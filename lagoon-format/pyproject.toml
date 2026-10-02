@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lagoon-format"
+version = "0.0.1.dev0"
+description = "The LAGOON data format for ocean and coastal simulation output (specification and reference reader/writer)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Hans Bihs" }]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/REEF3D/LAGOON"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lagoon_format"]

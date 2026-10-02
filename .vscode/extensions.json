@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.debugpy",
+    "charliermarsh.ruff",
+    "ms-vscode.cpptools",
+    "tamasfe.even-better-toml"
+  ]
+}

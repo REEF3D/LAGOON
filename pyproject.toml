@@ -1,0 +1,94 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lagoon-viz"
+version = "0.0.1.dev0"
+description = "LAGOON: Lightweight Animation and Graphics for Open Ocean Numerics"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Hans Bihs" }]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Scientific/Engineering :: Hydrology",
+]
+dependencies = [
+    "lagoon-format>=0.0.1.dev0",
+    "PySide6-Essentials>=6.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+    "ruff>=0.6",
+    "import-linter>=2.1",
+]
+
+[project.scripts]
+lagoon = "lagoonviz.gui.app:main"
+
+[project.urls]
+Homepage = "https://github.com/REEF3D/LAGOON"
+Issues = "https://github.com/REEF3D/LAGOON/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lagoonviz"]
+
+# ---------------------------------------------------------------- tests
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+
+# ---------------------------------------------------------------- lint
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["lagoon-format/build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+# ---------------------------------------------------------------- layer rules
+# Checked in CI with `lint-imports`. The core must stay usable without a GUI or GPU.
+[tool.importlinter]
+root_packages = ["lagoonviz", "lagoon_format"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: gui -> render -> core"
+type = "layers"
+layers = ["lagoonviz.gui", "lagoonviz.render", "lagoonviz.core"]
+
+[[tool.importlinter.contracts]]
+name = "Core stays free of Qt, GPU and plotting libraries"
+type = "forbidden"
+source_modules = ["lagoonviz.core"]
+forbidden_modules = ["PySide6", "pygfx", "wgpu", "matplotlib", "lagoonviz.gui", "lagoonviz.render", "lagoonviz.plugins"]
+
+[[tool.importlinter.contracts]]
+name = "Render does not use Qt"
+type = "forbidden"
+source_modules = ["lagoonviz.render"]
+forbidden_modules = ["PySide6", "lagoonviz.gui"]
+
+[[tool.importlinter.contracts]]
+name = "Plugins do not use the GUI"
+type = "forbidden"
+source_modules = ["lagoonviz.plugins"]
+forbidden_modules = ["PySide6", "lagoonviz.gui"]
+
+[[tool.importlinter.contracts]]
+name = "Format library (MIT) is independent of the application (GPLv3)"
+type = "forbidden"
+source_modules = ["lagoon_format"]
+forbidden_modules = ["lagoonviz"]

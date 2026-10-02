@@ -29,3 +29,18 @@ tests/regression/runs/
 __pycache__/
 !tests/regression/cases/**/*.json
 !tests/validation/cases/**/*.json
+# but keep the VS Code workspace settings
+!.vscode/*.json
+
+# LAGOON (Python)
+*.py[cod]
+*.egg-info/
+dist/
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+.pixi/
+.venv/
+venv/
+*.lagoon-session
+setup_lagoon.log

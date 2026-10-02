@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "LAGOON",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lagoonviz",
+      "justMyCode": true
+    },
+    {
+      "name": "LAGOON: open session file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lagoonviz",
+      "args": ["${file}"]
+    }
+  ]
+}
