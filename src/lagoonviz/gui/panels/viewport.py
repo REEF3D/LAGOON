@@ -18,6 +18,7 @@ tests, which run without a screen) a placeholder takes the viewport's place.
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import traceback
@@ -42,6 +43,8 @@ from lagoonviz.gui.resources import resource_path
 from lagoonviz.gui.theme import COLORS, SERIES_COLORS
 
 log = logging.getLogger("lagoon.viewport")
+#: the probe marker's colour (the dot in the 3D view and before its values in the header)
+PROBE_COLOR = "#e07b39"
 
 TOP = QColor(COLORS["viewport_top"])
 BOTTOM = QColor(COLORS["viewport_bottom"])
@@ -243,6 +246,7 @@ class Viewport3D(QWidget):
 
         self.colorbars = ColorBarStrip(self)
         self.info = QLabel()
+        self.info.setTextFormat(Qt.RichText)  # the probe's orange dot
         bar = QHBoxLayout()
         bar.setContentsMargins(6, 2, 6, 2)
         bar.setSpacing(2)
@@ -476,6 +480,10 @@ class Viewport3D(QWidget):
                 shown = self.session.data.display(item_id, mesh)
             with PERF.track(f"upload {item.kind}"):
                 self.view.update(item.kind, shown)
+            with PERF.track("contours"):
+                self.view.update_contours(
+                    item_id, self.session.data.contour_lines(item_id, mesh, shown)
+                )
         except Exception:  # noqa: BLE001 (a bad frame must not take the window down)
             log.error("showing %s failed:\n%s", item_id, traceback.format_exc())
             self.statusMessage.emit(f"Could not show {item.name}; see the log")
@@ -495,7 +503,11 @@ class Viewport3D(QWidget):
             key = self._shown_keys.get(other.id)
             mesh = self.session.data.cache.get(key) if key is not None else None
             if mesh is not None and "depth" not in mesh.point_data:
-                self.view.update(other.kind, self.session.data.display(other.id, mesh))
+                shown = self.session.data.display(other.id, mesh)
+                self.view.update(other.kind, shown)
+                self.view.update_contours(
+                    other.id, self.session.data.contour_lines(other.id, mesh, shown)
+                )
 
     def _on_scene(self, event: str, item_id: str) -> None:
         if self.comparing:
@@ -557,7 +569,11 @@ class Viewport3D(QWidget):
         self.colorbars.set_entries(entries)
         loading = " · loading…" if self.busy else ""
         if self.probe is not None:
-            self.info.setText(self.probe.summary() + loading)
+            # the orange dot of the marker in the view, so the values read as its values
+            self.info.setText(
+                f'<span style="color:{PROBE_COLOR}">\u25cf</span> '
+                + html.escape(self.probe.summary() + loading)
+            )
         elif frames:
             self.info.setText(f"output {max(frames)}{loading}")
         else:

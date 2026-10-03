@@ -86,7 +86,11 @@ class OffscreenView:
             if mesh is None:
                 self.scene.remove(item_id)  # no output of this run at this time
             else:
-                self.scene.update(item.kind, session.data.display(item_id, mesh))
+                shown = session.data.display(item_id, mesh)
+                self.scene.update(item.kind, shown)
+                self.scene.update_contours(
+                    item_id, session.data.contour_lines(item_id, mesh, shown)
+                )
         profiles = set(session.data.profile_items())
         for item_id in session.data.series_items() + sorted(profiles):
             data = session.data

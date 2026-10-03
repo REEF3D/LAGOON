@@ -57,6 +57,20 @@ def _data_source(role: str) -> dict[str, PropertySpec]:
     }
 
 
+def _contours(variable: str = "none") -> dict[str, PropertySpec]:
+    return {
+        "contour_by": PropertySpec(
+            variable,
+            "Contour lines of",
+            provider="variables",
+            tip="Draw contour lines of a variable on the surface (none: no lines)",
+        ),
+        "contour_levels": PropertySpec(
+            10, "Contour lines", minimum=2, maximum=100, tip="About how many lines (round levels)"
+        ),
+    }
+
+
 def _exaggeration(tip: str) -> dict[str, PropertySpec]:
     return {
         "exaggeration": PropertySpec(
@@ -114,6 +128,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("free surface"),
             **_colouring("eta", "reef3d"),
+            **_contours(),
             **_exaggeration("Scales the surface elevation about the still water level"),
             "hide_dry": PropertySpec(
                 True, "Hide dry land", tip="Leave out the surface where the depth is zero"
@@ -125,6 +140,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("bed"),
             **_colouring("none", "sand"),
+            **_contours(),
             **_exaggeration("Scales the bed height about the still water level"),
             "hide_wet": PropertySpec(
                 False,
@@ -159,6 +175,7 @@ KINDS: dict[str, KindSpec] = {
             "normal": PropertySpec("y", "Normal", choices=("x", "y", "z")),
             "position": PropertySpec(0.0, "Position [m]", tip="Where the plane cuts the axis"),
             **_colouring("velocity", "ocean"),
+            **_contours(),
         },
     ),
     "profile": KindSpec(

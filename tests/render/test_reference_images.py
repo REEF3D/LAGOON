@@ -57,6 +57,13 @@ LOOKS = {
         ("free_surface-1",),
     ),
     "bed-greys-plain": ({"bed__colormap": "greys"}, "perspective", "studio", ()),
+    "bed-contours": (
+        {"bed__contour_by": "elevation", "bed__contour_levels": 6},
+        "perspective",
+        "studio",
+        ("free_surface-1",),
+    ),
+    "surface-contours-2d": ({"fs__contour_by": "eta"}, "2d", "studio", ()),
 }
 
 

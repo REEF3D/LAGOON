@@ -14,7 +14,7 @@ import numpy as np
 import pygfx as gfx
 
 from lagoonviz.core.colormaps import colors, lut, normalize
-from lagoonviz.core.data.manager import DisplaySurface, GaugeMarks
+from lagoonviz.core.data.manager import ContourLines, DisplaySurface, GaugeMarks
 
 #: The lights and gloss of every look: a soft sun from above for the shadows, most of
 #: the light from a headlamp that moves with the camera, so slopes keep their shading
@@ -37,8 +37,9 @@ LIGHTING = {
 #: Viewport looks: the same light on a white ("studio", as in the REEF3D result
 #: animations) or a dark blue ("ocean") background.
 STYLES = {
-    "studio": {"background": ("#e6eaef", "#ffffff"), **LIGHTING},  # bottom, top (pygfx order)
-    "ocean": {"background": ("#1c3354", "#3b5f8f"), **LIGHTING},
+    # background: bottom, top (pygfx order); contour lines dark on white, light on blue
+    "studio": {"background": ("#e6eaef", "#ffffff"), "contours": "#1e2833", **LIGHTING},
+    "ocean": {"background": ("#1c3354", "#3b5f8f"), "contours": "#e8eef5", **LIGHTING},
 }
 DEFAULT_STYLE = "studio"
 
@@ -166,6 +167,8 @@ class SceneRenderer:
         self._marker: gfx.Points | None = None
         # gauges sit outside ``content`` so they do not change the framed bounds
         self._gauges: dict[str, gfx.Group] = {}
+        #: contour lines of an item; outside ``content``, like the gauges
+        self._contours: dict[str, gfx.Line] = {}
 
     # ------------------------------------------------------------- items
     def _texture(self, colormap: str):
@@ -355,6 +358,8 @@ class SceneRenderer:
         self._shadow_fit = None
         self._fit_shadow()
         self.headlamp.intensity = look["headlamp"]
+        for line in self._contours.values():
+            line.material.color = look.get("contours", "#1e2833")
         for shown in self._shown.values():
             material = shown.mesh.material
             if hasattr(material, "shininess"):
@@ -375,7 +380,7 @@ class SceneRenderer:
                 self._marker.visible = False
             return
         if self._marker is None:
-            material = gfx.PointsMaterial(size=14, color="#e07b39")
+            material = gfx.PointsMaterial(size=14, color="#e07b39")  # as PROBE_COLOR
             for name, value in (("depth_test", False), ("render_queue", 4000)):
                 try:
                     setattr(material, name, value)
@@ -455,12 +460,36 @@ class SceneRenderer:
         shown = self._shown.pop(item_id, None)
         if shown is not None:
             self.content.remove(shown.mesh)
+        self.update_contours(item_id, None)
+
+    def update_contours(self, item_id: str, lines: ContourLines | None) -> None:
+        """Contour lines of an item (None or no segments: none), thin and dark."""
+        line = self._contours.get(item_id)
+        if lines is None or not lines.segments.size:
+            if line is not None:
+                self.scene.remove(line)
+                del self._contours[item_id]
+            return
+        positions = np.array(lines.segments.reshape(-1, 3), np.float32)
+        if line is not None and _update_buffer(line.geometry, "positions", positions):
+            line.visible = lines.visible
+            return
+        if line is not None:
+            self.scene.remove(line)
+        look = STYLES[self.style_name]
+        material = gfx.LineSegmentMaterial(thickness=1.2, color=look.get("contours", "#1e2833"))
+        line = gfx.Line(gfx.Geometry(positions=positions), material)
+        line.visible = lines.visible
+        self.scene.add(line)
+        self._contours[item_id] = line
 
     def clear(self) -> None:
         for item_id in list(self._shown):
             self.remove(item_id)
         for item_id in list(self._gauges):
             self.remove_gauges(item_id)
+        for item_id in list(self._contours):
+            self.update_contours(item_id, None)
         self._framed = False
         self.set_marker(None)
 

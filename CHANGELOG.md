@@ -23,7 +23,8 @@
   (`REEF3D_*_VRANS_VTP`, `_FORCING_VTP`) are shown in 3D and move with the timeline;
   opening a case adds those of the shown run. Bodies take a material colour.
 - Click on a surface in the 3D view to read its values at that point; the marker
-  stays (same size at any zoom, drawn on top) and its values follow the timeline.
+  stays (same size at any zoom, drawn on top) and its values follow the timeline. The
+  values above the view start with the marker's orange dot.
 - Viewport in the style of the REEF3D result animations ("studio"): white background,
   a fixed sun from above plus a headlamp, matt surfaces, plain sand bed, free surface in
   the new REEF3D colour map (blue troughs, white still water, orange crests), magnitudes
@@ -151,6 +152,12 @@
 - Rotation goes all the way round (pygfx stopped 1 degree short of the poles), always
   about the centre of the view. After the top view the scene no longer tips over when
   turned (the top view's "up" had become the orbit axis).
+- Contour lines on the free surface, the bed and slices: *Contour lines of* (any
+  variable, e.g. the bed's elevation or the surface's eta) and about how many lines.
+  Levels are round numbers over the variable's automatic range and stay put while
+  playing; the lines follow the surface as shown (exaggerated, or flat in 2D), dark on
+  the studio look, light on the ocean look, and are filmed by the export too. Whole-
+  number properties are edited without decimals.
 - 2D view (button next to *Frame all*, key 2): everything drawn flat (the free surface
   as a plane coloured by its values over the bed, objects between, gauges and profiles
   on top; no shadows), seen from straight above, orthographic, no rotation; every drag

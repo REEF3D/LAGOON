@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from lagoonviz.core.colormaps import SERIES_PALETTES, plain_color
+from lagoonviz.core.contours import contour_levels, contour_segments
 from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
@@ -66,6 +67,16 @@ class DisplaySurface:
     #: (k, 2) uint32 line segments for line items (mooring lines)
     segments: np.ndarray | None = None
     line_width: float = 3.0
+
+
+@dataclass
+class ContourLines:
+    """Contour lines of one item: segments in 3D and the levels they show."""
+
+    item_id: str
+    segments: np.ndarray  # (k, 2, 3) float32
+    levels: list[float]
+    visible: bool
 
 
 @dataclass
@@ -507,8 +518,11 @@ class DataManager:
     # ------------------------------------------------------------- loading
     @staticmethod
     def arrays_for(item: SceneItem) -> tuple[str, ...]:
-        variable = str(item.properties.get("variable", "none"))
-        arrays = {variable.partition(".")[0]} if variable and variable != "none" else set()
+        arrays = set()
+        for key in ("variable", "contour_by"):  # colours and contour lines
+            variable = str(item.properties.get(key, "none"))
+            if variable and variable != "none":
+                arrays.add(variable.partition(".")[0])
         if item.kind == "free_surface":
             arrays.update(("eta", "depth"))  # depth: dry land is hidden (FNPF writes it)
         if item.kind == "bathymetry":
@@ -566,7 +580,10 @@ class DataManager:
         props = item.properties
         if not props.get("auto_range", True):
             return float(props.get("vmin", 0.0)), float(props.get("vmax", 1.0))
-        variable = str(props.get("variable", "none"))
+        return self._range_of(item_id, str(props.get("variable", "none")), mesh)
+
+    def _range_of(self, item_id: str, variable: str, mesh: SurfaceMesh) -> tuple[float, float]:
+        """The automatic range of a variable of an item, found once and kept."""
         dataset = self.dataset(item_id)
         key = (item_id, dataset.key if dataset else "", variable)
         if key not in self._auto_ranges:
@@ -575,6 +592,32 @@ class DataManager:
                 values += self._sampled_values(dataset, variable)
             self._auto_ranges[key] = auto_range(np.concatenate([v.ravel() for v in values]))
         return self._auto_ranges[key]
+
+    def contour_lines(
+        self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
+    ) -> ContourLines | None:
+        """Contour lines of an item's "contour_by" variable on its surface as shown
+        (exaggerated, or flat in 2D), lifted a little so the surface does not hide
+        them. Levels are round numbers over the variable's automatic range, kept from
+        frame to frame. None when the item draws none."""
+        item = self.scene.get(item_id)
+        variable = str(item.properties.get("contour_by", "none"))
+        if variable == "none" or shown.triangles.size == 0:
+            return None
+        try:
+            values = mesh.scalar(variable)
+        except KeyError:
+            return None
+        if values is None or values.shape[0] != shown.positions.shape[0]:
+            return None
+        low, high = self._range_of(item_id, variable, mesh)
+        levels = contour_levels(low, high, int(item.properties.get("contour_levels", 10)))
+        segments = contour_segments(shown.positions, shown.triangles, values, levels)
+        if segments.size:
+            span = np.ptp(shown.positions, axis=0)
+            lift = 0.05 if self.scene.plan_view else 2e-3 * float(max(span.max(), 1e-9))
+            segments[..., 2] += lift
+        return ContourLines(item_id, segments, levels, shown.visible)
 
     @staticmethod
     def _sampled_values(dataset, variable: str, samples: int = 5) -> list[np.ndarray]:

@@ -369,7 +369,7 @@ def _number_box(prop: PropertySpec) -> _SpinBox:
     number_locale = QLocale.c()
     number_locale.setNumberOptions(QLocale.OmitGroupSeparator)
     spin.setLocale(number_locale)
-    spin.setDecimals(3)
+    spin.setDecimals(0 if isinstance(prop.default, int) else 3)
     spin.setRange(
         prop.minimum if prop.minimum is not None else -1e9,
         prop.maximum if prop.maximum is not None else 1e9,
