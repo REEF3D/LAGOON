@@ -94,3 +94,14 @@ def test_command_line(reef3d_run, tmp_path, capsys):
     assert main([str(reef3d_run), str(out), "--size", "200x120", "--time", "2"]) == 0
     assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     assert "Free surface" in capsys.readouterr().out
+
+
+def test_render_slice(reef3d_run):
+    session = Session()
+    session.open_case(reef3d_run)
+    for item in ("free_surface-1", "bathymetry-1"):
+        session.set_visible(item, False)
+    session.add_slice("y", variable="pressure")
+    image = render_session(session, (320, 180), view="front")
+    _keep("render_slice.png", image)
+    assert _colours(image) > 50

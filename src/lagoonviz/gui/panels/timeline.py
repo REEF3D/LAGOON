@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
 
 from lagoonviz.core.data.manager import BackgroundLoader
 from lagoonviz.gui.bridge import SessionBridge
+from lagoonviz.gui.icons import icon
+from lagoonviz.gui.theme import COLORS
 
 #: slider resolution without data (time in seconds up to "End")
 STEPS = 1000
@@ -47,21 +49,29 @@ class TimelinePanel(QWidget):
         self.dt = 1.0
         self.unit = "frame"
 
-        def tool(text: str, tip: str, slot) -> QToolButton:
+        def tool(name: str, tip: str, slot) -> QToolButton:
             button = QToolButton()
-            button.setText(text)
+            button.setIcon(icon(name))
+            button.setIconSize(QSize(22, 22))
+            button.setMinimumSize(38, 36)
             button.setToolTip(tip)
+            button.setAutoRaise(True)
             button.clicked.connect(slot)
             return button
 
-        self.first_button = tool("⏮", "First frame", lambda: self.go_to_frame(0))
-        self.prev_button = tool("◀", "Previous frame", lambda: self.step(-1))
+        self.first_button = tool("first", "First frame", lambda: self.go_to_frame(0))
+        self.prev_button = tool("previous", "Previous frame", lambda: self.step(-1))
         self.play_button = QToolButton()
         self.play_button.setText("Play")
+        self.play_button.setIcon(icon("play", COLORS["cursor"]))
+        self.play_button.setIconSize(QSize(28, 28))
+        self.play_button.setMinimumSize(48, 40)
+        self.play_button.setToolTip("Play / pause (Space in the viewport)")
         self.play_button.setCheckable(True)
+        self.play_button.setAutoRaise(True)
         self.play_button.toggled.connect(self._toggle_play)
-        self.next_button = tool("▶", "Next frame", lambda: self.step(1))
-        self.last_button = tool("⏭", "Last frame", lambda: self.go_to_frame(self.n_frames - 1))
+        self.next_button = tool("next", "Next frame", lambda: self.step(1))
+        self.last_button = tool("last", "Last frame", lambda: self.go_to_frame(self.n_frames - 1))
 
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, STEPS)
@@ -163,6 +173,7 @@ class TimelinePanel(QWidget):
     # ------------------------------------------------------------- playback
     def _toggle_play(self, playing: bool) -> None:
         self.play_button.setText("Pause" if playing else "Play")
+        self.play_button.setIcon(icon("pause" if playing else "play", COLORS["cursor"]))
         if playing:
             self.timer.start()
         else:

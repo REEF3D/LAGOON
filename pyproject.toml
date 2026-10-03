@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lagoon-viz"
-version = "0.1.0.dev0"
+version = "0.2.0.dev0"
 description = "LAGOON: Lightweight Animation and Graphics for Open Ocean Numerics"
 readme = "README.md"
 license = "GPL-3.0-or-later"

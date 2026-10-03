@@ -5,9 +5,9 @@ An open-source desktop application for exploring, plotting and rendering ocean a
 coastal simulations, in the spirit of ParaView and Blender but built for
 hydrodynamics. Part of the [REEF3D](https://github.com/REEF3D) family.
 
-> Status: **phase 1, viewer (in progress).** LAGOON opens REEF3D runs (NHFLOW, FNPF,
-> CFD VTU/PVTU output), shows the free surface, bed and volume in a GPU viewport and
-> plays them over time. See `docs/LAGOON implementation plan.pdf` for what comes next.
+> Status: **phase 2, domain tools (started).** LAGOON opens REEF3D runs (NHFLOW, FNPF,
+> CFD VTU/PVTU output), shows the free surface, bed and volume in a GPU viewport, plays
+> them over time, and plots wave gauges, 6DOF forces and motions linked to the 3D view. See `docs/LAGOON implementation plan.pdf` for what comes next.
 
 <p align="center"><img src="docs/phase1_viewport.png" alt="LAGOON showing an NHFLOW free surface" width="720"></p>
 
@@ -43,8 +43,17 @@ lagoon figure.lagoon-session              # a saved session
 In the viewport: left drag rotates, right drag (or Shift + drag) pans, the wheel
 zooms. Blender's middle-mouse navigation works too, and the number keys choose views:
 1 front, 3 side, 7 top (with Ctrl the opposite side), 5 perspective/orthographic,
-Home frames everything. The timeline plays and scrubs through the frames; frames are
+Home frames everything. Click on a surface to read its values there (the orange
+marker keeps showing them while the time changes). The timeline plays and scrubs through the frames; frames are
 read in the background and kept in memory, so stepping back is instant.
+
+*Add → Slice* cuts the volume output with an x, y or z plane; set its position and
+the variable to colour by in the properties.
+
+Wave gauges (`REEF3D_*_WSF`), 6DOF forces and motions (`REEF3D_*_6DOF`) and force
+files of the run are plotted under the 3D view. The orange cursor is the current
+time: click or drag in a plot to move the 3D view to that moment. Pick other files or
+columns (e.g. `P1, P4` or `Fx, Fz`) in the properties of a *Time series* item.
 
 The same view renders without a screen, e.g. on a cluster:
 

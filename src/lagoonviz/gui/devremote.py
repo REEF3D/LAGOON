@@ -16,6 +16,8 @@ deletes the request. Only the actions below exist; there is no way to run code.
         {"wait": 2.0},                       # seconds
         {"screenshot": "after.png"},         # waits until the frame is loaded
         {"resize": [1400, 860]},
+        {"add": "slice"},                    # like Add in the menu
+        {"probe": ["free_surface-1", 120]},  # like a click on triangle 120
         {"fps": 30},                         # playback speed
         {"clear_cache": true},               # forget loaded frames (timing tests)
         {"measure_play": 5.0}                # play for 5 s and report frames per second
@@ -150,6 +152,13 @@ class DevRemote(QObject):
         if name == "resize":
             window.resize(int(value[0]), int(value[1]))
             return f"resize {value}"
+        if name == "add":
+            return f"add {value} -> {window.add_item(str(value))}"
+        if name == "probe":
+            item_id, triangle, *weights = value
+            window.viewport.probe_at(item_id, int(triangle), tuple(weights or (1, 1, 1)))
+            probe = getattr(window.viewport, "probe", None)
+            return f"probe {probe.summary() if probe else None}"
         if name == "fps":
             window.timeline.fps.setValue(int(value))
             return f"fps {value}"

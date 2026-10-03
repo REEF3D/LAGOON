@@ -211,6 +211,7 @@ def make_run(
     ranks: int = 2,
     volume: bool = True,
     print_interval: float | None = None,
+    series: bool = False,
 ) -> Path:
     """Write a REEF3D-like case folder with free surface, bed and volume output."""
     root.mkdir(parents=True, exist_ok=True)
@@ -241,4 +242,40 @@ def make_run(
                 names.append(name)
             components = {n: (v.shape[1] if v.ndim == 2 else 1) for n, v in data.items()}
             write_parallel(folder / f"{stem}-{frame:08d}.p{ext}", kind, names, components)
+    if series:
+        write_series(root, solver, (frames - 1) * (print_interval or 1.0))
     return root
+
+
+GAUGES = [(1.0, 2.0), (4.0, 2.0), (7.0, 2.0)]
+
+
+def gauge_eta(x: float, t: np.ndarray) -> np.ndarray:
+    return 0.1 * np.sin(x - 0.5 * t)
+
+
+def write_series(root: Path, solver: str, end: float, steps: int = 41) -> None:
+    """Wave gauges and 6DOF files written like REEF3D writes them."""
+    time = np.linspace(0.0, end, steps)
+    wsf = root / f"REEF3D_{solver}_WSF"
+    wsf.mkdir(exist_ok=True)
+    lines = [f"number of gauges:  {len(GAUGES)}", "", "x_coord     y_coord"]
+    lines += [f"{i + 1}\t {x:g}\t {y:g}" for i, (x, y) in enumerate(GAUGES)]
+    lines += ["", "", "time\t " + "\t ".join(f"P{i + 1}" for i in range(len(GAUGES)))]
+    for t in time:
+        values = [gauge_eta(x, np.array([t]))[0] for x, _ in GAUGES]
+        lines.append(f"{t:g}\t " + "\t ".join(f"{v:g}" for v in values))
+    lines.append(f"{end + 1:g}\t -1e+20\t nan\t 0")  # REEF3D's "no value" markers
+    (wsf / f"REEF3D-{solver}-WSF-HG.dat").write_text("\n".join(lines) + "\n")
+
+    dof = root / f"REEF3D_{solver}_6DOF"
+    dof.mkdir(exist_ok=True)
+    forces = ["time \t Fx \t Fy \t Fz"]
+    forces += [f"{t:g} \t {1000 * np.sin(t):g} \t 0 \t {2000 + 10 * t:g}" for t in time]
+    (dof / "REEF3D_6DOF_forces_0.dat").write_text("\n".join(forces) + "\n")
+    position = ["time \t XG \t YG \t ZG \t Phi \t Theta \t Psi"]
+    position += [f"{t:g} \t 5 \t 2 \t {1.5 + 0.1 * np.sin(t):g} \t 0 \t 0 \t 0" for t in time]
+    (dof / "REEF3D_6DOF_position_0.dat").write_text("\n".join(position) + "\n")
+    velocity = ["time \t Ue [m/s] \t We [m/s] \t Qe [rad/s]"]
+    velocity += [f"{t:g} \t 0 \t {0.1 * np.cos(t):g} \t 0" for t in time]
+    (dof / "REEF3D_6DOF_velocity_0.dat").write_text("\n".join(velocity) + "\n")

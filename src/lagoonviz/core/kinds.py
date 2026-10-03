@@ -92,15 +92,25 @@ KINDS: dict[str, KindSpec] = {
         "Volume",
         {**_data_source("volume"), **_colouring("velocity", "viridis")},
     ),
+    "series": KindSpec(
+        "Time series",
+        {
+            "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
+            "source": PropertySpec(
+                "", "File", provider="series", tip="Gauge, 6DOF or force file of the case"
+            ),
+            "columns": PropertySpec(
+                "", "Columns", tip="Comma-separated column names, e.g. P1, P4 or Fx, Fz"
+            ),
+        },
+    ),
     "slice": KindSpec(
         "Slice",
         {
+            **_data_source("volume"),
             "normal": PropertySpec("y", "Normal", choices=("x", "y", "z")),
-            "position": PropertySpec(0.0, "Position [m]"),
-            "variable": PropertySpec(
-                "velocity", "Colour by", choices=("velocity", "pressure", "phi")
-            ),
-            "colormap": PropertySpec("balance", "Colour map", choices=COLORMAPS),
+            "position": PropertySpec(0.0, "Position [m]", tip="Where the plane cuts the axis"),
+            **_colouring("velocity", "balance"),
         },
     ),
     "gauge": KindSpec(

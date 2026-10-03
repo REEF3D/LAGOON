@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0.dev0 (phase 2, domain tools; in progress)
+
+- Time series: REEF3D wave gauges (`REEF3D_*_WSF`), 6DOF forces, motions, velocities
+  and mooring lines (`REEF3D_*_6DOF`) and force files are found in a case and read on
+  first use (again when a running simulation appends to them). Units in column names
+  and gauge positions are kept; REEF3D's `-1e20` and `nan` mean "no value".
+- New item kind *Time series* (file and columns). Opening a case adds plots for the
+  shown run's gauges, body forces and motion. A case with only time series opens too.
+- Plot panel: one row per series, shared time axis, orange time cursor linked to the
+  timeline and the 3D view; click or drag to set the time, wheel to zoom, right drag
+  to pan, double-click to reset; legend with values at the cursor; min/max decimation.
+- Slices through volume output (x, y or z plane), coloured by any variable, cut with
+  marching tetrahedra in NumPy; vertical slices of σ-grids reuse their cut plan, so
+  playing a slice costs only interpolation. *Add → Slice* cuts the middle of the volume.
+- Click on a surface in the 3D view to read its values at that point; the marker
+  stays and its values follow the timeline.
+- Fresher look: light theme in REEF3D blues by default, dark theme under View → Theme
+  (Fusion style on every platform), icons drawn in code, toolbar with icons and labels,
+  larger player buttons, Space to play and pause.
+
 ## 0.1.0.dev0 (phase 1, viewer; in progress)
 
 - REEF3D readers (`lagoonviz.core.data`), NumPy only: VTK XML `.vtu`/`.vtp` and the

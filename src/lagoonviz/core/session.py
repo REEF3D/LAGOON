@@ -98,6 +98,8 @@ class Session:
             if variable != KINDS[kind].properties["variable"].default:
                 props["variable"] = variable
             children.append(AddItem(kind, None, props))
+        for series in case.main_series():
+            children.append(AddItem("series", series.name, {"source": series.key}))
         command = OpenCase(path, name, children)
         if name is None:
             command.case.name = Path(path).expanduser().name or str(path)
@@ -105,6 +107,17 @@ class Session:
         self.stack.execute(command)
         assert command.item_id is not None
         return command.item_id
+
+    def add_slice(self, normal: str = "y", position: float | None = None, **properties: Any) -> str:
+        """Add a slice through the volume; without a position it cuts the middle.
+
+        The position is computed here and recorded, so the script and the saved
+        session cut at exactly the same place.
+        """
+        if position is None:
+            center = self.data.domain_center("slice", properties)
+            position = round(center["xyz".index(normal)], 6) if center else 0.0
+        return self.add_item("slice", normal=normal, position=position, **properties)
 
     def remove_item(self, item_id: str) -> None:
         self.scene.get(item_id)

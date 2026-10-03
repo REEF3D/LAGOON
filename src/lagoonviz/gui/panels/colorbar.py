@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from lagoonviz.core.colormaps import lut
+from lagoonviz.gui.theme import COLORS
 
 ROW = 22
 
@@ -48,14 +49,14 @@ class ColorBarStrip(QWidget):
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#1c3354"))
+        painter.fillRect(self.rect(), QColor(COLORS["panel"]))
         metrics = QFontMetrics(self.font())
         label_width = max((metrics.horizontalAdvance(e.label) for e in self.entries), default=0)
         label_width = min(label_width + 16, self.width() // 3)
         number_width = metrics.horizontalAdvance("-0.000e+00") + 12
         for row, entry in enumerate(self.entries):
             top = 4 + row * ROW
-            painter.setPen(QColor(235, 240, 248))
+            painter.setPen(QColor(COLORS["text"]))
             painter.drawText(
                 QRectF(8, top, label_width - 8, ROW),
                 Qt.AlignVCenter | Qt.AlignLeft,
@@ -74,7 +75,7 @@ class ColorBarStrip(QWidget):
             painter.fillRect(bar, gradient)
             painter.setPen(QPen(QColor(255, 255, 255, 90)))
             painter.drawRect(bar)
-            painter.setPen(QColor(235, 240, 248))
+            painter.setPen(QColor(COLORS["text"]))
             painter.drawText(
                 QRectF(label_width, top, number_width - 6, ROW),
                 Qt.AlignVCenter | Qt.AlignRight,

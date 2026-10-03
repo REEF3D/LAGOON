@@ -110,6 +110,9 @@ class PropertiesPanel(QWidget):
         default = prop.default
         if prop.choices is not None or prop.provider is not None:
             box = QComboBox()
+            # long file and dataset names must not widen the panel
+            box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            box.setMinimumContentsLength(10)
             self._fill(box, self._choices(prop, value), value)
             box.currentIndexChanged.connect(lambda _i, b=box: self._set(key, b.currentData()))
             return box
@@ -165,7 +168,16 @@ class PropertiesPanel(QWidget):
             if case is None:
                 return data.error(item_id) or ""
             parts = [f"{d.label}: {len(d)} frames" for d in case.datasets.values()]
+            if case.series:
+                parts.append(f"{len(case.series)} gauge, 6DOF or force files")
             return "\n".join(parts)
+        if item.kind == "series":
+            found = data.series_file(item_id)
+            table = data.series(item_id)
+            if found is None or table is None:
+                return "No time series: open a case with gauge, 6DOF or force output"
+            span = f"{table.time[0]:g}–{table.time[-1]:g} s" if len(table) else "empty"
+            return f"{found.label}\n{len(table)} rows, {span}\nColumns: {', '.join(table.names)}"
         dataset = data.dataset(item_id)
         if dataset is None:
             return (

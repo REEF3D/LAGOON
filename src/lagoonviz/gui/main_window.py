@@ -10,13 +10,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QByteArray, QLocale, QPoint, QRect, QSettings, Qt
+from PySide6.QtCore import QByteArray, QLocale, QPoint, QRect, QSettings, QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QIcon, QImage, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QMainWindow,
     QMessageBox,
+    QSizePolicy,
     QWidget,
 )
 
@@ -25,6 +26,7 @@ from lagoonviz.core import SESSION_EXTENSION, Session
 from lagoonviz.core.data.manager import BackgroundLoader
 from lagoonviz.core.kinds import KINDS
 from lagoonviz.gui.bridge import SessionBridge
+from lagoonviz.gui.icons import icon
 from lagoonviz.gui.panels import (
     ConsolePanel,
     PlotsPanel,
@@ -34,11 +36,12 @@ from lagoonviz.gui.panels import (
     create_viewport,
 )
 from lagoonviz.gui.resources import resource_path
+from lagoonviz.gui.theme import DEFAULT_THEME
 
 SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 OUTPUT_FILTER = "REEF3D output (*.pvtu *.pvtp *.vtu *.vtp);;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
-LAYOUT_VERSION = 1
+LAYOUT_VERSION = 2
 
 
 class MainWindow(QMainWindow):
@@ -72,7 +75,7 @@ class MainWindow(QMainWindow):
         self.timeline = TimelinePanel(
             self.bridge, loader=self.loader, busy=lambda: self.viewport.busy
         )
-        self.plots = PlotsPanel()
+        self.plots = PlotsPanel(self.bridge)
         self.console = ConsolePanel(self.bridge)
 
         self.docks: dict[str, QDockWidget] = {}
@@ -150,7 +153,7 @@ class MainWindow(QMainWindow):
         self.add_actions = {
             kind: self._action(
                 spec.label,
-                lambda _=False, k=kind: self.session.add_item(k),
+                lambda _=False, k=kind: self.add_item(k),
                 tip=f"Add a {spec.label.lower()} to the scene",
             )
             for kind, spec in KINDS.items()
@@ -160,6 +163,9 @@ class MainWindow(QMainWindow):
             self.save_screenshot_dialog,
             "F12",
             tip="Save a picture of the LAGOON window, including the 3D view",
+        )
+        self.act_play = self._action(
+            "&Play / pause", lambda: self.timeline.play_button.toggle(), "Space"
         )
         self.act_reset_layout = self._action("&Reset layout", self.reset_layout)
         self.act_about = self._action("&About LAGOON", self.about)
@@ -190,7 +196,17 @@ class MainWindow(QMainWindow):
         view_menu = bar.addMenu("&View")
         for dock in self.docks.values():
             view_menu.addAction(dock.toggleViewAction())
+        theme_menu = view_menu.addMenu("&Theme")
+        current = str(self.settings.value("view/theme", DEFAULT_THEME))
+        self.theme_actions = {}
+        for name, label in (("light", "&Light"), ("dark", "&Dark")):
+            action = theme_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(name == current)
+            action.triggered.connect(lambda _=False, n=name: self.set_theme(n))
+            self.theme_actions[name] = action
         view_menu.addSeparator()
+        view_menu.addAction(self.act_play)
         view_menu.addAction(self.act_screenshot)
         view_menu.addAction(self.act_reset_layout)
 
@@ -198,8 +214,25 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self.act_about)
 
     def _build_toolbar(self) -> None:
+        for action, name in (
+            (self.act_open_case, "open_case"),
+            (self.act_open, "open"),
+            (self.act_save, "save"),
+            (self.act_undo, "undo"),
+            (self.act_redo, "redo"),
+            (self.act_screenshot, "screenshot"),
+        ):
+            action.setIcon(icon(name))
+        for kind in ("free_surface", "bathymetry", "volume", "slice", "series"):
+            self.add_actions[kind].setIcon(icon(kind))
+        self.act_open.setIconText("Open session")
+        self.act_save.setIconText("Save")
+        self.act_screenshot.setIconText("Screenshot")
         bar = self.addToolBar("Main")
         bar.setObjectName("toolbar_main")
+        bar.setMovable(False)
+        bar.setIconSize(QSize(18, 18))
+        bar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         bar.addAction(self.act_open_case)
         bar.addSeparator()
         bar.addAction(self.act_open)
@@ -208,8 +241,12 @@ class MainWindow(QMainWindow):
         bar.addAction(self.act_undo)
         bar.addAction(self.act_redo)
         bar.addSeparator()
-        for kind in ("free_surface", "bathymetry", "volume", "slice", "gauge"):
+        for kind in ("free_surface", "bathymetry", "volume", "slice", "series"):
             bar.addAction(self.add_actions[kind])
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        bar.addWidget(spacer)
+        bar.addAction(self.act_screenshot)
 
     # ------------------------------------------------------------- layout
     def _restore_layout(self) -> None:
@@ -221,7 +258,7 @@ class MainWindow(QMainWindow):
 
     def _apply_default_sizes(self) -> None:
         self.resizeDocks([self.docks["scene"], self.docks["properties"]], [260, 300], Qt.Horizontal)
-        self.resizeDocks([self.docks["plots"], self.docks["timeline"]], [160, 90], Qt.Vertical)
+        self.resizeDocks([self.docks["plots"], self.docks["timeline"]], [240, 80], Qt.Vertical)
         self.resizeDocks([self.docks["timeline"], self.docks["console"]], [700, 500], Qt.Horizontal)
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt naming)
@@ -230,6 +267,19 @@ class MainWindow(QMainWindow):
         if not self._sized and not self._restored:
             self._apply_default_sizes()
         self._sized = True
+
+    def add_item(self, kind: str) -> str:
+        """Add an item from the menu or toolbar (slices start in the middle of the volume)."""
+        if kind == "slice":
+            return self.session.add_slice("y")
+        return self.session.add_item(kind)
+
+    def set_theme(self, name: str) -> None:
+        """Remember the theme; it is applied when LAGOON starts next time."""
+        self.settings.setValue("view/theme", name)
+        for key, action in self.theme_actions.items():
+            action.setChecked(key == name)
+        self.statusBar().showMessage(f"{name.capitalize()} theme: restart LAGOON to apply", 8000)
 
     def reset_layout(self) -> None:
         self.restoreState(self._default_state, LAYOUT_VERSION)

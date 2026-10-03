@@ -20,6 +20,7 @@ import logging
 import os
 import traceback
 
+import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
@@ -28,11 +29,12 @@ from lagoonviz.core.data.manager import BackgroundLoader, FrameKey
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.panels.colorbar import ColorBarEntry, ColorBarStrip
 from lagoonviz.gui.resources import resource_path
+from lagoonviz.gui.theme import COLORS
 
 log = logging.getLogger("lagoon.viewport")
 
-TOP = QColor("#3b5f8f")
-BOTTOM = QColor("#1c3354")
+TOP = QColor(COLORS["viewport_top"])
+BOTTOM = QColor(COLORS["viewport_bottom"])
 
 
 class ViewportPlaceholder(QWidget):
@@ -61,6 +63,14 @@ class ViewportPlaceholder(QWidget):
 
     def canvas_snapshot(self):
         return None
+
+    probe = None
+
+    def probe_at(self, item_id: str, triangle: int, weights: tuple[float, ...]) -> None:
+        pass
+
+    def clear_probe(self) -> None:
+        pass
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         painter = QPainter(self)
@@ -160,10 +170,15 @@ class Viewport3D(QWidget):
         self.canvas.request_draw(self._draw)
         self.renderer.add_event_handler(self._on_key, "key_down")
         self.renderer.add_event_handler(self._on_interaction, "pointer_up", "wheel")
+        self.renderer.add_event_handler(self._on_pointer, "pointer_down", "pointer_up")
+        self._press: tuple[float, float, object, dict] | None = None
+        self._probe_at: tuple[str, int, tuple[float, ...]] | None = None
+        #: the last probe (values where the user clicked), shown in the header
+        self.probe = None
 
         self.colorbars = ColorBarStrip(self)
         self.info = QLabel()
-        self.info.setStyleSheet("color: #dfe8f3;")
+        self.info.setStyleSheet(f"color: {COLORS['dim']};")
         bar = QHBoxLayout()
         bar.setContentsMargins(6, 2, 6, 2)
         bar.setSpacing(2)
@@ -195,7 +210,11 @@ class Viewport3D(QWidget):
         bar.addWidget(self.info)
         header = QWidget()
         header.setLayout(bar)
-        header.setStyleSheet("background: #1c3354; color: #dfe8f3;")
+        header.setObjectName("viewportHeader")
+        header.setStyleSheet(
+            f"#viewportHeader {{ background: {COLORS['panel']}; }}"
+            f"QToolButton {{ color: {COLORS['text']}; padding: 3px 8px; }}"
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -300,6 +319,7 @@ class Viewport3D(QWidget):
             self.refresh()
 
     def _update_overlays(self) -> None:
+        self._update_probe()  # a probe follows the timeline
         entries = []
         frames = []
         for item_id in self.view.item_ids:
@@ -325,7 +345,9 @@ class Viewport3D(QWidget):
                     )
         self.colorbars.set_entries(entries)
         loading = " · loading…" if self.busy else ""
-        if frames:
+        if self.probe is not None:
+            self.info.setText(self.probe.summary() + loading)
+        elif frames:
             self.info.setText(f"frame {max(frames)}{loading}")
         else:
             self.info.setText("Open a REEF3D case: File → Open case…" if not loading else loading)
@@ -369,6 +391,70 @@ class Viewport3D(QWidget):
             self.ortho_button.toggle()
         elif key in ("Home", "."):
             self.frame("perspective")
+
+    def _on_pointer(self, event) -> None:
+        """A click (press and release without dragging) on a surface probes its values."""
+        kind = getattr(event, "type", "")
+        x, y = getattr(event, "x", 0.0), getattr(event, "y", 0.0)
+        if kind == "pointer_down":
+            if getattr(event, "button", 0) == 1:
+                self._press = (
+                    x,
+                    y,
+                    getattr(event, "target", None),
+                    getattr(event, "pick_info", {}),
+                )
+            return
+        press, self._press = self._press, None
+        if press is None or abs(x - press[0]) + abs(y - press[1]) > 4:
+            return  # a drag rotates the view; only clicks probe
+        _, _, target, info = press
+        item_id = self.view.item_at(target) if target is not None else None
+        if item_id is None or not info or "face_index" not in info:
+            self.clear_probe()
+            return
+        weights = tuple(info.get("face_coord", (1 / 3, 1 / 3, 1 / 3)))[:3]
+        self.probe_at(item_id, int(info["face_index"]), weights)
+
+    def probe_at(self, item_id: str, triangle: int, weights: tuple[float, ...]) -> None:
+        """Show the values at a point of an item's surface; they follow the timeline."""
+        self._probe_at = (item_id, int(triangle), tuple(float(w) for w in weights))
+        self._update_probe()
+        if self.probe is None:
+            self.clear_probe()
+            return
+        self.statusMessage.emit(self.probe.summary())
+        self._update_overlays()
+        self.redraw()
+
+    def _update_probe(self) -> None:
+        if self._probe_at is None:
+            return
+        item_id, triangle, weights = self._probe_at
+        data = self.session.data
+        try:
+            self.probe = data.probe(item_id, triangle, weights)
+        except Exception:  # noqa: BLE001
+            log.warning("probe failed:\n%s", traceback.format_exc())
+            self.probe = None
+        if self.probe is None:
+            return
+        marker = self.probe.point
+        key = data.frame_key(item_id)
+        mesh = data.cache.get(key) if key is not None else None
+        if mesh is not None:  # the marker goes where the surface is drawn (exaggeration)
+            shown = data.display(item_id, mesh)
+            nodes = shown.triangles[triangle].astype(int)
+            marker = tuple((shown.positions[nodes].T @ np.asarray(weights, float)).tolist())
+        self.view.set_marker(marker)
+
+    def clear_probe(self) -> None:
+        self._probe_at = None
+        if self.probe is not None:
+            self.probe = None
+            self.view.set_marker(None)
+            self._update_overlays()
+            self.redraw()
 
     def _on_interaction(self, _event) -> None:
         self._save_camera.start()

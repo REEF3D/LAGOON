@@ -209,3 +209,98 @@ def test_dev_remote_runs_actions(window, reef3d_run, tmp_path):
     assert (folder / "a.png").is_file()
     assert result["results"][-1].startswith("ERROR unknown action 'exec'")
     assert not (folder / "request.json").exists()
+
+
+# ----------------------------------------------------------------- phase 2: time series
+@pytest.fixture
+def series_run(tmp_path):
+    from reef3d_fixtures import make_run
+
+    return make_run(tmp_path / "body", frames=5, volume=False, print_interval=0.5, series=True)
+
+
+def test_plots_show_series_and_follow_time(window, series_run, qtbot):
+    from PySide6.QtCore import QPoint
+
+    window.open_case(series_run)
+    plots = window.plots
+    assert plots.row_ids == ["series-1", "series-2", "series-3"]
+    assert plots.linked
+    plots.resize(800, 300)
+    image = plots.grab().toImage()  # paints without errors
+    assert image.width() == 800
+    # clicking in a plot moves the scene time (and the timeline)
+    x = int(plots.x_of(1.0))
+    qtbot.mouseClick(plots, Qt.LeftButton, pos=QPoint(x, 100))
+    assert window.session.scene.time == pytest.approx(1.0, abs=0.05)
+    assert window.timeline.frame_of(window.session.scene.time) == 2
+    # zoom and reset
+    low, high = plots.time_window()
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QWheelEvent
+
+    wheel = QWheelEvent(
+        QPointF(x, 100),
+        QPointF(x, 100),
+        QPoint(0, 0),
+        QPoint(0, 240),
+        Qt.NoButton,
+        Qt.NoModifier,
+        Qt.NoScrollPhase,
+        False,
+    )
+    plots.wheelEvent(wheel)
+    zoomed = plots.time_window()
+    assert zoomed[1] - zoomed[0] < high - low
+    qtbot.mouseDClick(plots, Qt.LeftButton, pos=QPoint(x, 100))
+    assert plots.view is None
+
+
+def test_hidden_series_leave_the_plot(window, series_run):
+    window.open_case(series_run)
+    window.session.set_visible("series-2", False)
+    assert window.plots.row_ids == ["series-1", "series-3"]
+    window.session.set_property("series-1", "columns", "P2, P3")
+    assert [t.name for t in window.plots._rows[0][1]] == ["P2", "P3"]
+
+
+def test_series_properties_list_files(window, series_run):
+    window.open_case(series_run)
+    window.scene_tree.select("series-2")
+    combo = window.properties.editors["source"]
+    labels = [combo.itemText(i) for i in range(combo.count())]
+    assert "NHFLOW Body 0 forces (REEF3D_6DOF_forces_0.dat)" in labels
+    assert "Columns: Fx, Fy, Fz" in window.properties.info.text()
+
+
+def test_empty_plot_paints_hint(window):
+    window.plots.resize(400, 200)
+    assert window.plots.row_ids == []
+    window.plots.grab()
+
+
+def test_theme_choice_is_remembered(window):
+    window.theme_actions["dark"].trigger()
+    assert window.settings.value("view/theme") == "dark"
+    assert (
+        window.theme_actions["dark"].isChecked() and not window.theme_actions["light"].isChecked()
+    )
+
+
+def test_themes_apply(qapp):
+    from lagoonviz.gui.theme import COLORS, SERIES_COLORS, THEMES, apply_theme
+
+    assert apply_theme(qapp, "dark") == "dark" and COLORS["base"] == THEMES["dark"]["base"]
+    assert SERIES_COLORS[0] == "#5aa2e6"
+    assert apply_theme(qapp, "nonsense") == "light" and COLORS == THEMES["light"]
+
+
+def test_add_slice_from_toolbar(window, reef3d_run):
+    window.open_case(reef3d_run)
+    window.add_actions["slice"].trigger()
+    item = window.session.scene.get("slice-1")
+    assert item.properties["normal"] == "y" and item.properties["position"] == 2.0
+    assert window.scene_tree.selected_id() == "slice-1"
+    combo = window.properties.editors["variable"]
+    choices = [combo.itemText(i) for i in range(combo.count())]
+    assert "pressure" in choices and "velocity.z" in choices

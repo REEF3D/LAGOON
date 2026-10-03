@@ -21,10 +21,12 @@ import numpy as np
 
 from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
 from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
+from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
 from lagoonviz.core.scene import Scene, SceneItem
 
 #: item kinds that show a dataset, and the dataset role they use by default
-DATA_KINDS = {kind: role for role, kind in ROLES.items()}
+DATA_KINDS = {kind: role for role, kind in ROLES.items()} | {"slice": "volume"}
+AXES = {"x": 0, "y": 1, "z": 2}
 
 
 @dataclass
@@ -45,12 +47,45 @@ class DisplaySurface:
     frame: int
 
 
+@dataclass
+class Trace:
+    """One line of a time-series plot."""
+
+    item_id: str
+    name: str
+    unit: str
+    time: np.ndarray
+    values: np.ndarray
+
+
+@dataclass
+class Probe:
+    """Values at a point of an item's surface."""
+
+    item_id: str
+    name: str
+    point: tuple[float, float, float]
+    values: dict[str, float]
+    variable: str
+
+    def summary(self) -> str:
+        """One line: the coloured variable first, then the position."""
+        parts = [self.name]
+        if self.variable in self.values:
+            parts.append(f"{self.variable} = {self.values[self.variable]:.4g}")
+        x, y, z = self.point
+        parts.append(f"x {x:.3f}  y {y:.3f}  z {z:.3f}")
+        return " · ".join(parts)
+
+
 @dataclass(frozen=True)
 class FrameKey:
     case: str
     dataset: str
     index: int
     arrays: tuple[str, ...]
+    #: what is read from the frame: () the surface, ("slice", axis, position) a section
+    extra: tuple = ()
 
 
 class FrameCache:
@@ -156,7 +191,9 @@ class DataManager:
         item = self.scene.get(item_id)
         if item.kind == "case":
             return item
-        ref = item.properties.get("case", "")
+        return self._case_item_for(str(item.properties.get("case", "")))
+
+    def _case_item_for(self, ref: str) -> SceneItem | None:
         if ref and ref in self.scene and self.scene.get(ref).kind == "case":
             return self.scene.get(ref)
         for other in self.scene:  # unassigned items use the first case
@@ -175,14 +212,22 @@ class DataManager:
 
     def dataset(self, item_id: str) -> Dataset | None:
         """The dataset an item shows: its ``dataset`` property, else the one for its role."""
-        case = self.case(item_id)
-        if case is None:
-            return None
         item = self.scene.get(item_id)
-        key = item.properties.get("dataset", "")
+        return self.dataset_for(item.kind, item.properties)
+
+    def dataset_for(self, kind: str, properties: dict) -> Dataset | None:
+        """The dataset an item of this kind with these properties would show."""
+        case_item = self._case_item_for(str(properties.get("case", "")))
+        if case_item is None or not case_item.properties.get("path"):
+            return None
+        try:
+            case = self.open(case_item.properties["path"])
+        except (OSError, ValueError):
+            return None
+        key = properties.get("dataset", "")
         if key and key in case.datasets:
             return case.datasets[key]
-        role = DATA_KINDS.get(item.kind)
+        role = DATA_KINDS.get(kind)
         return case.by_role(role) if role else None
 
     # ------------------------------------------------------------- choices
@@ -201,6 +246,9 @@ class DataManager:
             return ["", *self.dataset_choices(item_id)]
         if provider == "cases":
             return ["", *[i.id for i in self.scene if i.kind == "case"]]
+        if provider == "series":
+            case = self.case(item_id)
+            return ["", *case.series] if case else [""]
         raise ValueError(f"unknown choice provider {provider!r}")
 
     def labelled_choices(self, item_id: str, provider: str) -> list[tuple[str, str]]:
@@ -224,6 +272,12 @@ class DataManager:
         if provider == "cases":
             return [
                 ("first case" if v == "" else f"{self.scene.get(v).name} [{v}]", v) for v in values
+            ]
+        if provider == "series":
+            case = self.case(item_id)
+            return [
+                ("first file" if v == "" else case.series[v].label if case else v, v)
+                for v in values
             ]
         return [(v, v) for v in values]
 
@@ -260,7 +314,13 @@ class DataManager:
         dt = self.print_interval()
         if dt:
             return 0.0, max(n - 1, 0) * dt, "s"
+        if n == 0 and self.series_items():
+            return 0.0, self.series_end(), "s"  # only time series: plain seconds
         return 0.0, float(max(n - 1, 0)), "frame"
+
+    def time_in_seconds(self) -> bool:
+        """True if the scene time is in seconds, so plots can follow the timeline."""
+        return self.time_range()[2] == "s"
 
     def frame_index(self, item_id: str, time: float | None = None) -> int | None:
         dataset = self.dataset(item_id)
@@ -288,7 +348,12 @@ class DataManager:
         arrays = tuple(
             a for a in self.arrays_for(self.scene.get(item_id)) if a in dataset.components
         )
-        return FrameKey(str(case.path), dataset.key, index, arrays)
+        item = self.scene.get(item_id)
+        extra: tuple = ()
+        if item.kind == "slice":
+            axis = AXES.get(str(item.properties.get("normal", "y")), 1)
+            extra = ("slice", axis, float(item.properties.get("position", 0.0)))
+        return FrameKey(str(case.path), dataset.key, index, arrays, extra)
 
     def cached(self, item_id: str, time: float | None = None) -> SurfaceMesh | None:
         key = self.frame_key(item_id, time)
@@ -299,7 +364,11 @@ class DataManager:
         if mesh is not None:
             return mesh
         case = self._cases.get(key.case) or self.open(key.case)
-        mesh = case.datasets[key.dataset].read(key.index, list(key.arrays))
+        dataset = case.datasets[key.dataset]
+        if key.extra and key.extra[0] == "slice":
+            mesh = dataset.read_slice(key.index, key.extra[1], key.extra[2], list(key.arrays))
+        else:
+            mesh = dataset.read(key.index, list(key.arrays))
         self.cache.put(key, mesh)
         return mesh
 
@@ -375,6 +444,72 @@ class DataManager:
             variable=variable if values is not None else "none",
             frame=index if index is not None else 0,
         )
+
+    # ------------------------------------------------------------- time series
+    def series_items(self) -> list[str]:
+        return [item.id for item in self.scene if item.kind == "series"]
+
+    def series_file(self, item_id: str) -> SeriesFile | None:
+        case = self.case(item_id)
+        if case is None or not case.series:
+            return None
+        source = str(self.scene.get(item_id).properties.get("source", ""))
+        if source in case.series:
+            return case.series[source]
+        return None if source else next(iter(case.series.values()))
+
+    def series(self, item_id: str) -> TimeSeries | None:
+        found = self.series_file(item_id)
+        if found is None:
+            return None
+        try:
+            return found.read()
+        except (OSError, ValueError):
+            return None
+
+    def traces(self, item_id: str) -> list[Trace]:
+        """The lines an item plots (its columns of its file)."""
+        table = self.series(item_id)
+        if table is None:
+            return []
+        names = parse_columns(str(self.scene.get(item_id).properties.get("columns", "")), table)
+        return [
+            Trace(item_id, name, table.units.get(name, ""), table.time, table.columns[name])
+            for name in names
+        ]
+
+    def series_end(self) -> float:
+        """Last time of the shown time series (0 without any)."""
+        ends = [
+            float(table.time[-1])
+            for item_id in self.series_items()
+            if (table := self.series(item_id)) is not None and len(table)
+        ]
+        return max(ends, default=0.0)
+
+    def domain_center(self, kind: str, properties: dict) -> tuple[float, float, float] | None:
+        """Centre of the first frame of the dataset an item would show (to place slices)."""
+        dataset = self.dataset_for(kind, properties)
+        if dataset is None:
+            return None
+        low, high = dataset.bounds(0)
+        return tuple(float(v) for v in (low + high) / 2)  # type: ignore[return-value]
+
+    def probe(
+        self, item_id: str, triangle: int, weights: tuple[float, float, float]
+    ) -> Probe | None:
+        """Values where the mouse hit an item's surface (current frame, from the cache)."""
+        key = self._shown_key(item_id)
+        mesh = self.cache.get(key) if key else None
+        if mesh is None or not 0 <= triangle < mesh.n_triangles:
+            return None
+        point, values = mesh.sample(triangle, weights)
+        item = self.scene.get(item_id)
+        variable = str(item.properties.get("variable", "none"))
+        return Probe(item_id, item.name, tuple(float(v) for v in point), values, variable)
+
+    def _shown_key(self, item_id: str) -> FrameKey | None:
+        return self.frame_key(item_id)
 
     def data_items(self) -> list[str]:
         """Ids of the scene items that show data."""

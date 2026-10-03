@@ -9,6 +9,7 @@ import os
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -16,6 +17,7 @@ import lagoonviz
 from lagoonviz.core import Session
 from lagoonviz.gui.main_window import MainWindow
 from lagoonviz.gui.resources import resource_path
+from lagoonviz.gui.theme import DEFAULT_THEME, apply_theme
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setOrganizationName("REEF3D")
     app.setApplicationVersion(lagoonviz.__version__)
     app.setWindowIcon(QIcon(str(resource_path("icon.png"))))
+    apply_theme(app, str(QSettings().value("view/theme", DEFAULT_THEME)))
 
     window = MainWindow(Session())
     window.show()

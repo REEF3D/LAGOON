@@ -81,6 +81,7 @@ class SceneRenderer:
         self._shown: dict[str, _Shown] = {}
         self._textures: dict[str, gfx.Texture] = {}
         self._framed = False
+        self._marker: gfx.Mesh | None = None
 
     # ------------------------------------------------------------- items
     def _texture(self, colormap: str) -> gfx.Texture:
@@ -90,6 +91,10 @@ class SceneRenderer:
 
     def _material(self, kind: str, shown: DisplaySurface) -> gfx.Material:
         material = gfx.MeshPhongMaterial(side="both", shininess=20)
+        try:
+            material.pick_write = True  # clicks report which triangle was hit
+        except AttributeError:
+            pass
         self._style(material, kind, shown)
         return material
 
@@ -151,6 +156,32 @@ class SceneRenderer:
         if item_id in self._shown:
             self._shown[item_id].mesh.visible = visible
 
+    def item_at(self, world_object) -> str | None:
+        """The item a picked pygfx object belongs to."""
+        for item_id, shown in self._shown.items():
+            if shown.mesh is world_object:
+                return item_id
+        return None
+
+    def set_marker(self, point: tuple[float, float, float] | None) -> None:
+        """Show (or hide) the orange probe marker at a point."""
+        if point is None:
+            if self._marker is not None:
+                self._marker.visible = False
+            return
+        if self._marker is None:
+            radius = 1.0
+            box = self.content.get_world_bounding_box()
+            if box is not None:
+                radius = max(float(np.linalg.norm(np.asarray(box[1]) - np.asarray(box[0]))), 1e-6)
+                radius *= 0.006
+            self._marker = gfx.Mesh(
+                gfx.sphere_geometry(radius, 16, 12), gfx.MeshBasicMaterial(color="#e07b39")
+            )
+            self.scene.add(self._marker)
+        self._marker.local.position = tuple(point)
+        self._marker.visible = True
+
     def remove(self, item_id: str) -> None:
         shown = self._shown.pop(item_id, None)
         if shown is not None:
@@ -160,6 +191,7 @@ class SceneRenderer:
         for item_id in list(self._shown):
             self.remove(item_id)
         self._framed = False
+        self.set_marker(None)
 
     @property
     def item_ids(self) -> list[str]:

@@ -23,12 +23,15 @@ from pathlib import Path
 import numpy as np
 
 from lagoonviz.core.data.mesh import (
+    CutPlan,
     PieceMerger,
     SurfaceMesh,
     VolumePlan,
+    plan_cut,
     triangulate,
     variable_names,
 )
+from lagoonviz.core.data.series import SeriesFile, find_series
 from lagoonviz.core.data.vtkxml import (
     read_header,
     read_parallel_header,
@@ -90,6 +93,8 @@ class Dataset:
         self._triangles = np.zeros((0, 3), np.uint32)
         self._volume_plan: VolumePlan | None = None
         self._step_array: np.ndarray | None = None
+        self._cells: dict[int, tuple] = {}  # piece number -> cells, for slices
+        self._cuts: dict[tuple, CutPlan] = {}  # vertical slices: cut plans per piece
         #: set for output left over from an earlier run in the same folder
         self.earlier_run = False
         self._lock = threading.Lock()  # one merge plan per dataset
@@ -207,6 +212,67 @@ class Dataset:
         )
         return mesh.with_normals()  # here, so it runs in the loader thread
 
+    def read_slice(
+        self, index: int, axis: int, position: float, variables: list[str] | None = None
+    ) -> SurfaceMesh:
+        """The section of a volume frame with the plane ``x[axis] = position``.
+
+        Each MPI piece is cut on its own; the cells of each piece are read once and
+        kept, so later frames read only points and the arrays to colour by.
+        """
+        if self.kind != "UnstructuredGrid":
+            raise ValueError(f"{self.label}: only volumes can be sliced")
+        frame = self.frames[index]
+        arrays = self._arrays(variables)
+        parts = []
+        for number, path in enumerate(frame.pieces):
+            piece = read_piece(path, point_arrays=arrays, with_cells=False)
+            with self._lock:
+                cells = self._cells.get(number)
+                if cells is None or cells[0] != piece.points.shape[0]:
+                    full = read_piece(path, point_arrays=[])
+                    cells = (
+                        full.points.shape[0],
+                        full.connectivity.astype(np.int32),
+                        full.offsets.astype(np.int64),
+                        full.types,
+                    )
+                    self._cells[number] = cells
+            _, connectivity, offsets, types = cells
+            # σ-grids move only vertically: an x or y plane cuts the same edges in every frame
+            key = (number, axis, float(position), piece.points.shape[0])
+            plan = self._cuts.get(key) if axis in (0, 1) else None
+            if plan is None:
+                plan = plan_cut(piece.points, connectivity, offsets, types, axis, position)
+                if axis in (0, 1):
+                    if len(self._cuts) > 64:  # positions dragged through: keep it small
+                        self._cuts.clear()
+                    self._cuts[key] = plan
+            parts.append(plan.apply(piece.points, piece.point_data))
+        points = np.concatenate([p.points for p in parts])
+        shift = np.cumsum([0] + [p.n_points for p in parts[:-1]])
+        triangles = np.concatenate(
+            [p.triangles.astype(np.int64) + s for p, s in zip(parts, shift, strict=True)]
+        )
+        names = set.intersection(*(set(p.point_data) for p in parts)) if parts else set()
+        data = {name: np.concatenate([p.point_data[name] for p in parts]) for name in names}
+        mesh = SurfaceMesh(points, np.ascontiguousarray(triangles, dtype=np.uint32), data)
+        return mesh.with_normals()
+
+    def bounds(self, index: int = 0) -> tuple[np.ndarray, np.ndarray]:
+        """Lower and upper corner of a frame's points."""
+        pieces = [
+            read_piece(p, point_arrays=[], with_cells=False) for p in self.frames[index].pieces
+        ]
+        points = np.concatenate([p.points for p in pieces])
+        return points.min(axis=0), points.max(axis=0)
+
+    def _arrays(self, variables: list[str] | None) -> list[str] | None:
+        if variables is None:
+            return None
+        names = sorted({v.partition(".")[0] for v in variables if v and v != "none"})
+        return [name for name in names if name in self.components]
+
 
 @dataclass
 class Case:
@@ -215,6 +281,8 @@ class Case:
     path: Path
     datasets: dict[str, Dataset] = field(default_factory=dict)
     print_interval: float | None = None  # seconds between frames (ctrl.txt P 30)
+    #: gauge, 6DOF and force tables (read on first use)
+    series: dict[str, SeriesFile] = field(default_factory=dict)
 
     @property
     def solver(self) -> str:
@@ -231,6 +299,34 @@ class Case:
     def n_frames(self) -> int:
         """Length of the timeline: the highest output number plus one."""
         return max((d.last_step + 1 for d in self.datasets.values()), default=0)
+
+    def main_series(self, limit: int = 4) -> list[SeriesFile]:
+        """Time series to plot when the case is opened: those of the shown run.
+
+        A series belongs to the run if its file was last written while the run's
+        surfaces were written. Wave gauges come first, then forces and motions.
+        """
+        shown = list(self.main_datasets().values())
+        if shown:
+            start = min(d.written_span()[0] for d in shown) - 600.0
+            end = max(d.written_span()[1] for d in shown) + 600.0
+        else:
+            start, end = -np.inf, np.inf
+        order = {"wave gauges": 0, "6DOF": 1, "forces": 2}
+        picked = []
+        for item in sorted(self.series.values(), key=lambda f: (order.get(f.group, 9), f.key)):
+            try:
+                written = item.path.stat().st_mtime
+            except OSError:
+                continue
+            if not start <= written <= end:
+                continue
+            if item.group == "6DOF" and not any(
+                word in item.path.stem for word in ("forces", "position")
+            ):
+                continue  # velocities and mooring lines stay available, not shown
+            picked.append(item)
+        return picked[:limit]
 
     def main_datasets(self) -> dict[str, Dataset]:
         """What to show when the case is opened: the most recent run's surfaces.
@@ -398,7 +494,10 @@ def open_case(path: str | Path) -> Case:
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
     datasets: list[Dataset] = []
-    if path.is_file():
+    if path.is_file() and path.suffix == ".dat":
+        # a gauge or force table: its case is the folder above REEF3D_*
+        case_dir = path.parent.parent if path.parent.name.startswith("REEF3D_") else path.parent
+    elif path.is_file():
         if path.suffix not in _SUFFIXES:
             raise ValueError(f"{path.name}: not a VTU/VTP file")
         folder = path.parent
@@ -409,6 +508,8 @@ def open_case(path: str | Path) -> Case:
     elif _FOLDER.match(path.name):
         datasets = _dataset_from_folder(path)
         case_dir = path.parent
+    elif path.name.startswith("REEF3D_"):  # e.g. REEF3D_NHFLOW_6DOF
+        case_dir = path.parent
     else:
         case_dir = path
         for folder in sorted(path.iterdir()):
@@ -417,9 +518,10 @@ def open_case(path: str | Path) -> Case:
         if not datasets:
             # a plain folder with VTU/VTP files
             datasets = _dataset_from_folder(path)
-    if not datasets:
-        raise ValueError(f"no REEF3D VTU/VTP output found in {path}")
-    case = Case(case_dir, print_interval=read_print_interval(case_dir))
+    series = find_series(case_dir)
+    if not datasets and not series:
+        raise ValueError(f"no REEF3D VTU/VTP output or time series found in {path}")
+    case = Case(case_dir, print_interval=read_print_interval(case_dir), series=series)
     for dataset in datasets:
         key = dataset.key
         n = 2

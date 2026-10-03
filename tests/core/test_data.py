@@ -436,3 +436,31 @@ def test_a_short_restart_does_not_hide_the_long_run(tmp_path):
         os.utime(path, (stamp, stamp))
     case = open_case(folder)
     assert case.by_role("free_surface").steps == list(range(2, 30))
+
+
+def test_probe_values_on_a_surface(reef3d_run):
+    s = Session()
+    s.open_case(reef3d_run)
+    mesh = s.data.load("free_surface-1")
+    triangle = 7
+    probe = s.data.probe("free_surface-1", triangle, (0.2, 0.3, 0.5))
+    nodes = mesh.triangles[triangle].astype(int)
+    expected = mesh.points[nodes].T @ np.array([0.2, 0.3, 0.5])
+    np.testing.assert_allclose(probe.point, expected, rtol=1e-6)
+    assert probe.values["eta"] == pytest.approx(
+        float(mesh.point_data["eta"][nodes] @ np.array([0.2, 0.3, 0.5])), rel=1e-5
+    )
+    assert probe.summary().startswith("Free surface · eta = ")
+    assert s.data.probe("free_surface-1", 10**9, (1, 0, 0)) is None
+
+
+def test_probe_vector_components(reef3d_run):
+    from lagoonviz.core.data.mesh import SurfaceMesh
+
+    mesh = SurfaceMesh(
+        np.eye(3, dtype=np.float32),
+        np.array([[0, 1, 2]], np.uint32),
+        {"u": np.array([[3, 4, 0], [3, 4, 0], [3, 4, 0]], np.float32)},
+    )
+    _, values = mesh.sample(0, (1, 1, 1))
+    assert values == {"u": 5.0, "u.x": 3.0, "u.y": 4.0, "u.z": 0.0}
