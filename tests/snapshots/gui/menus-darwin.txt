@@ -1,0 +1,54 @@
+File
+  Open case...  [Ctrl+Shift+O]
+  Open output file...
+  Reload case  [F5]
+  [ ] Follow running simulation
+  ----
+  New session  [Ctrl+N]
+  Open session...  [Ctrl+O]
+  Save session  [Ctrl+S]
+  Save session as...  [Ctrl+Shift+S]
+  ----
+  Export script...
+  Export animation...  [Ctrl+Shift+E]
+  Save screenshot...  [F12]
+  ----
+  Quit
+Edit
+  Undo  [Ctrl+Z] (disabled)
+  Redo  [Ctrl+Y] (disabled)
+  ----
+  Remove  [Del]
+Add
+  Case
+  Free surface
+  Bathymetry
+  Volume
+  Time series
+  Slice
+  Wave profile
+  Gauge
+  Bodies
+  Mooring lines
+  Structures
+View
+  [x] Scene
+  [x] Properties
+  [x] Plots
+  [x] Timeline
+  [x] Python console
+  [x] Wave profiles
+  Theme >
+    [x] Light
+    [ ] Dark
+  Viewport look >
+    [x] Studio (light)
+    [ ] Ocean (dark blue)
+  ----
+  [ ] Compare side by side  [Ctrl+Shift+2]
+  [ ] Full screen viewer  [Ctrl+Shift+F]
+  Play / pause  [Space]
+  Save screenshot...  [F12]
+  Reset layout
+Help
+  About LAGOON

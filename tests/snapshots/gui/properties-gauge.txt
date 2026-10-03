@@ -1,0 +1,8 @@
+QWidget
+  Name: text 'Gauge'
+  Kind: label 'Gauge'
+  Visible: checkbox '' on
+  x [m]: number 0 in [-1e+09, 1e+09] decimals 3
+  y [m]: number 0 in [-1e+09, 1e+09] decimals 3
+  Show in plot: checkbox '' on
+  label '' (disabled)

@@ -1,0 +1,9 @@
+QWidget
+  Name: text 'Time series'
+  Kind: label 'Time series'
+  Visible: checkbox '' on
+  Case: choice 'first case' of ['first case', 'run [case-1]']
+  File: choice 'first file' of ['first file']
+  Columns: text ''
+  Gauges in 3D: checkbox '' on
+  label 'No time series: open a case with gauge, 6DOF or force output' (disabled)

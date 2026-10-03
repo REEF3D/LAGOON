@@ -1,0 +1,38 @@
+TOOLBAR
+Open case...
+Reload case
+----
+Open session...
+Save session
+----
+Undo
+Redo
+----
+Free surface
+Bathymetry
+Volume
+Slice
+Time series
+
+Save screenshot...
+
+PANELS
+scene: 'Scene' in LeftDockWidgetArea
+properties: 'Properties' in RightDockWidgetArea
+plots: 'Plots' in BottomDockWidgetArea tabbed with dock_profiles
+timeline: 'Timeline' in BottomDockWidgetArea
+console: 'Python console' in BottomDockWidgetArea
+profiles: 'Wave profiles' in BottomDockWidgetArea tabbed with dock_plots
+
+PLAYER
+button '' tip='First frame' (disabled)
+button '' tip='Previous frame' (disabled)
+button 'Play' [ ] tip='Play / pause (Space in the viewport)'
+button '' tip='Next frame' (disabled)
+button '' tip='Last frame' (disabled)
+slider in [0, 1000]
+label 't = 0.00 s'
+integer 12 in [1, 60]
+label 'End'
+number 60 in [0.1, 1e+07] decimals 2
+button 'Exit full screen' tip='Back to the window (Esc)' (hidden)

@@ -394,11 +394,15 @@ class Viewport3D(QWidget):
                 self.view.remove(item_id)
                 self._shown_keys.pop(item_id, None)
                 self._wanted.pop(item_id, None)
+                self.loader.want((id(self), item_id), None)
         for item_id in item_ids if item_ids is not None else sorted(current):
             if item_id not in current:
                 continue
             key = data.frame_key(item_id)
+            # a frame asked for before and not started is dropped (dragging the slider)
+            owner = (id(self), item_id)
             if key is None:
+                self.loader.want(owner, None)
                 self.view.remove(item_id)
                 self._wanted.pop(item_id, None)
                 self._shown_keys.pop(item_id, None)
@@ -409,9 +413,10 @@ class Viewport3D(QWidget):
             self._wanted[item_id] = key
             mesh = data.cache.get(key)
             if mesh is not None:
+                self.loader.want(owner, key)
                 self._show(item_id, key, mesh)
             else:
-                self.loader.request(key, self._loaded.emit)
+                self.loader.request(key, self._loaded.emit, owner=owner)
         self._update_gauges()
         self._update_overlays()
         self.redraw()

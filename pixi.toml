@@ -15,6 +15,8 @@ lagoon-viz = { path = ".", editable = true, extras = ["dev"] }
 [tasks]
 lagoon = "python -m lagoonviz"
 test = "pytest"
+# accept the current window structure and 3D looks as agreed (review, then commit)
+snapshots = "pytest --update-snapshots tests/gui/test_snapshots.py tests/render/test_reference_images.py"
 lint = { depends-on = ["ruff", "layers"] }
 ruff = "ruff check . && ruff format --check ."
 layers = "lint-imports"

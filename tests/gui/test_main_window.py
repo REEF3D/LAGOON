@@ -90,6 +90,57 @@ def test_timeline_click_jumps_to_the_click(window, reef3d_run, qtbot):
     assert slider.value() == slider.value_at(x) == slider.maximum()
 
 
+def test_pressing_beside_the_handle_while_playing_drags(window, reef3d_run, qtbot):
+    """Held beside the handle, Qt's slider stepped towards the mouse again and again
+    while playing moved the handle away: it jumped back and forth, never forward."""
+    from PySide6.QtCore import QPoint
+
+    window.open_case(reef3d_run)
+    timeline, slider = window.timeline, window.timeline.slider
+    slider.resize(400, slider.height())
+    timeline.go_to_frame(0)
+    middle = QPoint(slider.width() // 2, slider.height() // 2)
+    qtbot.mousePress(slider, Qt.LeftButton, pos=middle)
+    assert slider.isSliderDown() and slider.value() == slider.value_at(middle.x())
+    held = slider.value()
+    window.session.set_time(float(timeline.times[0]))  # playing shows another frame
+    timeline._advance()  # and does not step while held
+    assert slider.value() == held
+    qtbot.mouseRelease(slider, Qt.LeftButton, pos=middle)
+    assert not slider.isSliderDown()
+    assert timeline.frame_of(window.session.scene.time) == held  # plays on from here
+
+
+def test_holding_the_slider_pauses_playing(window, reef3d_run):
+    """Playing and dragging the slider used to fight: the handle jumped back and forth."""
+    window.open_case(reef3d_run)
+    timeline = window.timeline
+    timeline.go_to_frame(0)
+    timeline.slider.setSliderDown(True)
+    timeline._advance()
+    assert timeline.frame_of(window.session.scene.time) == 0  # waits while held
+    timeline.slider.setValue(2)  # dragged to frame 2
+    window.session.set_time(float(timeline.times[1]))  # a frame arriving meanwhile
+    assert timeline.slider.value() == 2  # the handle stays under the mouse
+    timeline.slider.setSliderDown(False)
+    timeline.go_to_frame(2)
+    timeline._advance()
+    assert timeline.frame_of(window.session.scene.time) == 0  # on from there (wraps)
+
+
+def test_slider_keeps_its_width_while_playing(window, reef3d_run):
+    """The time label used to resize with each text, and the slider with it: the
+    handle jiggled back and forth while playing."""
+    window.open_case(reef3d_run)
+    timeline = window.timeline
+    widths = set()
+    for frame in range(3):
+        timeline.go_to_frame(frame)
+        widths.add(timeline.label.width())
+        assert timeline.label.sizeHint().width() <= timeline.label.width() + 1
+    assert len(widths) == 1
+
+
 def test_timeline_sets_time(window):
     window.timeline.slider.setValue(500)
     assert window.session.scene.time == pytest.approx(30.0)
@@ -331,6 +382,24 @@ def test_plots_show_series_and_follow_time(window, series_run, qtbot):
     assert zoomed[1] - zoomed[0] < high - low
     qtbot.mouseDClick(plots, Qt.LeftButton, pos=QPoint(x, 100))
     assert plots.view is None
+
+
+def test_plots_draw_their_lines_once_while_playing(window, series_run):
+    """Playing redrew every line of every plot at each frame (330 ms for a gauge file
+    of a long run): now only the cursor and the legend values are drawn again."""
+    window.open_case(series_run)
+    plots = window.plots
+    plots.resize(600, 300)
+    plots.grab()  # paints: lines into the cached picture
+    picture = plots._static
+    assert picture is not None
+    for time in (0.5, 1.0, 1.5):
+        window.session.set_time(time)
+        plots.grab()
+    assert plots._static is picture  # not drawn again
+    plots.resize(700, 300)
+    plots.grab()
+    assert plots._static is not picture  # a new size draws the lines again
 
 
 def test_hidden_series_leave_the_plot(window, series_run):

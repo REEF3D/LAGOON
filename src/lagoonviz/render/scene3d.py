@@ -21,9 +21,11 @@ from lagoonviz.core.data.manager import DisplaySurface, GaugeMarks
 #: from any side, and some sheen on the water. pygfx lights are physical (diffuse =
 #: colour / pi).
 LIGHTING = {
-    "ambient": 0.55,
-    "sun": 0.6,  # fixed light from above: casts the shadows
-    "headlamp": 2.0,  # light that moves with the camera
+    "ambient": 0.45,
+    # fixed light from above: casts the shadows. Strong enough that they show (at 0.6
+    # they darkened the ground by 1 %), with the headlamp still modelling the waves
+    "sun": 2.4,
+    "headlamp": 1.1,  # light that moves with the camera
     "shininess": 20,
     "specular": "#494949",
     # water is glossier: a soft sheen on the slopes that face the light

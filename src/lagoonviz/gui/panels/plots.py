@@ -17,7 +17,7 @@ import math
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from lagoonviz.core.data.manager import Trace
@@ -45,7 +45,13 @@ class PlotsPanel(QWidget):
         self.session = bridge.session if bridge else None
         self.view: tuple[float, float] | None = None  # time window; None: everything
         self._rows: list[tuple[str, list[Trace]]] = []
+        self._ranges: list[tuple[float, float]] = []  # value range of each row
         self._paths: dict[tuple, QPainterPath] = {}
+        # grid, lines and labels drawn once into a picture; a new time only draws the
+        # cursor and the legend values on top (redrawing everything at every frame
+        # slowed playing down noticeably)
+        self._static: QPixmap | None = None
+        self._static_key: tuple | None = None
         self._drag: tuple[str, float, tuple[float, float]] | None = None
         self.hover_time: float | None = None
         if bridge is not None:
@@ -71,6 +77,8 @@ class PlotsPanel(QWidget):
                 if case_item is not None and not case_item.visible:
                     continue
                 self._rows.append((item_id, data.traces(item_id)))
+        self._ranges = [value_range(t.values for t in traces) for _, traces in self._rows]
+        self._static = None
         self.update()
 
     @property
@@ -125,15 +133,17 @@ class PlotsPanel(QWidget):
         with PERF.track("plots"):
             self._paint(event)
 
-    def _paint(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor(COLORS["base"]))
+    def _font(self) -> tuple[QFont, QFontMetrics]:
         font = QFont(self.font())
         font.setPointSizeF(max(font.pointSizeF() - 1.5, 8.0))
-        painter.setFont(font)
-        metrics = QFontMetrics(font)
+        return font, QFontMetrics(font)
+
+    def _paint(self, event) -> None:
+        painter = QPainter(self)
+        font, metrics = self._font()
         if not self._rows:
+            painter.fillRect(self.rect(), QColor(COLORS["base"]))
+            painter.setFont(font)
             painter.setPen(QColor(COLORS["dim"]))
             painter.drawText(
                 self.rect(),
@@ -143,13 +153,58 @@ class PlotsPanel(QWidget):
             )
             painter.end()
             return
+        painter.drawPixmap(0, 0, self._static_picture(font, metrics))
+        # what changes with the time: legend values and the cursor
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setFont(font)
+        linked = self.linked
+        cursor = self.session.scene.time if linked else None
+        low_t, high_t = self.time_window()
+        for (item_id, traces), rect in zip(self._rows, self._plot_rects(), strict=True):
+            self._paint_legend(painter, metrics, item_id, traces, rect, cursor)
+            if cursor is not None and low_t <= cursor <= high_t:
+                x = self.x_of(cursor)
+                painter.setPen(QPen(QColor(COLORS["cursor"]), 1.6))
+                painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+        if not linked and self.session is not None and self.session.data.n_frames():
+            painter.setPen(QColor(COLORS["dim"]))
+            painter.drawText(
+                QRectF(LEFT, 2, self.width() - LEFT - RIGHT, TOP - 4),
+                Qt.AlignRight | Qt.AlignVCenter,
+                "set the case's output interval to link plots and 3D view",
+            )
+        painter.end()
+
+    def _static_picture(self, font: QFont, metrics: QFontMetrics) -> QPixmap:
+        """Background, grid, lines and axis labels: drawn again only when the rows,
+        the size, the time window or the theme change."""
+        ratio = self.devicePixelRatioF()
+        key = (
+            self.width(),
+            self.height(),
+            ratio,
+            self.time_window(),
+            tuple(COLORS.items()),
+            tuple(SERIES_COLORS),
+            font.pointSizeF(),
+        )
+        if self._static is not None and self._static_key == key:
+            return self._static
+        self._paths.clear()  # lines of an earlier size or window
+        pixmap = QPixmap(max(int(self.width() * ratio), 1), max(int(self.height() * ratio), 1))
+        pixmap.setDevicePixelRatio(ratio)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(QRectF(0, 0, self.width(), self.height()), QColor(COLORS["base"]))
+        painter.setFont(font)
         low, high = self.time_window()
         time_ticks = nice_ticks(low, high, max(2, int(self.width() / 110)))
         time_step = nice_step(high - low, max(2, int(self.width() / 110)))
-        cursor = self.session.scene.time if self.linked else None
         rects = self._plot_rects()
-        for (item_id, traces), rect in zip(self._rows, rects, strict=True):
-            self._paint_row(painter, metrics, item_id, traces, rect, time_ticks, cursor)
+        for (item_id, traces), value_span, rect in zip(
+            self._rows, self._ranges, rects, strict=True
+        ):
+            self._paint_row(painter, metrics, item_id, traces, value_span, rect, time_ticks)
         # time labels under the last row
         last = rects[-1]
         painter.setPen(QColor(COLORS["dim"]))
@@ -165,18 +220,14 @@ class PlotsPanel(QWidget):
             Qt.AlignRight | Qt.AlignTop,
             "t [s]",
         )
-        if not self.linked and self.session is not None and self.session.data.n_frames():
-            painter.drawText(
-                QRectF(LEFT, 2, self.width() - LEFT - RIGHT, TOP - 4),
-                Qt.AlignRight | Qt.AlignVCenter,
-                "set the case's output interval to link plots and 3D view",
-            )
         painter.end()
+        self._static, self._static_key = pixmap, key
+        return pixmap
 
-    def _paint_row(self, painter, metrics, item_id, traces, rect, time_ticks, cursor) -> None:
+    def _paint_row(self, painter, metrics, item_id, traces, value_span, rect, time_ticks):
         grid = QColor(COLORS["border"])
         painter.fillRect(rect, QColor(COLORS["panel"]))
-        low_v, high_v = value_range(t.values for t in traces)
+        low_v, high_v = value_span
         target = max(2, int(rect.height() / (1.8 * metrics.height())))
         value_ticks = nice_ticks(low_v, high_v, target)
         value_step = nice_step(high_v - low_v, target)
@@ -216,8 +267,12 @@ class PlotsPanel(QWidget):
             painter.setPen(QPen(color, 1.4))
             painter.drawPath(path)
         painter.restore()
+        if not traces:
+            painter.setPen(QColor(COLORS["dim"]))
+            painter.drawText(rect, Qt.AlignCenter, "no data: check the item's file and columns")
 
-        # title and legend with values at the cursor
+    def _paint_legend(self, painter, metrics, item_id, traces, rect, cursor) -> None:
+        """Title and legend above a row, with each line's value at the cursor."""
         item = self.session.scene.get(item_id)
         x = rect.left() + 2
         painter.setPen(QColor(COLORS["text"]))
@@ -236,14 +291,6 @@ class PlotsPanel(QWidget):
                 QRectF(x + 14, rect.top() - TOP + 2, 400, TOP - 4), Qt.AlignVCenter, text
             )
             x += 14 + metrics.horizontalAdvance(text) + 14
-        if not traces:
-            painter.setPen(QColor(COLORS["dim"]))
-            painter.drawText(rect, Qt.AlignCenter, "no data: check the item's file and columns")
-
-        if cursor is not None and low_t <= cursor <= high_t:
-            x = self.x_of(cursor)
-            painter.setPen(QPen(QColor(COLORS["cursor"]), 1.6))
-            painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
 
     def _path(self, trace: Trace, rect: QRectF, low_t, high_t, y_of) -> QPainterPath:
         time, values = trace.time, trace.values

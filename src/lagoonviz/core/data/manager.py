@@ -1013,15 +1013,47 @@ LoadCallback = Callable[[FrameKey, SurfaceMesh | None, BaseException | None], No
 
 
 class BackgroundLoader:
-    """Read frames in worker threads. Requests for the same frame are shared."""
+    """Read frames in worker threads. Requests for the same frame are shared.
+
+    A request can name its ``owner`` (a view's item): when the owner asks for another
+    frame, the frame it asked for before is dropped if no other owner needs it and
+    reading has not started. Dragging the timeline over hundreds of frames thus reads
+    only the frame where the slider is, not every frame it passed (they used to queue
+    up, and playing or the view waited for all of them).
+    """
 
     def __init__(self, manager: DataManager, workers: int = 2):
         self.manager = manager
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="lagoon-io")
         self._pending: dict[FrameKey, Future] = {}
+        self._wants: dict[object, FrameKey] = {}  # owner -> the frame it waits for
+        self._holders: dict[FrameKey, set] = {}  # frame -> owners waiting for it
         self._lock = threading.Lock()
 
-    def request(self, key: FrameKey, callback: LoadCallback | None = None) -> Future:
+    def want(self, owner: object, key: FrameKey | None) -> None:
+        """``owner`` now needs ``key`` (None: nothing). Its earlier frame is dropped
+        if nobody else needs it and it has not started loading."""
+        drop = None
+        with self._lock:
+            old = self._wants.pop(owner, None)
+            if key is not None:
+                self._wants[owner] = key
+                self._holders.setdefault(key, set()).add(owner)
+            if old is not None and old != key:
+                holders = self._holders.get(old)
+                if holders is not None:
+                    holders.discard(owner)
+                    if not holders:
+                        del self._holders[old]
+                        drop = self._pending.get(old)
+        if drop is not None:
+            drop.cancel()  # outside the lock: cancelling runs _done, which takes it
+
+    def request(
+        self, key: FrameKey, callback: LoadCallback | None = None, owner: object = None
+    ) -> Future:
+        if owner is not None:
+            self.want(owner, key)
         with self._lock:
             future = self._pending.get(key)
             new = future is None
@@ -1031,21 +1063,24 @@ class BackgroundLoader:
         if new:
             # outside the lock: a future that is already done runs the callback at
             # once, in this thread, and _done takes the lock (this deadlocked)
-            future.add_done_callback(lambda _f, k=key: self._done(k))
+            future.add_done_callback(lambda f, k=key: self._done(k, f))
         if callback is not None:
 
             def deliver(f: Future, k: FrameKey = key) -> None:
+                if f.cancelled():
+                    return  # nobody wants it any more
                 error = f.exception()
                 callback(k, None if error else f.result(), error)
 
             future.add_done_callback(deliver)
         return future
 
-    def _done(self, key: FrameKey) -> None:
+    def _done(self, key: FrameKey, future: Future) -> None:
         with self._lock:
-            future = self._pending.get(key)
-            if future is not None and future.done():
+            if self._pending.get(key) is future:
                 del self._pending[key]
+            if not self._holders.get(key, True):
+                self._holders.pop(key, None)
 
     def prefetch(
         self,

@@ -38,19 +38,46 @@ DEFAULT_FPS = 12
 
 
 class ClickSlider(QSlider):
-    """A slider that jumps to where it is clicked (Qt steps a page towards the click),
-    and can be dragged on from there."""
+    """A slider that goes where it is pressed and follows the mouse until let go.
+
+    Qt's own slider, pressed beside its handle, steps a page towards the mouse and
+    keeps stepping while the button is held. While playing, the handle moves away
+    with every frame, so it stepped back again and again: the handle jumped back and
+    forth and never got anywhere. Here the left button always drags: the handle goes
+    under the mouse at once, the slider counts as held (``isSliderDown``) until the
+    button is let go, and nothing steps on its own.
+    """
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self._dragging = False
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        event.ignore()  # scrolling (two fingers on a trackpad) must not move the time
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
-        if event.button() == Qt.LeftButton:
-            option = QStyleOptionSlider()
-            self.initStyleOption(option)
-            handle = self.style().subControlRect(
-                QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self
-            )
-            if not handle.contains(event.position().toPoint()):
-                self.setValue(self.value_at(event.position().x()))
-        super().mousePressEvent(event)  # on the handle now: dragging goes on
+        if event.button() != Qt.LeftButton:
+            super().mousePressEvent(event)
+            return
+        self._dragging = True
+        self.setSliderDown(True)  # first, so playing leaves the handle alone
+        self.setSliderPosition(self.value_at(event.position().x()))
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if not self._dragging:
+            super().mouseMoveEvent(event)
+            return
+        self.setSliderPosition(self.value_at(event.position().x()))
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if not self._dragging or event.button() != Qt.LeftButton:
+            super().mouseReleaseEvent(event)
+            return
+        self._dragging = False  # the handle stays where the press or the last move put it
+        self.setSliderDown(False)
+        event.accept()
 
     def value_at(self, x: float) -> int:
         """The slider value under a horizontal position in the widget."""
@@ -112,6 +139,8 @@ class TimelinePanel(QWidget):
         self.slider = ClickSlider(Qt.Horizontal)
         self.slider.setRange(0, STEPS)
         self.slider.valueChanged.connect(self._on_slider)
+        # let go: the time is where the handle is, whatever happened meanwhile
+        self.slider.sliderReleased.connect(lambda: self._on_slider(self.slider.value()))
 
         self.label = QLabel()
         self.label.setMinimumWidth(150)
@@ -188,7 +217,22 @@ class TimelinePanel(QWidget):
         self.slider.setRange(self.first_frame, max(n - 1, 0) if n else STEPS)
         self.slider.setPageStep(max(1, self.steps.size // 20) if n else 50)
         self.slider.blockSignals(False)
+        self._fit_label()
         self._show_time(self.session.scene.time)
+
+    def _fit_label(self) -> None:
+        """A fixed width for the time label, as wide as its longest text. When it took
+        the width of each text, the slider beside it changed width with every frame and
+        its handle jiggled back and forth while playing."""
+        end = max(self.end_time, 1.0)
+        last = max(self.n_frames - 1, 1)
+        digits = "8" * len(f"{end:.2f}".split(".")[0])
+        sample = (
+            f"t = {digits}.88 s  (frame {'8' * len(str(last))} / {'8' * len(str(last))})"
+            if self.unit == "s" or not self.has_frames
+            else f"frame {'8' * len(str(last))} / {'8' * len(str(last))}"
+        )
+        self.label.setFixedWidth(self.label.fontMetrics().horizontalAdvance(sample) + 12)
 
     # ------------------------------------------------------------- time
     def _index_of(self, time: float) -> int:
@@ -221,14 +265,17 @@ class TimelinePanel(QWidget):
             self.session.set_time(value / STEPS * self.end_time)
 
     def _show_time(self, time: float) -> None:
+        held = self.slider.isSliderDown()  # the handle stays under the mouse
         self.slider.blockSignals(True)
         if self.has_frames:
             frame = self.frame_of(time)
-            self.slider.setValue(frame)
+            if not held:
+                self.slider.setValue(frame)
             where = f"frame {frame} / {self.n_frames - 1}"
             self.label.setText(f"t = {time:.2f} s  ({where})" if self.unit == "s" else where)
         else:
-            self.slider.setValue(round(min(time / self.end_time, 1.0) * STEPS))
+            if not held:
+                self.slider.setValue(round(min(time / self.end_time, 1.0) * STEPS))
             self.label.setText(f"t = {time:.2f} s")
         self.slider.blockSignals(False)
 
@@ -257,6 +304,10 @@ class TimelinePanel(QWidget):
     def _tick(self) -> None:
         if not self.play_button.isChecked():
             return
+        if self.slider.isSliderDown():
+            # the user holds the slider: playing waits and goes on from where it is let go
+            self.timer.start(20)
+            return
         if self.busy():
             PERF.count("tick waiting for data")
             self.timer.start(4)
@@ -271,8 +322,8 @@ class TimelinePanel(QWidget):
         self.timer.start(max(int(interval * 1000) - 2, 1))
 
     def _advance(self) -> None:
-        if self.busy():
-            return  # wait until the current frame is on screen
+        if self.busy() or self.slider.isSliderDown():
+            return  # wait until the current frame is on screen, or the slider is let go
         PERF.count("frames advanced")
         if self.has_frames:
             frame = self.frame_of(self.session.scene.time) + 1

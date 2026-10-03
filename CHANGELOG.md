@@ -115,8 +115,24 @@
   material's colour.
 - New colour map "white": grey (low) to white (high) when colouring by a variable, pure white
   when coloured by nothing.
-- Clicking the timeline slider jumps to the clicked time (it used to step a page
-  towards it); dragging on from there works as before.
+- Regression suite for agreed behaviour: behaviour tests, text snapshots of the window
+  (menus, toolbar, panels, properties of every kind) and reference images of the 3D
+  view per platform; `pytest --update-snapshots` (`pixi run snapshots`) accepts an
+  intended change. `lagoon-render --view 2d` renders the 2D view.
+- Closing LAGOON in the full screen viewer keeps the panels for the next start.
+- Playing with time series plots shown is fast again: the plots drew every line again at
+  each frame (330 ms for the gauges of a long run, 3 fps); lines, grid and labels are now
+  drawn once, and each frame draws only the cursor and the legend values.
+- The timeline slider no longer jiggles while playing: the time label beside it took
+  the width of each new text, so the slider changed width with every frame.
+- Dragging the timeline slider while playing: playing goes on from where the slider
+  is let go, at once. Frames the slider passed over are no longer all read one after
+  the other (they queued up, and playing waited for them); a view asks only for the
+  frame it shows now. Holding the slider pauses playing.
+- The timeline slider goes where it is pressed and follows the mouse until let go,
+  also while playing (pressed beside the handle, Qt's slider stepped towards the mouse
+  again and again while playing moved it away: it jumped back and forth). Scrolling
+  over the slider (two fingers on a trackpad) no longer moves the time.
 - Opening a case shows its free surface in the properties panel (else its bed),
   not the last item added.
 - Vertical exaggeration as a slider (log scale, 0.1 to 100, plus a number box) with a
@@ -132,8 +148,8 @@
 - 2D view (button next to *Frame all*, key 2): from straight above, orthographic, no
   rotation; every drag pans, the wheel zooms. *Frame all* keeps it; 3D, front and side
   leave it.
-- Studio look uses the ocean look's lights (more headlamp, softer sun, more sheen);
-  the two looks now differ only in background.
+- Studio look uses the ocean look's lights (headlamp, more sheen); the two looks now
+  differ only in background. The sun is strong enough again for visible shadows.
 - Ctrl+C in the terminal closes LAGOON properly (it used to close only the 3D view
   and leave the terminal waiting).
 - Move the view: Ctrl (or Cmd) + drag, Shift + drag or right drag; arrow keys move

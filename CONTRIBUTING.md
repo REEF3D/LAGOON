@@ -25,6 +25,31 @@ pixi run lagoon    # start the application
 Branch from `main`, keep pull requests small, and make sure CI passes on all three
 platforms.
 
+## Agreed behaviour and looks
+
+Once a behaviour or a look is agreed, the tests keep it from changing by accident:
+
+1. **Behaviour** (`tests/gui/test_agreed_behaviour.py`): one test per agreed behaviour,
+   named after it; its docstring indexes the ones guarded elsewhere.
+2. **Window structure** (`tests/gui/test_snapshots.py`): menus and shortcuts, toolbar,
+   panels and the properties panel of every item kind, as plain text in
+   `tests/snapshots/gui`. A change fails with a diff.
+3. **Looks** (`tests/render/test_reference_images.py`): the 3D view rendered off screen
+   and compared with `tests/snapshots/images/<platform>` within a small tolerance. A
+   change fails and leaves the new image, the agreed one and a difference image in
+   `$LAGOON_TEST_OUTPUT/snapshots` (or a temporary folder named in the message).
+
+When a change is intended, accept it and review what changed before committing:
+
+```bash
+pixi run snapshots          # or: pytest --update-snapshots
+git diff tests/snapshots    # the text diff; open the changed images
+```
+
+A snapshot that does not exist yet is recorded and its test skipped with a note, so
+the first run on a platform records the agreed state (`LAGOON_REQUIRE_SNAPSHOTS=1`
+makes that a failure instead).
+
 ## Testing with real data and a real screen
 
 The automated tests use small synthetic runs (`tests/reef3d_fixtures.py`) and render

@@ -89,7 +89,10 @@ class OffscreenView:
             else:
                 self.scene.update_gauges(marks)
         if not self._camera_set:
-            if self.view:
+            if self.view == "2d":  # from straight above, orthographic, as the 2D view
+                self.scene.set_orthographic(True)
+                self.scene.frame("top")
+            elif self.view:
                 self.scene.frame(self.view)
             elif session.scene.camera:
                 self.scene.set_camera_state(session.scene.camera)

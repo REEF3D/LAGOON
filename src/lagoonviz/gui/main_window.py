@@ -435,8 +435,14 @@ class MainWindow(QMainWindow):
         if not self.confirm_discard():
             event.ignore()
             return
-        self.settings.setValue("window/geometry", self.saveGeometry())
-        self.settings.setValue("window/state", self.saveState(LAYOUT_VERSION))
+        if self.full_screen:
+            # closed in the full screen viewer: keep the window as it was before it,
+            # panels and toolbar included, for the next start
+            state, _maximized, geometry, _shown = self._before_full_screen
+        else:
+            state, geometry = self.saveState(LAYOUT_VERSION), self.saveGeometry()
+        self.settings.setValue("window/geometry", geometry)
+        self.settings.setValue("window/state", state)
         self.timeline.timer.stop()
         self.loader.shutdown()
         event.accept()

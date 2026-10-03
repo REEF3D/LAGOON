@@ -691,3 +691,38 @@ def test_plain_colour_follows_the_colour_map(reef3d_run):
         assert shown.values is None and shown.color == color
     s.set_property(bed, "colormap", "rainbow")
     assert s.data.display(bed, mesh).color == "#00ff00"  # the middle of the map
+
+
+def test_loader_drops_frames_nobody_waits_for():
+    """Dragging the timeline asks for many frames in turn: only the last one is read."""
+    import threading
+
+    from lagoonviz.core.data.manager import BackgroundLoader
+
+    gate = threading.Event()
+    read = []
+
+    class Slow:
+        def load_key(self, key):
+            gate.wait(5)
+            read.append(key)
+            return key
+
+    loader = BackgroundLoader(Slow(), workers=1)
+    delivered = []
+    first = loader.request("busy", lambda k, m, e: delivered.append(k), owner="other")
+    passed = []
+    for i in range(20):
+        passed.append(
+            loader.request(f"frame {i}", lambda k, m, e: delivered.append(k), owner="view")
+        )
+        if i == 5:
+            shared = loader.request("frame 5", owner="second view")  # needed elsewhere too
+    gate.set()
+    for future in (first, shared, passed[-1]):
+        future.result(timeout=5)
+    loader.shutdown()
+    assert all(f.cancelled() for f in passed[:5] + passed[6:-1])
+    assert not shared.cancelled() and shared is passed[5]
+    assert set(read) == {"busy", "frame 5", "frame 19"}
+    assert sorted(delivered) == ["busy", "frame 19", "frame 5"]  # dropped: no callback
