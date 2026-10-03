@@ -1,6 +1,7 @@
 #!/bin/bash
 # LAGOON setup for macOS: installs uv (if needed), Python 3.12 and LAGOON, runs the tests,
-# then starts LAGOON. Double-click this file in Finder. Output is also written to setup_lagoon.log.
+# then starts LAGOON. Run it with:  bash ~/Codelite/LAGOON/setup_lagoon.command [case folder]
+# Output is also written to setup_lagoon.log; the application log goes to lagoon.log.
 HERE="$(cd "$(dirname "$0")" && pwd)"
 exec > >(tee "$HERE/setup_lagoon.log") 2>&1
 cd "$HERE" || exit 1
@@ -20,10 +21,18 @@ python --version
 
 echo "== 3/4 install LAGOON"
 uv pip install -e ./lagoon-format -e ".[dev]" || { echo "ERROR: install failed"; read -r -p "Press Return to close"; exit 1; }
+python -c "import pygfx, wgpu; print('pygfx', pygfx.__version__, '| wgpu', wgpu.__version__); print(wgpu.gpu.request_adapter_sync(power_preference='high-performance').info)" 2>&1 | tail -3
 
 echo "== 4/4 tests"
-python -m pytest -q
+export LAGOON_TEST_OUTPUT="$HERE/.test_output"
+python -m pytest -q -rs
 
 echo "== starting LAGOON (close the window to finish)"
-lagoon
+export LAGOON_LOG="$HERE/lagoon.log"
+if [ -n "$LAGOON_DEV" ]; then
+  # developer testing: Claude asks the running app for screenshots via .dev_remote/
+  lagoon --dev-remote "$HERE/.dev_remote" "$@"
+else
+  lagoon "$@"
+fi
 echo "== done"

@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Application entry point: ``lagoon [session-file]``."""
+"""Application entry point: ``lagoon [session file | case folder | output file]``."""
 
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import sys
+from pathlib import Path
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
@@ -18,9 +21,17 @@ from lagoonviz.gui.resources import resource_path
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(prog="lagoon", description="LAGOON desktop application")
-    parser.add_argument("session", nargs="?", help="session file to open")
+    parser.add_argument(
+        "path", nargs="?", help="session file, REEF3D case folder or output file to open"
+    )
+    parser.add_argument(
+        "--dev-remote",
+        metavar="DIR",
+        help="developer testing: take screenshots and simple actions from DIR/request.json",
+    )
     parser.add_argument("--version", action="version", version=f"LAGOON {lagoonviz.__version__}")
     args = parser.parse_args(argv)
+    setup_logging()
 
     app = QApplication.instance() or QApplication([sys.argv[0]])
     app.setApplicationName("LAGOON")
@@ -29,10 +40,33 @@ def main(argv: list[str] | None = None) -> int:
     app.setWindowIcon(QIcon(str(resource_path("icon.png"))))
 
     window = MainWindow(Session())
-    if args.session:
-        window.open_session(args.session)
     window.show()
+    if args.dev_remote:
+        from lagoonviz.gui.devremote import DevRemote
+
+        window.dev_remote = DevRemote(window, args.dev_remote)
+    if args.path:
+        path = Path(args.path).expanduser()
+        if path.suffix == ".lagoon-session":
+            window.open_session(path)
+        else:
+            window.open_case(path)
     return app.exec()
+
+
+def setup_logging() -> None:
+    """Log to stderr, and to the file in ``LAGOON_LOG`` if it is set."""
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    target = os.environ.get("LAGOON_LOG")
+    if target:
+        handlers.append(logging.FileHandler(target, mode="w", encoding="utf-8"))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+        handlers=handlers,
+        force=True,
+    )
+    logging.getLogger("lagoon").info("LAGOON %s, Python %s", lagoonviz.__version__, sys.version)
 
 
 if __name__ == "__main__":

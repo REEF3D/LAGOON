@@ -1,11 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Scene tree (like Blender's outliner): items, visibility, selection, rename, remove."""
+"""Scene tree (like Blender's outliner): items, visibility, selection, rename, remove.
+
+Items that show data are listed under their case; hiding a case hides them all.
+"""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QAbstractItemView, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QTreeWidgetItemIterator,
+    QVBoxLayout,
+    QWidget,
+)
 
 from lagoonviz.core.kinds import KINDS
 from lagoonviz.gui.bridge import SessionBridge
@@ -26,7 +36,7 @@ class SceneTreePanel(QWidget):
         self.tree = QTreeWidget(self)
         self.tree.setObjectName("sceneTree")
         self.tree.setHeaderLabels(["Name", "Kind"])
-        self.tree.setRootIsDecorated(False)
+        self.tree.setRootIsDecorated(True)
         self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tree.setEditTriggers(
             QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
@@ -53,26 +63,45 @@ class SceneTreePanel(QWidget):
         items = self.tree.selectedItems()
         return items[0].data(0, ID_ROLE) if items else ""
 
+    def entries(self) -> list[QTreeWidgetItem]:
+        """All entries, parents before their children."""
+        found = []
+        iterator = QTreeWidgetItemIterator(self.tree)
+        while iterator.value():
+            found.append(iterator.value())
+            iterator += 1
+        return found
+
     def select(self, item_id: str) -> None:
-        for row in range(self.tree.topLevelItemCount()):
-            entry = self.tree.topLevelItem(row)
-            if entry.data(0, ID_ROLE) == item_id:
-                self.tree.setCurrentItem(entry)
-                return
-        self.tree.clearSelection()
+        entry = self._entry(item_id)
+        if entry is not None:
+            self.tree.setCurrentItem(entry)
+        else:
+            self.tree.clearSelection()
 
     def rebuild(self) -> None:
         selected = self.selected_id()
         self._updating = True
         self.tree.blockSignals(True)
         self.tree.clear()
+        cases: dict[str, QTreeWidgetItem] = {}
         for item in self.session.scene:
             entry = QTreeWidgetItem([item.name, KINDS[item.kind].label])
             entry.setData(0, ID_ROLE, item.id)
             entry.setFlags(entry.flags() | Qt.ItemIsEditable | Qt.ItemIsUserCheckable)
             entry.setCheckState(0, Qt.Checked if item.visible else Qt.Unchecked)
             entry.setToolTip(0, item.id)
-            self.tree.addTopLevelItem(entry)
+            parent = None
+            if item.kind != "case":
+                case_item = self.session.data.case_item(item.id)
+                parent = cases.get(case_item.id) if case_item is not None else None
+            if parent is not None:
+                parent.addChild(entry)
+            else:
+                self.tree.addTopLevelItem(entry)
+            if item.kind == "case":
+                cases[item.id] = entry
+        self.tree.expandAll()
         self.tree.blockSignals(False)
         self._updating = False
         self.tree.resizeColumnToContents(0)
@@ -83,8 +112,7 @@ class SceneTreePanel(QWidget):
 
     # ------------------------------------------------------------- events
     def _entry(self, item_id: str) -> QTreeWidgetItem | None:
-        for row in range(self.tree.topLevelItemCount()):
-            entry = self.tree.topLevelItem(row)
+        for entry in self.entries():
             if entry.data(0, ID_ROLE) == item_id:
                 return entry
         return None

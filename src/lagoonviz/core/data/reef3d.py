@@ -1,0 +1,431 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""REEF3D cases: find the output of a run and read it frame by frame.
+
+A REEF3D run writes one folder per kind of output next to ``ctrl.txt``::
+
+    REEF3D_NHFLOW_VTU/       REEF3D-NHFLOW-00000012.pvtu  + one .vtu per MPI rank
+    REEF3D_NHFLOW_VTP_FSF/   REEF3D-NHFLOW-FSF-00000012.pvtp  (free surface)
+    REEF3D_NHFLOW_VTP_BED/   REEF3D-NHFLOW-BED-00000012.pvtp  (bed)
+    REEF3D_FNPF_VTU/ ...     REEF3D_CFD_VTU/ ...
+
+:func:`open_case` accepts the case folder, one of these output folders, or a single
+file. Each output folder becomes a :class:`Dataset`; its frames are the numbered
+files, merged across MPI ranks into one surface.
+"""
+
+from __future__ import annotations
+
+import re
+import threading
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+from lagoonviz.core.data.mesh import (
+    PieceMerger,
+    SurfaceMesh,
+    VolumePlan,
+    triangulate,
+    variable_names,
+)
+from lagoonviz.core.data.vtkxml import (
+    read_header,
+    read_parallel_header,
+    read_piece,
+    split_name,
+)
+
+SOLVERS = ("CFD", "NHFLOW", "FNPF", "SFLOW", "POTENTIAL")
+
+#: dataset roles and the scene item kind that shows them
+ROLES = {
+    "free_surface": "free_surface",
+    "bed": "bathymetry",
+    "volume": "volume",
+}
+
+_FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
+_SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp")
+
+
+def _role(what: str, tag: str | None, kind: str) -> str:
+    if tag in ("FSF", "FS"):
+        return "free_surface"
+    if tag == "BED":
+        return "bed"
+    if what == "VTU" or kind == "UnstructuredGrid":
+        return "volume"
+    return (tag or "surface").lower()
+
+
+ROLE_LABELS = {"free_surface": "free surface", "bed": "bed", "volume": "volume"}
+
+
+@dataclass
+class Frame:
+    """One output time of one dataset: the parallel file or the single serial file."""
+
+    step: int
+    path: Path  # .pvtu/.pvtp or the serial file
+    pieces: list[Path]
+
+
+class Dataset:
+    """One kind of output of a run (free surface, bed, volume) over all its frames."""
+
+    def __init__(self, key: str, solver: str, role: str, frames: list[Frame], folder: Path):
+        if not frames:
+            raise ValueError(f"{folder}: no frames")
+        self.key = key
+        self.solver = solver
+        self.role = role
+        self.frames = frames
+        self.folder = folder
+        first = frames[0]
+        header = read_header(first.pieces[0])
+        self.kind = header.kind
+        self.components = {name: info.components for name, info in header.point_data.items()}
+        self._merger = PieceMerger("xy" if self.surface_like else "xyz")
+        self._triangles = np.zeros((0, 3), np.uint32)
+        self._volume_plan: VolumePlan | None = None
+        self._step_array: np.ndarray | None = None
+        #: set for output left over from an earlier run in the same folder
+        self.earlier_run = False
+        self._lock = threading.Lock()  # one merge plan per dataset
+        self._span: tuple[float, float] | None = None
+
+    # ------------------------------------------------------------- description
+    @property
+    def label(self) -> str:
+        label = f"{self.solver} {ROLE_LABELS.get(self.role, self.role)}"
+        if self.earlier_run:
+            label += f" (earlier run, outputs {self.steps[0]}–{self.last_step})"
+        return label
+
+    @property
+    def surface_like(self) -> bool:
+        """2.5D surfaces whose points move only vertically."""
+        return self.role in ("free_surface", "bed")
+
+    @property
+    def steps(self) -> list[int]:
+        return [frame.step for frame in self.frames]
+
+    def __len__(self) -> int:
+        return len(self.frames)
+
+    def variables(self) -> list[str]:
+        """Colour-by choices, e.g. ``eta``, ``velocity``, ``velocity.x``."""
+        return variable_names(self.components)
+
+    def default_variable(self) -> str:
+        preferred = {
+            "free_surface": ("eta", "elevation", "WL"),
+            "bed": ("elevation", "depth", "ST_bedch"),
+            "volume": ("velocity", "pressure", "elevation"),
+        }.get(self.role, ())
+        for name in preferred:
+            if name in self.components:
+                return name
+        return next(iter(self.components), "none")
+
+    def written_span(self) -> tuple[float, float]:
+        """Modification times of the first and last frame (when the run wrote them)."""
+        if self._span is None:
+            try:
+                first = self.frames[0].pieces[0].stat().st_mtime
+                last = self.frames[-1].pieces[0].stat().st_mtime
+            except OSError:
+                first = last = 0.0
+            self._span = (min(first, last), max(first, last))
+        return self._span
+
+    def same_run_as(self, other: Dataset, margin: float = 600.0) -> bool:
+        """True if both were written during one run (their write times overlap)."""
+        a0, a1 = self.written_span()
+        b0, b1 = other.written_span()
+        return self.solver == other.solver and a0 <= b1 + margin and b0 <= a1 + margin
+
+    @property
+    def last_step(self) -> int:
+        return self.frames[-1].step
+
+    def frame_index(self, frame: float) -> int:
+        """Index of the frame shown at a (fractional) output number on the timeline.
+
+        The timeline counts REEF3D's output numbers, so a dataset with missing or
+        leftover outputs still lines up in time: the latest frame at or before the
+        position is shown (the first frame before it starts).
+        """
+        if self._step_array is None:
+            self._step_array = np.array(self.steps)
+        index = int(np.searchsorted(self._step_array, round(frame), side="right")) - 1
+        return min(max(index, 0), len(self.frames) - 1)
+
+    # ------------------------------------------------------------- reading
+    def read(self, index: int, variables: list[str] | None = None) -> SurfaceMesh:
+        """Read one frame as a surface with the arrays needed for ``variables``.
+
+        ``variables=None`` reads every array. Surfaces are merged across MPI ranks;
+        volumes are reduced to their outer boundary.
+        """
+        frame = self.frames[index]
+        arrays = None
+        if variables is not None:
+            arrays = sorted({v.partition(".")[0] for v in variables if v and v != "none"})
+            arrays = [name for name in arrays if name in self.components]
+            if self.role == "free_surface" and "eta" in self.components and "eta" not in arrays:
+                arrays.append("eta")  # needed for vertical exaggeration
+        # reading runs in parallel; only making a new plan is serialised
+        light = [read_piece(path, point_arrays=arrays, with_cells=False) for path in frame.pieces]
+        if self.kind == "UnstructuredGrid":
+            with self._lock:
+                plan = self._volume_plan
+                if plan is None or not plan.accepts(light):
+                    full = [read_piece(path, point_arrays=[]) for path in frame.pieces]
+                    plan = self._volume_plan = VolumePlan.build(full)
+                    del full
+            points, data = plan.apply(light)
+            triangles = plan.triangles
+        else:
+            with self._lock:
+                if not self._merger.accepts(light):
+                    full = [read_piece(path, point_arrays=[]) for path in frame.pieces]
+                    merged = self._merger.make_plan(full).apply(full)
+                    self._triangles = np.ascontiguousarray(
+                        triangulate(merged.connectivity, merged.offsets), dtype=np.uint32
+                    )
+                plan = self._merger.plan
+                triangles = self._triangles
+            merged = plan.apply(light)
+            points, data = merged.points, merged.point_data
+        mesh = SurfaceMesh(
+            points=np.ascontiguousarray(points, dtype=np.float32),
+            triangles=triangles,
+            point_data=data,
+        )
+        return mesh.with_normals()  # here, so it runs in the loader thread
+
+
+@dataclass
+class Case:
+    """A REEF3D run: its datasets and, if known, the time between outputs."""
+
+    path: Path
+    datasets: dict[str, Dataset] = field(default_factory=dict)
+    print_interval: float | None = None  # seconds between frames (ctrl.txt P 30)
+
+    @property
+    def solver(self) -> str:
+        for dataset in self.datasets.values():
+            return dataset.solver
+        return ""
+
+    def by_role(self, role: str) -> Dataset | None:
+        """The dataset shown for a role when the item does not name one (see :func:`preferred`)."""
+        matches = [d for d in self.datasets.values() if d.role == role]
+        return preferred(matches) if matches else None
+
+    @property
+    def n_frames(self) -> int:
+        """Length of the timeline: the highest output number plus one."""
+        return max((d.last_step + 1 for d in self.datasets.values()), default=0)
+
+    def main_datasets(self) -> dict[str, Dataset]:
+        """What to show when the case is opened: the most recent run's surfaces.
+
+        A folder can hold output of several runs (REEF3D overwrites only the files it
+        writes again), e.g. an FNPF run next to an older NHFLOW run, or a bed from an
+        earlier run. The free surface (or bed) written last picks the run; outputs
+        written during that run join it. Without surfaces, the volume is shown.
+        """
+        surfaces = [d for d in self.datasets.values() if d.role in ("free_surface", "bed")]
+        if not surfaces:
+            volumes = [d for d in self.datasets.values() if d.role == "volume"]
+            if not volumes:
+                return {}
+            return {"volume": max(volumes, key=lambda d: d.written_span()[1])}
+        free = [d for d in surfaces if d.role == "free_surface"]
+        lead = preferred(free or surfaces)
+        chosen = {lead.role: lead}
+        for role in ("bed", "free_surface"):
+            if role in chosen:
+                continue
+            options = [d for d in surfaces if d.role == role and d.same_run_as(lead)]
+            if options:
+                chosen[role] = max(options, key=len)
+        # beds are drawn first, so a transparent free surface shows them
+        return {role: chosen[role] for role in ("bed", "free_surface") if role in chosen}
+
+    def describe(self) -> str:
+        lines = [f"REEF3D case {self.path}"]
+        for dataset in self.datasets.values():
+            lines.append(
+                f"  {dataset.key}: {dataset.label}, {len(dataset)} frames, "
+                f"{len(dataset.frames[0].pieces)} pieces, "
+                f"variables: {', '.join(dataset.components)}"
+            )
+        return "\n".join(lines)
+
+
+# ----------------------------------------------------------------- discovery
+def _frames_in(folder: Path) -> dict[str, list[Frame]]:
+    """Group the files of a folder into series of frames, keyed by file stem."""
+    parallel: dict[str, dict[int, Path]] = {}
+    serial: dict[str, dict[int, Path]] = {}
+    for path in folder.iterdir():
+        if path.suffix not in _SUFFIXES or path.name.startswith("."):
+            continue
+        stem, step, rank = split_name(path)
+        if step is None:
+            continue
+        if path.suffix in (".pvtu", ".pvtp"):
+            parallel.setdefault(stem, {})[step] = path
+        elif rank is None:
+            serial.setdefault(stem, {})[step] = path
+    series: dict[str, list[Frame]] = {}
+    for stem, steps in parallel.items():
+        frames = []
+        for step in sorted(steps):
+            path = steps[step]
+            header = read_parallel_header(path) if not frames else None
+            if header is not None:
+                pieces = header.pieces
+                names = [p.name for p in pieces]
+            else:
+                # pieces follow the same naming in every frame: avoid parsing each file
+                old = f"{split_name(frames[0].path)[1]:0{_width(frames[0].path)}d}"
+                new = f"{step:0{_width(path)}d}"
+                pieces = [path.parent / n.replace(f"-{old}-", f"-{new}-", 1) for n in names]
+            frames.append(Frame(step, path, pieces))
+        series[stem] = frames
+    for stem, steps in serial.items():
+        if stem not in series:
+            series[stem] = [Frame(s, steps[s], [steps[s]]) for s in sorted(steps)]
+    return series
+
+
+def _width(path: Path) -> int:
+    match = re.search(r"-(\d+)(?:-\d+)?$", path.stem)
+    return len(match.group(1)) if match else 8
+
+
+def _dataset_from_folder(folder: Path) -> list[Dataset]:
+    match = _FOLDER.match(folder.name)
+    datasets = []
+    for stem, frames in _frames_in(folder).items():
+        # REEF3D-NHFLOW-FSF -> solver NHFLOW, tag FSF
+        parts = stem.split("-")
+        solver = parts[1] if len(parts) > 1 and parts[0] == "REEF3D" else "REEF3D"
+        tag = "_".join(parts[2:]) or None
+        what = "VTU" if frames[0].path.suffix in (".pvtu", ".vtu") else "VTP"
+        if match:
+            solver = match.group("solver")
+            tag = match.group("tag") or tag
+            what = "VTU" if match.group("what") == "VTU" else "VTP"
+        kind = "UnstructuredGrid" if what == "VTU" else "PolyData"
+        role = _role(what, tag, kind)
+        key = f"{solver.lower()}_{role}"
+        for number, run in enumerate(split_runs(frames)):
+            dataset = Dataset(
+                key if number == 0 else f"{key}_earlier{number}", solver, role, run, folder
+            )
+            dataset.earlier_run = number > 0
+            datasets.append(dataset)
+    return datasets
+
+
+def preferred(datasets: list[Dataset], short: float = 0.1) -> Dataset:
+    """The run to show among alternatives: the latest, unless it is only a short start.
+
+    A run stopped after a few outputs (a test, a crash) is usually not what one
+    wants to look at; if the latest run has less than ``short`` times the outputs of
+    the longest one, the longest is shown. The others stay selectable.
+    """
+    latest = max(datasets, key=lambda d: d.written_span()[1])
+    longest = max(datasets, key=len)
+    return latest if len(latest) >= short * len(longest) else longest
+
+
+def split_runs(frames: list[Frame], tolerance: float = 1.0) -> list[list[Frame]]:
+    """Split a series into the runs that wrote it, the latest run first.
+
+    A run writes its outputs in order, so their modification times increase with
+    the output number. REEF3D started again in the same folder overwrites outputs
+    from the beginning; the outputs it did not reach are older than the ones before
+    them. Each such drop in time starts the leftovers of an earlier run.
+    """
+    if len(frames) < 2:
+        return [frames]
+    times = []
+    for frame in frames:
+        try:
+            times.append(frame.path.stat().st_mtime)
+        except OSError:
+            times.append(0.0)
+    runs: list[list[Frame]] = [[frames[0]]]
+    run_times = [[times[0]]]
+    for frame, written, before in zip(frames[1:], times[1:], times[:-1], strict=True):
+        if written < before - tolerance:
+            runs.append([])
+            run_times.append([])
+        runs[-1].append(frame)
+        run_times[-1].append(written)
+    order = sorted(range(len(runs)), key=lambda i: max(run_times[i]), reverse=True)
+    return [runs[i] for i in order]
+
+
+def read_print_interval(case_dir: Path) -> float | None:
+    """Time between outputs from ``ctrl.txt`` (``P 30 dt``), if the run used it."""
+    ctrl = case_dir / "ctrl.txt"
+    if not ctrl.is_file():
+        return None
+    try:
+        for line in ctrl.read_text(errors="replace").splitlines():
+            fields = line.split()
+            if len(fields) >= 3 and fields[0] == "P" and fields[1] == "30":
+                value = float(fields[2])
+                return value if value > 0 else None
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def open_case(path: str | Path) -> Case:
+    """Open a REEF3D case folder, one output folder, or one output file."""
+    path = Path(path).expanduser()
+    if not path.exists():
+        raise FileNotFoundError(f"{path} does not exist")
+    datasets: list[Dataset] = []
+    if path.is_file():
+        if path.suffix not in _SUFFIXES:
+            raise ValueError(f"{path.name}: not a VTU/VTP file")
+        folder = path.parent
+        stem = split_name(path)[0]
+        found = [d for d in _dataset_from_folder(folder) if d.frames[0].path.name.startswith(stem)]
+        datasets = found
+        case_dir = folder.parent if _FOLDER.match(folder.name) else folder
+    elif _FOLDER.match(path.name):
+        datasets = _dataset_from_folder(path)
+        case_dir = path.parent
+    else:
+        case_dir = path
+        for folder in sorted(path.iterdir()):
+            if folder.is_dir() and _FOLDER.match(folder.name):
+                datasets += _dataset_from_folder(folder)
+        if not datasets:
+            # a plain folder with VTU/VTP files
+            datasets = _dataset_from_folder(path)
+    if not datasets:
+        raise ValueError(f"no REEF3D VTU/VTP output found in {path}")
+    case = Case(case_dir, print_interval=read_print_interval(case_dir))
+    for dataset in datasets:
+        key = dataset.key
+        n = 2
+        while key in case.datasets:
+            key = f"{dataset.key}_{n}"
+            n += 1
+        dataset.key = key
+        case.datasets[key] = dataset
+    return case

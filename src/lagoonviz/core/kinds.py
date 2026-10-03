@@ -3,8 +3,11 @@
 
 Each kind lists its properties with defaults and limits. The properties panel in
 the GUI is generated from these specs, and :func:`validate` keeps scripts and the
-GUI to the same rules. Phase 0 defines the kinds as placeholders; readers and
-renderers attach to them in phases 1 and 2.
+GUI to the same rules.
+
+Some choices depend on the loaded data (which variables a dataset has). Such
+properties name a ``provider``; the data manager lists the current choices, and
+the core accepts any name so that a session can be built before its data exists.
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-COLORMAPS = ("lagoon_blue", "balance", "viridis", "cividis", "greys")
+COLORMAPS = ("lagoon_blue", "balance", "viridis", "cividis", "sand", "greys")
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,30 @@ class PropertySpec:
     choices: tuple[str, ...] | None = None
     minimum: float | None = None
     maximum: float | None = None
+    #: name of a data-dependent choice list (``"variables"``, ``"datasets"``, ``"cases"``)
+    provider: str | None = None
+    tip: str = ""
+
+
+def _data_source(role: str) -> dict[str, PropertySpec]:
+    """Properties shared by all items that show a dataset of a case."""
+    return {
+        "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
+        "dataset": PropertySpec(
+            "", "Dataset", provider="datasets", tip=f"Output to show (empty: the {role} output)"
+        ),
+    }
+
+
+def _colouring(variable: str, colormap: str) -> dict[str, PropertySpec]:
+    return {
+        "variable": PropertySpec(variable, "Colour by", provider="variables"),
+        "colormap": PropertySpec(colormap, "Colour map", choices=COLORMAPS),
+        "auto_range": PropertySpec(True, "Automatic range"),
+        "vmin": PropertySpec(0.0, "Range min"),
+        "vmax": PropertySpec(1.0, "Range max"),
+        "opacity": PropertySpec(1.0, "Opacity", minimum=0.0, maximum=1.0),
+    }
 
 
 @dataclass(frozen=True)
@@ -34,25 +61,36 @@ KINDS: dict[str, KindSpec] = {
     "case": KindSpec(
         "Case",
         {
-            "path": PropertySpec("", "Path"),
-            "solver": PropertySpec("NHFLOW", "Solver", choices=("CFD", "NHFLOW", "FNPF", "SFLOW")),
+            "path": PropertySpec("", "Path", tip="REEF3D case folder, output folder or file"),
+            "print_interval": PropertySpec(
+                0.0,
+                "Output interval [s]",
+                minimum=0.0,
+                tip="Time between outputs; 0 = from ctrl.txt (P 30), else frame numbers",
+            ),
         },
     ),
     "free_surface": KindSpec(
         "Free surface",
         {
-            "colormap": PropertySpec("lagoon_blue", "Colour map", choices=COLORMAPS),
-            "variable": PropertySpec("eta", "Colour by", choices=("eta", "velocity", "none")),
-            "opacity": PropertySpec(1.0, "Opacity", minimum=0.0, maximum=1.0),
-            "exaggeration": PropertySpec(1.0, "Vertical exaggeration", minimum=0.1, maximum=100.0),
+            **_data_source("free surface"),
+            **_colouring("eta", "balance"),
+            "exaggeration": PropertySpec(
+                1.0,
+                "Vertical exaggeration",
+                minimum=0.1,
+                maximum=100.0,
+                tip="Scales the surface elevation about the still water level",
+            ),
         },
     ),
     "bathymetry": KindSpec(
         "Bathymetry",
-        {
-            "colormap": PropertySpec("greys", "Colour map", choices=COLORMAPS),
-            "opacity": PropertySpec(1.0, "Opacity", minimum=0.0, maximum=1.0),
-        },
+        {**_data_source("bed"), **_colouring("elevation", "sand")},
+    ),
+    "volume": KindSpec(
+        "Volume",
+        {**_data_source("volume"), **_colouring("velocity", "viridis")},
     ),
     "slice": KindSpec(
         "Slice",

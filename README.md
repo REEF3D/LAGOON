@@ -5,9 +5,11 @@ An open-source desktop application for exploring, plotting and rendering ocean a
 coastal simulations, in the spirit of ParaView and Blender but built for
 hydrodynamics. Part of the [REEF3D](https://github.com/REEF3D) family.
 
-> Status: **phase 0, foundations.** The application window, scene tree, properties,
-> timeline and Python console exist; there is no data reading or 3D rendering yet.
-> See the implementation plan for what comes next.
+> Status: **phase 1, viewer (in progress).** LAGOON opens REEF3D runs (NHFLOW, FNPF,
+> CFD VTU/PVTU output), shows the free surface, bed and volume in a GPU viewport and
+> plays them over time. See `docs/LAGOON implementation plan.pdf` for what comes next.
+
+<p align="center"><img src="docs/phase1_viewport.png" alt="LAGOON showing an NHFLOW free surface" width="720"></p>
 
 ## Run it
 
@@ -27,12 +29,36 @@ lagoon                 # or: python -m lagoonviz
 pytest
 ```
 
+## Open a REEF3D run
+
+*File → Open case…* and pick the folder the run wrote its `REEF3D_*` folders into
+(or one of those folders, or a single `.pvtu`/`.pvtp` file). From a terminal:
+
+```bash
+lagoon ~/runs/seamount                    # a case folder
+lagoon ~/runs/seamount/REEF3D_NHFLOW_VTP_FSF
+lagoon figure.lagoon-session              # a saved session
+```
+
+In the viewport: left drag rotates, right drag (or Shift + drag) pans, the wheel
+zooms. Blender's middle-mouse navigation works too, and the number keys choose views:
+1 front, 3 side, 7 top (with Ctrl the opposite side), 5 perspective/orthographic,
+Home frames everything. The timeline plays and scrubs through the frames; frames are
+read in the background and kept in memory, so stepping back is instant.
+
+The same view renders without a screen, e.g. on a cluster:
+
+```bash
+lagoon-render ~/runs/seamount frame.png --time 120 --size 1920x1080
+lagoon-render figure.lagoon-session figure.png
+```
+
 ## Layout
 
 | Path | What | License |
 | --- | --- | --- |
-| `src/lagoonviz/core` | Scene, commands, sessions. No Qt, no GPU. | GPLv3 |
-| `src/lagoonviz/render` | pygfx and matplotlib rendering (from phase 1) | GPLv3 |
+| `src/lagoonviz/core` | Scene, commands, sessions, REEF3D readers. No Qt, no GPU. | GPLv3 |
+| `src/lagoonviz/render` | pygfx 3D scene and offscreen rendering (matplotlib later) | GPLv3 |
 | `src/lagoonviz/gui` | PySide6 application | GPLv3 |
 | `src/lagoonviz/plugins` | Readers and tools for other codes (later) | GPLv3 |
 | `lagoon-format/` | LAGOON data format: specification and reference reader/writer | MIT |
@@ -49,10 +75,14 @@ and replayed headless:
 from lagoonviz.core import Session
 
 session = Session()
-fs = session.add_item("free_surface", colormap="balance")
-session.set_property(fs, "exaggeration", 8.0)
+session.open_case("~/runs/seamount")            # adds the case, free surface and bed
+session.set_property("free_surface-1", "exaggeration", 8.0)
+session.set_time(120.0)
 session.save("seamount.lagoon-session")
 print(session.to_script())  # the history as a runnable script
+
+mesh = session.data.load("free_surface-1")      # NumPy arrays of the current frame
+print(mesh.points.shape, mesh.point_data["eta"].max())
 ```
 
 In the application, *File → Export script* writes the same script, and the Python

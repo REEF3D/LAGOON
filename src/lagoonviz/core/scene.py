@@ -66,6 +66,8 @@ class Scene:
         self._counters: dict[str, int] = {}
         self._observers: list[Observer] = []
         self.time: float = 0.0
+        #: saved 3D view (camera state from the renderer); view state, not undoable
+        self.camera: dict[str, Any] | None = None
 
     # ------------------------------------------------------------- observers
     def subscribe(self, callback: Observer) -> None:
@@ -165,6 +167,7 @@ class Scene:
         return {
             "lagoon_session": SESSION_FORMAT,
             "time": self.time,
+            "camera": copy.deepcopy(self.camera),
             "counters": dict(self._counters),
             "items": [item.to_dict() for item in self._items.values()],
         }
@@ -183,6 +186,8 @@ class Scene:
         self._items = {item.id: item for item in items}
         self._counters = {str(k): int(v) for k, v in data.get("counters", {}).items()}
         self.time = float(data.get("time", 0.0))
+        camera = data.get("camera")
+        self.camera = copy.deepcopy(camera) if isinstance(camera, dict) else None
         self._notify("reset", None)
 
     def save(self, path: str | Path) -> None:

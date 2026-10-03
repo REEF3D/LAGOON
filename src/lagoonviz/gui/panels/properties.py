@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from PySide6.QtCore import QLocale
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -29,6 +31,7 @@ class PropertiesPanel(QWidget):
         self.session = bridge.session
         self.item_id = ""
         self.editors: dict[str, QWidget] = {}
+        self.info = QLabel()
 
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
@@ -67,17 +70,48 @@ class PropertiesPanel(QWidget):
 
         for key, prop in spec.properties.items():
             editor = self._editor(key, prop, item.properties[key])
+            if prop.tip:
+                editor.setToolTip(prop.tip)
             self.editors[key] = editor
             form.addRow(prop.label, editor)
+
+        if "auto_range" in spec.properties:
+            fit = QPushButton("Fit range to this frame")
+            fit.setToolTip("Fix the colour range to the values of the current frame")
+            fit.clicked.connect(self._fit_range)
+            form.addRow("", fit)
+            self.fit_button = fit
+        self.info = QLabel(self._data_info(item.id))
+        self.info.setWordWrap(True)
+        self.info.setEnabled(False)
+        form.addRow(self.info)
         self._scroll.setWidget(body)
+
+    def _choices(self, prop: PropertySpec, value: Any) -> list[tuple[str, str]]:
+        """(label, value) pairs for a choice property; the current value is always listed."""
+        if prop.provider is None:
+            choices = [(c, c) for c in prop.choices or ()]
+        else:
+            choices = self.session.data.labelled_choices(self.item_id, prop.provider)
+        if str(value) not in [v for _, v in choices]:
+            choices.append((str(value), str(value)))
+        return choices
+
+    @staticmethod
+    def _fill(box: QComboBox, choices: list[tuple[str, str]], value: Any) -> None:
+        current = [(box.itemText(i), box.itemData(i)) for i in range(box.count())]
+        if current != choices:
+            box.clear()
+            for label, data in choices:
+                box.addItem(label, data)
+        box.setCurrentIndex(max(box.findData(str(value)), 0))
 
     def _editor(self, key: str, prop: PropertySpec, value: Any) -> QWidget:
         default = prop.default
-        if prop.choices is not None:
+        if prop.choices is not None or prop.provider is not None:
             box = QComboBox()
-            box.addItems(list(prop.choices))
-            box.setCurrentText(str(value))
-            box.currentTextChanged.connect(lambda text: self._set(key, text))
+            self._fill(box, self._choices(prop, value), value)
+            box.currentIndexChanged.connect(lambda _i, b=box: self._set(key, b.currentData()))
             return box
         if isinstance(default, bool):
             check = QCheckBox()
@@ -86,6 +120,10 @@ class PropertiesPanel(QWidget):
             return check
         if isinstance(default, int | float):
             spin = QDoubleSpinBox()
+            # a decimal point whatever the system language, as in scripts and papers
+            number_locale = QLocale.c()
+            number_locale.setNumberOptions(QLocale.OmitGroupSeparator)
+            spin.setLocale(number_locale)
             spin.setDecimals(3)
             spin.setRange(
                 prop.minimum if prop.minimum is not None else -1e9,
@@ -110,6 +148,38 @@ class PropertiesPanel(QWidget):
             return
         self.session.set_property(self.item_id, key, value, merge=merge)
 
+    def _fit_range(self) -> None:
+        if not self.item_id:
+            return
+        try:
+            self.session.fit_range(self.item_id)
+        except (ValueError, KeyError) as error:
+            self.info.setText(str(error))
+
+    def _data_info(self, item_id: str) -> str:
+        """A line about the data behind an item: frames and points, or why there is none."""
+        data = self.session.data
+        item = self.session.scene.get(item_id)
+        if item.kind == "case":
+            case = data.case(item_id)
+            if case is None:
+                return data.error(item_id) or ""
+            parts = [f"{d.label}: {len(d)} frames" for d in case.datasets.values()]
+            return "\n".join(parts)
+        dataset = data.dataset(item_id)
+        if dataset is None:
+            return (
+                "No data: open a case (File → Open case…)"
+                if item.kind
+                in (
+                    "free_surface",
+                    "bathymetry",
+                    "volume",
+                )
+                else ""
+            )
+        return f"{dataset.label} · {len(dataset)} frames · {dataset.folder.name}"
+
     def _rename(self, text: str) -> None:
         text = text.strip()
         if self.item_id and text and text != self.session.scene.get(self.item_id).name:
@@ -126,11 +196,14 @@ class PropertiesPanel(QWidget):
         """Update editor values in place (no rebuild, so focus and cursor stay)."""
         item = self.session.scene.get(self.item_id)
         values: dict[str, Any] = {"name": item.name, "visible": item.visible, **item.properties}
+        spec = kind_spec(item.kind)
         for key, editor in self.editors.items():
             value = values[key]
             editor.blockSignals(True)
             if isinstance(editor, QComboBox):
-                editor.setCurrentText(str(value))
+                prop = spec.properties.get(key)
+                if prop is not None:
+                    self._fill(editor, self._choices(prop, value), value)
             elif isinstance(editor, QCheckBox):
                 editor.setChecked(bool(value))
             elif isinstance(editor, QDoubleSpinBox):
@@ -138,3 +211,4 @@ class PropertiesPanel(QWidget):
             elif isinstance(editor, QLineEdit) and not editor.hasFocus():
                 editor.setText(str(value))
             editor.blockSignals(False)
+        self.info.setText(self._data_info(self.item_id))

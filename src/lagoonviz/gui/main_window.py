@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence
+import numpy as np
+from PySide6.QtCore import QByteArray, QLocale, QPoint, QRect, QSettings, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QIcon, QImage, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 
 import lagoonviz
 from lagoonviz.core import SESSION_EXTENSION, Session
+from lagoonviz.core.data.manager import BackgroundLoader
 from lagoonviz.core.kinds import KINDS
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.panels import (
@@ -29,11 +31,12 @@ from lagoonviz.gui.panels import (
     PropertiesPanel,
     SceneTreePanel,
     TimelinePanel,
-    ViewportPlaceholder,
+    create_viewport,
 )
 from lagoonviz.gui.resources import resource_path
 
 SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
+OUTPUT_FILTER = "REEF3D output (*.pvtu *.pvtp *.vtu *.vtp);;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
 LAYOUT_VERSION = 1
 
@@ -41,6 +44,10 @@ LAYOUT_VERSION = 1
 class MainWindow(QMainWindow):
     def __init__(self, session: Session | None = None, settings: QSettings | None = None):
         super().__init__()
+        # numbers as in scripts and papers: decimal point, no digit grouping
+        locale = QLocale(QLocale.English, QLocale.UnitedKingdom)
+        locale.setNumberOptions(QLocale.OmitGroupSeparator)
+        QLocale.setDefault(locale)
         self.session = session or Session()
         self.bridge = SessionBridge(self.session, self)
         self.settings = settings if settings is not None else QSettings()
@@ -53,12 +60,18 @@ class MainWindow(QMainWindow):
         self.setDockNestingEnabled(True)
         self.resize(1400, 860)
 
+        # frames are read in background threads and kept in the session's cache
+        self.loader = BackgroundLoader(self.session.data)
+
         # panels
-        self.viewport = ViewportPlaceholder(self)
+        self.viewport = create_viewport(self.bridge, self.loader, self)
+        self.viewport.statusMessage.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.setCentralWidget(self.viewport)
         self.scene_tree = SceneTreePanel(self.bridge)
         self.properties = PropertiesPanel(self.bridge)
-        self.timeline = TimelinePanel(self.bridge)
+        self.timeline = TimelinePanel(
+            self.bridge, loader=self.loader, busy=lambda: self.viewport.busy
+        )
         self.plots = PlotsPanel()
         self.console = ConsolePanel(self.bridge)
 
@@ -103,6 +116,18 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_actions(self) -> None:
+        self.act_open_case = self._action(
+            "Open &case...",
+            self.open_case_dialog,
+            "Ctrl+Shift+O",
+            tip="Open a REEF3D case folder (or one of its REEF3D_* output folders)",
+        )
+        self.act_open_case.setIconText("Open case")
+        self.act_open_file = self._action(
+            "Open output &file...",
+            self.open_output_dialog,
+            tip="Open a REEF3D .pvtu/.pvtp/.vtu/.vtp file and the series it belongs to",
+        )
         self.act_new = self._action("&New session", self.new_session, QKeySequence.New)
         self.act_open = self._action(
             "&Open session...", self.open_session_dialog, QKeySequence.Open
@@ -130,12 +155,21 @@ class MainWindow(QMainWindow):
             )
             for kind, spec in KINDS.items()
         }
+        self.act_screenshot = self._action(
+            "Save &screenshot...",
+            self.save_screenshot_dialog,
+            "F12",
+            tip="Save a picture of the LAGOON window, including the 3D view",
+        )
         self.act_reset_layout = self._action("&Reset layout", self.reset_layout)
         self.act_about = self._action("&About LAGOON", self.about)
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
         file_menu = bar.addMenu("&File")
+        file_menu.addAction(self.act_open_case)
+        file_menu.addAction(self.act_open_file)
+        file_menu.addSeparator()
         for action in (self.act_new, self.act_open, self.act_save, self.act_save_as):
             file_menu.addAction(action)
         file_menu.addSeparator()
@@ -157,6 +191,7 @@ class MainWindow(QMainWindow):
         for dock in self.docks.values():
             view_menu.addAction(dock.toggleViewAction())
         view_menu.addSeparator()
+        view_menu.addAction(self.act_screenshot)
         view_menu.addAction(self.act_reset_layout)
 
         help_menu = bar.addMenu("&Help")
@@ -165,13 +200,15 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self) -> None:
         bar = self.addToolBar("Main")
         bar.setObjectName("toolbar_main")
+        bar.addAction(self.act_open_case)
+        bar.addSeparator()
         bar.addAction(self.act_open)
         bar.addAction(self.act_save)
         bar.addSeparator()
         bar.addAction(self.act_undo)
         bar.addAction(self.act_redo)
         bar.addSeparator()
-        for kind in ("free_surface", "bathymetry", "slice", "gauge"):
+        for kind in ("free_surface", "bathymetry", "volume", "slice", "gauge"):
             bar.addAction(self.add_actions[kind])
 
     # ------------------------------------------------------------- layout
@@ -206,6 +243,8 @@ class MainWindow(QMainWindow):
             return
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState(LAYOUT_VERSION))
+        self.timeline.timer.stop()
+        self.loader.shutdown()
         event.accept()
 
     # ------------------------------------------------------------- history and title
@@ -245,6 +284,34 @@ class MainWindow(QMainWindow):
             self.session.reset()
             self.dirty = False
             self._update_title()
+
+    def open_case_dialog(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Open REEF3D case", self._last_dir())
+        if path:
+            self.open_case(path)
+
+    def open_output_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open REEF3D output file", self._last_dir(), OUTPUT_FILTER
+        )
+        if path:
+            self.open_case(path)
+
+    def open_case(self, path: str | Path) -> str | None:
+        """Open a REEF3D case into the session; returns the case item id."""
+        self.statusBar().showMessage(f"Opening {path} ...")
+        try:
+            case_id = self.session.open_case(path)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, "Could not open case", str(error))
+            self.statusBar().clearMessage()
+            return None
+        self._remember_dir(path)
+        case = self.session.data.case(case_id)
+        summary = ", ".join(f"{d.label} ({len(d)} frames)" for d in case.datasets.values())
+        self.statusBar().showMessage(f"Opened {Path(path).name}: {summary}", 10000)
+        self.viewport.reframe()
+        return case_id
 
     def open_session_dialog(self) -> None:
         if not self.confirm_discard():
@@ -303,6 +370,41 @@ class MainWindow(QMainWindow):
     def export_script(self, path: str | Path) -> None:
         Path(path).write_text(self.session.to_script(), encoding="utf-8")
         self.statusBar().showMessage(f"Script written to {path}", 5000)
+
+    def save_screenshot_dialog(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save screenshot", self._last_dir(), "PNG image (*.png)"
+        )
+        if path:
+            if not Path(path).suffix:
+                path += ".png"
+            self.save_screenshot(path)
+
+    def screenshot(self) -> QImage:
+        """The window as an image, with the GPU-drawn 3D view pasted in.
+
+        Qt cannot read back the GPU canvas, so the last frame pygfx rendered is
+        drawn over the canvas area of the window grab.
+        """
+        image = self.grab().toImage()
+        snapshot = self.viewport.canvas_snapshot()
+        if snapshot is not None:
+            widget, pixels = snapshot
+            pixels = np.ascontiguousarray(np.asarray(pixels)[..., :4], dtype=np.uint8)
+            height, width = pixels.shape[:2]
+            frame = QImage(pixels.data, width, height, 4 * width, QImage.Format_RGBA8888)
+            top_left = widget.mapTo(self, QPoint(0, 0))
+            painter = QPainter(image)
+            painter.drawImage(QRect(top_left, widget.size()), frame)
+            painter.end()
+        return image
+
+    def save_screenshot(self, path: str | Path) -> bool:
+        ok = self.screenshot().save(str(path), "PNG")
+        self.statusBar().showMessage(
+            f"Screenshot saved to {path}" if ok else f"Could not save {path}", 5000
+        )
+        return ok
 
     def _last_dir(self) -> str:
         return str(self.settings.value("files/last_dir", str(Path.home())))

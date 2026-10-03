@@ -44,3 +44,6 @@ dist/
 venv/
 *.lagoon-session
 setup_lagoon.log
+lagoon.log
+.test_output/
+.dev_remote/

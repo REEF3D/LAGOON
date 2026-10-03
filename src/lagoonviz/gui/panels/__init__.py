@@ -6,7 +6,7 @@ from lagoonviz.gui.panels.plots import PlotsPanel
 from lagoonviz.gui.panels.properties import PropertiesPanel
 from lagoonviz.gui.panels.scene_tree import SceneTreePanel
 from lagoonviz.gui.panels.timeline import TimelinePanel
-from lagoonviz.gui.panels.viewport import ViewportPlaceholder
+from lagoonviz.gui.panels.viewport import ViewportPlaceholder, create_viewport
 
 __all__ = [
     "ConsolePanel",
@@ -15,4 +15,5 @@ __all__ = [
     "SceneTreePanel",
     "TimelinePanel",
     "ViewportPlaceholder",
+    "create_viewport",
 ]

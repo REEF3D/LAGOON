@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lagoon-viz"
-version = "0.0.1.dev0"
+version = "0.1.0.dev0"
 description = "LAGOON: Lightweight Animation and Graphics for Open Ocean Numerics"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -23,7 +23,10 @@ classifiers = [
 ]
 dependencies = [
     "lagoon-format>=0.0.1.dev0",
+    "numpy>=1.24",
     "PySide6-Essentials>=6.7",
+    "pygfx>=0.9",
+    "rendercanvas>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +39,7 @@ dev = [
 
 [project.scripts]
 lagoon = "lagoonviz.gui.app:main"
+lagoon-render = "lagoonviz.render.offscreen:main"
 
 [project.urls]
 Homepage = "https://github.com/REEF3D/LAGOON"
@@ -73,7 +77,7 @@ layers = ["lagoonviz.gui", "lagoonviz.render", "lagoonviz.core"]
 name = "Core stays free of Qt, GPU and plotting libraries"
 type = "forbidden"
 source_modules = ["lagoonviz.core"]
-forbidden_modules = ["PySide6", "pygfx", "wgpu", "matplotlib", "lagoonviz.gui", "lagoonviz.render", "lagoonviz.plugins"]
+forbidden_modules = ["PySide6", "pygfx", "wgpu", "rendercanvas", "matplotlib", "lagoonviz.gui", "lagoonviz.render", "lagoonviz.plugins"]
 
 [[tool.importlinter.contracts]]
 name = "Render does not use Qt"

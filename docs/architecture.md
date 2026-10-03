@@ -1,9 +1,11 @@
-# LAGOON architecture (phase 0)
+# LAGOON architecture (phase 1)
 
 ```
 lagoonviz.gui      PySide6 windows and panels      -> may import render, core
-lagoonviz.render   pygfx / matplotlib (phase 1+)   -> may import core, never Qt
+lagoonviz.render   pygfx scene, offscreen images   -> may import core, never Qt
 lagoonviz.core     scene, kinds, commands, session -> no Qt, no GPU, no plotting
+  core.data        VTK XML reader, REEF3D cases,
+                   merging, cache, loader         -> NumPy only
 lagoonviz.plugins  readers for other codes (later) -> may import core, render
 lagoon_format      data format, MIT                -> never imports lagoonviz
 ```
@@ -18,6 +20,25 @@ lagoon_format      data format, MIT                -> never imports lagoonviz
 5. The stack's history is the recorded script (`Session.to_script()`), shown live in
    the Python console.
 
+## From files to pixels (phase 1)
+
+1. `Session.open_case(path)` runs one `OpenCase` command: a `case` item (the path)
+   and items for the latest run's free surface and bed. Only descriptions go into
+   the scene; the data stays on disk.
+2. `DataManager` (`session.data`) opens the case (`core.data.reef3d.open_case`):
+   each `REEF3D_*` folder becomes a `Dataset` whose frames are the numbered files.
+3. For an item and the scene time it builds a `FrameKey` (case, dataset, frame,
+   arrays). The `FrameCache` holds recent frames; the `BackgroundLoader` reads
+   missing ones in worker threads and prefetches ahead while playing.
+4. A frame is read with `vtkxml.read_piece` per MPI piece (only the arrays needed)
+   and merged with a `MergePlan` made once per dataset. Volumes keep only their
+   outer surface. Normals are computed in the worker thread.
+5. `DataManager.display` turns the mesh into plain arrays for an item's settings
+   (exaggeration, colour range, colour map): a `DisplaySurface`.
+6. `render.scene3d.SceneRenderer` puts those arrays into pygfx buffers (updated in
+   place while the topology stays the same). The GUI viewport and
+   `render.offscreen` use the same renderer, so screen and headless images match.
+
 ## Key rules
 
 - Item ids are deterministic (`<kind>-<n>`), including across undo, so recorded
@@ -28,3 +49,6 @@ lagoon_format      data format, MIT                -> never imports lagoonviz
 - Time is view state, not an undo step.
 - The scene tree updates entries in place on changes, never rebuilding the entry
   that is emitting a Qt signal.
+- Readers and geometry live in the core and are tested with small synthetic runs
+  written like REEF3D writes them (`tests/reef3d_fixtures.py`).
+- The camera is view state stored in the scene (saved with the session, not undoable).

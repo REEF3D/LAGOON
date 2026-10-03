@@ -125,6 +125,27 @@ class SetProperty(Command):
         return f"session.set_property({_py(self.item_id)}, {_py(self.key)}, {_py(self.value)})"
 
 
+class SetProperties(Command):
+    """Set several properties of one item in one undo step."""
+
+    def __init__(self, scene: Scene, item_id: str, values: dict[str, Any]):
+        item = scene.get(item_id)
+        self.item_id = item_id
+        self.values = {key: validate(item.kind, key, value) for key, value in values.items()}
+        self.old = {key: item.properties[key] for key in self.values}
+        self.label = f"Set {', '.join(self.values)}"
+
+    def do(self, scene: Scene) -> None:
+        scene.update(self.item_id, properties=dict(self.values))
+
+    def undo(self, scene: Scene) -> None:
+        scene.update(self.item_id, properties=dict(self.old))
+
+    def to_script(self) -> str:
+        args = ", ".join(f"{key}={_py(value)}" for key, value in self.values.items())
+        return f"session.set_properties({_py(self.item_id)}, {args})"
+
+
 class SetVisible(Command):
     def __init__(self, scene: Scene, item_id: str, visible: bool):
         self.item_id = item_id
@@ -157,6 +178,38 @@ class Rename(Command):
 
     def to_script(self) -> str:
         return f"session.rename({_py(self.item_id)}, {_py(self.name)})"
+
+
+class OpenCase(Command):
+    """Add a case and the items that show its outputs, as one undo step."""
+
+    def __init__(self, path: str, name: str | None, children: list[AddItem]):
+        self.path = path
+        self.name = name
+        self.case = AddItem("case", name, {"path": path})
+        self.children = children
+        self.label = f"Open {self.case.name}"
+
+    @property
+    def item_id(self) -> str | None:
+        return self.case.item_id
+
+    def do(self, scene: Scene) -> None:
+        self.case.do(scene)
+        for child in self.children:
+            child.properties["case"] = self.case.item_id
+            child.do(scene)
+
+    def undo(self, scene: Scene) -> None:
+        for child in reversed(self.children):
+            child.undo(scene)
+        self.case.undo(scene)
+
+    def to_script(self) -> str:
+        args = [_py(self.path)]
+        if self.name is not None:
+            args.append(f"name={_py(self.name)}")
+        return f"session.open_case({', '.join(args)})"
 
 
 #: Listener signature: ``callback(kind, command)`` with kind ``"do"``, ``"merge"`` (folded

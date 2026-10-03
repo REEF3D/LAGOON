@@ -25,6 +25,21 @@ pixi run lagoon    # start the application
 Branch from `main`, keep pull requests small, and make sure CI passes on all three
 platforms.
 
+## Testing with real data and a real screen
+
+The automated tests use small synthetic runs (`tests/reef3d_fixtures.py`) and render
+offscreen. For real REEF3D output and the real window:
+
+```bash
+lagoon ~/runs/case                       # look at it
+lagoon --dev-remote /tmp/lagoon-remote ~/runs/case
+```
+
+With `--dev-remote`, a tool can drive the running window through
+`/tmp/lagoon-remote/request.json` (screenshots, frames, views, a few properties and
+playback timing; see `lagoonviz/gui/devremote.py`) and read `result.json`. It cannot
+run code. On macOS, `LAGOON_DEV=1 bash setup_lagoon.command CASE` does the same.
+
 ## Adding a scene item kind
 
 1. Add a `KindSpec` with its properties to `src/lagoonviz/core/kinds.py`.
