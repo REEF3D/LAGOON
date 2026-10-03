@@ -8,8 +8,8 @@ Navigation (mouse and trackpad):
 * pan: right drag, or Shift + middle drag (Blender)
 * zoom: wheel or pinch; Ctrl + middle drag
 * views: 1 front, 3 right, 7 top (Ctrl for the opposite side), 5 perspective or
-  orthographic, Home or . to frame everything, 2 the 2D view (from above, no
-  rotation: any drag pans)
+  orthographic, Home or . to frame everything, 2 the 2D view (everything flat, seen
+  from above, no rotation: any drag pans; the other views wait until 2D is left)
 
 Frames are read in background threads; the viewport shows the newest frame that
 has arrived, so scrubbing never blocks the window. Without a usable GPU (or in
@@ -311,6 +311,7 @@ class Viewport3D(QWidget):
         self._loaded.connect(self._on_loaded)
         bridge.sceneChanged.connect(self._on_scene)
         bridge.timeChanged.connect(lambda _t: self.refresh())
+        self._apply_2d(self.session.scene.plan_view, frame=False)
         if self.session.scene.camera:
             self.view.set_camera_state(self.session.scene.camera)
         self.refresh()
@@ -503,9 +504,13 @@ class Viewport3D(QWidget):
             self.view.clear()
             self._wanted.clear()
             self._shown_keys.clear()
+            self._apply_2d(self.session.scene.plan_view, frame=False)  # a loaded session's
             if self.session.scene.camera:
                 self.view.set_camera_state(self.session.scene.camera)
             self.refresh()
+        elif event == "view":  # 2D or 3D: everything is drawn again
+            self.refresh()
+            self._apply_2d(self.session.scene.plan_view)
         elif event == "changed" and item_id in self.session.scene:
             item = self.session.scene.get(item_id)
             if item.kind == "case":
@@ -594,8 +599,8 @@ class Viewport3D(QWidget):
         if key == "frame":
             self.frame("top" if self.two_d else "perspective")
             return
-        if key != "top" and self.two_d:
-            self.two_d_button.setChecked(False)  # leaves 2D (and frames the 3D view)
+        if self.two_d and key != "top":
+            return  # 2D stays 2D (the buttons are greyed out)
         self.frame(key)
 
     def _use_controls(self, controls: dict) -> None:
@@ -607,22 +612,35 @@ class Viewport3D(QWidget):
                 log.warning("control %s not set: %s", control, error)
 
     def set_2d(self, on: bool) -> None:
-        """The 2D view: from straight above, orthographic, rotation off (drags pan).
-        Leaving it goes back to the 3D view and its projection."""
+        """2D: every item drawn flat and seen from straight above, orthographic, no
+        rotation (drags pan); the 3D, front and side views wait until 2D is left. The
+        state is the session's (saved with it, filmed by the export, shared by both
+        views when comparing); leaving goes back to the 3D view."""
         on = bool(on)
         if self.two_d_button.isChecked() != on:
             self.two_d_button.setChecked(on)  # comes back here through toggled
             return
+        self.session.set_plan_view(on)  # every view hears it ("view")
+        self._apply_2d(on)
+
+    def _apply_2d(self, on: bool, frame: bool = True) -> None:
+        """Controls, buttons and projection for 2D or 3D; ``frame=False`` keeps the
+        camera (a session that was saved in 2D brings its own)."""
         if on == self.two_d:
             return
         self.two_d = on
+        self.two_d_button.blockSignals(True)
+        self.two_d_button.setChecked(on)
+        self.two_d_button.blockSignals(False)
         self.controller.locked = on
         self._use_controls(CONTROLS_2D if on else BLENDER_CONTROLS)
+        for key in ("perspective", "front", "right"):
+            self.view_buttons[key].setEnabled(not on)
         self.ortho_button.setEnabled(not on)
+        self.view.set_plan(on)
         self.view.set_orthographic(on or self.ortho_button.isChecked())
-        self.frame("top" if on else "perspective")
-        if self.partner is not None and self.partner.two_d != on:
-            self.partner.set_2d(on)  # compare: both views the same way
+        if frame:
+            self.frame("top" if on else "perspective")
 
     def _set_ortho(self, on: bool) -> None:
         self.view.set_orthographic(on or self.two_d)
@@ -637,8 +655,8 @@ class Viewport3D(QWidget):
         if key in KEY_VIEWS:
             view = KEY_VIEWS[key]
             if self.two_d and view != "top":
-                self.two_d_button.setChecked(False)
-            self.frame(OPPOSITE[view] if "Control" in modifiers else view)
+                return  # 2D stays 2D
+            self.frame("top" if self.two_d else OPPOSITE[view] if "Control" in modifiers else view)
         elif key == "2":
             self.two_d_button.toggle()
         elif key == "5":

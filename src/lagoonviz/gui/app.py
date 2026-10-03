@@ -65,8 +65,9 @@ def _quit_on_ctrl_c(app: QApplication, window: MainWindow) -> None:
     """Ctrl+C in the terminal closes LAGOON properly.
 
     The render canvas library installs its own handler, which closes only the 3D
-    view and leaves the window (and the terminal) waiting; this one replaces it. A
-    timer wakes Python regularly, so the signal is seen while Qt is idle.
+    view and leaves the window (and the terminal) waiting. It does so when its loop
+    starts, after this function has run, so the timer that wakes Python regularly
+    (for the signal to be seen while Qt is idle) also puts this handler back.
     """
 
     def stop(*_args) -> None:
@@ -74,9 +75,13 @@ def _quit_on_ctrl_c(app: QApplication, window: MainWindow) -> None:
         window.close()
         app.quit()
 
-    signal.signal(signal.SIGINT, stop)
+    def keep() -> None:
+        if signal.getsignal(signal.SIGINT) is not stop:
+            signal.signal(signal.SIGINT, stop)
+
+    keep()
     app._signal_timer = QTimer()  # kept on the app so it lives as long
-    app._signal_timer.timeout.connect(lambda: None)
+    app._signal_timer.timeout.connect(keep)
     app._signal_timer.start(250)
 
 

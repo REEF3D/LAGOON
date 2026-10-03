@@ -40,6 +40,7 @@ from lagoonviz.core.data.vtkxml import (
     read_legacy,
     read_parallel_header,
     read_piece,
+    read_time_value,
     split_name,
 )
 
@@ -53,23 +54,30 @@ ROLES = {
     "body": "body",
     "mooring": "mooring",
     "structure": "structure",
+    "dem": "dem",
 }
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
 _SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp", ".vtk")
-#: folders of objects in the flow: floating bodies, mooring lines, porous or forced structures
+#: folders of objects in the flow: floating bodies, mooring lines, porous or forced
+#: structures, DEM elements (REEF3D_DEM_VTP, written by the DEM for any solver)
 _OBJECT_FOLDER = re.compile(
-    r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>6DOF_VTP|6DOF_Mooring|VRANS_VTP|FORCING_VTP)$"
+    r"^REEF3D_(?:(?P<solver>[A-Z0-9]+)_)?"
+    r"(?P<what>6DOF_VTP|6DOF_Mooring|VRANS_VTP|FORCING_VTP|DEM_VTP)$"
 )
 _OBJECT_ROLES = {
     "6DOF_VTP": "body",
     "6DOF_Mooring": "mooring",
     "VRANS_VTP": "structure",
     "FORCING_VTP": "structure",
+    "DEM_VTP": "dem",
 }
 #: roles whose files are drawn as they are (no merging of MPI pieces)
-PLAIN_ROLES = ("body", "mooring", "structure")
+PLAIN_ROLES = ("body", "mooring", "structure", "dem")
+#: roles whose outputs have their own interval: their times come from the files
+OWN_TIME_ROLES = ("dem",)
 _PIECE_STEP = re.compile(r"^(?P<stem>.+?)-(?P<piece>\d+)-(?P<step>\d+)$")
+_SERIAL_STEP = re.compile(r"^(?P<stem>.+?)-(?P<step>\d+)$")
 
 
 def _role(what: str, tag: str | None, kind: str) -> str:
@@ -89,6 +97,7 @@ ROLE_LABELS = {
     "body": "bodies",
     "mooring": "mooring lines",
     "structure": "structures",
+    "dem": "DEM elements",
 }
 
 
@@ -167,7 +176,7 @@ class Dataset:
             "bed": (),  # plain sand; elevation and sediment fields stay one click away
             "volume": ("velocity", "pressure", "elevation"),
         }.get(self.role, ())
-        if self.role in ("bed", "body", "structure"):
+        if self.role in ("bed", "body", "structure", "dem"):
             return "none"  # drawn in their material colour, like sand or steel
         for name in preferred:
             if name in self.components:
@@ -192,7 +201,9 @@ class Dataset:
             return self.run_id == other.run_id
         a0, a1 = self.written_span()
         b0, b1 = other.written_span()
-        return self.solver == other.solver and a0 <= b1 + margin and b0 <= a1 + margin
+        # DEM output belongs to whichever solver it is coupled to
+        solvers = self.solver == other.solver or "DEM" in (self.solver, other.solver)
+        return solvers and a0 <= b1 + margin and b0 <= a1 + margin
 
     @property
     def last_step(self) -> int:
@@ -448,12 +459,12 @@ class Case:
             if options:
                 chosen[role] = max(options, key=len)
         # objects of the same run: bodies, mooring lines, structures
-        for role in ("body", "mooring", "structure"):
+        for role in ("body", "mooring", "structure", "dem"):
             options = [d for d in self.datasets.values() if d.role == role and d.same_run_as(lead)]
             if options:
                 chosen[role] = max(options, key=len)
         # beds are drawn first, so a transparent free surface shows them
-        order = ("bed", "structure", "body", "mooring", "free_surface")
+        order = ("bed", "structure", "body", "dem", "mooring", "free_surface")
         return {role: chosen[role] for role in order if role in chosen}
 
     def describe(self) -> str:
@@ -475,16 +486,21 @@ def _frames_by_piece(folder: Path) -> dict[str, list[Frame]]:
     without numbers (a fixed structure) is one frame at step 0.
     """
     steps: dict[str, dict[int, dict[int, Path]]] = {}
+    # DEM output numbers its files; structure files may number structures instead
+    numbered = folder.name.endswith("DEM_VTP")
     for path in folder.iterdir():
         if path.suffix not in _SUFFIXES or path.name.startswith("."):
             continue
         match = _PIECE_STEP.match(path.stem)
+        serial = _SERIAL_STEP.match(path.stem) if numbered else None
         if match:
             stem, piece, step = (
                 match.group("stem"),
                 int(match.group("piece")),
                 int(match.group("step")),
             )
+        elif serial:  # one file per output: REEF3D-DEM-000012
+            stem, piece, step = serial.group("stem"), 0, int(serial.group("step"))
         else:
             stem, piece, step = path.stem, 0, 0
         steps.setdefault(stem, {}).setdefault(step, {})[piece] = path
@@ -599,7 +615,7 @@ def _dataset_from_folder(folder: Path) -> list[Dataset]:
     datasets = []
     for stem, frames in _frames_in(folder).items():
         if objects:
-            solver = objects.group("solver")
+            solver = objects.group("solver") or "DEM"
             role = _OBJECT_ROLES[objects.group("what")]
             key = f"{solver.lower()}_{role}"
             datasets += _datasets_by_run(key, solver, role, frames, folder, owners)
@@ -634,8 +650,24 @@ def _datasets_by_run(key, solver, role, frames, folder, owners) -> list[Dataset]
             if np.any(np.diff(np.asarray(times)) < 0):  # keep frames in time order
                 dataset.frames = [run_frames[i] for i in order]
             dataset.times = np.asarray(times, dtype=np.float64)[order]
+        elif role in OWN_TIME_ROLES:
+            _times_from_files(dataset)
         datasets.append(dataset)
     return datasets
+
+
+def _times_from_files(dataset: Dataset) -> None:
+    """Simulation times from the files' TimeValue field data, for outputs written at
+    their own interval (DEM: E 15), which output numbers cannot place on the timeline.
+    Left unset unless every frame has one."""
+    times = [
+        read_time_value(frame.pieces[0] if frame.pieces else frame.path) for frame in dataset.frames
+    ]
+    if not times or any(t is None for t in times):
+        return
+    order = np.argsort(times, kind="stable")
+    dataset.frames = [dataset.frames[i] for i in order]
+    dataset.times = np.asarray(times, dtype=np.float64)[order]
 
 
 def preferred(datasets: list[Dataset], short: float = 0.1) -> Dataset:

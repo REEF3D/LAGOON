@@ -355,6 +355,22 @@ def read_piece(
 _PIECE_NAME = re.compile(r"^(?P<stem>.+?)-(?P<step>\d+)(?:-(?P<rank>\d+))?$")
 
 
+_TIME_VALUE = re.compile(rb'Name="TimeValue"[^>]*>\s*([-+0-9.eE]+)\s*<')
+
+
+def read_time_value(path: str | Path, head: int = 4096) -> float | None:
+    """The simulation time in a VTK XML file's ``TimeValue`` field data, or None.
+
+    REEF3D writes it before the data, so only the start of the file is read.
+    """
+    try:
+        with open(path, "rb") as file:
+            match = _TIME_VALUE.search(file.read(head))
+    except OSError:
+        return None
+    return float(match.group(1)) if match else None
+
+
 def split_name(path: str | Path) -> tuple[str, int | None, int | None]:
     """Split ``REEF3D-NHFLOW-FSF-00000696-000001.vtp`` into (stem, step, rank)."""
     match = _PIECE_NAME.match(Path(path).stem)

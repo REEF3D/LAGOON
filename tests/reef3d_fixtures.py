@@ -214,6 +214,7 @@ def make_run(
     series: bool = False,
     objects: bool = False,
     profiles: bool = False,
+    dem: float | None = None,
 ) -> Path:
     """Write a REEF3D-like case folder with free surface, bed and volume output."""
     root.mkdir(parents=True, exist_ok=True)
@@ -250,7 +251,69 @@ def make_run(
         write_objects(root, solver, frames)
     if profiles:
         write_profiles(root, solver, (frames - 1) * (print_interval or 1.0))
+    if dem is not None:  # DEM output every ``dem`` seconds over the same span
+        write_dem(root, (frames - 1) * (print_interval or 1.0), dem)
     return root
+
+
+#: DEM elements of the test case: two cubes of 0.2 m that fall towards the bed
+DEM_START = ((2.0, 1.0, 3.0), (5.0, 3.0, 3.5))
+
+
+def dem_centres(t: float) -> np.ndarray:
+    return np.array(DEM_START) - np.array([0.0, 0.0, 0.5 * t])
+
+
+def write_dem(root: Path, end: float, interval: float) -> None:
+    """DEM output as REEF3D's DEM writes it (dem_f_print.cpp): one serial ASCII
+    PolyData file per output in REEF3D_DEM_VTP, numbered from 0 with six digits,
+    the simulation time in its TimeValue field data, triangles of every element."""
+    folder = root / "REEF3D_DEM_VTP"
+    folder.mkdir(exist_ok=True)
+    tris = np.concatenate([BOX_FACES[:, [0, 1, 2]], BOX_FACES[:, [0, 2, 3]]])
+    for count, t in enumerate(np.arange(0.0, end + 1e-9, interval)):
+        points, velocity, ids, cells = [], [], [], []
+        for body, centre in enumerate(dem_centres(t)):
+            vertices = (BOX - 0.5) * 0.2 + centre
+            cells.append(tris + 8 * body)
+            points.append(vertices)
+            velocity.append(np.tile([0.0, 0.0, -0.5], (8, 1)))
+            ids += [body + 1] * 8
+        points, velocity, cells = (
+            np.concatenate(points),
+            np.concatenate(velocity),
+            np.concatenate(cells),
+        )
+        lines = [
+            '<?xml version="1.0"?>',
+            '<VTKFile type="PolyData" version="0.1" byte_order="LittleEndian">',
+            "<PolyData>",
+            "<FieldData>",
+            f'<DataArray type="Float64" Name="TimeValue" NumberOfTuples="1">{t:.12g}</DataArray>',
+            "</FieldData>",
+            f'<Piece NumberOfPoints="{len(points)}" NumberOfPolys="{len(cells)}">',
+            '<Points>\n<DataArray type="Float32" NumberOfComponents="3" format="ascii">',
+            *(f"{x:.8g} {y:.8g} {z:.8g}" for x, y, z in points),
+            "</DataArray>\n</Points>",
+            "<PointData>",
+            '<DataArray type="Float32" Name="velocity" NumberOfComponents="3" format="ascii">',
+            *(f"{u:g} {v:g} {w:g}" for u, v, w in velocity),
+            "</DataArray>",
+            '<DataArray type="Int32" Name="id" format="ascii">',
+            *(str(i) for i in ids),
+            "</DataArray>",
+            '<DataArray type="Int32" Name="resolved" format="ascii">',
+            *("0" for _ in ids),
+            "</DataArray>",
+            "</PointData>",
+            '<Polys>\n<DataArray type="Int32" Name="connectivity" format="ascii">',
+            *(f"{a} {b} {c}" for a, b, c in cells),
+            '</DataArray>\n<DataArray type="Int32" Name="offsets" format="ascii">',
+            *(str(3 * (i + 1)) for i in range(len(cells))),
+            "</DataArray>\n</Polys>",
+            "</Piece>\n</PolyData>\n</VTKFile>",
+        ]
+        (folder / f"REEF3D-DEM-{count:06d}.vtp").write_text("\n".join(lines) + "\n")
 
 
 #: y of the wave profile lines, and their x points

@@ -68,6 +68,8 @@ class Scene:
         self.time: float = 0.0
         #: saved 3D view (camera state from the renderer); view state, not undoable
         self.camera: dict[str, Any] | None = None
+        #: 2D: everything drawn flat, seen from above (view state, not undoable)
+        self.plan_view: bool = False
 
     # ------------------------------------------------------------- observers
     def subscribe(self, callback: Observer) -> None:
@@ -162,6 +164,12 @@ class Scene:
         self.time = float(time)
         self._notify("time", None)
 
+    def set_plan_view(self, on: bool) -> None:
+        """2D or 3D; observers draw everything again ("view")."""
+        if bool(on) != self.plan_view:
+            self.plan_view = bool(on)
+            self._notify("view", None)
+
     def data_changed(self) -> None:
         """Tell observers to show everything again: the data behind the items changed
         (a reloaded case). Sent as "reset", like loading a session."""
@@ -173,6 +181,7 @@ class Scene:
             "lagoon_session": SESSION_FORMAT,
             "time": self.time,
             "camera": copy.deepcopy(self.camera),
+            "plan_view": self.plan_view,
             "counters": dict(self._counters),
             "items": [item.to_dict() for item in self._items.values()],
         }
@@ -193,6 +202,7 @@ class Scene:
         self.time = float(data.get("time", 0.0))
         camera = data.get("camera")
         self.camera = copy.deepcopy(camera) if isinstance(camera, dict) else None
+        self.plan_view = bool(data.get("plan_view", False))
         self._notify("reset", None)
 
     def save(self, path: str | Path) -> None:

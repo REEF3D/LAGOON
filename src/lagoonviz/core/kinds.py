@@ -209,6 +209,14 @@ KINDS: dict[str, KindSpec] = {
             **_colouring("none", "greys"),
         },
     ),
+    "dem": KindSpec(
+        "DEM elements",
+        {
+            **_data_source("DEM"),
+            "material": PropertySpec("rock", "Material", choices=MATERIALS),
+            **_colouring("none", "viridis"),
+        },
+    ),
 }
 
 

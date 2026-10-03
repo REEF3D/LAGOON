@@ -125,6 +125,7 @@ PLAIN_COLORS = {
     "mooring": "#e0a030",
     "body": "#8f9aa6",
     "structure": "#a7a39b",
+    "dem": "#6f6a64",  # rock
 }
 #: colours of the materials of bodies and structures
 MATERIAL_COLORS = {

@@ -29,6 +29,19 @@ from lagoonviz.core.scene import Scene, SceneItem
 
 #: item kinds that show a dataset, and the dataset role they use by default
 DATA_KINDS = {kind: role for role, kind in ROLES.items()} | {"slice": "volume"}
+#: 2D: heights of the flat layers (the free surface over objects over the bed)
+PLAN_LAYERS = {
+    "bathymetry": 0.0,
+    "volume": 0.5,
+    "slice": 0.5,
+    "structure": 1.0,
+    "body": 1.5,
+    "dem": 1.5,
+    "mooring": 2.0,
+    "free_surface": 3.0,
+}
+#: 2D: gauges and wave profiles on top of everything
+PLAN_MARKS = 4.0
 AXES = {"x": 0, "y": 1, "z": 2}
 
 
@@ -454,6 +467,10 @@ class DataManager:
                 return 0  # a bed is shown at any time: it rarely changes between runs
             return index
         dt = self.print_interval()
+        if dataset.times is not None and dt:
+            # its own times (DEM, written at its own interval) on a timeline in seconds
+            index = dataset.index_at_time(time)
+            return 0 if index is None and dataset.role == "bed" else index
         output = time / dt if dt else time
         # before this run's first output (e.g. outputs left from a run that was
         # restarted): nothing to show. One output of slack: mooring output starts at 1.
@@ -649,6 +666,11 @@ class DataManager:
             positions = positions.copy()
             positions[:, 2] = level + exaggeration * (positions[:, 2] - level)
             normals = exaggerate_normals(normals, exaggeration)
+        if self.scene.plan_view:
+            # 2D: flat, stacked by kind so the free surface lies over the bed
+            positions = np.array(positions, dtype=np.float32, copy=True)
+            positions[:, 2] = PLAN_LAYERS.get(item.kind, 1.0)
+            normals = np.tile(np.array([0.0, 0.0, 1.0], np.float32), (len(positions), 1))
         variable = str(props.get("variable", "none"))
         try:
             values = mesh.scalar(variable)
@@ -715,6 +737,24 @@ class DataManager:
         ]
 
     def gauge_marks(self, item_id: str, palette: list[str] | None = None) -> GaugeMarks | None:
+        """Wave gauges of a series item for the 3D view (flat on top in 2D)."""
+        return self._planned(self._gauge_marks(item_id, palette))
+
+    def profile_marks(self, item_id: str, palette: list[str] | None = None) -> GaugeMarks | None:
+        """Wave profile lines for the 3D view (flat on top in 2D)."""
+        return self._planned(self._profile_marks(item_id, palette))
+
+    def _planned(self, marks: GaugeMarks | None) -> GaugeMarks | None:
+        if marks is None or not self.scene.plan_view:
+            return marks
+        staffs = np.array(marks.staffs, dtype=np.float32, copy=True)
+        dots = np.array(marks.dots, dtype=np.float32, copy=True)
+        staffs[..., 2] = PLAN_MARKS
+        if dots.size:
+            dots[:, 2] = np.where(np.isfinite(dots[:, 2]), PLAN_MARKS, np.nan)
+        return GaugeMarks(marks.item_id, marks.names, staffs, dots, marks.colors, marks.visible)
+
+    def _gauge_marks(self, item_id: str, palette: list[str] | None = None) -> GaugeMarks | None:
         """Positions of the gauges a series item plots, at the scene time (None if the
         file has no gauge positions)."""
         if item_id not in self.scene or self.scene.get(item_id).kind != "series":
@@ -868,7 +908,7 @@ class DataManager:
         numbers = [n for n in wanted if n in profile.lines] or sorted(profile.lines)
         return [profile.lines[n] for n in numbers]
 
-    def profile_marks(self, item_id: str, palette: list[str] | None = None) -> GaugeMarks | None:
+    def _profile_marks(self, item_id: str, palette: list[str] | None = None) -> GaugeMarks | None:
         """A shown profile as lines in 3D, at the still water level of the case's free
         surface (exaggerated like it), in the colours of its plot lines. The lines
         travel as segments in ``staffs``; ``dots`` stays empty."""

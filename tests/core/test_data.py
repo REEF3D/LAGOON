@@ -726,3 +726,61 @@ def test_loader_drops_frames_nobody_waits_for():
     assert not shared.cancelled() and shared is passed[5]
     assert set(read) == {"busy", "frame 5", "frame 19"}
     assert sorted(delivered) == ["busy", "frame 19", "frame 5"]  # dropped: no callback
+
+
+def test_dem_elements(tmp_path):
+    """DEM output (REEF3D_DEM_VTP, serial ASCII files at the DEM's own interval) is
+    found, shown when the case opens, and placed in time by the files' TimeValue."""
+    from reef3d_fixtures import dem_centres, make_run
+
+    run = make_run(tmp_path / "dem", frames=5, print_interval=0.5, dem=0.25)
+    s = Session()
+    s.open_case(run)
+    dem = next(i.id for i in s.scene if i.kind == "dem")
+    dataset = s.data.dataset(dem)
+    assert dataset.role == "dem" and len(dataset) == 9 and dataset.label
+    np.testing.assert_allclose(dataset.times, np.arange(9) * 0.25)
+    assert s.data.variable_choices(dem)[:2] == ["none", "velocity"]
+    for time in (0.0, 0.75, 1.5):
+        s.set_time(time)
+        assert s.data.frame_index(dem) == round(time / 0.25)  # not output number x 0.5
+        mesh = s.data.load(dem)
+        shown = s.data.display(dem, mesh)
+        assert shown.triangles.shape == (24, 3)  # two cubes
+        assert shown.color == "#6f6a64"  # rock
+        np.testing.assert_allclose(
+            mesh.points.reshape(2, 8, 3).mean(axis=1), dem_centres(time), atol=1e-5
+        )
+    assert s.data.frame_index("free_surface-1") == 3  # the surfaces still by output number
+
+
+def test_plan_view_draws_everything_flat(tmp_path):
+    """2D: every item flat, the free surface over the bed, gauges on top; saved with
+    the session and in the script, so the export films it the same way."""
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.core.data.manager import PLAN_LAYERS, PLAN_MARKS
+
+    run = make_run(tmp_path / "plan", frames=5, print_interval=0.5, series=True, dem=0.25)
+    s = Session()
+    s.open_case(run)
+    s.set_property("case-1", "exaggeration", 5.0)  # makes no difference in 2D
+    events = []
+    s.scene.subscribe(lambda event, _id: events.append(event))
+    s.set_plan_view(True)
+    assert events == ["view"]
+    for item_id in s.data.data_items():
+        shown = s.data.display(item_id, s.data.load(item_id))
+        kind = s.scene.get(item_id).kind
+        np.testing.assert_allclose(shown.positions[:, 2], PLAN_LAYERS[kind])
+        np.testing.assert_allclose(shown.normals[:, 2], 1.0)
+        assert shown.values is not None or kind != "free_surface"  # still coloured by eta
+    marks = s.data.gauge_marks("series-1")
+    assert np.all(marks.staffs[..., 2] == PLAN_MARKS)
+    path = tmp_path / "plan.lagoon-session"
+    s.save(path)
+    assert Session.open(path).scene.plan_view is True
+    assert "session.set_plan_view(True)" in s.to_script()
+    s.set_plan_view(False)
+    bed = next(i.id for i in s.scene if i.kind == "bathymetry")
+    assert np.ptp(s.data.display(bed, s.data.load(bed)).positions[:, 2]) > 0  # 3D again

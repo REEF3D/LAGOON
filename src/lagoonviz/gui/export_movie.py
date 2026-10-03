@@ -44,6 +44,18 @@ SIZES = {
 }
 
 
+def view_sizes(viewport_size) -> list[tuple[str, tuple[int, int]]]:
+    """Film sizes with the 3D view's shape, so the film frames exactly what it shows:
+    Full HD, HD and 4K widths (even sizes, as H.264 needs)."""
+    width, height = (max(int(v), 1) for v in viewport_size)
+    sizes = []
+    for name, target in (("Full HD", 1920), ("HD", 1280), ("4K", 3840)):
+        w = target
+        h = max(2, round(target * height / width / 2) * 2)
+        sizes.append((f"As the 3D view, {name} width: {w} × {h}", (w, h)))
+    return sizes
+
+
 class ExportAnimationDialog(QDialog):
     """Where to, how big, which outputs, how fast."""
 
@@ -66,11 +78,13 @@ class ExportAnimationDialog(QDialog):
         form.addRow("File", holder)
 
         self.size = QComboBox()
-        width, height = viewport_size
-        self.size.addItem(f"As the 3D view {width} × {height}", (width, height))
-        for label, value in SIZES.items():
+        # the film shows what the 3D view shows: same shape (a different shape shows
+        # more at the sides or above and below), Full HD width by default
+        for label, value in view_sizes(viewport_size):
             self.size.addItem(label, value)
-        self.size.setCurrentIndex(2)  # Full HD
+        for label, value in SIZES.items():
+            self.size.addItem(f"{label} (16:9: other framing unless the view is 16:9)", value)
+        self.size.setCurrentIndex(0)
         form.addRow("Size", self.size)
 
         self.start = QSpinBox()

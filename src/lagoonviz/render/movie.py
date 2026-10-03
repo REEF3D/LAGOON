@@ -12,6 +12,8 @@ path without ``.mp4``/``.mov``, numbered PNGs are written instead.
 
 from __future__ import annotations
 
+import logging
+import time as time_module
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -26,6 +28,11 @@ Overlay = Callable[[np.ndarray, float], np.ndarray]
 Progress = Callable[[int, int], bool]
 
 MOVIE_SUFFIXES = (".mp4", ".mov", ".m4v")
+#: frames read ahead while one is drawn, and the threads reading them
+READ_AHEAD = 6
+READERS = 3
+
+log = logging.getLogger("lagoon.movie")
 
 
 def frame_times(
@@ -59,6 +66,8 @@ class OffscreenView:
         from lagoonviz.render.scene3d import SceneRenderer
 
         self.session = session
+        if view == "2d":
+            session.set_plan_view(True)  # everything flat, as the 2D view shows it
         self.size = (int(size[0]), int(size[1]))
         self.canvas = _offscreen_canvas(self.size)
         self.renderer = gfx.WgpuRenderer(self.canvas)
@@ -89,7 +98,12 @@ class OffscreenView:
             else:
                 self.scene.update_gauges(marks)
         if not self._camera_set:
-            if self.view == "2d":  # from straight above, orthographic, as the 2D view
+            if self.session.scene.plan_view:
+                self.scene.set_plan(True)
+            if self.view == "2d" or (
+                self.session.scene.plan_view and not self.view and not session.scene.camera
+            ):
+                # from straight above, orthographic, as the 2D view
                 self.scene.set_orthographic(True)
                 self.scene.frame("top")
             elif self.view:
@@ -133,33 +147,76 @@ def write_movie(
         folder = path.with_suffix("") if path.suffix else path
         folder.mkdir(parents=True, exist_ok=True)
     data = session.data
-    pool = ThreadPoolExecutor(2, thread_name_prefix="lagoon-movie")
+    # reading several frames ahead, and encoding beside the drawing: the three used to
+    # take turns, and reading one frame at a time was most of an export
+    readers = ThreadPoolExecutor(READERS, thread_name_prefix="lagoon-movie-read")
+    writer = ThreadPoolExecutor(1, thread_name_prefix="lagoon-movie-write")
+    spent = {"waiting for data": 0.0, "drawing": 0.0, "overlay": 0.0, "encoding": 0.0}
+    started = time_module.perf_counter()
 
-    def preload(time: float) -> None:
+    def preload(when: float) -> None:
         for item_id in data.data_items():
-            data.load(item_id, time)
+            data.load(item_id, when)
 
-    try:
-        ahead = pool.submit(preload, times[0])
-        for number, time in enumerate(times):
-            ahead.result()  # this frame's data is read
-            if number + 1 < len(times):
-                ahead = pool.submit(preload, times[number + 1])
-            image = view_.render(time)
-            if overlay is not None:
-                image = overlay(image, time)
-            if sink is not None:
-                sink.send(np.ascontiguousarray(image[..., :3]).tobytes())
-            else:
-                from lagoonviz.render.offscreen import write_png
-
-                write_png(folder / f"frame_{number:05d}.png", image)
-            if progress is not None and not progress(number + 1, len(times)):
-                break
-    finally:
-        pool.shutdown(wait=True, cancel_futures=True)
+    def write(number: int, image: np.ndarray) -> None:
         if sink is not None:
-            sink.close()
+            sink.send(np.ascontiguousarray(image[..., :3]).tobytes())
+        else:
+            from lagoonviz.render.offscreen import write_png
+
+            write_png(folder / f"frame_{number:05d}.png", image)
+
+    ahead = {i: readers.submit(preload, times[i]) for i in range(min(READ_AHEAD, len(times)))}
+    written = None
+    done = 0
+    try:
+        for number, time in enumerate(times):
+            clock = time_module.perf_counter()
+            ahead.pop(number).result()  # this frame's data is read
+            following = number + READ_AHEAD
+            if following < len(times):
+                ahead[following] = readers.submit(preload, times[following])
+            spent["waiting for data"] += time_module.perf_counter() - clock
+            clock = time_module.perf_counter()
+            image = view_.render(time)
+            spent["drawing"] += time_module.perf_counter() - clock
+            if overlay is not None:
+                clock = time_module.perf_counter()
+                image = overlay(image, time)
+                spent["overlay"] += time_module.perf_counter() - clock
+            else:
+                image = np.array(image, copy=True)  # the next drawing may reuse the buffer
+            clock = time_module.perf_counter()
+            if written is not None:
+                written.result()  # one frame at a time in the encoder's queue
+            spent["encoding"] += time_module.perf_counter() - clock
+            written = writer.submit(write, number, image)
+            done = number + 1
+            if progress is not None and not progress(done, len(times)):
+                break
+        if written is not None:
+            clock = time_module.perf_counter()
+            written.result()
+            spent["encoding"] += time_module.perf_counter() - clock
+    finally:
+        for future in ahead.values():
+            future.cancel()
+        readers.shutdown(wait=True, cancel_futures=True)
+        writer.shutdown(wait=True)
+        if sink is not None:
+            clock = time_module.perf_counter()
+            sink.close()  # ffmpeg finishes encoding
+            spent["encoding"] += time_module.perf_counter() - clock
+    total = time_module.perf_counter() - started
+    log.info(
+        "film: %d frames %dx%d in %.1f s (%.1f frames/s); %s",
+        done,
+        size[0],
+        size[1],
+        total,
+        done / max(total, 1e-9),
+        ", ".join(f"{name} {seconds:.1f} s" for name, seconds in spent.items()),
+    )
     return path if sink is not None else folder
 
 
@@ -181,7 +238,9 @@ def _movie_sink(path: Path, size: tuple[int, int], fps: float):
         macro_block_size=2,
         ffmpeg_log_level="error",
         # visually lossless, plays everywhere (QuickTime, PowerPoint, browsers)
-        output_params=["-crf", "17", "-preset", "medium", "-movflags", "+faststart"],
+        # "fast" encodes about twice as fast as "medium" at the same quality setting
+        # (files a little larger)
+        output_params=["-crf", "17", "-preset", "fast", "-movflags", "+faststart"],
     )
     writer.send(None)  # start ffmpeg
     return writer

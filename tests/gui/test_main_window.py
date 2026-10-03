@@ -499,6 +499,9 @@ def test_export_dialog_and_overlay(window, reef3d_run):
     settings = dialog.settings()
     assert settings["size"] == (1920, 1080) and (settings["start"], settings["end"]) == (0, 2)
     assert settings["path"].endswith(".mp4")
+    # the film has the 3D view's shape by default, so it frames what the view shows
+    square = ExportAnimationDialog(window, window.session, str(reef3d_run), (800, 600))
+    assert square.settings()["size"] == (1920, 1440)
     image = np.full((180, 320, 4), 255, np.uint8)
     drawn = make_overlay(window.session)(image.copy(), 1.0)
     assert drawn.shape == image.shape and (drawn != 255).any()  # time and colour bar

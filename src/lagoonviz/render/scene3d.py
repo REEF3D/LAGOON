@@ -49,6 +49,21 @@ SUN_DIRECTION = np.array((-0.9, -0.4, 0.6)) / np.linalg.norm((-0.9, -0.4, 0.6))
 #: shadow map depth bias, as a fraction of the shadow camera's depth range
 SHADOW_BIAS = 0.0008
 
+#: room around the data when framing (perspective makes the near side look larger)
+FRAME_MARGIN = 1.05
+
+
+def _fov_distance(fov: float) -> float:
+    """Camera distance per unit of view extent, as pygfx computes it."""
+    try:
+        from pygfx.cameras._perspective import fov_distance_factor
+
+        return float(fov_distance_factor(fov))
+    except ImportError:  # pragma: no cover (older or newer pygfx)
+        fov = max(float(fov), 0.1)
+        return 0.5 / np.tan(0.5 * np.radians(fov))
+
+
 #: named views: (view direction, up). z is up, as in REEF3D.
 VIEWS = {
     "front": ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),  # looking along +y
@@ -131,6 +146,7 @@ class SceneRenderer:
         self.sun = gfx.DirectionalLight(intensity=look["sun"])
         self.sun.local.position = tuple(SUN_DIRECTION)
         self.sun.cast_shadow = bool(look.get("shadows", False))
+        self.plan = False
         self.scene.add(self.sun)
         self._shadow_fit: tuple | None = None
         self.camera = gfx.PerspectiveCamera(45, 16 / 9)
@@ -335,7 +351,7 @@ class SceneRenderer:
         self.scene.add(self.background)
         self.ambient.intensity = look["ambient"]
         self.sun.intensity = look["sun"]
-        self.sun.cast_shadow = bool(look.get("shadows", False))
+        self.sun.cast_shadow = bool(look.get("shadows", False)) and not self.plan
         self._shadow_fit = None
         self._fit_shadow()
         self.headlamp.intensity = look["headlamp"]
@@ -489,8 +505,54 @@ class SceneRenderer:
             self.camera.show_object((*centre, radius), view_dir=direction, up=up)
         except (ValueError, TypeError):
             return
+        self._fit_box(low, high, centre, np.asarray(direction, dtype=float))
         self._keep_z_up()
         self._framed = True
+
+    def _fit_box(self, low, high, centre, direction) -> None:
+        """Widen the view where the data's box does not fit.
+
+        pygfx frames the bounding sphere into the mean of width and height, which in a
+        wide window leaves the height short: a tall scene (strong vertical
+        exaggeration) was cut off at the top and bottom. Flat scenes keep the view
+        they had. Perspective is taken into account (the near side looks larger).
+        """
+        corners = np.array(
+            [
+                (x, y, z)
+                for x in (low[0], high[0])
+                for y in (low[1], high[1])
+                for z in (low[2], high[2])
+            ]
+        )
+        centre = np.asarray(centre, dtype=float)
+        forward = direction / max(float(np.linalg.norm(direction)), 1e-12)
+        inverse = np.asarray(self.camera.world.inverse_matrix, dtype=float)
+        flat = np.abs(corners @ inverse[:3, :3].T + inverse[:3, 3])[:, :2].max(axis=0)
+        if (
+            2 * FRAME_MARGIN * flat[0] <= self.camera.width
+            and 2 * FRAME_MARGIN * flat[1] <= self.camera.height
+        ):
+            return  # the box fits as pygfx framed it: flat scenes keep their view
+        perspective = float(self.camera.fov) > 0
+        for _ in range(6):  # moving back changes the perspective a little: repeat
+            inverse = np.asarray(self.camera.world.inverse_matrix, dtype=float)
+            seen = corners @ inverse[:3, :3].T + inverse[:3, 3]
+            if perspective:
+                to_centre = float(np.linalg.norm(np.asarray(self.camera.world.position) - centre))
+                depth = np.maximum(-seen[:, 2], 1e-3 * max(to_centre, 1e-9))
+                seen = seen[:, :2] * (to_centre / depth)[:, None]
+            half = np.abs(seen[:, :2]).max(axis=0)
+            width = max(float(self.camera.width), 2 * FRAME_MARGIN * float(half[0]))
+            height = max(float(self.camera.height), 2 * FRAME_MARGIN * float(half[1]))
+            if width <= self.camera.width * 1.0001 and height <= self.camera.height * 1.0001:
+                return  # fits
+            self.camera.width, self.camera.height = width, height
+            extent = 0.5 * (width + height)
+            self.camera.world.position = tuple(
+                centre - forward * _fov_distance(self.camera.fov) * extent
+            )
+            self.camera.depth = extent
 
     def _keep_z_up(self) -> None:
         """pygfx makes the ``up`` of the last named view the axis the view orbits
@@ -549,6 +611,14 @@ class SceneRenderer:
         """Frame the scene the first time something is shown."""
         if not self._framed and self._shown:
             self.frame(view)
+
+    def set_plan(self, on: bool) -> None:
+        """2D: the items are flat layers seen from above; the sun's shadows would only
+        darken the lower layers, so they are off."""
+        self.plan = bool(on)
+        look = STYLES[self.style_name]
+        self.sun.cast_shadow = bool(look.get("shadows", False)) and not self.plan
+        self._shadow_fit = None
 
     def set_orthographic(self, orthographic: bool) -> None:
         self.camera.fov = 0 if orthographic else 45

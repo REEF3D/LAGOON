@@ -14,6 +14,10 @@
 - Slices through volume output (x, y or z plane), coloured by any variable, cut with
   marching tetrahedra in NumPy; vertical slices of σ-grids reuse their cut plan, so
   playing a slice costs only interpolation. *Add → Slice* cuts the middle of the volume.
+- DEM elements (`REEF3D_DEM_VTP`, one ASCII file per output with every element's
+  triangles, velocity, id and whether it is resolved) are shown in 3D and move with the
+  timeline; opening a case adds them, in rock colour. The DEM writes at its own
+  interval (E 15): without a run log their times come from the files' `TimeValue`.
 - Floating bodies (`REEF3D_*_6DOF_VTP`), mooring lines with their tension
   (`REEF3D_*_6DOF_Mooring`, legacy VTK) and porous or forced structures
   (`REEF3D_*_VRANS_VTP`, `_FORCING_VTP`) are shown in 3D and move with the timeline;
@@ -120,6 +124,8 @@
   view per platform; `pytest --update-snapshots` (`pixi run snapshots`) accepts an
   intended change. `lagoon-render --view 2d` renders the 2D view.
 - Closing LAGOON in the full screen viewer keeps the panels for the next start.
+- *Frame all* fits tall scenes (strong vertical exaggeration) in a wide window; they
+  were cut off at the top and bottom. Flat scenes are framed as before.
 - Playing with time series plots shown is fast again: the plots drew every line again at
   each frame (330 ms for the gauges of a long run, 3 fps); lines, grid and labels are now
   drawn once, and each frame draws only the cursor and the legend values.
@@ -145,17 +151,28 @@
 - Rotation goes all the way round (pygfx stopped 1 degree short of the poles), always
   about the centre of the view. After the top view the scene no longer tips over when
   turned (the top view's "up" had become the orbit axis).
-- 2D view (button next to *Frame all*, key 2): from straight above, orthographic, no
-  rotation; every drag pans, the wheel zooms. *Frame all* keeps it; 3D, front and side
-  leave it.
+- 2D view (button next to *Frame all*, key 2): everything drawn flat (the free surface
+  as a plane coloured by its values over the bed, objects between, gauges and profiles
+  on top; no shadows), seen from straight above, orthographic, no rotation; every drag
+  pans, the wheel zooms. While it is on, 3D, front and side are greyed out. It is saved
+  with the session and in scripts, both views follow it when comparing, and exported
+  animations and `lagoon-render --view 2d` film it the same way.
 - Studio look uses the ocean look's lights (headlamp, more sheen); the two looks now
   differ only in background. The sun is strong enough again for visible shadows.
 - Ctrl+C in the terminal closes LAGOON properly (it used to close only the 3D view
-  and leave the terminal waiting).
+  and leave the terminal waiting): the 3D view's library installed its own handler
+  once its loop had started; LAGOON's is now put back.
 - Move the view: Ctrl (or Cmd) + drag, Shift + drag or right drag; arrow keys move
   it by a tenth (Shift: a third).
 - Fixed: the background loader could deadlock when a frame finished before its
   completion callback was registered (playing, prefetching).
+- Faster animation export: frames are read several ahead in three threads and encoded
+  while the next one is drawn (reading, drawing and encoding used to take turns), and
+  H.264 uses the "fast" preset at the same quality setting. The log tells where the
+  time went.
+- Exported animations frame what the 3D view shows: the size has the view's shape
+  (Full HD, HD or 4K wide); a 16:9 film of a differently shaped view showed more or
+  less at the sides.
 - Animations are saved next to the case by default (or in ~/Movies); an unwritable
   folder is reported before rendering starts.
 - Developer remote: `{"diagnose": true}` reports the renderer's items, bounds, camera

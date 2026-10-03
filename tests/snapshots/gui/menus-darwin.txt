@@ -31,6 +31,7 @@ Add
   Bodies
   Mooring lines
   Structures
+  DEM elements
 View
   [x] Scene
   [x] Properties

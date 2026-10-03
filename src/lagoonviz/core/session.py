@@ -222,6 +222,11 @@ class Session:
         """Move the current time. View state: not an undo step."""
         self.scene.set_time(time)
 
+    def set_plan_view(self, on: bool) -> None:
+        """2D: every item drawn flat and seen from straight above (the free surface as
+        a plane coloured by its values over the bed). View state: not an undo step."""
+        self.scene.set_plan_view(on)
+
     def set_camera(self, state: dict[str, Any] | None) -> None:
         """Remember the 3D view (saved with the session). View state: not an undo step."""
         self.scene.camera = dict(state) if state else None
@@ -274,6 +279,8 @@ class Session:
         # view state last, so the script shows the same frame and view
         if self.scene.time:
             lines.append(f"session.set_time({self.scene.time!r})")
+        if self.scene.plan_view:
+            lines.append("session.set_plan_view(True)")
         if self.scene.camera:
             lines.append(f"session.set_camera({self.scene.camera!r})")
         return "\n".join(lines) + "\n"

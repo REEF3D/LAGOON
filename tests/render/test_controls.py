@@ -59,3 +59,35 @@ def test_2d_view_does_not_rotate():
     rotation = np.asarray(camera.local.rotation).copy()
     controller.rotate((0.5, 0.5), RECT)
     np.testing.assert_allclose(camera.local.rotation, rotation)
+
+
+def test_frame_all_fits_a_tall_scene(reef3d_run):
+    """With strong vertical exaggeration the scene is tall: framing used to cut it off
+    at the top in a wide window. Every corner of the data must be in view."""
+    from lagoonviz.core import Session
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    session.set_property("case-1", "exaggeration", 5.0)
+    view = SceneRenderer()
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        if mesh is not None:
+            view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+    for name in ("perspective", "front", "top"):
+        view.frame(name)
+        view.camera.set_view_size(320, 180)
+        low, high = view.bounds()
+        corners = np.array(
+            [
+                (x, y, z)
+                for x in (low[0], high[0])
+                for y in (low[1], high[1])
+                for z in (low[2], high[2])
+            ]
+        )
+        matrix = np.asarray(view.camera.camera_matrix, dtype=float)
+        clip = np.c_[corners, np.ones(8)] @ matrix.T
+        ndc = clip[:, :2] / clip[:, 3:4]
+        assert np.abs(ndc).max() <= 1.0, (name, np.abs(ndc).max(axis=0))
