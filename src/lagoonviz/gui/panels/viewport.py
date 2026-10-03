@@ -28,8 +28,9 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWi
 from lagoonviz.core.data.manager import BackgroundLoader, FrameKey
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.panels.colorbar import ColorBarEntry, ColorBarStrip
+from lagoonviz.gui.perf import PERF
 from lagoonviz.gui.resources import resource_path
-from lagoonviz.gui.theme import COLORS
+from lagoonviz.gui.theme import COLORS, SERIES_COLORS
 
 log = logging.getLogger("lagoon.viewport")
 
@@ -60,6 +61,9 @@ class ViewportPlaceholder(QWidget):
 
     def reframe(self) -> None:
         pass
+
+    def refresh(self, item_ids=None) -> None:
+        self.update()
 
     def set_style(self, style: str) -> None:
         pass
@@ -130,11 +134,16 @@ BLENDER_CONTROLS = {
     "mouse3": ("rotate", "drag", (0.005, 0.005)),
     "shift+mouse3": ("pan", "drag", (1.0, 1.0)),
     "shift+mouse1": ("pan", "drag", (1.0, 1.0)),
+    # Cmd (Ctrl elsewhere) + drag moves the view; on a Mac, Ctrl + click is a right
+    # click, which pans too
+    "control+mouse1": ("pan", "drag", (1.0, 1.0)),
     "control+mouse3": ("zoom", "drag", (0.005, 0.005)),
     "wheel": ("zoom", "push", -0.001),
 }
 
 KEY_VIEWS = {"1": "front", "3": "right", "7": "top"}
+#: arrow keys move the view (a tenth of it; with Shift a third)
+KEY_PANS = {"ArrowLeft": (-1, 0), "ArrowRight": (1, 0), "ArrowUp": (0, 1), "ArrowDown": (0, -1)}
 OPPOSITE = {"front": "back", "right": "left", "top": "bottom"}
 
 
@@ -189,7 +198,6 @@ class Viewport3D(QWidget):
 
         self.colorbars = ColorBarStrip(self)
         self.info = QLabel()
-        self.info.setStyleSheet(f"color: {COLORS['dim']};")
         bar = QHBoxLayout()
         bar.setContentsMargins(6, 2, 6, 2)
         bar.setSpacing(2)
@@ -222,10 +230,8 @@ class Viewport3D(QWidget):
         header = QWidget()
         header.setLayout(bar)
         header.setObjectName("viewportHeader")
-        header.setStyleSheet(
-            f"#viewportHeader {{ background: {COLORS['panel']}; }}"
-            f"QToolButton {{ color: {COLORS['text']}; padding: 3px 8px; }}"
-        )
+        self.header = header
+        self.apply_theme_colors()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -253,7 +259,8 @@ class Viewport3D(QWidget):
         return any(self._wanted.get(i) != self._shown_keys.get(i) for i in self._wanted)
 
     def _draw(self) -> None:
-        self.view.render(self.renderer)
+        with PERF.track("render"):
+            self.view.render(self.renderer)
 
     def redraw(self) -> None:
         self.canvas.request_draw()
@@ -286,8 +293,31 @@ class Viewport3D(QWidget):
                 self._show(item_id, key, mesh)
             else:
                 self.loader.request(key, self._loaded.emit)
+        self._update_gauges()
         self._update_overlays()
         self.redraw()
+
+    def _update_gauges(self) -> None:
+        with PERF.track("update gauges"):
+            self.__update_gauges_now()
+
+    def __update_gauges_now(self) -> None:
+        """Wave gauge positions, in the colours of their plot lines."""
+        data = self.session.data
+        wanted = set(data.series_items())
+        for item_id in self.view.gauge_ids:
+            if item_id not in wanted:
+                self.view.remove_gauges(item_id)
+        for item_id in wanted:
+            try:
+                marks = data.gauge_marks(item_id, SERIES_COLORS)
+            except Exception:  # noqa: BLE001 (a bad file must not take the window down)
+                log.error("gauges of %s:\n%s", item_id, traceback.format_exc())
+                marks = None
+            if marks is None:
+                self.view.remove_gauges(item_id)
+            else:
+                self.view.update_gauges(marks)
 
     def _on_loaded(self, key: FrameKey, mesh, error) -> None:
         if error is not None:
@@ -297,20 +327,46 @@ class Viewport3D(QWidget):
         for item_id, wanted in list(self._wanted.items()):
             if wanted == key and item_id in self.session.scene:
                 self._show(item_id, key, mesh)
+        self._update_gauges()  # the still water level may be known now
         self._update_overlays()
         self.redraw()
+
+    def apply_theme_colors(self) -> None:
+        """Header bar colours from the current theme (again after a theme switch)."""
+        self.header.setStyleSheet(
+            f"#viewportHeader {{ background: {COLORS['panel']}; }}"
+            f"QToolButton {{ color: {COLORS['text']}; padding: 3px 8px; }}"
+        )
+        self.info.setStyleSheet(f"color: {COLORS['dim']};")
+        self.colorbars.update()
 
     def _show(self, item_id: str, key: FrameKey, mesh) -> None:
         item = self.session.scene.get(item_id)
         try:
-            self.view.update(item.kind, self.session.data.display(item_id, mesh))
+            with PERF.track(f"display {item.kind}"):
+                shown = self.session.data.display(item_id, mesh)
+            with PERF.track(f"upload {item.kind}"):
+                self.view.update(item.kind, shown)
         except Exception:  # noqa: BLE001 (a bad frame must not take the window down)
             log.error("showing %s failed:\n%s", item_id, traceback.format_exc())
             self.statusMessage.emit(f"Could not show {item.name}; see the log")
             return
         self._shown_keys[item_id] = key
+        if item.kind == "free_surface":
+            self._reshow_exaggerated_beds()
         if not self.session.scene.camera:
             self.view.frame_once()
+
+    def _reshow_exaggerated_beds(self) -> None:
+        """A bed without its own still water depth is exaggerated about the free
+        surface's level, which is known only once a free surface frame has arrived."""
+        for other in self.session.scene:
+            if other.kind != "bathymetry" or float(other.properties.get("exaggeration", 1)) == 1:
+                continue
+            key = self._shown_keys.get(other.id)
+            mesh = self.session.data.cache.get(key) if key is not None else None
+            if mesh is not None and "depth" not in mesh.point_data:
+                self.view.update(other.kind, self.session.data.display(other.id, mesh))
 
     def _on_scene(self, event: str, item_id: str) -> None:
         if event == "reset":
@@ -330,6 +386,10 @@ class Viewport3D(QWidget):
             self.refresh()
 
     def _update_overlays(self) -> None:
+        with PERF.track("update overlays"):
+            self.__update_overlays_now()
+
+    def __update_overlays_now(self) -> None:
         self._update_probe()  # a probe follows the timeline
         entries = []
         frames = []
@@ -339,13 +399,18 @@ class Viewport3D(QWidget):
             item = self.session.scene.get(item_id)
             key = self._shown_keys.get(item_id)
             if item.visible and key is not None:
-                frames.append(key.index)
+                dataset = self.session.data.dataset(item_id)
+                if dataset is not None and key.index < len(dataset.frames):
+                    frames.append(dataset.frames[key.index].step)  # REEF3D output number
                 mesh = self.session.data.cache.get(key)
                 if mesh is None:
                     continue
                 variable = str(item.properties.get("variable", "none"))
                 if variable != "none":
-                    vmin, vmax = self.session.data.value_range(item_id, mesh)
+                    try:
+                        vmin, vmax = self.session.data.value_range(item_id, mesh)
+                    except KeyError:
+                        continue  # a new variable is still loading
                     entries.append(
                         ColorBarEntry(
                             f"{item.name} · {variable}",
@@ -359,7 +424,7 @@ class Viewport3D(QWidget):
         if self.probe is not None:
             self.info.setText(self.probe.summary() + loading)
         elif frames:
-            self.info.setText(f"frame {max(frames)}{loading}")
+            self.info.setText(f"output {max(frames)}{loading}")
         else:
             self.info.setText("Open a REEF3D case: File → Open case…" if not loading else loading)
 
@@ -370,7 +435,11 @@ class Viewport3D(QWidget):
         self.redraw()
 
     def canvas_snapshot(self):
-        """(widget, RGBA image) of the last rendered 3D frame, for screenshots."""
+        """(widget, RGBA image) of the 3D view as it is now, for screenshots."""
+        try:
+            self.canvas.force_draw()  # the last frame may be older than the latest change
+        except Exception:  # noqa: BLE001 (older rendercanvas: the last frame will do)
+            pass
         try:
             image = self.renderer.snapshot()
         except Exception:  # noqa: BLE001
@@ -407,6 +476,12 @@ class Viewport3D(QWidget):
             self.ortho_button.toggle()
         elif key in ("Home", "."):
             self.frame("perspective")
+        elif key in KEY_PANS:
+            step = 0.33 if "Shift" in modifiers else 0.1
+            dx, dy = KEY_PANS[key]
+            self.view.pan(-dx * step, -dy * step)  # the scene follows the arrow
+            self._store_camera()
+            self.redraw()
 
     def _on_pointer(self, event) -> None:
         """A click (press and release without dragging) on a surface probes its values."""

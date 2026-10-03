@@ -14,18 +14,24 @@ import numpy as np
 import pygfx as gfx
 
 from lagoonviz.core.colormaps import colors, lut, normalize
-from lagoonviz.core.data.manager import DisplaySurface
+from lagoonviz.core.data.manager import DisplaySurface, GaugeMarks
 
 #: Viewport looks. "studio" is the light look of the REEF3D result animations:
 #: white background, soft light from above, matt surfaces. "ocean" is dark blue.
 STYLES = {
     "studio": {
         "background": ("#e6eaef", "#ffffff"),  # bottom, top (pygfx order)
-        "ambient": 0.75,
-        "sun": 1.5,  # fixed light from above
-        "headlamp": 0.9,  # light that moves with the camera
-        "shininess": 12,
+        # pygfx lights are physical (diffuse = colour / pi): this mix shows flat water
+        # close to its colour map colour, shades slopes and lets the sun cast shadows
+        "ambient": 1.0,
+        "sun": 3.0,  # fixed light from above, low enough to model the waves
+        "headlamp": 0.2,  # light that moves with the camera (more of it flattens)
+        "shininess": 16,
         "specular": "#2a2a2a",
+        # water is glossier: a soft sun sheen on the slopes that face it
+        "water_shininess": 40,
+        "water_specular": "#3a3a3a",
+        "shadows": True,
     },
     "ocean": {
         "background": ("#1c3354", "#3b5f8f"),
@@ -34,9 +40,19 @@ STYLES = {
         "headlamp": 2.0,
         "shininess": 20,
         "specular": "#494949",
+        "water_shininess": 40,
+        "water_specular": "#5a5a5a",
+        "shadows": True,
     },
 }
 DEFAULT_STYLE = "studio"
+
+#: where the sun stands, seen from the scene: about 31 degrees above the horizon and
+#: mostly from -x, across the crests of waves that travel along x (REEF3D's usual
+#: set-up), so the slopes facing it and facing away differ clearly
+SUN_DIRECTION = np.array((-0.9, -0.4, 0.6)) / np.linalg.norm((-0.9, -0.4, 0.6))
+#: shadow map depth bias, as a fraction of the shadow camera's depth range
+SHADOW_BIAS = 0.0008
 
 #: named views: (view direction, up). z is up, as in REEF3D.
 VIEWS = {
@@ -61,6 +77,24 @@ def _rgba(color: str) -> tuple[float, float, float, float]:
     return tuple(int(color[i : i + 2], 16) / 255 for i in (0, 2, 4)) + (1.0,)  # type: ignore[return-value]
 
 
+def _corners(positions: np.ndarray) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """(low, high) of finite vertex positions; (None, None) if there are none."""
+    low, high = positions.min(axis=0), positions.max(axis=0)
+    if not (np.isfinite(low).all() and np.isfinite(high).all()):
+        finite = positions[np.isfinite(positions).all(axis=1)]
+        if not finite.size:
+            return None, None
+        low, high = finite.min(axis=0), finite.max(axis=0)
+    return low.astype(float), high.astype(float)
+
+
+def _texel_coords(unit: np.ndarray, colormap: str) -> np.ndarray:
+    """[0, 1] values to texture coordinates between the first and last texel centre."""
+    n = len(lut(colormap))
+    coords = (0.5 + np.nan_to_num(unit) * (n - 1)) / n
+    return np.ascontiguousarray(coords, dtype=np.float32)
+
+
 def _update_buffer(geometry: gfx.Geometry, name: str, data: np.ndarray) -> bool:
     """Write new data into an existing buffer. False if the size changed."""
     buffer = getattr(geometry, name, None)
@@ -77,9 +111,14 @@ def _update_buffer(geometry: gfx.Geometry, name: str, data: np.ndarray) -> bool:
 @dataclass
 class _Shown:
     mesh: gfx.Mesh
+    kind: str
     colormap: str
-    triangles_id: int
+    #: the triangle array last uploaded (kept, so a new array is never mistaken for it)
+    triangles: np.ndarray
     has_values: bool
+    #: corners of the vertex positions, kept with each update (bounds without a scan)
+    low: np.ndarray | None = None
+    high: np.ndarray | None = None
 
 
 class SceneRenderer:
@@ -95,8 +134,10 @@ class SceneRenderer:
         self.scene.add(self.ambient)
         # a sun from above, fixed in the scene: wave crests read the same from any side
         self.sun = gfx.DirectionalLight(intensity=look["sun"])
-        self.sun.local.position = (-0.4, -0.7, 1.0)
+        self.sun.local.position = tuple(SUN_DIRECTION)
+        self.sun.cast_shadow = bool(look.get("shadows", False))
         self.scene.add(self.sun)
+        self._shadow_fit: tuple | None = None
         self.camera = gfx.PerspectiveCamera(45, 16 / 9)
         try:
             self.camera.world.reference_up = (0, 0, 1)
@@ -109,29 +150,47 @@ class SceneRenderer:
         self.content = gfx.Group()
         self.scene.add(self.content)
         self._shown: dict[str, _Shown] = {}
-        self._textures: dict[str, gfx.Texture] = {}
+        self._textures: dict[str, object] = {}
         self._framed = False
         self._marker: gfx.Points | None = None
+        # gauges sit outside ``content`` so they do not change the framed bounds
+        self._gauges: dict[str, gfx.Group] = {}
 
     # ------------------------------------------------------------- items
-    def _texture(self, colormap: str) -> gfx.Texture:
+    def _texture(self, colormap: str):
+        """The colour map as a 1D texture, clamped at both ends.
+
+        With pygfx's default (repeat), values at the top of the range wrapped round
+        to the bottom colour and showed as dark spots on the crests.
+        """
         if colormap not in self._textures:
-            self._textures[colormap] = gfx.Texture(lut(colormap), dim=1)
+            texture = gfx.Texture(lut(colormap), dim=1)
+            try:
+                texture = gfx.TextureMap(texture, filter="linear", wrap="clamp")
+            except (AttributeError, TypeError):  # older pygfx: texel centres still help
+                pass
+            self._textures[colormap] = texture
         return self._textures[colormap]
 
     def _material(self, kind: str, shown: DisplaySurface) -> gfx.Material:
-        look = STYLES[self.style_name]
-        material = gfx.MeshPhongMaterial(side="both", shininess=look["shininess"])
-        try:
-            material.specular = look["specular"]
-        except (AttributeError, ValueError):
-            pass
+        material = gfx.MeshPhongMaterial(side="both")
+        self._gloss(material, kind)
         try:
             material.pick_write = True  # clicks report which triangle was hit
         except AttributeError:
             pass
         self._style(material, kind, shown)
         return material
+
+    def _gloss(self, material: gfx.Material, kind: str) -> None:
+        """Shininess and specular colour of the look; water is glossier."""
+        look = STYLES[self.style_name]
+        water = kind == "free_surface"
+        material.shininess = look["water_shininess" if water else "shininess"]
+        try:
+            material.specular = look["water_specular" if water else "specular"]
+        except (AttributeError, ValueError):
+            pass
 
     def _style(self, material: gfx.Material, kind: str, shown: DisplaySurface) -> None:
         if shown.values is not None:
@@ -157,7 +216,7 @@ class SceneRenderer:
             return
         normals = shown.normals
         texcoords = (
-            normalize(shown.values, shown.vmin, shown.vmax)
+            _texel_coords(normalize(shown.values, shown.vmin, shown.vmax), shown.colormap)
             if shown.values is not None
             else np.zeros(shown.positions.shape[0], np.float32)
         )
@@ -176,26 +235,61 @@ class SceneRenderer:
                 and _update_buffer(geometry, "normals", normals)
                 and _update_buffer(geometry, "texcoords", texcoords)
                 and (
-                    current.triangles_id == id(shown.triangles)
+                    current.triangles is shown.triangles
                     or _update_buffer(geometry, "indices", indices)
                 )
             )
         if not same_sizes:
             if current is not None:
                 self.content.remove(current.mesh)
+            # pygfx buffers keep the array they are given and later updates write into
+            # it: give them copies, never the cached frame's (or dataset's) own arrays
             geometry = gfx.Geometry(
-                positions=shown.positions, indices=indices, normals=normals, texcoords=texcoords
+                positions=np.array(shown.positions, np.float32),
+                indices=np.array(indices, np.uint32),
+                normals=np.array(normals, np.float32),
+                texcoords=np.array(texcoords, np.float32),
             )
             mesh = gfx.Mesh(geometry, self._material(kind, shown))
+            mesh.cast_shadow = True
+            mesh.receive_shadow = True
             self.content.add(mesh)
-            current = _Shown(mesh, shown.colormap, id(shown.triangles), shown.values is not None)
+            current = _Shown(mesh, kind, shown.colormap, shown.triangles, shown.values is not None)
             self._shown[shown.item_id] = current
         else:
             self._style(current.mesh.material, kind, shown)
-        current.triangles_id = id(shown.triangles)
+        current.triangles = shown.triangles
+        current.low, current.high = _corners(shown.positions)
         current.mesh.visible = shown.visible
         current.colormap = shown.colormap
         current.has_values = shown.values is not None
+        self._fit_shadow()
+
+    def _fit_shadow(self) -> None:
+        """Aim the sun's shadow map at what is shown: it covers the scene's bounding
+        sphere, seen from the sun, so any domain size gets the full map resolution."""
+        if not self.sun.cast_shadow:
+            return
+        corners = self.bounds(visible_only=False)
+        if corners is None:
+            return
+        low, high = corners
+        centre = (low + high) / 2
+        radius = max(float(np.linalg.norm(high - low)) / 2, 1e-6)
+        fit = (*np.round(centre, 3), round(radius, 3))
+        if fit == self._shadow_fit:
+            return
+        self._shadow_fit = fit
+        self.sun.target.local.position = tuple(centre)
+        self.sun.local.position = tuple(centre + SUN_DIRECTION * 2 * radius)
+        shadow = getattr(self.sun, "shadow", None)
+        if shadow is None:
+            return
+        camera = shadow.camera
+        camera.width = camera.height = 2 * radius
+        camera.depth_range = (0.0, 4 * radius)
+        shadow.bias = SHADOW_BIAS
+        shadow.cull_mode = "none"  # open surfaces (water, bed) cast shadows from both sides
 
     def _update_lines(self, kind: str, shown: DisplaySurface) -> None:
         """Mooring lines and other segment data, drawn as screen-space lines.
@@ -227,9 +321,10 @@ class SceneRenderer:
             material = gfx.LineSegmentMaterial(thickness=shown.line_width, color_mode="vertex")
             line = gfx.Line(gfx.Geometry(positions=positions, colors=rgba), material)
             self.content.add(line)
-            current = _Shown(line, shown.colormap, id(shown.segments), shown.values is not None)
+            current = _Shown(line, kind, shown.colormap, shown.segments, shown.values is not None)
             self._shown[shown.item_id] = current
         current.mesh.material.thickness = shown.line_width
+        current.low, current.high = _corners(positions)
         current.mesh.visible = shown.visible
 
     def set_visible(self, item_id: str, visible: bool) -> None:
@@ -245,11 +340,14 @@ class SceneRenderer:
         self.scene.add(self.background)
         self.ambient.intensity = look["ambient"]
         self.sun.intensity = look["sun"]
+        self.sun.cast_shadow = bool(look.get("shadows", False))
+        self._shadow_fit = None
+        self._fit_shadow()
         self.headlamp.intensity = look["headlamp"]
         for shown in self._shown.values():
             material = shown.mesh.material
             if hasattr(material, "shininess"):
-                material.shininess = look["shininess"]
+                self._gloss(material, shown.kind)
 
     def item_at(self, world_object) -> str | None:
         """The item a picked pygfx object belongs to."""
@@ -279,6 +377,62 @@ class SceneRenderer:
         _update_buffer(self._marker.geometry, "positions", np.array([point], np.float32))
         self._marker.visible = True
 
+    def update_gauges(self, marks: GaugeMarks) -> None:
+        """Wave gauges as thin staffs with a dot at the water, in their plot colours.
+
+        The dots are drawn on top, like the probe marker, so a gauge behind a wave
+        crest is still found.
+        """
+        rgba = np.array([_rgba(c) for c in marks.colors], np.float32).reshape(-1, 4)
+        staff_positions = np.array(marks.staffs.reshape(-1, 3), np.float32)
+        staff_colors = np.array(np.repeat(rgba, 2, axis=0), np.float32)
+        wet = np.isfinite(marks.dots[:, 2])
+        dot_positions = np.array(marks.dots[wet], np.float32)
+        dot_colors = np.array(rgba[wet], np.float32)
+        group = self._gauges.get(marks.item_id)
+        if group is not None and len(group.children) == (2 if wet.any() else 1):
+            # while playing only the dots move: update the buffers in place
+            staffs, *dots = group.children
+            if (
+                _update_buffer(staffs.geometry, "positions", staff_positions)
+                and _update_buffer(staffs.geometry, "colors", staff_colors)
+                and all(
+                    _update_buffer(d.geometry, "positions", dot_positions)
+                    and _update_buffer(d.geometry, "colors", dot_colors)
+                    for d in dots
+                )
+            ):
+                group.visible = marks.visible
+                return
+        self.remove_gauges(marks.item_id)
+        group = gfx.Group()
+        group.visible = marks.visible
+        staffs = gfx.Line(
+            gfx.Geometry(positions=staff_positions, colors=staff_colors),
+            gfx.LineSegmentMaterial(thickness=2.5, color_mode="vertex"),
+        )
+        group.add(staffs)
+        if wet.any():
+            material = gfx.PointsMaterial(size=11, color_mode="vertex")
+            for name, value in (("depth_test", False), ("render_queue", 3900)):
+                try:
+                    setattr(material, name, value)
+                except (AttributeError, ValueError, TypeError):
+                    pass
+            dots = gfx.Points(gfx.Geometry(positions=dot_positions, colors=dot_colors), material)
+            group.add(dots)
+        self.scene.add(group)
+        self._gauges[marks.item_id] = group
+
+    def remove_gauges(self, item_id: str) -> None:
+        group = self._gauges.pop(item_id, None)
+        if group is not None:
+            self.scene.remove(group)
+
+    @property
+    def gauge_ids(self) -> list[str]:
+        return list(self._gauges)
+
     def remove(self, item_id: str) -> None:
         shown = self._shown.pop(item_id, None)
         if shown is not None:
@@ -287,6 +441,8 @@ class SceneRenderer:
     def clear(self) -> None:
         for item_id in list(self._shown):
             self.remove(item_id)
+        for item_id in list(self._gauges):
+            self.remove_gauges(item_id)
         self._framed = False
         self.set_marker(None)
 
@@ -299,15 +455,83 @@ class SceneRenderer:
         return not any(s.mesh.visible for s in self._shown.values())
 
     # ------------------------------------------------------------- camera
+    def bounds(self, visible_only: bool = True) -> tuple[np.ndarray, np.ndarray] | None:
+        """(low, high) corners of the shown data, from the vertex arrays (finite values).
+
+        Computed here rather than by pygfx, so hidden items, markers, gauges and the
+        lights never change what "frame all" shows.
+        """
+        lows, highs = [], []
+        for shown in self._shown.values():
+            if visible_only and not shown.mesh.visible:
+                continue
+            if shown.low is None:
+                shown.low, shown.high = _corners(shown.mesh.geometry.positions.data)
+            if shown.low is not None:
+                lows.append(shown.low)
+                highs.append(shown.high)
+        if not lows:
+            return None
+        return np.min(lows, axis=0).astype(float), np.max(highs, axis=0).astype(float)
+
     def frame(self, view: str = "perspective") -> None:
         """Point the camera at everything visible from a named direction."""
         direction, up = VIEWS[view]
-        target = self.content if self._shown else self.scene
+        corners = self.bounds() or self.bounds(visible_only=False)
+        if corners is None:
+            return  # nothing to frame
+        low, high = corners
+        centre = (low + high) / 2
+        radius = max(float(np.linalg.norm(high - low)) / 2, 1e-6)
         try:
-            self.camera.show_object(target, view_dir=direction, up=up)
-        except (ValueError, TypeError):  # empty scene: nothing to frame
+            self.camera.show_object((*centre, radius), view_dir=direction, up=up)
+        except (ValueError, TypeError):
             return
         self._framed = True
+
+    def diagnostics(self) -> dict:
+        """What the renderer holds, for the developer remote: items, bounds, camera, sun."""
+        items = {}
+        for item_id, shown in self._shown.items():
+            positions = shown.mesh.geometry.positions.data
+            finite = np.isfinite(positions).all(axis=1)
+            items[item_id] = {
+                "type": type(shown.mesh).__name__,
+                "visible": bool(shown.mesh.visible),
+                "vertices": int(positions.shape[0]),
+                "not_finite": int((~finite).sum()),
+                "low": positions[finite].min(axis=0).round(3).tolist() if finite.any() else None,
+                "high": positions[finite].max(axis=0).round(3).tolist() if finite.any() else None,
+                "pygfx_bounds": np.asarray(shown.mesh.get_world_bounding_box()).round(3).tolist(),
+            }
+        shadow = getattr(self.sun, "shadow", None)
+        return {
+            "style": self.style_name,
+            "items": items,
+            "gauges": self.gauge_ids,
+            "bounds": [b.round(3).tolist() for b in self.bounds() or ()],
+            "camera": {
+                k: v
+                for k, v in self.camera_state().items()
+                if k in ("position", "width", "height", "fov")
+            },
+            "sun": {
+                "position": np.asarray(self.sun.local.position).round(3).tolist(),
+                "target": np.asarray(self.sun.target.local.position).round(3).tolist(),
+                "cast_shadow": bool(self.sun.cast_shadow),
+                "shadow_width": getattr(getattr(shadow, "camera", None), "width", None),
+                "shadow_depth": list(getattr(getattr(shadow, "camera", None), "depth_range", ())),
+            },
+        }
+
+    def pan(self, right: float, up: float) -> None:
+        """Move the view sideways and up/down by fractions of what it shows."""
+        state = self.camera.get_state()
+        extent = float(state.get("width") or 1.0)
+        matrix = np.asarray(self.camera.world.matrix, dtype=float)
+        axes = matrix[:3, :2] / np.maximum(np.linalg.norm(matrix[:3, :2], axis=0), 1e-12)
+        shift = axes @ np.array([right, up]) * extent
+        self.camera.world.position = tuple(np.asarray(self.camera.world.position) + shift)
 
     def frame_once(self) -> None:
         """Frame the scene the first time something is shown."""

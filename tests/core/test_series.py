@@ -129,3 +129,36 @@ def test_decimate_keeps_extremes():
     dt, dv = decimate(t, v, 200)
     assert dt.size == 400 and dv.max() == 5.0 and dv.min() == pytest.approx(v.min(), abs=1e-6)
     assert np.all(np.diff(dt) >= 0)
+
+
+def test_gauges_in_3d_follow_time_and_plot_colours(run):
+    from reef3d_fixtures import DEPTH
+
+    from lagoonviz.core.colormaps import SERIES_PALETTES
+
+    s = Session()
+    s.open_case(run)
+    gauges = next(i for i in s.scene if i.kind == "series" and i.name == "Wave gauges")
+    surface = next(i for i in s.scene if i.kind == "free_surface")
+    # the still water level comes from the free surface, once it was shown
+    s.data.display(surface.id, s.data.load(surface.id))
+    s.set_time(1.0)
+    marks = s.data.gauge_marks(gauges.id)
+    assert marks.names == ["P1", "P2", "P3"]
+    assert marks.colors == SERIES_PALETTES["light"][:3]
+    assert marks.visible
+    xs = [x for x, _ in GAUGES]
+    np.testing.assert_allclose(marks.dots[:, 0], xs)
+    np.testing.assert_allclose(marks.dots[:, 2], DEPTH + gauge_eta(np.array(xs), 1.0), atol=1e-5)
+    assert np.all(marks.staffs[:, 0, 2] < marks.dots[:, 2])
+    assert np.all(marks.staffs[:, 1, 2] > marks.dots[:, 2])
+
+    # the plot shows P3 first: so does its colour in 3D
+    s.set_property(gauges.id, "columns", "P3")
+    marks = s.data.gauge_marks(gauges.id, ["#000000", "#ffffff"])
+    assert marks.names == ["P3"] and marks.colors == ["#000000"]
+    s.set_property(gauges.id, "gauges_3d", False)
+    assert not s.data.gauge_marks(gauges.id).visible
+    # files without positions have no marks
+    forces = next(i for i in s.scene if i.name == "Body 0 forces")
+    assert s.data.gauge_marks(forces.id) is None

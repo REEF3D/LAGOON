@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from lagoonviz.core.colormaps import plain_color
+from lagoonviz.core.colormaps import SERIES_PALETTES, plain_color
 from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
 from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
@@ -62,6 +62,21 @@ class Trace:
     unit: str
     time: np.ndarray
     values: np.ndarray
+
+
+@dataclass
+class GaugeMarks:
+    """Wave gauges of a series item in 3D: a staff per gauge and a dot at the water.
+
+    Each gauge has the colour of its line in the plots, so 3D and plots read together.
+    """
+
+    item_id: str
+    names: list[str]
+    staffs: np.ndarray  # (k, 2, 3) float32: bottom and top of each staff
+    dots: np.ndarray  # (k, 3) float32; z is NaN when the time is outside the record
+    colors: list[str]
+    visible: bool
 
 
 @dataclass
@@ -159,6 +174,7 @@ class DataManager:
         self._resolved: dict[str, str] = {}
         self._auto_ranges: dict[tuple, tuple[float, float]] = {}
         self._still_water: dict[tuple, float] = {}
+        self._wet: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # item -> (base, wet)
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------- cases
@@ -334,7 +350,35 @@ class DataManager:
             return None
         time = self.scene.time if time is None else time
         dt = self.print_interval()
-        return dataset.frame_index(time / dt if dt else time)
+        output = time / dt if dt else time
+        # before this run's first output (e.g. outputs left from a run that was
+        # restarted): nothing to show. One output of slack: mooring output starts at 1.
+        if dataset.role != "bed" and round(output) < dataset.frames[0].step - 1:
+            return None  # (a bed is shown at any time: it rarely changes between runs)
+        return dataset.frame_index(output)
+
+    def first_output(self, case_item_id: str | None = None) -> int:
+        """First REEF3D output with data among the shown surfaces and volumes (beds
+        aside), of one case or of all. 0 without data. The timeline starts here, so a
+        run whose first outputs were overwritten by a restart never shows nothing."""
+        firsts = []
+        for item_id in self.data_items():
+            if case_item_id is not None and self.case_item(item_id) is not self.scene.get(
+                case_item_id
+            ):
+                continue
+            dataset = self.dataset(item_id)
+            if dataset is not None and dataset.role != "bed":
+                firsts.append(dataset.frames[0].step)
+        return min(firsts) if firsts else 0
+
+    def first_time(self, case_item_id: str) -> float | None:
+        """Timeline position of :meth:`first_output` for a case (None if it is 0)."""
+        first = self.first_output(case_item_id)
+        if not first:
+            return None
+        dt = self.print_interval()
+        return first * dt if dt else float(first)
 
     # ------------------------------------------------------------- loading
     @staticmethod
@@ -342,7 +386,9 @@ class DataManager:
         variable = str(item.properties.get("variable", "none"))
         arrays = {variable.partition(".")[0]} if variable and variable != "none" else set()
         if item.kind == "free_surface":
-            arrays.add("eta")
+            arrays.update(("eta", "depth"))  # depth: dry land is hidden (FNPF writes it)
+        if item.kind == "bathymetry":
+            arrays.add("depth")  # still water depth: the level for vertical exaggeration
         return tuple(sorted(arrays))
 
     def frame_key(self, item_id: str, time: float | None = None) -> FrameKey | None:
@@ -406,15 +452,36 @@ class DataManager:
             del self._auto_ranges[key]
 
     def still_water_level(self, item_id: str, mesh: SurfaceMesh) -> float:
-        """Reference height for vertical exaggeration: the surface height where eta = 0."""
+        """Reference height for vertical exaggeration: the still water level.
+
+        A free surface gives it as ``z - eta``, a bed as ``z + depth`` (REEF3D writes
+        the still water depth with the bed); otherwise the case's free surface is asked.
+        """
         dataset = self.dataset(item_id)
         key = (dataset.folder, dataset.key) if dataset else (item_id,)
-        if key not in self._still_water:
-            z = mesh.points[:, 2].astype(np.float64)
-            eta = mesh.point_data.get("eta")
-            level = np.median(z - eta) if eta is not None and eta.ndim == 1 else np.median(z)
-            self._still_water[key] = float(level)
-        return self._still_water[key]
+        if key in self._still_water:
+            return self._still_water[key]
+        z = mesh.points[:, 2].astype(np.float64)
+        eta = mesh.point_data.get("eta")
+        depth = mesh.point_data.get("depth")
+        if eta is not None and eta.ndim == 1:
+            level = float(np.median(z - eta))
+        elif depth is not None and depth.ndim == 1:
+            level = float(np.median(z + depth))
+        else:
+            item = self.scene.get(item_id)
+            if item.kind != "free_surface" and self._has_free_surface(item_id):
+                return self._water_reference(item_id)[0]  # not cached: may not be known yet
+            level = float(np.median(z))
+        self._still_water[key] = level
+        return level
+
+    def _has_free_surface(self, item_id: str) -> bool:
+        case_item = self.case_item(item_id)
+        return any(
+            other.kind == "free_surface" and self.case_item(other.id) is case_item
+            for other in self.scene
+        )
 
     def display(self, item_id: str, mesh: SurfaceMesh) -> DisplaySurface:
         """Turn a loaded mesh into arrays for a renderer, following the item's settings."""
@@ -423,6 +490,8 @@ class DataManager:
         positions = mesh.points
         normals = mesh.with_normals().normals
         exaggeration = float(props.get("exaggeration", 1.0))
+        if item.kind == "free_surface":
+            self.still_water_level(item_id, mesh)  # once per dataset; gauges use it
         if exaggeration != 1.0:
             level = self.still_water_level(item_id, mesh)
             positions = positions.copy()
@@ -436,10 +505,13 @@ class DataManager:
         vmin, vmax = self.value_range(item_id, mesh) if values is not None else (0.0, 1.0)
         index = self.frame_index(item_id)
         case_item = self.case_item(item_id)
+        triangles = mesh.triangles
+        if item.kind == "free_surface" and props.get("hide_dry", True):
+            triangles = self._wet_triangles(item_id, mesh)
         return DisplaySurface(
             item_id=item_id,
             positions=np.ascontiguousarray(positions, dtype=np.float32),
-            triangles=mesh.triangles,
+            triangles=triangles,
             normals=normals,
             values=values,
             vmin=vmin,
@@ -487,6 +559,89 @@ class DataManager:
             for name in names
         ]
 
+    def gauge_marks(self, item_id: str, palette: list[str] | None = None) -> GaugeMarks | None:
+        """Positions of the gauges a series item plots, at the scene time (None if the
+        file has no gauge positions)."""
+        if item_id not in self.scene or self.scene.get(item_id).kind != "series":
+            return None
+        item = self.scene.get(item_id)
+        table = self.series(item_id)
+        if table is None or not table.locations:
+            return None
+        palette = list(palette or SERIES_PALETTES["light"])
+        level, exaggeration = self._water_reference(item_id)
+        time = self.scene.time if self.time_in_seconds() else None
+        names, staffs, dots, colors = [], [], [], []
+        for index, trace in enumerate(self.traces(item_id)):
+            where = table.locations.get(trace.name)
+            if where is None:
+                continue
+            x, y = where[0], where[1]
+            finite = trace.values[np.isfinite(trace.values)]
+            amplitude = float(np.abs(finite).max()) if finite.size else 0.0
+            # gauges give the elevation above still water; a few solvers write heights
+            offset = level
+            if finite.size and level and abs(float(np.median(finite)) - level) < 0.5 * abs(level):
+                offset = 0.0
+                amplitude = float(np.abs(finite - level).max())
+            half = 2.0 * (amplitude if amplitude > 0 else 1.0) * exaggeration
+            staffs.append(((x, y, level - half), (x, y, level + half)))
+            eta = table.value_at(trace.name, time) if time is not None else float("nan")
+            dots.append((x, y, level + exaggeration * (eta + offset - level)))
+            names.append(trace.name)
+            colors.append(palette[index % len(palette)])
+        if not names:
+            return None
+        case_item = self.case_item(item_id)
+        visible = bool(
+            item.visible
+            and item.properties.get("gauges_3d", True)
+            and (case_item is None or case_item.visible)
+        )
+        return GaugeMarks(
+            item_id,
+            names,
+            np.array(staffs, np.float32).reshape(-1, 2, 3),
+            np.array(dots, np.float32).reshape(-1, 3),
+            colors,
+            visible,
+        )
+
+    def _wet_triangles(self, item_id: str, mesh: SurfaceMesh) -> np.ndarray:
+        """:func:`_wet_triangles`, reusing the last array while the shoreline stays put
+        (the renderer then skips re-uploading the triangle list)."""
+        triangles = _wet_triangles(mesh)
+        if triangles is mesh.triangles:
+            return triangles
+        previous = self._wet.get(item_id)
+        if (
+            previous is not None
+            and previous[0] is mesh.triangles
+            and np.array_equal(previous[1], triangles)
+        ):
+            return previous[1]
+        self._wet[item_id] = (mesh.triangles, triangles)
+        return triangles
+
+    def _water_reference(self, item_id: str) -> tuple[float, float]:
+        """Still water level and vertical exaggeration of the case's free surface."""
+        case_item = self.case_item(item_id)
+        for other in self.scene:
+            if other.kind != "free_surface" or self.case_item(other.id) is not case_item:
+                continue
+            exaggeration = float(other.properties.get("exaggeration", 1.0))
+            dataset = self.dataset(other.id)
+            key = (dataset.folder, dataset.key) if dataset else (other.id,)
+            level = self._still_water.get(key)
+            if level is None:
+                frame = self.frame_key(other.id)
+                mesh = self.cache.get(frame) if frame is not None else None
+                if mesh is None:
+                    continue
+                level = self.still_water_level(other.id, mesh)
+            return level, exaggeration
+        return 0.0, 1.0
+
     def series_end(self) -> float:
         """Last time of the shown time series (0 without any)."""
         ends = [
@@ -525,6 +680,27 @@ class DataManager:
         return [item.id for item in self.scene if item.kind in DATA_KINDS]
 
 
+def _wet_triangles(mesh: SurfaceMesh) -> np.ndarray:
+    """The free surface without dry land, so the bed shows there.
+
+    A triangle goes when all its corners have no water depth. It stays in the index
+    list as a degenerate triangle, so the list keeps its length as the shoreline moves
+    and the renderer only updates its buffer.
+    """
+    depth = mesh.point_data.get("depth")
+    if depth is None or depth.ndim != 1:
+        return mesh.triangles
+    dry = depth <= 0.0
+    if not dry.any():
+        return mesh.triangles
+    gone = dry[mesh.triangles].all(axis=1)
+    if not gone.any():
+        return mesh.triangles
+    triangles = mesh.triangles.copy()
+    triangles[gone] = 0
+    return triangles
+
+
 def auto_range(values: np.ndarray | None) -> tuple[float, float]:
     """1st to 99th percentile; symmetric around zero when the values change sign."""
     if values is None or values.size == 0:
@@ -559,10 +735,14 @@ class BackgroundLoader:
     def request(self, key: FrameKey, callback: LoadCallback | None = None) -> Future:
         with self._lock:
             future = self._pending.get(key)
-            if future is None:
+            new = future is None
+            if new:
                 future = self._pool.submit(self.manager.load_key, key)
                 self._pending[key] = future
-                future.add_done_callback(lambda _f, k=key: self._done(k))
+        if new:
+            # outside the lock: a future that is already done runs the callback at
+            # once, in this thread, and _done takes the lock (this deadlocked)
+            future.add_done_callback(lambda _f, k=key: self._done(k))
         if callback is not None:
 
             def deliver(f: Future, k: FrameKey = key) -> None:
@@ -574,7 +754,9 @@ class BackgroundLoader:
 
     def _done(self, key: FrameKey) -> None:
         with self._lock:
-            self._pending.pop(key, None)
+            future = self._pending.get(key)
+            if future is not None and future.done():
+                del self._pending[key]
 
     def prefetch(self, item_ids: list[str], time: float, frames_ahead: int = 4) -> None:
         """Queue the next frames of the given items (used while playing)."""

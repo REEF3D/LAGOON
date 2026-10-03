@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QLocale
+from PySide6.QtCore import QLocale, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -122,7 +122,7 @@ class PropertiesPanel(QWidget):
             check.toggled.connect(lambda on: self._set(key, on))
             return check
         if isinstance(default, int | float):
-            spin = QDoubleSpinBox()
+            spin = _SpinBox()
             # a decimal point whatever the system language, as in scripts and papers
             number_locale = QLocale.c()
             number_locale.setNumberOptions(QLocale.OmitGroupSeparator)
@@ -224,3 +224,18 @@ class PropertiesPanel(QWidget):
                 editor.setText(str(value))
             editor.blockSignals(False)
         self.info.setText(self._data_info(self.item_id))
+
+
+class _SpinBox(QDoubleSpinBox):
+    """A spin box that leaves the mouse wheel to the panel unless it has focus, so
+    scrolling the property panel never changes a value by accident."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.StrongFocus)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()

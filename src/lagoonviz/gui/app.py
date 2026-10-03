@@ -6,15 +6,17 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import signal
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 import lagoonviz
 from lagoonviz.core import Session
+from lagoonviz.gui.macos import set_app_name
 from lagoonviz.gui.main_window import MainWindow
 from lagoonviz.gui.resources import resource_path
 from lagoonviz.gui.theme import DEFAULT_THEME, apply_theme
@@ -35,7 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     setup_logging()
 
-    app = QApplication.instance() or QApplication([sys.argv[0]])
+    set_app_name("LAGOON")  # before Qt starts: the macOS menu bar reads it once
+    app = QApplication.instance() or QApplication(["LAGOON"])
     app.setApplicationName("LAGOON")
     app.setOrganizationName("REEF3D")
     app.setApplicationVersion(lagoonviz.__version__)
@@ -54,7 +57,27 @@ def main(argv: list[str] | None = None) -> int:
             window.open_session(path)
         else:
             window.open_case(path)
+    _quit_on_ctrl_c(app, window)
     return app.exec()
+
+
+def _quit_on_ctrl_c(app: QApplication, window: MainWindow) -> None:
+    """Ctrl+C in the terminal closes LAGOON properly.
+
+    The render canvas library installs its own handler, which closes only the 3D
+    view and leaves the window (and the terminal) waiting; this one replaces it. A
+    timer wakes Python regularly, so the signal is seen while Qt is idle.
+    """
+
+    def stop(*_args) -> None:
+        window.ask_before_discard = False
+        window.close()
+        app.quit()
+
+    signal.signal(signal.SIGINT, stop)
+    app._signal_timer = QTimer()  # kept on the app so it lives as long
+    app._signal_timer.timeout.connect(lambda: None)
+    app._signal_timer.start(250)
 
 
 def setup_logging() -> None:

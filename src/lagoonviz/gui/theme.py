@@ -9,8 +9,15 @@ everything changes together.
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor, QFont, QPalette
+import os
+import tempfile
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QApplication
+
+from lagoonviz.core.colormaps import SERIES_PALETTES
 
 THEMES: dict[str, dict[str, str]] = {
     # default: bright panels, REEF3D blue accents
@@ -52,13 +59,9 @@ THEMES: dict[str, dict[str, str]] = {
     },
 }
 
-#: line colours for plots (REEF3D palette); brightened variants on the dark theme
-SERIES_PALETTES = {
-    "light": ["#2b4c7e", "#e07b39", "#3a9a5b", "#4f8fcf", "#c9a227", "#8e5bb0", "#6b6b6b"],
-    "dark": ["#5aa2e6", "#ef8a4b", "#56b870", "#e0c04a", "#c27ad1", "#7fc4cc", "#a7b1bc"],
-}
-
 DEFAULT_THEME = "light"
+#: the 3D view's look that goes with each theme
+THEME_LOOKS = {"light": "studio", "dark": "ocean"}
 
 #: the current theme's colours; widgets look them up when they paint
 COLORS: dict[str, str] = dict(THEMES[DEFAULT_THEME])
@@ -109,7 +112,27 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit {{
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
     border-color: {accent};
 }}
-QComboBox::drop-down {{ border: none; width: 18px; }}
+QComboBox::drop-down {{
+    subcontrol-origin: padding; subcontrol-position: center right; width: 22px; border: none;
+}}
+QComboBox::down-arrow {{ image: url("{arrow}"); width: 10px; height: 10px; }}
+QSpinBox, QDoubleSpinBox {{ padding-right: 22px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border; subcontrol-position: top right; width: 20px;
+    border: none; border-left: 1px solid {border}; border-top-right-radius: 5px;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border; subcontrol-position: bottom right; width: 20px;
+    border: none; border-left: 1px solid {border}; border-bottom-right-radius: 5px;
+}}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {raised}; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url("{arrow_up}"); width: 8px; height: 8px;
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url("{arrow}"); width: 8px; height: 8px;
+}}
 QComboBox QAbstractItemView {{
     background: {panel}; border: 1px solid {border}; selection-background-color: {selection};
     selection-color: {selection_text};
@@ -173,9 +196,46 @@ def apply_theme(app: QApplication, name: str = DEFAULT_THEME) -> str:
     for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
         palette.setColor(QPalette.Disabled, role, c["dim"])
     app.setPalette(palette)
-    app.setStyleSheet(STYLE_SHEET.format(**COLORS))
+    app.setStyleSheet(
+        STYLE_SHEET.format(
+            **COLORS,
+            arrow=_arrow_image(COLORS["dim"]),
+            arrow_up=_arrow_image(COLORS["dim"], up=True),
+        )
+    )
     font = QFont(app.font())
     if font.pointSizeF() > 0:
         font.setPointSizeF(max(font.pointSizeF(), 12.0))
     app.setFont(font)
     return name
+
+
+def _arrow_image(color: str, up: bool = False) -> str:
+    """A small chevron (down, or up) for combo and spin boxes, as a PNG the style
+    sheet can load.
+
+    Styling a combo box's drop-down in a style sheet removes Qt's own arrow, so
+    without this the boxes look like text fields. A 2x image is written next to it
+    for sharp arrows on Retina screens.
+    """
+    folder = (
+        Path(tempfile.gettempdir()) / f"lagoon-theme-{os.getuid() if hasattr(os, 'getuid') else 0}"
+    )
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"arrow-{'up' if up else 'down'}-{color.lstrip('#')}.png"
+    for scale, target in ((1, path), (2, path.with_name(path.stem + "@2x.png"))):
+        if target.exists():
+            continue
+        image = QImage(10 * scale, 10 * scale, QImage.Format_ARGB32)
+        image.fill(Qt.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.scale(scale, scale)
+        painter.setPen(QPen(QColor(color), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        if up:
+            painter.drawPolyline([QPointF(1.5, 6.5), QPointF(5.0, 3.0), QPointF(8.5, 6.5)])
+        else:
+            painter.drawPolyline([QPointF(1.5, 3.5), QPointF(5.0, 7.0), QPointF(8.5, 3.5)])
+        painter.end()
+        image.save(str(target))
+    return path.as_posix()

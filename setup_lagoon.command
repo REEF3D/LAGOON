@@ -27,12 +27,18 @@ echo "== 4/4 tests"
 export LAGOON_TEST_OUTPUT="$HERE/.test_output"
 python -m pytest -q -rs
 
+# macOS: LAGOON.app, so the menu bar and the Dock say LAGOON (double-click works too)
+LAUNCH=(lagoon)
+if [ "$(uname)" = "Darwin" ] && bash "$HERE/tools/make_macos_app.sh"; then
+  LAUNCH=("$HERE/LAGOON.app/Contents/MacOS/LAGOON")
+fi
+
 echo "== starting LAGOON (close the window to finish)"
 export LAGOON_LOG="$HERE/lagoon.log"
 if [ -n "$LAGOON_DEV" ]; then
   # developer testing: Claude asks the running app for screenshots via .dev_remote/
-  lagoon --dev-remote "$HERE/.dev_remote" "$@"
+  "${LAUNCH[@]}" --dev-remote "$HERE/.dev_remote" "$@"
 else
-  lagoon "$@"
+  "${LAUNCH[@]}" "$@"
 fi
 echo "== done"

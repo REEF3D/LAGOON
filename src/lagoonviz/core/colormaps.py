@@ -10,23 +10,31 @@ from __future__ import annotations
 
 import numpy as np
 
-from lagoonviz.core.kinds import COLORMAPS
+from lagoonviz.core.kinds import COLORMAP_ALIASES, COLORMAPS
+
+#: line colours of time-series plots; gauges in 3D take the colour of their plot line
+SERIES_PALETTES: dict[str, list[str]] = {
+    "light": ["#2b4c7e", "#e07b39", "#3a9a5b", "#4f8fcf", "#c9a227", "#8e5bb0", "#6b6b6b"],
+    "dark": ["#5aa2e6", "#ef8a4b", "#56b870", "#e0c04a", "#c27ad1", "#7fc4cc", "#a7b1bc"],
+}
 
 _STOPS: dict[str, list[str]] = {
-    # REEF3D's look: troughs in REEF3D blue, still water white, crests in REEF3D orange
+    # REEF3D's look: troughs in REEF3D blue, still water white, crests in warm red
     "reef3d": [
-        "#142a4d",
-        "#2b4c7e",
-        "#4f8fcf",
-        "#a9cbea",
+        "#2a5aa0",
+        "#3f78bd",
+        "#73a7dc",
+        "#b8d5ef",
         "#f7f7f5",
-        "#f4c49c",
-        "#e07b39",
-        "#a8521d",
-        "#5c2a0b",
+        "#f9cdb8",
+        "#f19479",
+        "#de5a45",
+        "#c4302b",
     ],
     # sequential for magnitudes (speed, depth): white to deep REEF3D blue
-    "ocean": ["#f5f8fb", "#cfe0f1", "#8fbbe3", "#4f8fcf", "#2b4c7e", "#142a4d"],
+    "ocean": ["#f5f8fb", "#cfe0f1", "#8fbbe3", "#4f8fcf", "#3f78bd", "#2a5aa0"],
+    # slack to taut in the REEF3D colours, without the white middle (lines on white)
+    "tension": ["#2a5aa0", "#4f8fcf", "#9cc3e8", "#f19479", "#de5a45", "#c4302b"],
     # REEF3D blues: deep water to foam
     "lagoon_blue": ["#0b1d36", "#1b365d", "#2b4c7e", "#3a6ea8", "#4f8fcf", "#8fbfe6", "#d6ecfa"],
     # diverging, after cmocean "balance": troughs blue, crests red, zero light
@@ -62,28 +70,13 @@ _STOPS: dict[str, list[str]] = {
         "#d8e219",
         "#fde725",
     ],
-    "cividis": [
-        "#00224e",
-        "#002e6a",
-        "#1a386f",
-        "#32436d",
-        "#434e6c",
-        "#535a6d",
-        "#61656f",
-        "#6f7073",
-        "#7d7c78",
-        "#8c8878",
-        "#9b9476",
-        "#aba072",
-        "#bcae6c",
-        "#cdbb63",
-        "#dec958",
-        "#f0d846",
-        "#fee838",
-    ],
+    # rainbow as in Tecplot, with slightly muted ends so the extremes keep a gradient:
+    # muted blue, blue, cyan, green, yellow, red, muted red
+    "rainbow": ["#2b2bc4", "#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff0000", "#c42b2b"],
     # sediment: deep bed dark, shallow bed light sand
     "sand": ["#2f2418", "#5a4630", "#87704f", "#b39c72", "#d9c59a", "#f3e7c9"],
-    "greys": ["#111111", "#ffffff"],
+    # dark to mid-light grey: never paper white, so a grey bed stands out on white
+    "greys": ["#1c1c1c", "#4a4a4a", "#7a7a7a", "#a6a6a6", "#c8c8c8"],
 }
 
 assert set(_STOPS) == set(COLORMAPS), "every colour map in kinds needs a table"
@@ -96,6 +89,7 @@ def _rgb(color: str) -> tuple[float, float, float]:
 
 def lut(name: str, n: int = 256) -> np.ndarray:
     """An ``(n, 4)`` float32 RGBA table for a colour map."""
+    name = COLORMAP_ALIASES.get(name, name)
     try:
         stops = np.array([_rgb(c) for c in _STOPS[name]], dtype=np.float64)
     except KeyError:

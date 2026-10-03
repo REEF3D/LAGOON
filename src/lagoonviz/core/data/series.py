@@ -256,13 +256,15 @@ _DEFAULT_COLUMNS = {
 
 
 def default_columns(series: TimeSeries) -> list[str]:
-    """Sensible first columns to plot: heave for positions, Fx/Fz for forces, P1, ..."""
+    """Sensible first columns to plot: heave for positions, Fx/Fz for forces, P1-P4."""
     stem = series.path.stem.lower()
     for word, names in _DEFAULT_COLUMNS.items():
         if word in stem:
             chosen = [n for n in names if n in series.columns]
             if chosen:
                 return chosen
+    if series.locations:  # wave gauges: the first few, so the 3D view shows where they are
+        return [n for n in series.names if n in series.locations][:4] or series.names[:1]
     return series.names[:1]
 
 

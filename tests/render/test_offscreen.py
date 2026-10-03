@@ -140,4 +140,194 @@ def test_styles(reef3d_run):
     assert studio[0, 0, :3].mean() > 200 > ocean[0, 0, :3].mean()  # white vs dark blue sky
     view = SceneRenderer("ocean")
     view.set_style("studio")
-    assert view.style_name == "studio" and view.ambient.intensity == 0.75
+    assert view.style_name == "studio" and abs(view.ambient.intensity - 1.0) < 1e-6
+
+
+def test_gauges_in_plot_colours(tmp_path):
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    run = make_run(tmp_path / "gauged", frames=5, volume=False, print_interval=0.5, series=True)
+    session = Session()
+    session.open_case(run)
+    image = render_session(session, (480, 270), time=1.0, view="perspective")
+    _keep("render_gauges.png", image)
+    green = np.array([0x3A, 0x9A, 0x5B])  # third plot colour: gauge P3
+    near = np.abs(image[..., :3].astype(int) - green).sum(axis=-1) < 40
+    assert near.sum() > 5
+
+    view = SceneRenderer()
+    marks = session.data.gauge_marks(session.data.series_items()[0])
+    view.update_gauges(marks)
+    view.update_gauges(marks)  # replaced, not added twice
+    assert view.gauge_ids == [marks.item_id]
+    view.clear()
+    assert view.gauge_ids == []
+
+
+def test_colour_map_ends_do_not_wrap():
+    from lagoonviz.core.colormaps import lut
+    from lagoonviz.render.scene3d import _texel_coords
+
+    n = len(lut("reef3d"))
+    coords = _texel_coords(np.array([0.0, 1.0, np.nan], np.float32), "reef3d")
+    np.testing.assert_allclose(coords, [0.5 / n, 1 - 0.5 / n, 0.5 / n], rtol=1e-6)
+
+
+def test_sun_casts_shadows_over_the_whole_scene(reef3d_run):
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+    assert view.sun.cast_shadow
+    assert all(shown.mesh.receive_shadow for shown in view._shown.values())
+    camera = view.sun.shadow.camera
+    low, high = (np.asarray(b) for b in view.content.get_world_bounding_box())
+    assert camera.width >= np.linalg.norm(high - low) * 0.99
+    image = render_session(session, (320, 180), style="studio")
+    _keep("render_shadows.png", image)
+
+
+def test_renderer_never_writes_into_cached_frames(reef3d_run):
+    """pygfx buffers keep the array they get: they must not be the cached frame's."""
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    item_id = "free_surface-1"
+    first = session.data.load(item_id)
+    original = first.points.copy()
+    for exaggeration in (1.0, 2.0, 3.0, 2.0, 1.0):
+        session.set_property(item_id, "exaggeration", exaggeration)
+        view.update("free_surface", session.data.display(item_id, first))
+    np.testing.assert_array_equal(first.points, original)
+    z = view._shown[item_id].mesh.geometry.positions.data[:, 2]
+    np.testing.assert_allclose(z, original[:, 2], rtol=1e-6)  # back at 1: as read
+    session.set_time(2)
+    view.update("free_surface", session.data.display(item_id, session.data.load(item_id)))
+    np.testing.assert_array_equal(first.points, original)  # playing leaves frame 0 alone
+
+
+def test_movie_mp4_and_png_frames(reef3d_run, tmp_path):
+    from lagoonviz.render.movie import frame_times, movie_available, write_movie
+
+    session = Session()
+    session.open_case(reef3d_run)
+    times = frame_times(session)
+    assert times == [0.0, 1.0, 2.0]
+    assert frame_times(session, start=1, every=2) == [1.0]
+    seen = []
+
+    def progress(done, total):
+        seen.append((done, total))
+        return True
+
+    folder = write_movie(session, tmp_path / "frames", times, (160, 90), progress=progress)
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "frame_00000.png",
+        "frame_00001.png",
+        "frame_00002.png",
+    ]
+    assert seen == [(1, 3), (2, 3), (3, 3)]
+    stopped = write_movie(
+        session, tmp_path / "stopped", times, (160, 90), progress=lambda d, t: False
+    )
+    assert len(list(stopped.iterdir())) == 1  # stopped after the first frame
+    if movie_available():
+        movie = write_movie(session, tmp_path / "waves.mp4", times, (161, 91), fps=10)
+        assert movie.suffix == ".mp4" and movie.stat().st_size > 1000
+
+
+def test_command_line_movie(reef3d_run, tmp_path, capsys):
+    from lagoonviz.render.movie import movie_available
+
+    if not movie_available():
+        pytest.skip("imageio-ffmpeg not installed")
+    out = tmp_path / "cli.mp4"
+    assert main([str(reef3d_run), str(out), "--size", "160x90", "--fps", "5"]) == 0
+    assert out.stat().st_size > 1000 and "3 frames" in capsys.readouterr().out
+
+
+def test_pan_moves_the_view_sideways(reef3d_run):
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+    view.frame("top")  # looking down: right is +x, up is +y
+    before = np.asarray(view.camera.world.position).copy()
+    width = view.camera.get_state()["width"]
+    view.pan(0.1, 0.0)
+    moved = np.asarray(view.camera.world.position) - before
+    np.testing.assert_allclose(moved, (0.1 * width, 0, 0), atol=1e-6 * width)
+
+
+def _plane_and_box():
+    from lagoonviz.core.data.manager import DisplaySurface
+
+    def surface(item_id, positions, triangles, color):
+        positions = np.asarray(positions, np.float32)
+        normals = np.zeros_like(positions)
+        normals[:, 2] = 1.0
+        return DisplaySurface(
+            item_id=item_id,
+            positions=positions,
+            triangles=np.asarray(triangles, np.uint32),
+            normals=normals,
+            values=None,
+            vmin=0.0,
+            vmax=1.0,
+            colormap="greys",
+            opacity=1.0,
+            visible=True,
+            variable="none",
+            frame=0,
+            color=color,
+        )
+
+    plane = surface(
+        "plane",
+        [(0, 0, 0), (100, 0, 0), (100, 100, 0), (0, 100, 0)],
+        [(0, 1, 2), (0, 2, 3)],
+        "#d0d0d0",
+    )
+    # a flat roof 20 m above the plane: it must throw a shadow
+    roof = surface(
+        "roof",
+        [(40, 40, 20), (60, 40, 20), (60, 60, 20), (40, 60, 20)],
+        [(0, 1, 2), (0, 2, 3)],
+        "#d0d0d0",
+    )
+    return plane, roof
+
+
+def test_sun_shadow_darkens_the_ground():
+    import pygfx as gfx
+
+    from lagoonviz.render.movie import _offscreen_canvas
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    images = {}
+    for shadows in (True, False):
+        canvas = _offscreen_canvas((240, 240))
+        renderer = gfx.WgpuRenderer(canvas)
+        view = SceneRenderer()
+        for shown in _plane_and_box():
+            view.update("bathymetry", shown)
+        view.sun.cast_shadow = shadows
+        view.frame("top")
+        canvas.request_draw(lambda v=view, r=renderer: v.render(r))
+        images[shadows] = np.asarray(canvas.draw())[..., :3].astype(int)
+    _keep("render_shadow_on.png", images[True].astype(np.uint8))
+    _keep("render_shadow_off.png", images[False].astype(np.uint8))
+    darker = (images[False] - images[True]).sum(axis=-1) > 30
+    assert darker.sum() > 200, f"no visible shadow ({darker.sum()} darker pixels)"

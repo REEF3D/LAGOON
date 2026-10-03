@@ -13,6 +13,7 @@ import numpy as np
 from PySide6.QtCore import QByteArray, QLocale, QPoint, QRect, QSettings, QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QIcon, QImage, QKeySequence, QPainter
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QFileDialog,
     QMainWindow,
@@ -36,7 +37,7 @@ from lagoonviz.gui.panels import (
     create_viewport,
 )
 from lagoonviz.gui.resources import resource_path
-from lagoonviz.gui.theme import DEFAULT_THEME
+from lagoonviz.gui.theme import DEFAULT_THEME, THEME_LOOKS, apply_theme
 
 SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 OUTPUT_FILTER = "REEF3D output (*.pvtu *.pvtp *.vtu *.vtp);;All files (*)"
@@ -64,11 +65,11 @@ class MainWindow(QMainWindow):
         self.resize(1400, 860)
 
         # frames are read in background threads and kept in the session's cache
-        self.loader = BackgroundLoader(self.session.data)
+        self.loader = BackgroundLoader(self.session.data, workers=4)
 
         # panels
         self.viewport = create_viewport(
-            self.bridge, self.loader, self, str(self.settings.value("view/viewport", "studio"))
+            self.bridge, self.loader, self, str(self.settings.value("view/look", "studio"))
         )
         self.viewport.statusMessage.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.setCentralWidget(self.viewport)
@@ -166,6 +167,12 @@ class MainWindow(QMainWindow):
             "F12",
             tip="Save a picture of the LAGOON window, including the 3D view",
         )
+        self.act_export_movie = self._action(
+            "Export &animation...",
+            self.export_animation,
+            "Ctrl+Shift+E",
+            tip="Film the 3D view over the timeline into an MP4 video",
+        )
         self.act_play = self._action(
             "&Play / pause", lambda: self.timeline.play_button.toggle(), "Space"
         )
@@ -182,6 +189,8 @@ class MainWindow(QMainWindow):
             file_menu.addAction(action)
         file_menu.addSeparator()
         file_menu.addAction(self.act_export_script)
+        file_menu.addAction(self.act_export_movie)
+        file_menu.addAction(self.act_screenshot)
         file_menu.addSeparator()
         file_menu.addAction(self.act_quit)
 
@@ -208,7 +217,7 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _=False, n=name: self.set_theme(n))
             self.theme_actions[name] = action
         look_menu = view_menu.addMenu("&Viewport look")
-        current_look = str(self.settings.value("view/viewport", "studio"))
+        current_look = str(self.settings.value("view/look", "studio"))
         self.look_actions = {}
         for name, label in (("studio", "&Studio (light)"), ("ocean", "&Ocean (dark blue)")):
             action = look_menu.addAction(label)
@@ -225,17 +234,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self.act_about)
 
     def _build_toolbar(self) -> None:
-        for action, name in (
-            (self.act_open_case, "open_case"),
-            (self.act_open, "open"),
-            (self.act_save, "save"),
-            (self.act_undo, "undo"),
-            (self.act_redo, "redo"),
-            (self.act_screenshot, "screenshot"),
-        ):
-            action.setIcon(icon(name))
-        for kind in ("free_surface", "bathymetry", "volume", "slice", "series"):
-            self.add_actions[kind].setIcon(icon(kind))
+        self._set_icons()
         self.act_open.setIconText("Open session")
         self.act_save.setIconText("Save")
         self.act_screenshot.setIconText("Screenshot")
@@ -279,6 +278,19 @@ class MainWindow(QMainWindow):
             self._apply_default_sizes()
         self._sized = True
 
+    def _set_icons(self) -> None:
+        for action, name in (
+            (self.act_open_case, "open_case"),
+            (self.act_open, "open"),
+            (self.act_save, "save"),
+            (self.act_undo, "undo"),
+            (self.act_redo, "redo"),
+            (self.act_screenshot, "screenshot"),
+        ):
+            action.setIcon(icon(name))
+        for kind in ("free_surface", "bathymetry", "volume", "slice", "series"):
+            self.add_actions[kind].setIcon(icon(kind))
+
     def add_item(self, kind: str) -> str:
         """Add an item from the menu or toolbar (slices start in the middle of the volume)."""
         if kind == "slice":
@@ -287,17 +299,25 @@ class MainWindow(QMainWindow):
 
     def set_viewport_look(self, name: str) -> None:
         """Background and lighting of the 3D view; remembered for the next start."""
-        self.settings.setValue("view/viewport", name)
+        self.settings.setValue("view/look", name)
         for key, action in self.look_actions.items():
             action.setChecked(key == name)
         self.viewport.set_style(name)
 
     def set_theme(self, name: str) -> None:
-        """Remember the theme; it is applied when LAGOON starts next time."""
+        """Switch the whole window to the light or dark theme, viewport included."""
         self.settings.setValue("view/theme", name)
         for key, action in self.theme_actions.items():
             action.setChecked(key == name)
-        self.statusBar().showMessage(f"{name.capitalize()} theme: restart LAGOON to apply", 8000)
+        apply_theme(QApplication.instance(), name)
+        self._set_icons()
+        self.timeline.refresh_icons()
+        self.set_viewport_look(THEME_LOOKS.get(name, "studio"))
+        if hasattr(self.viewport, "apply_theme_colors"):
+            self.viewport.apply_theme_colors()
+        self.viewport.refresh()  # gauges take the new plot colours
+        for widget in QApplication.allWidgets():
+            widget.update()
 
     def reset_layout(self) -> None:
         self.restoreState(self._default_state, LAYOUT_VERSION)
@@ -375,6 +395,7 @@ class MainWindow(QMainWindow):
             self.statusBar().clearMessage()
             return None
         self._remember_dir(path)
+        self.timeline.update_range()  # the whole case is in now: first output, end
         case = self.session.data.case(case_id)
         summary = ", ".join(f"{d.label} ({len(d)} frames)" for d in case.datasets.values())
         self.statusBar().showMessage(f"Opened {Path(path).name}: {summary}", 10000)
@@ -438,6 +459,12 @@ class MainWindow(QMainWindow):
     def export_script(self, path: str | Path) -> None:
         Path(path).write_text(self.session.to_script(), encoding="utf-8")
         self.statusBar().showMessage(f"Script written to {path}", 5000)
+
+    def export_animation(self) -> str | None:
+        """File → Export animation: an MP4 of the 3D view over the timeline."""
+        from lagoonviz.gui.export_movie import export_animation
+
+        return export_animation(self)
 
     def save_screenshot_dialog(self) -> None:
         path, _ = QFileDialog.getSaveFileName(

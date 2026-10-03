@@ -16,7 +16,20 @@ from dataclasses import dataclass
 from typing import Any
 
 MATERIALS = ("steel", "concrete", "rock", "ice", "wood")
-COLORMAPS = ("reef3d", "ocean", "lagoon_blue", "balance", "viridis", "cividis", "sand", "greys")
+#: colour maps that were renamed or replaced; old sessions and scripts keep working
+COLORMAP_ALIASES = {"cividis": "rainbow", "turbo": "rainbow", "jet": "rainbow"}
+
+COLORMAPS = (
+    "reef3d",
+    "ocean",
+    "tension",
+    "lagoon_blue",
+    "balance",
+    "viridis",
+    "rainbow",
+    "sand",
+    "greys",
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +51,14 @@ def _data_source(role: str) -> dict[str, PropertySpec]:
         "dataset": PropertySpec(
             "", "Dataset", provider="datasets", tip=f"Output to show (empty: the {role} output)"
         ),
+    }
+
+
+def _exaggeration(tip: str) -> dict[str, PropertySpec]:
+    return {
+        "exaggeration": PropertySpec(
+            1.0, "Vertical exaggeration", minimum=0.1, maximum=100.0, tip=tip
+        )
     }
 
 
@@ -76,18 +97,19 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("free surface"),
             **_colouring("eta", "reef3d"),
-            "exaggeration": PropertySpec(
-                1.0,
-                "Vertical exaggeration",
-                minimum=0.1,
-                maximum=100.0,
-                tip="Scales the surface elevation about the still water level",
+            **_exaggeration("Scales the surface elevation about the still water level"),
+            "hide_dry": PropertySpec(
+                True, "Hide dry land", tip="Leave out the surface where the depth is zero"
             ),
         },
     ),
     "bathymetry": KindSpec(
         "Bathymetry",
-        {**_data_source("bed"), **_colouring("none", "sand")},
+        {
+            **_data_source("bed"),
+            **_colouring("none", "sand"),
+            **_exaggeration("Scales the bed height about the still water level"),
+        },
     ),
     "volume": KindSpec(
         "Volume",
@@ -102,6 +124,9 @@ KINDS: dict[str, KindSpec] = {
             ),
             "columns": PropertySpec(
                 "", "Columns", tip="Comma-separated column names, e.g. P1, P4 or Fx, Fz"
+            ),
+            "gauges_3d": PropertySpec(
+                True, "Gauges in 3D", tip="Show wave gauge positions in the 3D view"
             ),
         },
     ),
@@ -134,7 +159,7 @@ KINDS: dict[str, KindSpec] = {
         "Mooring lines",
         {
             **_data_source("mooring lines"),
-            **_colouring("Tension", "viridis"),
+            **_colouring("Tension", "tension"),
             "line_width": PropertySpec(3.0, "Line width [px]", minimum=0.5, maximum=20.0),
         },
     ),
@@ -181,6 +206,8 @@ def validate(kind: str, key: str, value: Any) -> Any:
             raise ValueError(f"{key!r} must be <= {spec.maximum}, got {value}")
         return value
     value = str(value)
+    if key == "colormap":
+        value = COLORMAP_ALIASES.get(value, value)
     if spec.choices is not None and value not in spec.choices:
         raise ValueError(f"{key!r} must be one of {', '.join(spec.choices)}, got {value!r}")
     return value

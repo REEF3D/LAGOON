@@ -27,6 +27,7 @@ dependencies = [
     "PySide6-Essentials>=6.7",
     "pygfx>=0.9",
     "rendercanvas>=1.0",
+    "imageio-ffmpeg>=0.5",  # MP4 export; brings its own ffmpeg
 ]
 
 [project.optional-dependencies]

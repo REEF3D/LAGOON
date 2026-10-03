@@ -39,11 +39,13 @@ def test_set_property_validates():
     with pytest.raises(ValueError):
         s.set_property(fs, "opacity", 2.0)
     with pytest.raises(ValueError):
-        s.set_property(fs, "colormap", "rainbow")
+        s.set_property(fs, "colormap", "not-a-map")
     with pytest.raises(ValueError):
         s.set_property(fs, "nonsense", 1)
     s.undo()
     assert s.scene.get(fs).properties["opacity"] == 1.0
+    s.set_property(fs, "colormap", "cividis")  # replaced by rainbow: old scripts still run
+    assert s.scene.get(fs).properties["colormap"] == "rainbow"
 
 
 def test_merge_makes_one_undo_step():

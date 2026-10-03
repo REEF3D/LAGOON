@@ -9,6 +9,7 @@ asks the loader to read the next frames ahead. Keyframes follow in phase 5.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 
 from PySide6.QtCore import QSize, Qt, QTimer
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 from lagoonviz.core.data.manager import BackgroundLoader
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.icons import icon
+from lagoonviz.gui.perf import PERF
 from lagoonviz.gui.theme import COLORS
 
 #: slider resolution without data (time in seconds up to "End")
@@ -46,6 +48,7 @@ class TimelinePanel(QWidget):
         self.loader = loader
         self.busy = busy or (lambda: False)
         self.n_frames = 0
+        self.first_frame = 0  # outputs before it hold no data of the shown runs
         self.dt = 1.0
         self.unit = "frame"
 
@@ -85,7 +88,6 @@ class TimelinePanel(QWidget):
         self.fps.setValue(DEFAULT_FPS)
         self.fps.setSuffix(" fps")
         self.fps.setToolTip("Playback speed in frames per second")
-        self.fps.valueChanged.connect(lambda v: self.timer.setInterval(int(1000 / v)))
 
         self.end_label = QLabel("End")
         self.end = QDoubleSpinBox()
@@ -105,9 +107,13 @@ class TimelinePanel(QWidget):
         layout.addWidget(self.end_label)
         layout.addWidget(self.end)
 
+        # playback: one single-shot timer, scheduled after each step. Waiting for a
+        # frame re-checks every few milliseconds, so playing goes on as soon as the
+        # data is there instead of a whole frame interval later.
         self.timer = QTimer(self)
-        self.timer.setInterval(int(1000 / DEFAULT_FPS))
-        self.timer.timeout.connect(self._advance)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self._tick)
+        self._last_step = 0.0
         bridge.timeChanged.connect(self._show_time)
         bridge.sceneChanged.connect(lambda *_: self.update_range())
         self.update_range()
@@ -128,6 +134,7 @@ class TimelinePanel(QWidget):
         n = self.session.data.n_frames()
         dt = self.session.data.print_interval()
         self.n_frames = n
+        self.first_frame = min(self.session.data.first_output(), max(n - 1, 0))
         self.dt = dt or 1.0
         self.unit = "s" if dt else "frame"
         self.end.setVisible(not n)
@@ -135,18 +142,18 @@ class TimelinePanel(QWidget):
         for button in (self.first_button, self.prev_button, self.next_button, self.last_button):
             button.setEnabled(n > 1)
         self.slider.blockSignals(True)
-        self.slider.setRange(0, max(n - 1, 0) if n else STEPS)
+        self.slider.setRange(self.first_frame, max(n - 1, 0) if n else STEPS)
         self.slider.setPageStep(max(1, n // 20) if n else 50)
         self.slider.blockSignals(False)
         self._show_time(self.session.scene.time)
 
     # ------------------------------------------------------------- time
     def frame_of(self, time: float) -> int:
-        return int(min(max(round(time / self.dt), 0), max(self.n_frames - 1, 0)))
+        return int(min(max(round(time / self.dt), self.first_frame), max(self.n_frames - 1, 0)))
 
     def go_to_frame(self, frame: int) -> None:
         if self.has_frames:
-            frame = min(max(frame, 0), self.n_frames - 1)
+            frame = min(max(frame, self.first_frame), self.n_frames - 1)
             self.session.set_time(frame * self.dt)
 
     def step(self, frames: int) -> None:
@@ -170,26 +177,56 @@ class TimelinePanel(QWidget):
             self.label.setText(f"t = {time:.2f} s")
         self.slider.blockSignals(False)
 
+    def refresh_icons(self) -> None:
+        """Draw the buttons again in the current theme's colours."""
+        for button, name in (
+            (self.first_button, "first"),
+            (self.prev_button, "previous"),
+            (self.next_button, "next"),
+            (self.last_button, "last"),
+        ):
+            button.setIcon(icon(name))
+        playing = self.play_button.isChecked()
+        self.play_button.setIcon(icon("pause" if playing else "play", COLORS["cursor"]))
+
     # ------------------------------------------------------------- playback
     def _toggle_play(self, playing: bool) -> None:
         self.play_button.setText("Pause" if playing else "Play")
         self.play_button.setIcon(icon("pause" if playing else "play", COLORS["cursor"]))
         if playing:
-            self.timer.start()
+            self._last_step = 0.0
+            self.timer.start(0)
         else:
             self.timer.stop()
+
+    def _tick(self) -> None:
+        if not self.play_button.isChecked():
+            return
+        if self.busy():
+            PERF.count("tick waiting for data")
+            self.timer.start(4)
+            return
+        interval = 1.0 / max(self.fps.value(), 1)
+        wait = self._last_step + interval - time.monotonic()
+        if wait > 0.002:
+            self.timer.start(max(int(wait * 1000), 1))
+            return
+        self._last_step = time.monotonic()
+        self._advance()
+        self.timer.start(max(int(interval * 1000) - 2, 1))
 
     def _advance(self) -> None:
         if self.busy():
             return  # wait until the current frame is on screen
+        PERF.count("frames advanced")
         if self.has_frames:
             frame = self.frame_of(self.session.scene.time) + 1
             if frame >= self.n_frames:
-                frame = 0
+                frame = self.first_frame
             self.go_to_frame(frame)
             if self.loader is not None:
                 self.loader.prefetch(
-                    self.session.data.data_items(), self.session.scene.time, frames_ahead=4
+                    self.session.data.data_items(), self.session.scene.time, frames_ahead=8
                 )
             return
         step = self.end_time / STEPS * 2

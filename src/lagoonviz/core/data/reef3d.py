@@ -395,7 +395,8 @@ class Case:
         A folder can hold output of several runs (REEF3D overwrites only the files it
         writes again), e.g. an FNPF run next to an older NHFLOW run, or a bed from an
         earlier run. The free surface (or bed) written last picks the run; outputs
-        written during that run join it. Without surfaces, the volume is shown.
+        written during that run join it; a bed of the same solver joins in any case.
+        Without surfaces, the volume is shown.
         """
         surfaces = [d for d in self.datasets.values() if d.role in ("free_surface", "bed")]
         if not surfaces:
@@ -410,6 +411,10 @@ class Case:
             if role in chosen:
                 continue
             options = [d for d in surfaces if d.role == role and d.same_run_as(lead)]
+            if not options and role == "bed":
+                # the bed rarely changes between runs: take the solver's latest one
+                options = [d for d in surfaces if d.role == "bed" and d.solver == lead.solver]
+                options = [preferred(options)] if options else []
             if options:
                 chosen[role] = max(options, key=len)
         # objects of the same run: bodies, mooring lines, structures

@@ -279,12 +279,18 @@ def test_empty_plot_paints_hint(window):
     window.plots.grab()
 
 
-def test_theme_choice_is_remembered(window):
+def test_theme_switches_now_and_is_remembered(window):
+    from lagoonviz.gui.theme import COLORS, THEMES
+
     window.theme_actions["dark"].trigger()
     assert window.settings.value("view/theme") == "dark"
     assert (
         window.theme_actions["dark"].isChecked() and not window.theme_actions["light"].isChecked()
     )
+    assert COLORS["base"] == THEMES["dark"]["base"]  # applied at once, no restart
+    assert window.settings.value("view/look") == "ocean"  # the 3D view follows
+    window.theme_actions["light"].trigger()
+    assert COLORS == THEMES["light"] and window.settings.value("view/look") == "studio"
 
 
 def test_themes_apply(qapp):
@@ -308,5 +314,45 @@ def test_add_slice_from_toolbar(window, reef3d_run):
 
 def test_viewport_look_is_remembered(window):
     window.look_actions["ocean"].trigger()
-    assert window.settings.value("view/viewport") == "ocean"
+    assert window.settings.value("view/look") == "ocean"
     assert window.look_actions["ocean"].isChecked()
+
+
+def test_timeline_starts_where_the_shown_run_has_data(window, tmp_path):
+    import os
+    import time
+
+    from reef3d_fixtures import make_run
+
+    # 28 outputs left from the long run, 2 from a restart (< 10 %): the long run shows
+    run = make_run(tmp_path / "restarted", frames=30, volume=False)
+    folder = run / "REEF3D_NHFLOW_VTP_FSF"
+    now = time.time()
+    for path in folder.iterdir():
+        step = int(path.name.split("-")[3][:8])
+        stamp = now + step if step < 2 else now - 3600 + step
+        os.utime(path, (stamp, stamp))
+    window.open_case(folder)
+    timeline = window.timeline
+    assert timeline.first_frame == 2 and timeline.slider.minimum() == 2
+    timeline.go_to_frame(0)
+    assert window.session.scene.time == 2.0
+    timeline.go_to_frame(timeline.n_frames - 1)
+    timeline._advance()  # wraps to the first frame with data, not to 0
+    assert window.session.scene.time == 2.0
+
+
+def test_export_dialog_and_overlay(window, reef3d_run):
+    import numpy as np
+
+    from lagoonviz.gui.export_movie import ExportAnimationDialog, make_overlay, movie_folder
+
+    window.open_case(reef3d_run)
+    assert movie_folder(window.session) == reef3d_run  # next to the case, if writable
+    dialog = ExportAnimationDialog(window, window.session, str(reef3d_run), (640, 360))
+    settings = dialog.settings()
+    assert settings["size"] == (1920, 1080) and (settings["start"], settings["end"]) == (0, 2)
+    assert settings["path"].endswith(".mp4")
+    image = np.full((180, 320, 4), 255, np.uint8)
+    drawn = make_overlay(window.session)(image.copy(), 1.0)
+    assert drawn.shape == image.shape and (drawn != 255).any()  # time and colour bar

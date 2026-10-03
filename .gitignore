@@ -47,3 +47,4 @@ setup_lagoon.log
 lagoon.log
 .test_output/
 .dev_remote/
+LAGOON.app/

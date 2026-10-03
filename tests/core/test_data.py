@@ -328,8 +328,8 @@ def test_colormaps():
         table = lut(name)
         assert table.shape == (256, 4) and table.min() >= 0 and table.max() <= 1
     rgba = colors(np.array([-1.0, 0.0, 1.0]), "greys", -1, 1)
-    np.testing.assert_allclose(rgba[0, :3], [17 / 255] * 3, atol=1e-6)
-    np.testing.assert_allclose(rgba[2, :3], [1, 1, 1])
+    np.testing.assert_allclose(rgba[0, :3], [0x1C / 255] * 3, atol=1e-6)
+    np.testing.assert_allclose(rgba[2, :3], [0xC8 / 255] * 3, atol=1e-6)  # never paper white
 
 
 def test_auto_range():
@@ -385,7 +385,9 @@ def test_folder_with_several_runs_shows_the_latest(tmp_path):
     s = Session()
     s.open_case(root)
     shown = {i.kind: i.properties.get("dataset") for i in s.scene if i.kind != "case"}
-    assert shown == {"free_surface": "fnpf_free_surface"}  # the old bed is not mixed in
+    # the bed rarely changes between runs: the solver's bed is shown with the new surface,
+    # never the bed of another solver
+    assert shown == {"bathymetry": "fnpf_bed", "free_surface": "fnpf_free_surface"}
     assert "nhflow_free_surface" in s.data.dataset_choices("free_surface-1")
 
 
@@ -464,3 +466,97 @@ def test_probe_vector_components(reef3d_run):
     )
     _, values = mesh.sample(0, (1, 1, 1))
     assert values == {"u": 5.0, "u.x": 3.0, "u.y": 4.0, "u.z": 0.0}
+
+
+def test_dry_land_is_left_out_of_the_free_surface(reef3d_run):
+    from lagoonviz.core.data.manager import _wet_triangles
+    from lagoonviz.core.data.mesh import SurfaceMesh
+
+    points = np.zeros((4, 3), np.float32)
+    triangles = np.array([[0, 1, 2], [1, 2, 3]], np.uint32)
+    dry = SurfaceMesh(points, triangles, {"depth": np.array([0.0, -1.0, 0.0, 0.5])})
+    kept = _wet_triangles(dry)
+    assert kept.shape == triangles.shape  # same length: the GPU buffer is reused
+    np.testing.assert_array_equal(kept, [[0, 0, 0], [1, 2, 3]])
+    wet = SurfaceMesh(points, triangles, {"depth": np.ones(4)})
+    assert _wet_triangles(wet) is triangles  # nothing dry: no copy
+
+    s = Session()
+    s.open_case(reef3d_run)
+    mesh = s.data.load("free_surface-1")
+    shown = s.data.display("free_surface-1", mesh)
+    assert shown.triangles is mesh.triangles  # this run has no dry land
+
+
+def test_a_run_that_starts_later_is_hidden_before_and_opened_at_its_start(tmp_path):
+    """Outputs 0-1 were overwritten by a restart; the long run starts at output 2."""
+    import os
+    import time
+
+    run = make_run(tmp_path / "restarted", frames=30, volume=False)
+    folder = run / "REEF3D_NHFLOW_VTP_FSF"
+    now = time.time()
+    for path in folder.iterdir():
+        step = int(path.name.split("-")[3][:8])
+        stamp = now + step if step < 2 else now - 3600 + step
+        os.utime(path, (stamp, stamp))
+    s = Session()
+    s.open_case(folder)
+    assert s.scene.time == 2.0  # opened where the shown run has data
+    assert s.data.frame_index("free_surface-1") == 0
+    s.set_time(0.0)
+    assert s.data.frame_index("free_surface-1") is None  # no frame from another run
+    assert s.data.frame_key("free_surface-1") is None
+
+
+def test_bed_exaggeration_about_still_water_level(reef3d_run):
+    from reef3d_fixtures import DEPTH
+
+    s = Session()
+    s.open_case(reef3d_run)
+    bed = next(i.id for i in s.scene if i.kind == "bathymetry")
+    mesh = s.data.load(bed)
+    assert "depth" in mesh.point_data
+    s.set_property(bed, "exaggeration", 3.0)
+    shown = s.data.display(bed, mesh)
+    np.testing.assert_allclose(
+        shown.positions[:, 2], DEPTH + 3.0 * (mesh.points[:, 2] - DEPTH), rtol=1e-5
+    )
+
+
+def test_loader_does_not_deadlock_on_frames_that_finish_at_once():
+    """A future done before its callback is added runs the callback in place."""
+    import threading
+
+    from lagoonviz.core.data.manager import BackgroundLoader
+
+    class Instant:
+        def load_key(self, key):
+            return key
+
+    loader = BackgroundLoader(Instant(), workers=2)
+    finished = threading.Event()
+
+    def hammer():
+        futures = [loader.request(("frame", i % 3)) for i in range(3000)]
+        for future in futures:
+            future.result(timeout=5)
+        finished.set()
+
+    worker = threading.Thread(target=hammer, daemon=True)
+    worker.start()
+    assert finished.wait(timeout=20), "loader deadlocked"
+    loader.shutdown()
+
+
+def test_choosing_a_colour_map_colours_the_bed(reef3d_run):
+    s = Session()
+    s.open_case(reef3d_run)
+    bed = next(i.id for i in s.scene if i.kind == "bathymetry")
+    assert s.scene.get(bed).properties["variable"] == "none"  # plain sand at first
+    s.set_property(bed, "colormap", "rainbow")
+    props = s.scene.get(bed).properties
+    assert (props["colormap"], props["variable"]) == ("rainbow", "elevation")
+    s.undo()  # one step
+    props = s.scene.get(bed).properties
+    assert props["variable"] == "none" and props["colormap"] == "sand"

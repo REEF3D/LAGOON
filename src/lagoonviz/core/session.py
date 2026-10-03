@@ -106,6 +106,10 @@ class Session:
             command.label = f"Open {command.case.name}"
         self.stack.execute(command)
         assert command.item_id is not None
+        # a run restarted in the same folder may start later: begin where it has data
+        first = self.data.first_time(command.item_id)
+        if first is not None and self.scene.time < first:
+            self.set_time(first)
         return command.item_id
 
     def add_slice(self, normal: str = "y", position: float | None = None, **properties: Any) -> str:
@@ -128,7 +132,25 @@ class Session:
 
         ``merge=True`` folds repeated changes (slider drags) into one undo step.
         """
+        item = self.scene.get(item_id)
+        if key == "colormap" and str(item.properties.get("variable", "")) == "none":
+            # a colour map only shows with something to colour by: pick the natural
+            # variable (a bed's elevation), in the same undo step
+            variable = self._colour_variable(item_id)
+            if variable:
+                self.stack.execute(
+                    SetProperties(self.scene, item_id, {"colormap": value, "variable": variable})
+                )
+                return
         self.stack.execute(SetProperty(self.scene, item_id, key, value), merge=merge)
+
+    def _colour_variable(self, item_id: str) -> str | None:
+        """What to colour an item by when only a colour map is chosen."""
+        choices = [c for c in self.data.variable_choices(item_id) if c != "none"]
+        for name in ("elevation", "eta", "depth", "Tension"):
+            if name in choices:
+                return name
+        return choices[0] if choices else None
 
     def set_properties(self, item_id: str, **values: Any) -> None:
         """Set several properties of one item as one undo step."""

@@ -20,6 +20,7 @@ deletes the request. Only the actions below exist; there is no way to run code.
         {"probe": ["free_surface-1", 120]},  # like a click on triangle 120
         {"fps": 30},                         # playback speed
         {"clear_cache": true},               # forget loaded frames (timing tests)
+        {"diagnose": true},                  # renderer state: items, bounds, camera, sun
         {"measure_play": 5.0}                # play for 5 s and report frames per second
     ]}
 """
@@ -34,6 +35,8 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, QTimer
+
+from lagoonviz.gui.perf import PERF
 
 log = logging.getLogger("lagoon.devremote")
 
@@ -162,10 +165,14 @@ class DevRemote(QObject):
         if name == "fps":
             window.timeline.fps.setValue(int(value))
             return f"fps {value}"
+        if name == "diagnose":
+            view = getattr(window.viewport, "view", None)
+            return "diagnose " + json.dumps(view.diagnostics() if view else None, default=str)
         if name == "clear_cache":
             session.data.cache.clear()
             return "cache cleared"
         if name == "measure_play":
+            PERF.reset()
             self._measure = (time.monotonic(), window.timeline.frame_of(session.scene.time))
             window.timeline.play_button.setChecked(True)
             self._wait_until = time.monotonic() + float(value)
@@ -176,7 +183,10 @@ class DevRemote(QObject):
             start, first = self._measure
             frames = window.timeline.frame_of(session.scene.time) - first
             seconds = time.monotonic() - start
-            return f"played {frames} frames in {seconds:.2f} s = {frames / seconds:.1f} fps"
+            return (
+                f"played {frames} frames in {seconds:.2f} s = {frames / seconds:.1f} fps"
+                f" | {PERF.summary()}"
+            )
         if name == "screenshot":
             path = self.folder / Path(str(value)).name
             ok = window.save_screenshot(path)

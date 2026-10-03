@@ -24,6 +24,7 @@ from lagoonviz.core.data.manager import Trace
 from lagoonviz.core.data.series import decimate
 from lagoonviz.core.plotting import nice_step, nice_ticks, tick_label, value_range
 from lagoonviz.gui.bridge import SessionBridge
+from lagoonviz.gui.perf import PERF
 from lagoonviz.gui.theme import COLORS, SERIES_COLORS
 
 LEFT = 64  # room for y tick labels
@@ -121,6 +122,10 @@ class PlotsPanel(QWidget):
 
     # ------------------------------------------------------------- painting
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        with PERF.track("plots"):
+            self._paint(event)
+
+    def _paint(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.rect(), QColor(COLORS["base"]))
