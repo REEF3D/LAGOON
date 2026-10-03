@@ -26,6 +26,7 @@ from lagoonviz.core.commands import (
     OpenCase,
     RemoveItem,
     Rename,
+    SetMany,
     SetProperties,
     SetProperty,
     SetVisible,
@@ -134,25 +135,59 @@ class Session:
 
         ``merge=True`` folds repeated changes (slider drags) into one undo step.
         """
-        item = self.scene.get(item_id)
-        if key == "colormap" and str(item.properties.get("variable", "")) == "none":
-            # a colour map only shows with something to colour by: pick the natural
-            # variable (a bed's elevation), in the same undo step
-            variable = self._colour_variable(item_id)
-            if variable:
-                self.stack.execute(
-                    SetProperties(self.scene, item_id, {"colormap": value, "variable": variable})
-                )
-                return
+        if key == "auto_range":
+            if value:
+                self.data.forget_range(item_id)  # found again, for what is shown now
+            else:
+                # switching it off keeps the colours as they are: the fixed range
+                # starts at the automatic one
+                shown = self.data.automatic_range(item_id)
+                if shown is not None:
+                    low, high = (float(f"{v:.6g}") for v in shown)
+                    self.stack.execute(
+                        SetProperties(
+                            self.scene, item_id, {"auto_range": False, "vmin": low, "vmax": high}
+                        )
+                    )
+                    return
         self.stack.execute(SetProperty(self.scene, item_id, key, value), merge=merge)
 
-    def _colour_variable(self, item_id: str) -> str | None:
-        """What to colour an item by when only a colour map is chosen."""
-        choices = [c for c in self.data.variable_choices(item_id) if c != "none"]
-        for name in ("elevation", "eta", "depth", "Tension"):
-            if name in choices:
-                return name
-        return choices[0] if choices else None
+    def set_exaggeration(self, item_id: str, value: float, *, merge: bool = False) -> None:
+        """Vertical exaggeration as an item's slider sets it: while its case has sync on
+        (the default) the case's value, so every item of the case follows; else the
+        item's own."""
+        case = self.data.case_item(item_id)
+        if case is not None and case.properties.get("sync_exaggeration", True):
+            item_id = case.id
+        self.set_property(item_id, "exaggeration", value, merge=merge)
+
+    def sync_exaggeration(self, item_id: str, on: bool) -> None:
+        """Switch the case-wide vertical exaggeration of an item's case on or off.
+
+        Switching it off gives every item of the case the case's value as its own, so
+        nothing jumps; one undo step.
+        """
+        case = self.data.case_item(item_id)
+        if case is None:
+            return
+        changes: dict[str, dict[str, Any]] = {case.id: {"sync_exaggeration": bool(on)}}
+        if not on:
+            value = case.properties.get("exaggeration", 1.0)
+            for other in self.scene:
+                if (
+                    other.id != case.id
+                    and "exaggeration" in other.properties
+                    and self.data.case_item(other.id) is case
+                ):
+                    changes[other.id] = {"exaggeration": value}
+        self.stack.execute(
+            SetMany(
+                self.scene,
+                changes,
+                "Sync exaggeration" if on else "Unsync exaggeration",
+                f"session.sync_exaggeration({item_id!r}, {bool(on)!r})",
+            )
+        )
 
     def set_properties(self, item_id: str, **values: Any) -> None:
         """Set several properties of one item as one undo step."""
@@ -175,6 +210,13 @@ class Session:
 
     def rename(self, item_id: str, name: str) -> None:
         self.stack.execute(Rename(self.scene, item_id, name))
+
+    def reload(self, case_id: str | None = None) -> list[str]:
+        """Read the case folders again, keeping the scene, the time and the camera
+        (new results of a running simulation). Not an undo step."""
+        paths = self.data.reload(case_id)
+        self.scene.data_changed()
+        return paths
 
     def set_time(self, time: float) -> None:
         """Move the current time. View state: not an undo step."""

@@ -377,3 +377,57 @@ def write_series(root: Path, solver: str, end: float, steps: int = 41) -> None:
     velocity = ["time \t Ue [m/s] \t We [m/s] \t Qe [rad/s]"]
     velocity += [f"{t:g} \t 0 \t {0.1 * np.cos(t):g} \t 0" for t in time]
     (dof / "REEF3D_6DOF_velocity_0.dat").write_text("\n".join(velocity) + "\n")
+
+
+def write_run_log(root: Path, solver: str, runs: list[dict]) -> Path:
+    """A REEF3D run log (lagoon-format RUN.md) for files already in ``root``.
+
+    ``runs``: dicts with ``id``, ``started`` and ``outputs`` = {stream: [(step, time)]};
+    the streams are the free surface and bed folders ``make_run`` writes.
+    """
+    import json
+
+    streams = {
+        "fsf": {
+            "role": "free_surface",
+            "folder": f"REEF3D_{solver}_VTP_FSF",
+            "files": f"REEF3D-{solver}-FSF-{{step:08d}}.pvtp",
+            "format": "vtp",
+        },
+        "bed": {
+            "role": "bed",
+            "folder": f"REEF3D_{solver}_VTP_BED",
+            "files": f"REEF3D-{solver}-BED-{{step:08d}}.pvtp",
+            "format": "vtp",
+        },
+    }
+    lines = []
+    for run in runs:
+        lines.append(
+            {
+                "type": "run",
+                "format": "reef3d-run",
+                "version": 1,
+                "run": run["id"],
+                "solver": solver,
+                "started": run["started"],
+                "streams": streams,
+            }
+        )
+        for stream, outputs in run["outputs"].items():
+            for step, time in outputs:
+                lines.append(
+                    {
+                        "type": "output",
+                        "run": run["id"],
+                        "step": step,
+                        "time": time,
+                        "streams": [stream],
+                    }
+                )
+        lines.append({"type": "end", "run": run["id"], "status": "finished"})
+    folder = root / "REEF3D_Case"
+    folder.mkdir(exist_ok=True)
+    path = folder / f"REEF3D_{solver}_run.jsonl"
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    return path

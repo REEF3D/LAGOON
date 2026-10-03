@@ -131,7 +131,7 @@ def test_marker(reef3d_run):
 
 
 def test_styles(reef3d_run):
-    from lagoonviz.render.scene3d import SceneRenderer
+    from lagoonviz.render.scene3d import LIGHTING, SceneRenderer
 
     session = Session()
     session.open_case(reef3d_run)
@@ -140,7 +140,10 @@ def test_styles(reef3d_run):
     assert studio[0, 0, :3].mean() > 200 > ocean[0, 0, :3].mean()  # white vs dark blue sky
     view = SceneRenderer("ocean")
     view.set_style("studio")
-    assert view.style_name == "studio" and abs(view.ambient.intensity - 1.0) < 1e-6
+    assert view.style_name == "studio"
+    # both looks share the lights; only the background differs
+    assert abs(view.ambient.intensity - LIGHTING["ambient"]) < 1e-6
+    assert abs(view.headlamp.intensity - LIGHTING["headlamp"]) < 1e-6
 
 
 def test_gauges_in_plot_colours(tmp_path):
@@ -269,6 +272,8 @@ def test_pan_moves_the_view_sideways(reef3d_run):
     view.pan(0.1, 0.0)
     moved = np.asarray(view.camera.world.position) - before
     np.testing.assert_allclose(moved, (0.1 * width, 0, 0), atol=1e-6 * width)
+    # the top view's up (y) does not become the axis the view orbits about
+    np.testing.assert_allclose(view.camera.world.reference_up, (0, 0, 1))
 
 
 def _plane_and_box():

@@ -3,18 +3,22 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
-from PySide6.QtCore import QLocale, Qt
+from PySide6.QtCore import QLocale, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSlider,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -45,6 +49,8 @@ class PropertiesPanel(QWidget):
     def show_item(self, item_id: str) -> None:
         self.item_id = item_id if item_id in self.session.scene else ""
         self.editors = {}
+        self.fit_button = None
+        self.sync_button: QToolButton | None = None
         body = QWidget()
         form = QFormLayout(body)
         if not self.item_id:
@@ -69,6 +75,8 @@ class PropertiesPanel(QWidget):
         self.editors["visible"] = visible
 
         for key, prop in spec.properties.items():
+            if key == "sync_exaggeration":
+                continue  # the Sync button beside the exaggeration slider
             editor = self._editor(key, prop, item.properties[key])
             if prop.tip:
                 editor.setToolTip(prop.tip)
@@ -86,6 +94,8 @@ class PropertiesPanel(QWidget):
         self.info.setEnabled(False)
         form.addRow(self.info)
         self._scroll.setWidget(body)
+        self._show_range()
+        self._show_synced()
 
     def _choices(self, prop: PropertySpec, value: Any) -> list[tuple[str, str]]:
         """(label, value) pairs for a choice property; the current value is always listed."""
@@ -122,19 +132,19 @@ class PropertiesPanel(QWidget):
             check.toggled.connect(lambda on: self._set(key, on))
             return check
         if isinstance(default, int | float):
-            spin = _SpinBox()
-            # a decimal point whatever the system language, as in scripts and papers
-            number_locale = QLocale.c()
-            number_locale.setNumberOptions(QLocale.OmitGroupSeparator)
-            spin.setLocale(number_locale)
-            spin.setDecimals(3)
-            spin.setRange(
-                prop.minimum if prop.minimum is not None else -1e9,
-                prop.maximum if prop.maximum is not None else 1e9,
-            )
-            spin.setSingleStep(0.1 if (prop.maximum or 10) <= 1 else 1.0)
+            spin = _number_box(prop)
             spin.setValue(float(value))
-            spin.setKeyboardTracking(False)
+            if prop.slider == "log" and prop.minimum and prop.maximum:
+                both = _LogSlider(spin, prop.minimum, prop.maximum)
+                if key == "exaggeration":
+                    both.valueChanged.connect(self._set_exaggeration)
+                    self.sync_button = self._sync_button()
+                    both.layout().addWidget(self.sync_button)
+                else:
+                    both.valueChanged.connect(lambda v: self._set(key, v, merge=True))
+                both.released.connect(self.session.stack.end_merge)
+                spin.editingFinished.connect(self.session.stack.end_merge)
+                return both
             # dragging or stepping folds into one undo step until editing finishes
             spin.valueChanged.connect(lambda v: self._set(key, v, merge=True))
             spin.editingFinished.connect(self.session.stack.end_merge)
@@ -143,7 +153,28 @@ class PropertiesPanel(QWidget):
         line.editingFinished.connect(lambda: self._set(key, line.text()))
         return line
 
+    def _sync_button(self) -> QToolButton:
+        button = QToolButton()
+        button.setText("Sync")
+        button.setCheckable(True)
+        button.setToolTip(
+            "On: one vertical exaggeration for the whole case (every item follows "
+            "this slider). Off: each item has its own."
+        )
+        button.toggled.connect(self._sync_exaggeration)
+        return button
+
     # ------------------------------------------------------------- actions
+    def _set_exaggeration(self, value: float) -> None:
+        """The slider: the case's exaggeration while synced, else the item's own."""
+        if not self.item_id or self.session.data.exaggeration(self.item_id) == value:
+            return
+        self.session.set_exaggeration(self.item_id, value, merge=True)
+
+    def _sync_exaggeration(self, on: bool) -> None:
+        if self.item_id and self._case_synced() != on:
+            self.session.sync_exaggeration(self.item_id, on)
+
     def _set(self, key: str, value: Any, merge: bool = False) -> None:
         if not self.item_id:
             return
@@ -203,6 +234,13 @@ class PropertiesPanel(QWidget):
             self.show_item("")
         elif event == "changed" and item_id == self.item_id:
             self._refresh()
+        elif (
+            event == "changed"
+            and self.item_id in self.session.scene
+            and item_id in self.session.scene
+            and self.session.scene.get(item_id).kind == "case"
+        ):
+            self._show_synced()  # the case's exaggeration may apply to this item
 
     def _refresh(self) -> None:
         """Update editor values in place (no rebuild, so focus and cursor stay)."""
@@ -218,12 +256,96 @@ class PropertiesPanel(QWidget):
                     self._fill(editor, self._choices(prop, value), value)
             elif isinstance(editor, QCheckBox):
                 editor.setChecked(bool(value))
-            elif isinstance(editor, QDoubleSpinBox):
+            elif isinstance(editor, QDoubleSpinBox | _LogSlider):
                 editor.setValue(float(value))
             elif isinstance(editor, QLineEdit) and not editor.hasFocus():
                 editor.setText(str(value))
             editor.blockSignals(False)
         self.info.setText(self._data_info(self.item_id))
+        self._show_range()
+        self._show_synced()
+
+    def _case_synced(self) -> bool | None:
+        """Whether the item's case has one exaggeration for all items (None: no case)."""
+        case = self.session.data.case_item(self.item_id)
+        if case is None:
+            return None
+        return bool(case.properties.get("sync_exaggeration", True))
+
+    def _show_synced(self) -> None:
+        """The exaggeration slider shows what is drawn (the case's value while synced),
+        and the Sync button the case's setting."""
+        editor = self.editors.get("exaggeration")
+        if not isinstance(editor, _LogSlider) or self.item_id not in self.session.scene:
+            return
+        item = self.session.scene.get(self.item_id)
+        synced = self._case_synced()
+        editor.setValue(self.session.data.exaggeration(self.item_id))
+        if self.sync_button is not None:
+            self.sync_button.blockSignals(True)
+            self.sync_button.setChecked(bool(synced))
+            self.sync_button.blockSignals(False)
+            self.sync_button.setEnabled(synced is not None)
+        if item.kind == "case":
+            # the case's own value is only used while synced
+            editor.slider.setEnabled(bool(synced))
+            editor.spin.setEnabled(bool(synced))
+            text = (
+                "Scales heights about the still water level, for every item of the case"
+                if synced
+                else "Sync is off: each item has its own exaggeration"
+            )
+        elif synced:
+            text = "Sync is on: this sets the exaggeration of the whole case"
+        else:
+            text = "Scales heights about the still water level, for this item only"
+        editor.slider.setToolTip(text)
+        editor.spin.setToolTip(text)
+
+    def _show_range(self) -> None:
+        """With an automatic range, the min and max boxes show it and are read-only.
+        Coloured by nothing (a plain colour), the colour map and range are greyed out."""
+        low_box, high_box = self.editors.get("vmin"), self.editors.get("vmax")
+        if low_box is None or high_box is None or self.item_id not in self.session.scene:
+            return
+        props = self.session.scene.get(self.item_id).properties
+        coloured = str(props.get("variable", "none")) != "none"
+        hint = 'Coloured by nothing: choose "Colour by" to use a colour range'
+        auto_box = self.editors.get("auto_range")
+        if auto_box is not None:
+            auto_box.setEnabled(coloured)
+            auto_box.setToolTip("" if coloured else hint)
+        colormap_box = self.editors.get("colormap")
+        if colormap_box is not None:
+            # coloured by nothing, a surface takes one colour of the map (white: white);
+            # bodies and structures take their material's
+            uses_material = "material" in props
+            colormap_box.setEnabled(coloured or not uses_material)
+            colormap_box.setToolTip(
+                ""
+                if coloured
+                else 'Coloured by nothing: the material sets the colour; choose "Colour by"'
+                " to use a colour map"
+                if uses_material
+                else "Coloured by nothing: the surface takes one colour of this map"
+            )
+        if getattr(self, "fit_button", None) is not None:
+            self.fit_button.setEnabled(coloured)
+        auto = bool(props.get("auto_range", True))
+        for box in (low_box, high_box):
+            box.setEnabled(coloured and not auto)
+        if not auto or not coloured:
+            return
+        try:
+            shown = self.session.data.automatic_range(self.item_id)
+        except Exception:  # noqa: BLE001 (no data yet: the boxes stay as they are)
+            shown = None
+        if shown is None:
+            return
+        for box, value in zip((low_box, high_box), shown, strict=True):
+            box.blockSignals(True)
+            box.setValue(float(value))
+            box.blockSignals(False)
 
 
 class _SpinBox(QDoubleSpinBox):
@@ -239,3 +361,80 @@ class _SpinBox(QDoubleSpinBox):
             super().wheelEvent(event)
         else:
             event.ignore()
+
+
+def _number_box(prop: PropertySpec) -> _SpinBox:
+    spin = _SpinBox()
+    # a decimal point whatever the system language, as in scripts and papers
+    number_locale = QLocale.c()
+    number_locale.setNumberOptions(QLocale.OmitGroupSeparator)
+    spin.setLocale(number_locale)
+    spin.setDecimals(3)
+    spin.setRange(
+        prop.minimum if prop.minimum is not None else -1e9,
+        prop.maximum if prop.maximum is not None else 1e9,
+    )
+    spin.setSingleStep(0.1 if (prop.maximum or 10) <= 1 else 1.0)
+    spin.setKeyboardTracking(False)
+    return spin
+
+
+class _LogSlider(QWidget):
+    """A slider on a log scale with the spin box beside it, for factors like the
+    vertical exaggeration (0.1 to 100: the middle of the slider is 3.16)."""
+
+    STEPS = 1000
+    valueChanged = Signal(float)
+    released = Signal()
+
+    def __init__(self, spin: _SpinBox, minimum: float, maximum: float) -> None:
+        super().__init__()
+        self.spin = spin
+        self._low, self._high = math.log10(minimum), math.log10(maximum)
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, self.STEPS)
+        self.slider.setFocusPolicy(Qt.StrongFocus)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.slider, 1)
+        layout.addWidget(spin)
+        spin.setMaximumWidth(80)
+        self._place(spin.value())
+        self.slider.valueChanged.connect(self._slid)
+        self.slider.sliderReleased.connect(self.released)
+        spin.valueChanged.connect(self._typed)
+
+    def to_value(self, position: int) -> float:
+        value = 10 ** (self._low + position / self.STEPS * (self._high - self._low))
+        return float(f"{value:.3g}")  # 1.0, 2.5, 10: round numbers while dragging
+
+    def to_position(self, value: float) -> int:
+        if value <= 0:
+            return 0
+        share = (math.log10(value) - self._low) / (self._high - self._low)
+        return round(min(max(share, 0.0), 1.0) * self.STEPS)
+
+    def value(self) -> float:
+        return self.spin.value()
+
+    def setValue(self, value: float) -> None:  # noqa: N802 (Qt naming)
+        self.spin.blockSignals(True)
+        self.spin.setValue(value)
+        self.spin.blockSignals(False)
+        self._place(value)
+
+    def _place(self, value: float) -> None:
+        self.slider.blockSignals(True)
+        self.slider.setValue(self.to_position(value))
+        self.slider.blockSignals(False)
+
+    def _slid(self, position: int) -> None:
+        value = self.to_value(position)
+        self.spin.blockSignals(True)
+        self.spin.setValue(value)
+        self.spin.blockSignals(False)
+        self.valueChanged.emit(self.spin.value())
+
+    def _typed(self, value: float) -> None:
+        self._place(value)
+        self.valueChanged.emit(value)

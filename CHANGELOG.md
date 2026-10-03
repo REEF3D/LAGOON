@@ -31,6 +31,24 @@
   sun is lower, so waves show their shape.
 - View → Theme switches at once (no restart) and takes the 3D view along: light with
   the studio look, dark with the ocean look.
+- Full screen viewer (View → Full screen viewer, Cmd+Shift+F): only the 3D view and
+  the player on the whole screen; Esc or "Exit full screen" brings the window back as
+  it was.
+- Automatic colour range: shown in the min/max boxes (read-only while automatic);
+  found from frames spread over the run for surfaces (the first frame is often calm
+  water); switching it off keeps the colours (the fixed range starts at the automatic
+  one); switching it on finds it again.
+- Reload (toolbar, File → Reload case, Cmd+R / F5): reads the case folders again,
+  keeping items, time and camera; at the last frame it moves on to the new last
+  frame. File → Follow running simulation reloads by itself when the output folders
+  change (checked every 5 s, not while playing).
+- LAGOON reads the run log when a case has one: every frame gets its simulation
+  time from the log (no `P 30` needed; free surface and volume written at different
+  intervals line up), files are assigned to the run that wrote them (a restart in
+  the same folder is split by run, not guessed from file times), runs are labelled
+  with their start, and the timeline steps through the logged output times. Cases
+  without a log open as before. A small case written by the patched REEF3D (Stokes5
+  tutorial with a restart) is a test case.
 - REEF3D run log (`lagoon-format/RUN.md`, version 1): `REEF3D_Case/REEF3D_<SOLVER>_run.jsonl`
   states each run, the streams it writes (roles incl. floating bodies, DEM, CPM
   particles), and the time of every output; streams can register while running.
@@ -90,8 +108,32 @@
   ahead, the shoreline's triangle list re-used while it stays put (no re-upload),
   gauges and scene bounds updated in place. The developer remote's `measure_play`
   reports where the time goes.
-- Choosing a colour map for an item coloured by "none" (a plain sand bed) also
-  colours it by its natural variable (a bed's elevation), in one undo step.
+- Colour map and *Colour by* are independent again: choosing one never changes the
+  other. Coloured by "none", a surface takes one colour of its colour map (sand: sand,
+  greys: grey, white: white, others their middle colour), so a plain bed can still be
+  recoloured; the range settings are greyed out. Bodies and structures take their
+  material's colour.
+- New colour map "white": grey (low) to white (high) when colouring by a variable, pure white
+  when coloured by nothing.
+- Clicking the timeline slider jumps to the clicked time (it used to step a page
+  towards it); dragging on from there works as before.
+- Opening a case shows its free surface in the properties panel (else its bed),
+  not the last item added.
+- Vertical exaggeration as a slider (log scale, 0.1 to 100, plus a number box) with a
+  *Sync* button, on every item that has one and on the case. Sync on (the default):
+  any of these sliders sets one value for the whole case, and free surface, bed,
+  bodies and gauges all scale about the case's still water level. Sync off: each item
+  has its own, starting from the case's value; one undo step either way.
+- Bathymetry: *Hide wet land* leaves out the bed under still water, so only dry land
+  shows (by the still water depth REEF3D writes with the bed).
+- Rotation goes all the way round (pygfx stopped 1 degree short of the poles), always
+  about the centre of the view. After the top view the scene no longer tips over when
+  turned (the top view's "up" had become the orbit axis).
+- 2D view (button next to *Frame all*, key 2): from straight above, orthographic, no
+  rotation; every drag pans, the wheel zooms. *Frame all* keeps it; 3D, front and side
+  leave it.
+- Studio look uses the ocean look's lights (more headlamp, softer sun, more sheen);
+  the two looks now differ only in background.
 - Ctrl+C in the terminal closes LAGOON properly (it used to close only the 3D view
   and leave the terminal waiting).
 - Move the view: Ctrl (or Cmd) + drag, Shift + drag or right drag; arrow keys move

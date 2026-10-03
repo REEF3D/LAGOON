@@ -242,7 +242,7 @@ def test_display_exaggeration_and_range(reef3d_run):
     assert shown.variable == "eta" and shown.colormap == "reef3d"
     assert shown.vmin == pytest.approx(-shown.vmax)  # eta changes sign: symmetric
     assert s.data.still_water_level("free_surface-1", mesh) == pytest.approx(DEPTH, abs=1e-5)
-    s.set_property("free_surface-1", "exaggeration", 10.0)
+    s.set_property("case-1", "exaggeration", 10.0)  # synced: applies to every item
     big = s.data.display("free_surface-1", mesh)
     np.testing.assert_allclose(
         big.positions[:, 2] - DEPTH, 10 * (mesh.points[:, 2] - DEPTH), atol=1e-4
@@ -517,11 +517,32 @@ def test_bed_exaggeration_about_still_water_level(reef3d_run):
     bed = next(i.id for i in s.scene if i.kind == "bathymetry")
     mesh = s.data.load(bed)
     assert "depth" in mesh.point_data
-    s.set_property(bed, "exaggeration", 3.0)
+    s.set_property(bed, "exaggeration", 3.0)  # ignored while the case is synced
+    shown = s.data.display(bed, mesh)
+    np.testing.assert_allclose(shown.positions[:, 2], mesh.points[:, 2], rtol=1e-6)
+    s.set_property("case-1", "sync_exaggeration", False)
     shown = s.data.display(bed, mesh)
     np.testing.assert_allclose(
         shown.positions[:, 2], DEPTH + 3.0 * (mesh.points[:, 2] - DEPTH), rtol=1e-5
     )
+
+
+def test_case_exaggeration_applies_to_all_items(reef3d_run):
+    from reef3d_fixtures import DEPTH
+
+    s = Session()
+    s.open_case(reef3d_run)
+    s.set_property("case-1", "exaggeration", 5.0)
+    bed = next(i.id for i in s.scene if i.kind == "bathymetry")
+    for item in ("free_surface-1", bed):
+        assert s.data.exaggeration(item) == 5.0
+        mesh = s.data.load(item)
+        shown = s.data.display(item, mesh)
+        level = s.data.case_water_level(item)
+        assert level == pytest.approx(DEPTH, abs=1e-4)
+        np.testing.assert_allclose(
+            shown.positions[:, 2] - DEPTH, 5.0 * (mesh.points[:, 2] - DEPTH), atol=1e-3
+        )
 
 
 def test_loader_does_not_deadlock_on_frames_that_finish_at_once():
@@ -549,14 +570,124 @@ def test_loader_does_not_deadlock_on_frames_that_finish_at_once():
     loader.shutdown()
 
 
-def test_choosing_a_colour_map_colours_the_bed(reef3d_run):
+def test_colour_map_and_colour_by_are_independent(reef3d_run):
+    """Choosing a colour map never changes what is coloured, and the other way round."""
     s = Session()
     s.open_case(reef3d_run)
     bed = next(i.id for i in s.scene if i.kind == "bathymetry")
     assert s.scene.get(bed).properties["variable"] == "none"  # plain sand at first
     s.set_property(bed, "colormap", "rainbow")
     props = s.scene.get(bed).properties
-    assert (props["colormap"], props["variable"]) == ("rainbow", "elevation")
-    s.undo()  # one step
+    assert (props["colormap"], props["variable"]) == ("rainbow", "none")
+    s.set_property(bed, "variable", "depth")
+    shown = s.data.display(bed, s.data.load(bed))
+    assert (shown.variable, shown.colormap) == ("depth", "rainbow")
+    s.set_property(bed, "colormap", "greys")
+    assert s.scene.get(bed).properties["variable"] == "depth"
+    s.undo()
     props = s.scene.get(bed).properties
-    assert props["variable"] == "none" and props["colormap"] == "sand"
+    assert (props["colormap"], props["variable"]) == ("rainbow", "depth")
+
+
+def test_reload_picks_up_new_outputs(tmp_path):
+    """A running simulation writes more outputs; reloading shows them."""
+    import shutil
+
+    from reef3d_fixtures import make_run
+
+    full = make_run(tmp_path / "full", frames=5, volume=False)
+    running = tmp_path / "running"
+    shutil.copytree(full, running)
+    folder = running / "REEF3D_NHFLOW_VTP_FSF"
+    for written in (folder, running / "REEF3D_NHFLOW_VTP_BED"):
+        for path in written.glob("*0000000[34]*"):
+            path.unlink()  # outputs 3 and 4 not written yet
+    s = Session()
+    s.open_case(running)
+    events = []
+    s.scene.subscribe(lambda event, item: events.append(event))
+    assert s.data.n_frames() == 3
+    s.data.load("free_surface-1")
+    before = s.data.signature("case-1")
+    for path in (full / "REEF3D_NHFLOW_VTP_FSF").glob("*0000000[34]*"):
+        shutil.copy(path, folder)
+    import os
+
+    os.utime(folder, (os.path.getmtime(folder) + 5,) * 2)
+    assert s.data.signature("case-1") != before
+    assert s.reload() == [str(running.resolve())]
+    assert s.data.n_frames() == 5 and events[-1] == "reset"
+    assert len(s.data.cache) == 0  # frames read before are read again
+    s.set_time(4)
+    assert s.data.load("free_surface-1") is not None
+    assert [i.kind for i in s.scene].count("free_surface") == 1  # items kept
+
+
+def test_switching_the_automatic_range_off_keeps_the_colours(reef3d_run):
+    s = Session()
+    s.open_case(reef3d_run)
+    shown = s.data.automatic_range("free_surface-1")
+    assert shown is not None and shown[0] < 0 < shown[1]
+    s.set_property("free_surface-1", "auto_range", False)
+    props = s.scene.get("free_surface-1").properties
+    assert (props["vmin"], props["vmax"]) == pytest.approx(shown, rel=1e-5)
+    s.undo()  # one step
+    assert s.scene.get("free_surface-1").properties["auto_range"] is True
+    s.set_property("free_surface-1", "auto_range", True)  # found again
+    assert s.data.automatic_range("free_surface-1") == pytest.approx(shown)
+
+
+def test_item_slider_sets_case_exaggeration_while_synced(reef3d_run):
+    s = Session()
+    s.open_case(reef3d_run)
+    bed = next(i.id for i in s.scene if i.kind == "bathymetry")
+    s.set_exaggeration(bed, 4.0)  # synced: the case's, for every item
+    assert s.scene.get("case-1").properties["exaggeration"] == 4.0
+    assert s.data.exaggeration("free_surface-1") == 4.0
+    s.sync_exaggeration(bed, False)  # items keep the case's value as their own
+    assert s.data.exaggeration(bed) == 4.0 and s.data.exaggeration("free_surface-1") == 4.0
+    s.set_exaggeration(bed, 2.0)
+    assert s.data.exaggeration(bed) == 2.0 and s.data.exaggeration("free_surface-1") == 4.0
+    assert s.stack.undo_label == "Set exaggeration"
+    s.undo()
+    assert s.stack.undo_label == "Unsync exaggeration"
+    s.undo()  # one step: sync on again, items' own values back
+    assert s.scene.get("case-1").properties["sync_exaggeration"] is True
+    assert s.scene.get(bed).properties["exaggeration"] == 1.0
+
+
+def test_hide_wet_land_of_the_bed(reef3d_run):
+    from lagoonviz.core.data.manager import _dry_triangles
+    from lagoonviz.core.data.mesh import SurfaceMesh
+
+    points = np.array([[0, 0, -1], [1, 0, -1], [0, 1, -1], [1, 1, 1]], np.float32)
+    triangles = np.array([[0, 1, 2], [1, 3, 2]], np.int32)
+    mesh = SurfaceMesh(points, triangles, {"depth": -points[:, 2]})
+    kept = _dry_triangles(mesh, 0.0)
+    assert kept.tolist() == [[0, 0, 0], [1, 3, 2]]  # all wet: gone; shoreline: kept
+    no_depth = SurfaceMesh(points, triangles)
+    assert _dry_triangles(no_depth, 0.0).tolist() == kept.tolist()  # below the level
+
+    s = Session()
+    s.open_case(reef3d_run)
+    bed = next(i.id for i in s.scene if i.kind == "bathymetry")
+    mesh = s.data.load(bed)
+    assert s.data.display(bed, mesh).triangles is mesh.triangles  # off by default
+    s.set_property(bed, "hide_wet", True)
+    shown = s.data.display(bed, mesh)
+    assert shown.triangles.shape == mesh.triangles.shape  # same length: buffer update only
+    assert not shown.triangles.any()  # the test bed lies wholly under water
+
+
+def test_plain_colour_follows_the_colour_map(reef3d_run):
+    s = Session()
+    s.open_case(reef3d_run)
+    bed = next(i.id for i in s.scene if i.kind == "bathymetry")
+    mesh = s.data.load(bed)
+    assert s.data.display(bed, mesh).color == "#c4ae86"  # sand, as before
+    for colormap, color in (("white", "#ffffff"), ("greys", "#9a9a9a")):
+        s.set_property(bed, "colormap", colormap)
+        shown = s.data.display(bed, mesh)
+        assert shown.values is None and shown.color == color
+    s.set_property(bed, "colormap", "rainbow")
+    assert s.data.display(bed, mesh).color == "#00ff00"  # the middle of the map

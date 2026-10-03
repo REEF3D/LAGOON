@@ -3,11 +3,13 @@
 
 Navigation (mouse and trackpad):
 
-* rotate: left drag, or middle drag (Blender)
+* rotate: left drag, or middle drag (Blender), all the way round, about the centre
+  of the view
 * pan: right drag, or Shift + middle drag (Blender)
 * zoom: wheel or pinch; Ctrl + middle drag
 * views: 1 front, 3 right, 7 top (Ctrl for the opposite side), 5 perspective or
-  orthographic, Home or . to frame everything
+  orthographic, Home or . to frame everything, 2 the 2D view (from above, no
+  rotation: any drag pans)
 
 Frames are read in background threads; the viewport shows the newest frame that
 has arrived, so scrubbing never blocks the window. Without a usable GPU (or in
@@ -78,8 +80,13 @@ class ViewportPlaceholder(QWidget):
     def busy(self) -> bool:
         return False
 
+    two_d = False
+
     def frame(self, view: str = "perspective") -> None:
         pass
+
+    def set_2d(self, on: bool) -> None:
+        self.two_d = on
 
     def reframe(self) -> None:
         pass
@@ -163,6 +170,18 @@ BLENDER_CONTROLS = {
     "wheel": ("zoom", "push", -0.001),
 }
 
+#: 2D view: from above, no rotation; every drag pans
+CONTROLS_2D = {
+    "mouse1": ("pan", "drag", (1.0, 1.0)),
+    "mouse2": ("pan", "drag", (1.0, 1.0)),
+    "mouse3": ("pan", "drag", (1.0, 1.0)),
+    "shift+mouse1": ("pan", "drag", (1.0, 1.0)),
+    "shift+mouse3": ("pan", "drag", (1.0, 1.0)),
+    "control+mouse1": ("pan", "drag", (1.0, 1.0)),
+    "control+mouse3": ("zoom", "drag", (0.005, 0.005)),
+    "wheel": ("zoom", "push", -0.001),
+}
+
 KEY_VIEWS = {"1": "front", "3": "right", "7": "top"}
 #: arrow keys move the view (a tenth of it; with Shift a third)
 KEY_PANS = {"ArrowLeft": (-1, 0), "ArrowRight": (1, 0), "ArrowUp": (0, 1), "ArrowDown": (0, -1)}
@@ -187,6 +206,7 @@ class Viewport3D(QWidget):
         import pygfx as gfx
         from rendercanvas.qt import QRenderWidget
 
+        from lagoonviz.render.controls import FreeOrbitController
         from lagoonviz.render.scene3d import SceneRenderer
 
         self.setObjectName("viewport")
@@ -209,12 +229,9 @@ class Viewport3D(QWidget):
             self.canvas = QRenderWidget(self)
         self.renderer = gfx.WgpuRenderer(self.canvas)
         self.view = SceneRenderer(style)
-        self.controller = gfx.OrbitController(self.view.camera, register_events=self.renderer)
-        for control, action in BLENDER_CONTROLS.items():
-            try:
-                self.controller.controls[control] = action
-            except Exception as error:  # noqa: BLE001 (keep the pygfx default for this one)
-                log.warning("control %s not set: %s", control, error)
+        self.controller = FreeOrbitController(self.view.camera, register_events=self.renderer)
+        self.two_d = False
+        self._use_controls(BLENDER_CONTROLS)
         self.canvas.request_draw(self._draw)
         self.renderer.add_event_handler(self._on_key, "key_down")
         self.renderer.add_event_handler(self._on_interaction, "pointer_up", "wheel")
@@ -241,11 +258,20 @@ class Viewport3D(QWidget):
             button.setText(text)
             button.setToolTip(tip)
             button.setAutoRaise(True)
-            button.clicked.connect(
-                lambda _=False, k=key: self.frame("perspective" if k == "frame" else k)
-            )
+            button.clicked.connect(lambda _=False, k=key: self._view_button(k))
             bar.addWidget(button)
             self.view_buttons[key] = button
+            if key == "frame":
+                self.two_d_button = QToolButton()
+                self.two_d_button.setText("2D")
+                self.two_d_button.setCheckable(True)
+                self.two_d_button.setAutoRaise(True)
+                self.two_d_button.setToolTip(
+                    "2D: seen from straight above, orthographic, no rotation; any drag "
+                    "pans, the wheel zooms (2)"
+                )
+                self.two_d_button.toggled.connect(self.set_2d)
+                bar.addWidget(self.two_d_button)
         self.ortho_button = QToolButton()
         self.ortho_button.setText("Ortho")
         self.ortho_button.setCheckable(True)
@@ -452,13 +478,13 @@ class Viewport3D(QWidget):
         if item.kind == "free_surface":
             self._reshow_exaggerated_beds()
         if not self.session.scene.camera:
-            self.view.frame_once()
+            self.view.frame_once("top" if self.two_d else "perspective")
 
     def _reshow_exaggerated_beds(self) -> None:
         """A bed without its own still water depth is exaggerated about the free
         surface's level, which is known only once a free surface frame has arrived."""
         for other in self.session.scene:
-            if other.kind != "bathymetry" or float(other.properties.get("exaggeration", 1)) == 1:
+            if other.kind != "bathymetry" or self.session.data.exaggeration(other.id) == 1:
                 continue
             key = self._shown_keys.get(other.id)
             mesh = self.session.data.cache.get(key) if key is not None else None
@@ -556,10 +582,45 @@ class Viewport3D(QWidget):
         self.session.set_camera(None)
         self.view._framed = False
         if not self.view.is_empty:
-            self.frame("perspective")
+            self.frame("top" if self.two_d else "perspective")
+
+    def _view_button(self, key: str) -> None:
+        """Frame all keeps the 2D view; the 3D, front and side views leave it."""
+        if key == "frame":
+            self.frame("top" if self.two_d else "perspective")
+            return
+        if key != "top" and self.two_d:
+            self.two_d_button.setChecked(False)  # leaves 2D (and frames the 3D view)
+        self.frame(key)
+
+    def _use_controls(self, controls: dict) -> None:
+        self.controller.controls.clear()
+        for control, action in controls.items():
+            try:
+                self.controller.controls[control] = action
+            except Exception as error:  # noqa: BLE001 (keep the pygfx default for this one)
+                log.warning("control %s not set: %s", control, error)
+
+    def set_2d(self, on: bool) -> None:
+        """The 2D view: from straight above, orthographic, rotation off (drags pan).
+        Leaving it goes back to the 3D view and its projection."""
+        on = bool(on)
+        if self.two_d_button.isChecked() != on:
+            self.two_d_button.setChecked(on)  # comes back here through toggled
+            return
+        if on == self.two_d:
+            return
+        self.two_d = on
+        self.controller.locked = on
+        self._use_controls(CONTROLS_2D if on else BLENDER_CONTROLS)
+        self.ortho_button.setEnabled(not on)
+        self.view.set_orthographic(on or self.ortho_button.isChecked())
+        self.frame("top" if on else "perspective")
+        if self.partner is not None and self.partner.two_d != on:
+            self.partner.set_2d(on)  # compare: both views the same way
 
     def _set_ortho(self, on: bool) -> None:
-        self.view.set_orthographic(on)
+        self.view.set_orthographic(on or self.two_d)
         self._store_camera()
         self.redraw()
 
@@ -570,11 +631,16 @@ class Viewport3D(QWidget):
             key, modifiers = getattr(event, "key", ""), getattr(event, "modifiers", ())
         if key in KEY_VIEWS:
             view = KEY_VIEWS[key]
+            if self.two_d and view != "top":
+                self.two_d_button.setChecked(False)
             self.frame(OPPOSITE[view] if "Control" in modifiers else view)
+        elif key == "2":
+            self.two_d_button.toggle()
         elif key == "5":
-            self.ortho_button.toggle()
+            if not self.two_d:
+                self.ortho_button.toggle()
         elif key in ("Home", "."):
-            self.frame("perspective")
+            self.frame("top" if self.two_d else "perspective")
         elif key in KEY_PANS:
             step = 0.33 if "Shift" in modifiers else 0.1
             dx, dy = KEY_PANS[key]

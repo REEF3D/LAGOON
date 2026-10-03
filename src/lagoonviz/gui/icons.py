@@ -168,6 +168,13 @@ def _frame_all(p: QPainter) -> None:
     p.drawEllipse(QRectF(24, 24, 16, 16))
 
 
+def _reload(p: QPainter) -> None:
+    # a circular arrow: most of a circle, with the head at its open end
+    p.drawArc(QRectF(14, 14, 36, 36), 60 * 16, 290 * 16)
+    p.drawLine(QPointF(41, 16), QPointF(50, 14))
+    p.drawLine(QPointF(41, 16), QPointF(44, 25))
+
+
 def _camera(p: QPainter) -> None:
     p.drawRoundedRect(QRectF(8, 20, 48, 32), 6, 6)
     p.drawRect(QRectF(22, 12, 18, 8))
@@ -193,6 +200,7 @@ DRAWINGS: dict[str, Draw] = {
     "first": lambda p: _step(p, False, True),
     "frame_all": _frame_all,
     "screenshot": _camera,
+    "reload": _reload,
 }
 
 _cache: dict[tuple[str, str], QIcon] = {}

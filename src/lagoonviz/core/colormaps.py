@@ -77,6 +77,9 @@ _STOPS: dict[str, list[str]] = {
     "sand": ["#2f2418", "#5a4630", "#87704f", "#b39c72", "#d9c59a", "#f3e7c9"],
     # dark to mid-light grey: never paper white, so a grey bed stands out on white
     "greys": ["#1c1c1c", "#4a4a4a", "#7a7a7a", "#a6a6a6", "#c8c8c8"],
+    # grey to white: low values a mid grey, high values white; plain (coloured by
+    # nothing) it is pure white, shaded only by the light
+    "white": ["#9ba0a6", "#d4d7db", "#ffffff"],
 }
 
 assert set(_STOPS) == set(COLORMAPS), "every colour map in kinds needs a table"
@@ -133,8 +136,33 @@ MATERIAL_COLORS = {
 }
 
 
-def plain_color(kind: str, material: str | None = None) -> str:
-    """The colour of an item drawn without a colour map."""
+#: the one colour of a colour map for a surface coloured by nothing
+MAP_PLAIN_COLORS = {"sand": "#c4ae86", "greys": "#9a9a9a", "white": "#ffffff"}
+
+
+def map_plain_color(name: str) -> str:
+    """One colour standing for a colour map (its middle, unless set above)."""
+    name = COLORMAP_ALIASES.get(name, name)
+    if name in MAP_PLAIN_COLORS:
+        return MAP_PLAIN_COLORS[name]
+    r, g, b, _ = lut(name, 3)[1]
+    return f"#{round(r * 255):02x}{round(g * 255):02x}{round(b * 255):02x}"
+
+
+def plain_color(
+    kind: str,
+    material: str | None = None,
+    colormap: str | None = None,
+    default_colormap: str | None = None,
+) -> str:
+    """The colour of an item drawn without a variable: its material's, else the
+    kind's own while the colour map is the kind's default, else the colour map's
+    (a bed with the "white" map is white)."""
     if material in MATERIAL_COLORS:
         return MATERIAL_COLORS[material]
+    if colormap is not None and colormap != default_colormap:
+        try:
+            return map_plain_color(colormap)
+        except ValueError:
+            pass
     return PLAIN_COLORS.get(kind, "#cccccc")

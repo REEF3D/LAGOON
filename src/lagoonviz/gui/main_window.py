@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QByteArray, QLocale, QPoint, QRect, QSettings, QSize, Qt
+from PySide6.QtCore import QByteArray, QLocale, QPoint, QRect, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QIcon, QImage, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QApplication,
@@ -45,6 +45,9 @@ SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 OUTPUT_FILTER = "REEF3D output (*.pvtu *.pvtp *.vtu *.vtp);;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
 LAYOUT_VERSION = 3
+#: how often "Follow running simulation" looks for new output
+FOLLOW_SECONDS = 5
+QWIDGETSIZE_MAX = (1 << 24) - 1  # Qt's "no maximum size"
 
 
 class MainWindow(QMainWindow):
@@ -84,6 +87,7 @@ class MainWindow(QMainWindow):
         self.scene_tree = SceneTreePanel(self.bridge)
         self.properties = PropertiesPanel(self.bridge)
         self.timeline = TimelinePanel(self.bridge, loader=self.loader, busy=self._views_busy)
+        self.timeline.exit_full_screen.clicked.connect(lambda: self.toggle_full_screen(False))
         self.plots = PlotsPanel(self.bridge)
         self.profiles = ProfilesPanel(self.bridge)
         self.console = ConsolePanel(self.bridge)
@@ -145,6 +149,19 @@ class MainWindow(QMainWindow):
             self.open_output_dialog,
             tip="Open a REEF3D .pvtu/.pvtp/.vtu/.vtp file and the series it belongs to",
         )
+        self.act_reload = self._action(
+            "&Reload case",
+            self.reload_cases,
+            QKeySequence.Refresh,
+            tip="Read the case folders again: new outputs of a running simulation",
+        )
+        self.act_reload.setIconText("Reload")
+        self.act_follow = self._action(
+            "&Follow running simulation",
+            self.set_follow,
+            tip="Reload by itself when the simulation writes new output, and stay at the end",
+        )
+        self.act_follow.setCheckable(True)
         self.act_new = self._action("&New session", self.new_session, QKeySequence.New)
         self.act_open = self._action(
             "&Open session...", self.open_session_dialog, QKeySequence.Open
@@ -191,6 +208,22 @@ class MainWindow(QMainWindow):
             tip="Two 3D views, one case each; cameras and time move together",
         )
         self.act_compare.setCheckable(True)
+        self.act_full_screen = self._action(
+            "&Full screen viewer",
+            self.toggle_full_screen,
+            # not the system's full screen key (Ctrl+Cmd+F on a Mac): macOS takes that
+            # for its own full screen, which keeps all panels
+            "Ctrl+Shift+F",
+            tip="Only the 3D view and the player, on the whole screen (Esc to leave)",
+        )
+        self.act_full_screen.setCheckable(True)
+        # Esc leaves the full screen viewer (and does nothing otherwise)
+        self.act_leave_full_screen = self._action(
+            "Leave full screen", lambda: self.toggle_full_screen(False), "Esc"
+        )
+        self.act_leave_full_screen.setEnabled(False)
+        self.act_leave_full_screen.setShortcutContext(Qt.ApplicationShortcut)
+        self.addAction(self.act_leave_full_screen)
         self.act_play = self._action(
             "&Play / pause", lambda: self.timeline.play_button.toggle(), "Space"
         )
@@ -202,6 +235,8 @@ class MainWindow(QMainWindow):
         file_menu = bar.addMenu("&File")
         file_menu.addAction(self.act_open_case)
         file_menu.addAction(self.act_open_file)
+        file_menu.addAction(self.act_reload)
+        file_menu.addAction(self.act_follow)
         file_menu.addSeparator()
         for action in (self.act_new, self.act_open, self.act_save, self.act_save_as):
             file_menu.addAction(action)
@@ -245,6 +280,7 @@ class MainWindow(QMainWindow):
             self.look_actions[name] = action
         view_menu.addSeparator()
         view_menu.addAction(self.act_compare)
+        view_menu.addAction(self.act_full_screen)
         view_menu.addAction(self.act_play)
         view_menu.addAction(self.act_screenshot)
         view_menu.addAction(self.act_reset_layout)
@@ -257,12 +293,13 @@ class MainWindow(QMainWindow):
         self.act_open.setIconText("Open session")
         self.act_save.setIconText("Save")
         self.act_screenshot.setIconText("Screenshot")
-        bar = self.addToolBar("Main")
+        bar = self.toolbar = self.addToolBar("Main")
         bar.setObjectName("toolbar_main")
         bar.setMovable(False)
         bar.setIconSize(QSize(18, 18))
         bar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         bar.addAction(self.act_open_case)
+        bar.addAction(self.act_reload)
         bar.addSeparator()
         bar.addAction(self.act_open)
         bar.addAction(self.act_save)
@@ -305,6 +342,7 @@ class MainWindow(QMainWindow):
             (self.act_undo, "undo"),
             (self.act_redo, "redo"),
             (self.act_screenshot, "screenshot"),
+            (self.act_reload, "reload"),
         ):
             action.setIcon(icon(name))
         for kind in ("free_surface", "bathymetry", "volume", "slice", "series"):
@@ -470,6 +508,17 @@ class MainWindow(QMainWindow):
         self.viewport.reframe()
         if self.viewport2 is not None:
             self.viewport2.reframe()
+        self.scene_tree.select(self._main_item(case_id))
+        return case_id
+
+    def _main_item(self, case_id: str) -> str:
+        """The item to show in the properties after opening a case: its free surface,
+        else its bed, else the case itself (not the last item added, a gauge plot)."""
+        data = self.session.data
+        for kind in ("free_surface", "bathymetry"):
+            for item in self.session.scene:
+                if item.kind == kind and getattr(data.case_item(item.id), "id", None) == case_id:
+                    return item.id
         return case_id
 
     def open_session_dialog(self) -> None:
@@ -535,6 +584,116 @@ class MainWindow(QMainWindow):
         from lagoonviz.gui.export_movie import export_animation
 
         return export_animation(self)
+
+    # ------------------------------------------------------------- full screen
+    @property
+    def full_screen(self) -> bool:
+        return getattr(self, "_before_full_screen", None) is not None
+
+    def toggle_full_screen(self, on: bool | None = None) -> None:
+        """The 3D view and the player alone on the whole screen, or back to the
+        window as it was (panels, toolbar, size)."""
+        on = (not self.full_screen) if on is None else bool(on)
+        if on == self.full_screen:
+            self.act_full_screen.setChecked(on)
+            return
+        if on:
+            self._before_full_screen = (
+                self.saveState(LAYOUT_VERSION),
+                self.isMaximized(),
+                self.saveGeometry(),
+                [name for name, dock in self.docks.items() if not dock.isHidden()],
+            )
+            for name, dock in self.docks.items():
+                if name != "timeline":
+                    dock.hide()
+            self.docks["timeline"].show()
+            self.toolbar.hide()
+            self.statusBar().hide()
+            self.timeline.exit_full_screen.show()
+            # the player takes only the height it needs, without its title bar
+            dock = self.docks["timeline"]
+            dock.setTitleBarWidget(QWidget())
+            dock.setFixedHeight(self.timeline.sizeHint().height())
+            self.showFullScreen()
+        else:
+            state, maximized, geometry, shown = self._before_full_screen
+            self._before_full_screen = None
+            dock = self.docks["timeline"]
+            dock.setTitleBarWidget(None)
+            dock.setMinimumHeight(0)
+            dock.setMaximumHeight(QWIDGETSIZE_MAX)
+            self.timeline.exit_full_screen.hide()
+            self.toolbar.show()
+            self.statusBar().show()
+            for name in shown:
+                self.docks[name].show()
+            self.showNormal()
+            if maximized:
+                self.showMaximized()
+            else:
+                self.restoreGeometry(geometry)
+
+            def restore() -> None:
+                # sizes and tabs as before; after macOS has finished leaving full screen
+                # (while it animates, the window does not have its size yet)
+                if self.full_screen:
+                    return  # back in full screen meanwhile
+                self.restoreState(state, LAYOUT_VERSION)
+                for name in shown:
+                    self.docks[name].show()
+
+            restore()
+            QTimer.singleShot(700, restore)
+        self.act_full_screen.setChecked(on)
+        self.act_leave_full_screen.setEnabled(on)
+
+    # ------------------------------------------------------------- reload
+    def reload_cases(self) -> list[str]:
+        """Read the case folders again, keeping items, time and camera. At the last
+        frame, it stays at the (new) last frame, so a running simulation can be
+        followed."""
+        timeline = self.timeline
+        at_end = timeline.has_frames and timeline.frame_of(self.session.scene.time) >= (
+            timeline.n_frames - 1
+        )
+        before = timeline.n_frames
+        paths = self.session.reload()
+        self._signatures = self._case_signatures()
+        timeline.update_range()
+        if at_end and timeline.n_frames > before:
+            timeline.go_to_frame(timeline.n_frames - 1)
+        added = timeline.n_frames - before
+        news = f", {added} new output{'s' if added != 1 else ''}" if added > 0 else ""
+        self.statusBar().showMessage(f"Reloaded {len(paths)} case(s){news}", 6000)
+        return paths
+
+    def _case_signatures(self) -> dict[str, tuple]:
+        return {
+            item.id: self.session.data.signature(item.id)
+            for item in self.session.scene
+            if item.kind == "case"
+        }
+
+    def set_follow(self, on: bool) -> None:
+        """Watch the case folders every few seconds and reload when they change."""
+        if not hasattr(self, "_follow_timer"):
+            self._follow_timer = QTimer(self)
+            self._follow_timer.setInterval(FOLLOW_SECONDS * 1000)
+            self._follow_timer.timeout.connect(self._check_for_new_output)
+        self.act_follow.setChecked(bool(on))
+        if on:
+            self._signatures = self._case_signatures()
+            self._follow_timer.start()
+        else:
+            self._follow_timer.stop()
+
+    def _check_for_new_output(self) -> None:
+        if self.timeline.play_button.isChecked():
+            return  # not in the middle of playing
+        current = self._case_signatures()
+        if current != getattr(self, "_signatures", None):
+            self.reload_cases()
 
     def save_screenshot_dialog(self) -> None:
         path, _ = QFileDialog.getSaveFileName(

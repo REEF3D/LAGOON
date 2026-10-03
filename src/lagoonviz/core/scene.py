@@ -162,6 +162,11 @@ class Scene:
         self.time = float(time)
         self._notify("time", None)
 
+    def data_changed(self) -> None:
+        """Tell observers to show everything again: the data behind the items changed
+        (a reloaded case). Sent as "reset", like loading a session."""
+        self._notify("reset", None)
+
     # ------------------------------------------------------------- files
     def to_dict(self) -> dict[str, Any]:
         return {

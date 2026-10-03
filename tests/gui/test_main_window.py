@@ -78,6 +78,18 @@ def test_console_runs_python_and_logs_commands(window):
     assert "ZeroDivisionError" in window.console.log.toPlainText()
 
 
+def test_timeline_click_jumps_to_the_click(window, reef3d_run, qtbot):
+    from PySide6.QtCore import QPoint
+
+    window.open_case(reef3d_run)
+    slider = window.timeline.slider
+    slider.resize(400, slider.height())
+    slider.setValue(slider.minimum())
+    x = slider.width() - 1  # the far end, away from the handle
+    qtbot.mouseClick(slider, Qt.LeftButton, pos=QPoint(x, slider.height() // 2))
+    assert slider.value() == slider.value_at(x) == slider.maximum()
+
+
 def test_timeline_sets_time(window):
     window.timeline.slider.setValue(500)
     assert window.session.scene.time == pytest.approx(30.0)
@@ -176,6 +188,63 @@ def test_properties_list_data_variables(window, reef3d_run):
     window.properties.fit_button.click()
     assert props["auto_range"] is False and props["vmin"] < props["vmax"]
     assert "frames" in window.properties.info.text()
+
+
+def test_case_exaggeration_slider_and_sync(window, reef3d_run):
+    case_id = window.open_case(reef3d_run)
+    session = window.session
+    window.scene_tree.select(case_id)
+    assert "sync_exaggeration" not in window.properties.editors  # the Sync button instead
+    both = window.properties.editors["exaggeration"]
+    both.slider.setValue(both.slider.maximum() // 2)  # log scale: the middle is 3.16
+    assert session.scene.get(case_id).properties["exaggeration"] == pytest.approx(3.16)
+    assert both.spin.value() == pytest.approx(3.16)
+    both.spin.setValue(10.0)  # typing moves the slider
+    assert both.slider.value() == both.to_position(10.0)
+
+    bed = next(i.id for i in session.scene if i.kind == "bathymetry")
+    window.scene_tree.select(bed)
+    panel = window.properties
+    editor = panel.editors["exaggeration"]
+    assert editor.isEnabled() and editor.value() == pytest.approx(10.0)  # the case's
+    assert panel.sync_button.isChecked()
+    editor.spin.setValue(5.0)  # synced: moves the whole case
+    assert session.scene.get(case_id).properties["exaggeration"] == pytest.approx(5.0)
+    assert session.data.exaggeration("free_surface-1") == pytest.approx(5.0)
+
+    panel.sync_button.setChecked(False)  # each item its own, starting from 5
+    assert session.scene.get(case_id).properties["sync_exaggeration"] is False
+    editor.spin.setValue(2.0)
+    assert session.data.exaggeration(bed) == pytest.approx(2.0)
+    assert session.data.exaggeration("free_surface-1") == pytest.approx(5.0)
+    session.undo()
+    session.undo()  # sync back on
+    assert panel.sync_button.isChecked() and editor.value() == pytest.approx(5.0)
+
+
+def test_opening_a_case_shows_its_free_surface(window, reef3d_run):
+    window.open_case(reef3d_run)
+    assert window.scene_tree.selected_id() == "free_surface-1"
+    assert window.properties.item_id == "free_surface-1"
+
+
+def test_bed_colour_map_and_colour_by(window, reef3d_run):
+    window.open_case(reef3d_run)
+    session = window.session
+    bed = next(i.id for i in session.scene if i.kind == "bathymetry")
+    window.scene_tree.select(bed)
+    editors = window.properties.editors
+    # plain sand: the colour map still works, it picks the bed's one colour
+    assert editors["colormap"].isEnabled() and not editors["vmin"].isEnabled()
+    editors["colormap"].setCurrentText("white")
+    assert session.data.display(bed, session.data.load(bed)).color == "#ffffff"
+    assert session.scene.get(bed).properties["variable"] == "none"
+    editors["variable"].setCurrentText("depth")
+    editors["colormap"].setCurrentText("rainbow")
+    props = window.session.scene.get(bed).properties
+    assert (props["variable"], props["colormap"]) == ("depth", "rainbow")
+    editors["hide_wet"].setChecked(True)
+    assert props["hide_wet"] is True
 
 
 def test_open_case_error_is_reported(window, tmp_path, monkeypatch):
@@ -396,3 +465,66 @@ def test_compare_two_cases_side_by_side(window, tmp_path):
     window.screenshot()  # both views pasted in
     window.toggle_compare(False)
     assert window.viewport2.isHidden() and window.viewport.case_filter == ""
+
+
+def test_reload_follows_a_running_simulation(window, tmp_path):
+    import os
+    import shutil
+
+    from reef3d_fixtures import make_run
+
+    full = make_run(tmp_path / "full", frames=5, volume=False)
+    running = tmp_path / "running"
+    shutil.copytree(full, running)
+    folders = [running / "REEF3D_NHFLOW_VTP_FSF", running / "REEF3D_NHFLOW_VTP_BED"]
+    for folder in folders:
+        for path in folder.glob("*0000000[34]*"):
+            path.unlink()
+    window.open_case(running)
+    timeline = window.timeline
+    assert timeline.n_frames == 3
+    timeline.go_to_frame(2)  # at the end
+    window.set_follow(True)
+    for folder in folders:
+        for path in (full / folder.name).glob("*0000000[34]*"):
+            shutil.copy(path, folder)
+        os.utime(folder, (os.path.getmtime(folder) + 5,) * 2)
+    window._check_for_new_output()  # what the follow timer does
+    assert timeline.n_frames == 5
+    assert timeline.frame_of(window.session.scene.time) == 4  # followed to the new end
+    window.set_follow(False)
+    window.act_reload.trigger()  # nothing new: stays
+    assert timeline.n_frames == 5
+
+
+def test_full_screen_viewer_shows_only_the_view_and_the_player(window):
+    window.show()
+    window.act_full_screen.trigger()
+    assert window.full_screen and window.act_full_screen.isChecked()
+    shown = [name for name, dock in window.docks.items() if not dock.isHidden()]
+    assert shown == ["timeline"] and window.toolbar.isHidden()
+    assert not window.timeline.exit_full_screen.isHidden()
+    player = window.docks["timeline"]
+    assert player.maximumHeight() <= window.timeline.sizeHint().height()  # no more room
+    window.act_leave_full_screen.trigger()  # Esc
+    assert player.maximumHeight() > 10000
+    assert window.timeline.exit_full_screen.isHidden()
+    window.act_full_screen.trigger()
+    window.timeline.exit_full_screen.click()  # the button does the same
+    assert not window.full_screen
+    assert not window.full_screen and not window.toolbar.isHidden()
+    for name in ("scene", "properties", "plots", "timeline", "console"):
+        assert not window.docks[name].isHidden(), name
+
+
+def test_properties_show_the_automatic_range(window, reef3d_run):
+    window.open_case(reef3d_run)
+    window.scene_tree.select("free_surface-1")
+    low, high = window.properties.editors["vmin"], window.properties.editors["vmax"]
+    assert not low.isEnabled() and not high.isEnabled()
+    shown = window.session.data.automatic_range("free_surface-1")
+    assert (low.value(), high.value()) == pytest.approx(shown, abs=1e-3)
+    window.properties.editors["auto_range"].setChecked(False)
+    assert low.isEnabled() and window.session.scene.get("free_surface-1").properties[
+        "vmax"
+    ] == pytest.approx(shown[1], rel=1e-5)

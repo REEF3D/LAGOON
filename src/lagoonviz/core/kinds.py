@@ -29,6 +29,7 @@ COLORMAPS = (
     "rainbow",
     "sand",
     "greys",
+    "white",
 )
 
 
@@ -42,6 +43,8 @@ class PropertySpec:
     #: name of a data-dependent choice list (``"variables"``, ``"datasets"``, ``"cases"``)
     provider: str | None = None
     tip: str = ""
+    #: also edit with a slider: "log" (for factors such as exaggeration) or "linear"
+    slider: str | None = None
 
 
 def _data_source(role: str) -> dict[str, PropertySpec]:
@@ -57,7 +60,7 @@ def _data_source(role: str) -> dict[str, PropertySpec]:
 def _exaggeration(tip: str) -> dict[str, PropertySpec]:
     return {
         "exaggeration": PropertySpec(
-            1.0, "Vertical exaggeration", minimum=0.1, maximum=100.0, tip=tip
+            1.0, "Vertical exaggeration", minimum=0.1, maximum=100.0, tip=tip, slider="log"
         )
     }
 
@@ -90,6 +93,20 @@ KINDS: dict[str, KindSpec] = {
                 minimum=0.0,
                 tip="Time between outputs; 0 = from ctrl.txt (P 30), else frame numbers",
             ),
+            "exaggeration": PropertySpec(
+                1.0,
+                "Vertical exaggeration",
+                minimum=0.1,
+                maximum=100.0,
+                slider="log",
+                tip="Scales heights about the still water level, for the whole case",
+            ),
+            "sync_exaggeration": PropertySpec(
+                True,
+                "Same for all items",
+                tip="Use the case's exaggeration for every item (surface, bed, bodies, "
+                "slices, gauges); off: each surface and bed has its own",
+            ),
         },
     ),
     "free_surface": KindSpec(
@@ -109,6 +126,11 @@ KINDS: dict[str, KindSpec] = {
             **_data_source("bed"),
             **_colouring("none", "sand"),
             **_exaggeration("Scales the bed height about the still water level"),
+            "hide_wet": PropertySpec(
+                False,
+                "Hide wet land",
+                tip="Leave out the bed under still water, so only dry land shows",
+            ),
         },
     ),
     "volume": KindSpec(

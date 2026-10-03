@@ -16,34 +16,27 @@ import pygfx as gfx
 from lagoonviz.core.colormaps import colors, lut, normalize
 from lagoonviz.core.data.manager import DisplaySurface, GaugeMarks
 
-#: Viewport looks. "studio" is the light look of the REEF3D result animations:
-#: white background, soft light from above, matt surfaces. "ocean" is dark blue.
+#: The lights and gloss of every look: a soft sun from above for the shadows, most of
+#: the light from a headlamp that moves with the camera, so slopes keep their shading
+#: from any side, and some sheen on the water. pygfx lights are physical (diffuse =
+#: colour / pi).
+LIGHTING = {
+    "ambient": 0.55,
+    "sun": 0.6,  # fixed light from above: casts the shadows
+    "headlamp": 2.0,  # light that moves with the camera
+    "shininess": 20,
+    "specular": "#494949",
+    # water is glossier: a soft sheen on the slopes that face the light
+    "water_shininess": 40,
+    "water_specular": "#5a5a5a",
+    "shadows": True,
+}
+
+#: Viewport looks: the same light on a white ("studio", as in the REEF3D result
+#: animations) or a dark blue ("ocean") background.
 STYLES = {
-    "studio": {
-        "background": ("#e6eaef", "#ffffff"),  # bottom, top (pygfx order)
-        # pygfx lights are physical (diffuse = colour / pi): this mix shows flat water
-        # close to its colour map colour, shades slopes and lets the sun cast shadows
-        "ambient": 1.0,
-        "sun": 3.0,  # fixed light from above, low enough to model the waves
-        "headlamp": 0.2,  # light that moves with the camera (more of it flattens)
-        "shininess": 16,
-        "specular": "#2a2a2a",
-        # water is glossier: a soft sun sheen on the slopes that face it
-        "water_shininess": 40,
-        "water_specular": "#3a3a3a",
-        "shadows": True,
-    },
-    "ocean": {
-        "background": ("#1c3354", "#3b5f8f"),
-        "ambient": 0.55,
-        "sun": 0.6,
-        "headlamp": 2.0,
-        "shininess": 20,
-        "specular": "#494949",
-        "water_shininess": 40,
-        "water_specular": "#5a5a5a",
-        "shadows": True,
-    },
+    "studio": {"background": ("#e6eaef", "#ffffff"), **LIGHTING},  # bottom, top (pygfx order)
+    "ocean": {"background": ("#1c3354", "#3b5f8f"), **LIGHTING},
 }
 DEFAULT_STYLE = "studio"
 
@@ -494,7 +487,17 @@ class SceneRenderer:
             self.camera.show_object((*centre, radius), view_dir=direction, up=up)
         except (ValueError, TypeError):
             return
+        self._keep_z_up()
         self._framed = True
+
+    def _keep_z_up(self) -> None:
+        """pygfx makes the ``up`` of the last named view the axis the view orbits
+        about; after the top view that was y, and turning then tipped the scene over.
+        Orbiting is always about z, the vertical."""
+        try:
+            self.camera.world.reference_up = (0.0, 0.0, 1.0)
+        except AttributeError:
+            pass
 
     def diagnostics(self) -> dict:
         """What the renderer holds, for the developer remote: items, bounds, camera, sun."""
@@ -540,10 +543,10 @@ class SceneRenderer:
         shift = axes @ np.array([right, up]) * extent
         self.camera.world.position = tuple(np.asarray(self.camera.world.position) + shift)
 
-    def frame_once(self) -> None:
+    def frame_once(self, view: str = "perspective") -> None:
         """Frame the scene the first time something is shown."""
         if not self._framed and self._shown:
-            self.frame("perspective")
+            self.frame(view)
 
     def set_orthographic(self, orthographic: bool) -> None:
         self.camera.fov = 0 if orthographic else 45
@@ -566,6 +569,7 @@ class SceneRenderer:
         clean = {k: (tuple(v) if isinstance(v, list) else v) for k, v in state.items()}
         try:
             self.camera.set_state(clean)
+            self._keep_z_up()
             self._framed = True
         except (KeyError, TypeError, ValueError):
             self.frame()

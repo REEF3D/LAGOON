@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from lagoon_format.run import Output, Run, RunLog, read_case
 
 from lagoonviz.core.data.mesh import (
     CutPlan,
@@ -127,6 +128,11 @@ class Dataset:
         self._cuts: dict[tuple, CutPlan] = {}  # vertical slices: cut plans per piece
         #: set for output left over from an earlier run in the same folder
         self.earlier_run = False
+        #: from the run log (REEF3D_Case), when there is one: the run that wrote these
+        #: frames, when it started, and the simulation time of every frame
+        self.run_id: str | None = None
+        self.run_started = ""
+        self.times: np.ndarray | None = None
         self._lock = threading.Lock()  # one merge plan per dataset
         self._span: tuple[float, float] | None = None
 
@@ -135,7 +141,8 @@ class Dataset:
     def label(self) -> str:
         label = f"{self.solver} {ROLE_LABELS.get(self.role, self.role)}"
         if self.earlier_run:
-            label += f" (earlier run, outputs {self.steps[0]}–{self.last_step})"
+            when = f" {self.run_started[:16].replace('T', ' ')}" if self.run_started else ""
+            label += f" (earlier run{when}, outputs {self.steps[0]}–{self.last_step})"
         return label
 
     @property
@@ -179,7 +186,10 @@ class Dataset:
         return self._span
 
     def same_run_as(self, other: Dataset, margin: float = 600.0) -> bool:
-        """True if both were written during one run (their write times overlap)."""
+        """True if both were written during one run: by the run log if both are in it,
+        otherwise by overlapping write times."""
+        if self.run_id and other.run_id:
+            return self.run_id == other.run_id
         a0, a1 = self.written_span()
         b0, b1 = other.written_span()
         return self.solver == other.solver and a0 <= b1 + margin and b0 <= a1 + margin
@@ -187,6 +197,14 @@ class Dataset:
     @property
     def last_step(self) -> int:
         return self.frames[-1].step
+
+    def index_at_time(self, time: float) -> int | None:
+        """Index of the frame shown at a simulation time (run log times): the last one
+        written at or before it; None before the first."""
+        if self.times is None:
+            return None
+        index = int(np.searchsorted(self.times, time + 1e-9, side="right")) - 1
+        return index if index >= 0 else None
 
     def frame_index(self, frame: float) -> int:
         """Index of the frame shown at a (fractional) output number on the timeline.
@@ -522,21 +540,69 @@ def _width(path: Path) -> int:
     return len(match.group(1)) if match else 8
 
 
+_OWNERS: dict[Path, tuple[tuple, dict]] = {}
+
+
+def _owners(case_dir: Path) -> dict[Path, tuple[Run, Output]]:
+    """Which run wrote each file, and at which time, from the case's run log
+    (REEF3D_Case/REEF3D_*_run.jsonl); empty without one. Read once per change."""
+    case_dir = case_dir.resolve()
+    logs = sorted((case_dir / "REEF3D_Case").glob("REEF3D_*_run.jsonl")) + sorted(
+        case_dir.glob("REEF3D_*_run.jsonl")
+    )
+    stamp = tuple((p.name, p.stat().st_mtime, p.stat().st_size) for p in logs)
+    cached = _OWNERS.get(case_dir)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    found: dict[Path, tuple[Run, Output]] = {}
+    log = read_case(case_dir) if logs else None
+    if log is not None:
+        for path, (run, output, _stream) in log.owners().items():
+            found[(case_dir / path).resolve()] = (run, output)
+    _OWNERS[case_dir] = (stamp, found)
+    return found
+
+
+def run_log(case_dir: Path) -> RunLog | None:
+    """The run log of a case folder, if REEF3D wrote one."""
+    return read_case(case_dir.resolve())
+
+
+def _split(frames: list[Frame], owners: dict) -> list[tuple[list[Frame], Run | None, list]]:
+    """Frames grouped by the run that wrote them, the latest run first, each with the
+    simulation times of its frames. Uses the run log; frames it does not know are
+    split by modification times, as before."""
+    if owners:
+        by_run: dict[str, tuple[Run, list[Frame], list[float]]] = {}
+        unknown: list[Frame] = []
+        for frame in frames:
+            owner = owners.get(frame.path.resolve())
+            if owner is None:
+                unknown.append(frame)
+                continue
+            run, output = owner
+            entry = by_run.setdefault(run.id, (run, [], []))
+            entry[1].append(frame)
+            entry[2].append(output.time)
+        if by_run:
+            groups = sorted(by_run.values(), key=lambda e: e[0].started, reverse=True)
+            result = [(f, run, times) for run, f, times in groups]
+            result += [(run, None, []) for run in split_runs(unknown)] if unknown else []
+            return result
+    return [(run, None, []) for run in split_runs(frames)]
+
+
 def _dataset_from_folder(folder: Path) -> list[Dataset]:
     match = _FOLDER.match(folder.name)
     objects = _OBJECT_FOLDER.match(folder.name)
+    owners = _owners(folder.parent) if folder.parent.exists() else {}
     datasets = []
     for stem, frames in _frames_in(folder).items():
         if objects:
             solver = objects.group("solver")
             role = _OBJECT_ROLES[objects.group("what")]
             key = f"{solver.lower()}_{role}"
-            for number, run in enumerate(split_runs(frames)):
-                dataset = Dataset(
-                    key if number == 0 else f"{key}_earlier{number}", solver, role, run, folder
-                )
-                dataset.earlier_run = number > 0
-                datasets.append(dataset)
+            datasets += _datasets_by_run(key, solver, role, frames, folder, owners)
             continue
         # REEF3D-NHFLOW-FSF -> solver NHFLOW, tag FSF
         parts = stem.split("-")
@@ -550,12 +616,25 @@ def _dataset_from_folder(folder: Path) -> list[Dataset]:
         kind = "UnstructuredGrid" if what == "VTU" else "PolyData"
         role = _role(what, tag, kind)
         key = f"{solver.lower()}_{role}"
-        for number, run in enumerate(split_runs(frames)):
-            dataset = Dataset(
-                key if number == 0 else f"{key}_earlier{number}", solver, role, run, folder
-            )
-            dataset.earlier_run = number > 0
-            datasets.append(dataset)
+        datasets += _datasets_by_run(key, solver, role, frames, folder, owners)
+    return datasets
+
+
+def _datasets_by_run(key, solver, role, frames, folder, owners) -> list[Dataset]:
+    datasets = []
+    for number, (run_frames, run, times) in enumerate(_split(frames, owners)):
+        dataset = Dataset(
+            key if number == 0 else f"{key}_earlier{number}", solver, role, run_frames, folder
+        )
+        dataset.earlier_run = number > 0
+        if run is not None:
+            dataset.run_id = run.id
+            dataset.run_started = run.started
+            order = np.argsort(times, kind="stable")
+            if np.any(np.diff(np.asarray(times)) < 0):  # keep frames in time order
+                dataset.frames = [run_frames[i] for i in order]
+            dataset.times = np.asarray(times, dtype=np.float64)[order]
+        datasets.append(dataset)
     return datasets
 
 
@@ -566,7 +645,10 @@ def preferred(datasets: list[Dataset], short: float = 0.1) -> Dataset:
     wants to look at; if the latest run has less than ``short`` times the outputs of
     the longest one, the longest is shown. The others stay selectable.
     """
-    latest = max(datasets, key=lambda d: d.written_span()[1])
+    if all(d.run_started for d in datasets):  # the run log knows when each run began
+        latest = max(datasets, key=lambda d: d.run_started)
+    else:
+        latest = max(datasets, key=lambda d: d.written_span()[1])
     longest = max(datasets, key=len)
     return latest if len(latest) >= short * len(longest) else longest
 

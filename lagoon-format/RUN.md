@@ -204,20 +204,25 @@ two apart by the age of the last line.
 
 ## 2. Run and time inside VTK files
 
-Every `.vtu`, `.vtp`, `.pvtu` and `.pvtp` file gets field data before its first
-`<Piece>` (in the parallel files: inside `<PUnstructuredGrid>`/`<PPolyData>`):
+Every `.vtu`, `.vtp`, `.vts`, `.vtr` file and its parallel file get field data
+before the first `<Piece>` (in the parallel files: inside `<PUnstructuredGrid>`,
+`<PPolyData>`, ...):
 
 ```xml
 <FieldData>
-  <DataArray type="Float64" Name="TimeValue" NumberOfTuples="1" format="ascii">27.5</DataArray>
-  <DataArray type="Int32" Name="Step" NumberOfTuples="1" format="ascii">110</DataArray>
-  <DataArray type="String" Name="RunId" NumberOfTuples="1" format="ascii">20261003T154312Z-7f3a</DataArray>
+<DataArray type="Float64" Name="TimeValue" NumberOfTuples="1" format="ascii"> 0.633865420729153
+</DataArray>
+<DataArray type="String" Name="RunId" NumberOfTuples="1" format="ascii"> 50 48 50 54 ... 99 0
+</DataArray>
 </FieldData>
 ```
 
-`TimeValue` is the name ParaView already uses: with it, ParaView shows the real
-simulation time instead of the file index, so this helps every user. Legacy VTK
-(mooring lines) gets the same as a `FIELD FieldData 3` block.
+- `TimeValue` is the simulation time, the name ParaView already uses: ParaView then
+  shows real times instead of file numbers, which helps every user. REEF3D wrote it
+  before with `P 16 1`; it is now on by default.
+- `RunId` is the id of the run in the run log. As VTK requires for ASCII string
+  arrays, it is written as character codes, the string ending in 0.
+- The output number is in the file name and in the run log; it is not repeated.
 
 ## How readers use it
 

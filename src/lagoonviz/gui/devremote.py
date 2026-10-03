@@ -11,7 +11,7 @@ deletes the request. Only the actions below exist; there is no way to run code.
         {"set": ["free_surface-1", "exaggeration", 5.0]},
         {"visible": ["bathymetry-1", false]},
         {"select": "free_surface-1"},
-        {"view": "top"},                     # perspective, top, front, right, ...
+        {"view": "top"},                     # perspective, top, front, right, 2d, 3d, ...
         {"play": true},
         {"wait": 2.0},                       # seconds
         {"screenshot": "after.png"},         # waits until the frame is loaded
@@ -145,7 +145,10 @@ class DevRemote(QObject):
             window.scene_tree.select(value)
             return f"select {value}"
         if name == "view":
-            window.viewport.frame(str(value))
+            if str(value) in ("2d", "3d"):
+                window.viewport.set_2d(str(value) == "2d")
+            else:
+                window.viewport.frame(str(value))
             return f"view {value}"
         if name == "play":
             window.timeline.play_button.setChecked(bool(value))

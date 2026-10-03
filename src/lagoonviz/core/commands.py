@@ -146,6 +146,36 @@ class SetProperties(Command):
         return f"session.set_properties({_py(self.item_id)}, {args})"
 
 
+class SetMany(Command):
+    """Set properties of several items in one undo step (``{item_id: {key: value}}``),
+    recorded as one higher-level session call."""
+
+    def __init__(self, scene: Scene, changes: dict[str, dict[str, Any]], label: str, script: str):
+        self.values = {
+            item_id: {
+                key: validate(scene.get(item_id).kind, key, value) for key, value in values.items()
+            }
+            for item_id, values in changes.items()
+        }
+        self.old = {
+            item_id: {key: scene.get(item_id).properties[key] for key in values}
+            for item_id, values in self.values.items()
+        }
+        self.label = label
+        self.script = script
+
+    def do(self, scene: Scene) -> None:
+        for item_id, values in self.values.items():
+            scene.update(item_id, properties=dict(values))
+
+    def undo(self, scene: Scene) -> None:
+        for item_id, values in reversed(self.old.items()):
+            scene.update(item_id, properties=dict(values))
+
+    def to_script(self) -> str:
+        return self.script
+
+
 class SetVisible(Command):
     def __init__(self, scene: Scene, item_id: str, visible: bool):
         self.item_id = item_id

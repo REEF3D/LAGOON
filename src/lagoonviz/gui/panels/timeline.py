@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
+import numpy as np
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
@@ -19,6 +20,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QSlider,
     QSpinBox,
+    QStyle,
+    QStyleOptionSlider,
     QToolButton,
     QWidget,
 )
@@ -32,6 +35,34 @@ from lagoonviz.gui.theme import COLORS
 #: slider resolution without data (time in seconds up to "End")
 STEPS = 1000
 DEFAULT_FPS = 12
+
+
+class ClickSlider(QSlider):
+    """A slider that jumps to where it is clicked (Qt steps a page towards the click),
+    and can be dragged on from there."""
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if event.button() == Qt.LeftButton:
+            option = QStyleOptionSlider()
+            self.initStyleOption(option)
+            handle = self.style().subControlRect(
+                QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self
+            )
+            if not handle.contains(event.position().toPoint()):
+                self.setValue(self.value_at(event.position().x()))
+        super().mousePressEvent(event)  # on the handle now: dragging goes on
+
+    def value_at(self, x: float) -> int:
+        """The slider value under a horizontal position in the widget."""
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        groove = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderGroove, self)
+        handle = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self)
+        start = groove.x() + handle.width() / 2
+        span = max(groove.width() - handle.width(), 1)
+        return QStyle.sliderValueFromPosition(
+            self.minimum(), self.maximum(), round(x - start), round(span), option.upsideDown
+        )
 
 
 class TimelinePanel(QWidget):
@@ -48,6 +79,8 @@ class TimelinePanel(QWidget):
         self.loader = loader
         self.busy = busy or (lambda: False)
         self.n_frames = 0
+        self.times = np.zeros(0)
+        self.steps = np.zeros(0, int)
         self.first_frame = 0  # outputs before it hold no data of the shown runs
         self.dt = 1.0
         self.unit = "frame"
@@ -76,7 +109,7 @@ class TimelinePanel(QWidget):
         self.next_button = tool("next", "Next frame", lambda: self.step(1))
         self.last_button = tool("last", "Last frame", lambda: self.go_to_frame(self.n_frames - 1))
 
-        self.slider = QSlider(Qt.Horizontal)
+        self.slider = ClickSlider(Qt.Horizontal)
         self.slider.setRange(0, STEPS)
         self.slider.valueChanged.connect(self._on_slider)
 
@@ -106,6 +139,12 @@ class TimelinePanel(QWidget):
         layout.addWidget(self.fps)
         layout.addWidget(self.end_label)
         layout.addWidget(self.end)
+        # shown in the full screen viewer, where there is no toolbar or menu to leave by
+        self.exit_full_screen = QToolButton()
+        self.exit_full_screen.setText("Exit full screen")
+        self.exit_full_screen.setToolTip("Back to the window (Esc)")
+        self.exit_full_screen.hide()
+        layout.addWidget(self.exit_full_screen)
 
         # playback: one single-shot timer, scheduled after each step. Waiting for a
         # frame re-checks every few milliseconds, so playing goes on as soon as the
@@ -126,42 +165,58 @@ class TimelinePanel(QWidget):
     @property
     def end_time(self) -> float:
         if self.has_frames:
-            return max(self.n_frames - 1, 0) * self.dt
+            return float(self.times[-1])
         return self.end.value()
 
     def update_range(self) -> None:
-        """Follow the frames of the loaded cases."""
-        n = self.session.data.n_frames()
-        dt = self.session.data.print_interval()
+        """Follow the frames of the loaded cases: REEF3D's output numbers (times from
+        the output interval), or the times of the run log when REEF3D wrote one."""
+        times, steps, unit = self.session.data.timeline()
+        self.times = np.asarray(times, dtype=np.float64)
+        self.steps = np.asarray(steps, dtype=int)
+        n = int(self.steps[-1]) + 1 if self.steps.size else 0
         self.n_frames = n
-        self.first_frame = min(self.session.data.first_output(), max(n - 1, 0))
+        self.first_frame = int(self.steps[0]) if self.steps.size else 0
+        self.unit = unit
+        dt = self.session.data.print_interval()
         self.dt = dt or 1.0
-        self.unit = "s" if dt else "frame"
         self.end.setVisible(not n)
         self.end_label.setVisible(not n)
         for button in (self.first_button, self.prev_button, self.next_button, self.last_button):
-            button.setEnabled(n > 1)
+            button.setEnabled(self.steps.size > 1)
         self.slider.blockSignals(True)
         self.slider.setRange(self.first_frame, max(n - 1, 0) if n else STEPS)
-        self.slider.setPageStep(max(1, n // 20) if n else 50)
+        self.slider.setPageStep(max(1, self.steps.size // 20) if n else 50)
         self.slider.blockSignals(False)
         self._show_time(self.session.scene.time)
 
     # ------------------------------------------------------------- time
+    def _index_of(self, time: float) -> int:
+        """Index of the timeline frame nearest to a time."""
+        right = int(np.searchsorted(self.times, time))
+        if right <= 0:
+            return 0
+        if right >= self.times.size:
+            return self.times.size - 1
+        left = right - 1
+        return left if time - self.times[left] <= self.times[right] - time else right
+
     def frame_of(self, time: float) -> int:
-        return int(min(max(round(time / self.dt), self.first_frame), max(self.n_frames - 1, 0)))
+        if not self.has_frames:
+            return 0
+        return int(self.steps[self._index_of(time)])
 
     def go_to_frame(self, frame: int) -> None:
         if self.has_frames:
-            frame = min(max(frame, self.first_frame), self.n_frames - 1)
-            self.session.set_time(frame * self.dt)
+            frame = min(max(int(frame), self.first_frame), self.n_frames - 1)
+            self.session.set_time(float(self.times[frame - self.first_frame]))
 
     def step(self, frames: int) -> None:
         self.go_to_frame(self.frame_of(self.session.scene.time) + frames)
 
     def _on_slider(self, value: int) -> None:
         if self.has_frames:
-            self.session.set_time(value * self.dt)
+            self.go_to_frame(value)
         else:
             self.session.set_time(value / STEPS * self.end_time)
 
@@ -226,7 +281,10 @@ class TimelinePanel(QWidget):
             self.go_to_frame(frame)
             if self.loader is not None:
                 self.loader.prefetch(
-                    self.session.data.data_items(), self.session.scene.time, frames_ahead=8
+                    self.session.data.data_items(),
+                    self.session.scene.time,
+                    frames_ahead=8,
+                    times=self.times,
                 )
             return
         step = self.end_time / STEPS * 2
