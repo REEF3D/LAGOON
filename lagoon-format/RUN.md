@@ -19,8 +19,10 @@ the LAGOON format (Zarr, phase 3), so it is written once and kept.
 
 ## Two parts
 
-1. **A run log per solver**: `REEF3D_<SOLVER>_run.jsonl` in the case folder (the
-   folder that holds the `REEF3D_*` output folders). One JSON object per line.
+1. **A run log per solver**: `REEF3D_Case/REEF3D_<SOLVER>_run.jsonl`, in a
+   `REEF3D_Case` folder next to the `REEF3D_*` output folders. One JSON object per
+   line. The folder also keeps the control file of every run
+   (`REEF3D_Case/ctrl-<run id>.txt`).
 2. **Run and time inside every VTK file**: three `FieldData` arrays, so a file
    that left its folder still says where it belongs.
 
@@ -28,9 +30,10 @@ the LAGOON format (Zarr, phase 3), so it is written once and kept.
 
 ### File
 
-- Name: `REEF3D_<SOLVER>_run.jsonl`, e.g. `REEF3D_NHFLOW_run.jsonl`.
-  `<SOLVER>` is the same word as in the output folders (`FNPF`, `NHFLOW`, `CFD`,
-  `SFLOW`, ...).
+- Path: `REEF3D_Case/REEF3D_<SOLVER>_run.jsonl` in the case folder, e.g.
+  `REEF3D_Case/REEF3D_NHFLOW_run.jsonl`. `<SOLVER>` is the same word as in the
+  output folders (`FNPF`, `NHFLOW`, `CFD`, `SFLOW`, ...). Paths in the log
+  (`folder`) are relative to the case folder, not to `REEF3D_Case`.
 - Encoding: UTF-8, [JSON Lines](https://jsonlines.org): one JSON object per line,
   `\n` at the end of every line.
 - **Append only.** Rank 0 opens the file in append mode, writes a whole line and
@@ -42,7 +45,8 @@ the LAGOON format (Zarr, phase 3), so it is written once and kept.
 
 ### Record `run`: when a run starts
 
-Written once, before the first output.
+Written once, before the first output. Its `streams` may be empty: writers that
+register when they first write add their stream with a `stream` record.
 
 ```json
 {"type": "run", "format": "reef3d-run", "version": 1,
@@ -50,7 +54,8 @@ Written once, before the first output.
  "solver": "NHFLOW", "reef3d": "25.02", "git": "a1b2c3d",
  "started": "2026-10-03T15:43:12Z", "host": "node017", "ranks": 4,
  "case": "floating_wind_turbine",
- "ctrl": {"file": "ctrl.txt", "sha256": "9c1e..."},
+ "ctrl": {"file": "ctrl.txt", "copy": "REEF3D_Case/ctrl-20261003T154312Z-7f3a.txt",
+          "sha256": "9c1e..."},
  "restart": {"from": "20261002T081500Z-c2d1", "time": 120.0},
  "units": {"length": "m", "time": "s", "mass": "kg", "force": "N"},
  "still_water_level": 56.0,
@@ -67,7 +72,7 @@ Written once, before the first output.
 | `started` | required | Start time, ISO 8601 UTC |
 | `host`, `ranks` | optional | Machine, number of MPI ranks |
 | `case` | optional | A name for the case (default: the folder name) |
-| `ctrl` | recommended | Control file and its SHA-256: same hash = same set-up |
+| `ctrl` | recommended | Control file, the copy kept for this run, and its SHA-256: same hash = same set-up |
 | `restart` | optional | The run and time this one continues from (hot start) |
 | `units` | optional | Default SI as shown |
 | `still_water_level` | recommended | z of the still water surface |
@@ -89,7 +94,7 @@ A map from a short stream name (unique within the run) to its description.
              "pieces": 4, "static": true},
   "volume": {"role": "volume", "folder": "REEF3D_NHFLOW_VTU",
              "files": "REEF3D-NHFLOW-{step:08d}.pvtu", "format": "vtu", "pieces": 4},
-  "body0":  {"role": "body", "object": 0, "folder": "REEF3D_NHFLOW_6DOF_VTP",
+  "body0":  {"role": "floating_body", "object": 0, "folder": "REEF3D_NHFLOW_6DOF_VTP",
              "files": "REEF3D-6DOF-0-{step:06d}.vtp", "format": "vtp"},
   "moor1":  {"role": "mooring", "object": 1, "folder": "REEF3D_NHFLOW_6DOF_Mooring",
              "files": "REEF3D-Mooring-00000001-{step:06d}.vtk", "format": "vtk-legacy",
@@ -111,7 +116,7 @@ A map from a short stream name (unique within the run) to its description.
 
 | key | | meaning |
 |---|---|---|
-| `role` | required | `free_surface`, `bed`, `volume`, `body`, `mooring`, `structure`, `particles`, `gauges`, `profiles`, `forces`, `motion`, `probes`, or a name of the solver's own (readers show unknown roles as generic data) |
+| `role` | required | See the table of roles below |
 | `folder` | required | Output folder, relative to the case folder |
 | `files` | frames | File name pattern with `{step}` (output number) or `{iteration}`, Python/`fmt` style: `{step:08d}`. For parallel VTK it names the `.pvtu`/`.pvtp` file |
 | `file` | tables, static | One file: a table that grows over the run (gauges, forces, motions), or static geometry (a structure) |
@@ -123,9 +128,50 @@ A map from a short stream name (unique within the run) to its description.
 | `first_step` | optional | First output this stream writes, if not 0 |
 | `gauges`, `lines` | optional | Positions of gauges and profile lines |
 
+#### Roles
+
+| role | data |
+|---|---|
+| `free_surface` | the free surface (FSF) |
+| `free_surface_mean` | time-averaged free surface |
+| `bed` | the bed or topography |
+| `volume` | the 3D field (VTU) |
+| `floating_body` | a 6DOF body, moving with its motion |
+| `fixed_body` | a body that does not move |
+| `structure` | porous or forced structures (VRANS, forcing) |
+| `mooring` | a mooring line, with its tension |
+| `net` | a net |
+| `dem` | DEM elements (discrete element bodies) |
+| `cpm_particles` | CPM particles |
+| `particles` | other Lagrangian particles |
+| `gauges` | wave gauges (table) |
+| `profiles` | wave profiles along lines (WSFLINE) |
+| `forces` | forces on a body or structure (table) |
+| `motion` | position and orientation of a body (table) |
+| `body_velocity` | velocities of a body (table) |
+| `probes` | point or line probes (table) |
+
+A solver may use a role of its own; readers show unknown roles as generic data.
+
+### Record `stream`: a stream registered while running
+
+Writers that know their output only when they first write it (a body, a
+mooring line, a particle cloud) register it then:
+
+```json
+{"type": "stream", "run": "20261003T154312Z-7f3a", "name": "body0",
+ "stream": {"role": "floating_body", "folder": "REEF3D_NHFLOW_6DOF_VTP",
+            "files": "REEF3D-6DOF-0-{step:06d}.vtp", "format": "vtp", "first_step": 0}}
+```
+
+It has the same meaning as an entry in the `run` record's `streams`, and comes
+before the first `output` that names it.
+
 ### Record `output`: every time the run writes output
 
 One line per output step, after its files are complete (closed on all ranks).
+Streams with their own counters (bodies, mooring lines, profiles) write their own
+`output` lines; `step` is always the number in that stream's file names.
 
 ```json
 {"type": "output", "run": "20261003T154312Z-7f3a", "step": 110, "time": 27.5,
@@ -175,7 +221,9 @@ simulation time instead of the file index, so this helps every user. Legacy VTK
 
 ## How readers use it
 
-1. Read every `REEF3D_*_run.jsonl` in the case folder. Each `run` record is a run.
+1. Read every `REEF3D_Case/REEF3D_*_run.jsonl` of the case folder (and, for logs
+   written before the folder existed, `REEF3D_*_run.jsonl` in the case folder
+   itself). Each `run` record is a run; `stream` records add to its streams.
 2. A file belongs to the **last** run whose `output` records list it: a later
    run overwrites the files of an earlier one, and the log says which survived.
    Runs of which no file survived are history only.
@@ -201,13 +249,19 @@ Writing the run log now therefore costs nothing later: the same records move
 into the store, and REEF3D keeps writing them for VTK output as long as VTK is
 written.
 
-## Writing it in REEF3D (sketch)
+## Writing it in REEF3D
+
+The reference implementation is the `runlog` class of REEF3D (`src/runlog.h`,
+`src/runlog.cpp`): rank 0 writes; each writer calls it once after the files of an
+output are complete, giving the path it wrote; folder, file pattern and format are
+taken from that path. A sketch of what it does:
 
 Rank 0 only, after the output of a step is complete on all ranks:
 
 ```cpp
 // once, at start
-runlog.open(case_dir + "/REEF3D_" + solver + "_run.jsonl", std::ios::app);
+mkdir("./REEF3D_Case", 0777);
+runlog.open("./REEF3D_Case/REEF3D_" + solver + "_run.jsonl", std::ios::app);
 runlog << run_record_json() << '\n' << std::flush;
 // at every output
 runlog << "{\"type\":\"output\",\"run\":\"" << run_id << "\",\"step\":" << step

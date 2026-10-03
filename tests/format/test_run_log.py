@@ -57,7 +57,8 @@ def _write_case(root, crash=False):
     text = "".join(json.dumps(line) + "\n" for line in lines)
     if crash:
         text += '{"type": "output", "run": "2026'  # killed while writing
-    (root / "REEF3D_NHFLOW_run.jsonl").write_text(text)
+    (root / "REEF3D_Case").mkdir()
+    (root / "REEF3D_Case" / "REEF3D_NHFLOW_run.jsonl").write_text(text)
     return root
 
 
@@ -109,3 +110,77 @@ def test_the_example_in_the_specification_reads():
     assert run.streams["moor0"]["first_step"] == 1
     assert [o.time for o in run.outputs] == [0.0, 0.25, 0.5]
     assert run.file_name("body0", run.outputs[2]) == "REEF3D-6DOF-0-000002.vtp"
+
+
+def test_streams_registered_while_running(tmp_path):
+    """REEF3D's writers register a stream when they first write it."""
+    root = tmp_path / "case"
+    (root / "REEF3D_Case").mkdir(parents=True)
+    (root / "REEF3D_NHFLOW_6DOF_VTP").mkdir()
+    run = "20261003T190624Z-5dbb"
+    records = [
+        {
+            "type": "run",
+            "format": "reef3d-run",
+            "version": 1,
+            "run": run,
+            "solver": "NHFLOW",
+            "started": "2026-10-03T19:06:24Z",
+            "streams": {},
+        },
+        {
+            "type": "stream",
+            "run": run,
+            "name": "body0",
+            "stream": {
+                "role": "floating_body",
+                "folder": "REEF3D_NHFLOW_6DOF_VTP",
+                "files": "REEF3D-6DOF-0-{step:06d}.vtp",
+                "format": "vtp",
+            },
+        },
+    ]
+    for step in range(3):
+        (root / "REEF3D_NHFLOW_6DOF_VTP" / f"REEF3D-6DOF-0-{step:06d}.vtp").write_text("x")
+        records.append(
+            {
+                "type": "output",
+                "run": run,
+                "step": step,
+                "time": 0.5 * step,
+                "iteration": step,
+                "streams": ["body0"],
+            }
+        )
+    text = "".join(json.dumps(r) + "\n" for r in records)
+    (root / "REEF3D_Case" / "REEF3D_NHFLOW_run.jsonl").write_text(text)
+    log = read_case(root)
+    (only,) = log.runs
+    assert only.streams["body0"]["role"] == "floating_body"
+    assert [o.time for o, _ in log.surviving(only, "body0")] == [0.0, 0.5, 1.0]
+    assert check(log) == []
+
+
+def test_a_log_written_by_reef3d():
+    """Written by the patched REEF3D (hans_dev) on the NHFLOW Stokes5 tutorial:
+    a run of 2.2 s, then a restart of 1.2 s in the same folder."""
+    from pathlib import Path
+
+    from lagoon_format.run import read_log
+
+    path = (
+        Path(__file__).parents[2]
+        / "lagoon-format/examples/reef3d_stokes5_restart/REEF3D_Case/REEF3D_NHFLOW_run.jsonl"
+    )
+    log = read_log(path)
+    assert not log.warnings
+    first, second = log.runs
+    assert first.status == second.status == "finished"
+    assert set(first.streams) == {"wsf", "volume", "fsf", "bed", "wsfline"}
+    assert first.streams["fsf"]["files"] == "REEF3D-NHFLOW-FSF-{step:08d}.pvtp"
+    assert second.record["still_water_level"] == 4.01
+    times = [o.time for o in second.outputs if "fsf" in o.streams]
+    assert times == sorted(times) and times[0] == 0.0
+    owners = log.owners()
+    fsf0 = Path("REEF3D_NHFLOW_VTP_FSF/REEF3D-NHFLOW-FSF-00000000.pvtp")
+    assert owners[fsf0][0] is second  # the restart overwrote output 0

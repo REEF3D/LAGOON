@@ -31,10 +31,12 @@
   sun is lower, so waves show their shape.
 - View → Theme switches at once (no restart) and takes the 3D view along: light with
   the studio look, dark with the ocean look.
-- Proposed REEF3D run log (`lagoon-format/RUN.md`, draft 1): a JSON Lines file per
-  solver that states each run, the streams it writes and the time of every output,
-  plus `TimeValue`/`Step`/`RunId` field data in VTK files. Reference reader and
-  checker: `python -m lagoon_format.run <case>`. LAGOON will use it when present.
+- REEF3D run log (`lagoon-format/RUN.md`, version 1): `REEF3D_Case/REEF3D_<SOLVER>_run.jsonl`
+  states each run, the streams it writes (roles incl. floating bodies, DEM, CPM
+  particles), and the time of every output; streams can register while running.
+  Reference reader and checker: `python -m lagoon_format.run <case>`. The REEF3D
+  writer (hans_dev patch, `runlog` class) was tested on the NHFLOW Stokes5
+  tutorial with a restart; its log is a test fixture.
 - Compare side by side (View → Compare side by side, Ctrl+Shift+2): two 3D views,
   each showing one case (chosen in its header); cameras move together and both
   follow the timeline. With two cases open, each view gets one.

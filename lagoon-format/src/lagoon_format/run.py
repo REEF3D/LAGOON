@@ -1,4 +1,4 @@
-"""Reference reader for the REEF3D run log (``REEF3D_<SOLVER>_run.jsonl``).
+"""Reference reader for the REEF3D run log (``REEF3D_Case/REEF3D_<SOLVER>_run.jsonl``).
 
 See ``RUN.md`` for the specification. Standard library only, MIT-licensed.
 
@@ -16,6 +16,7 @@ from typing import Any
 FORMAT = "reef3d-run"
 VERSION = 1
 PATTERN = "REEF3D_*_run.jsonl"
+FOLDER = "REEF3D_Case"
 
 
 @dataclass
@@ -104,7 +105,8 @@ class RunLog:
 def read_log(path: str | Path, log: RunLog | None = None) -> RunLog:
     """Read one run log file (add to ``log`` if given)."""
     path = Path(path)
-    log = log or RunLog(path.parent)
+    case = path.parent.parent if path.parent.name == FOLDER else path.parent
+    log = log or RunLog(case)
     runs = {r.id: r for r in log.runs}
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.split("\n")
@@ -132,6 +134,14 @@ def read_log(path: str | Path, log: RunLog | None = None) -> RunLog:
                 log.warnings.append(f"{path.name}:{number}: run {run.id} started twice")
             runs[run.id] = run
             log.runs.append(run)
+        elif kind == "stream":
+            run = runs.get(str(record.get("run", "")))
+            if run is None:
+                log.warnings.append(f"{path.name}:{number}: stream of an unknown run")
+                continue
+            run.record.setdefault("streams", {})[str(record.get("name", ""))] = record.get(
+                "stream", {}
+            )
         elif kind == "output":
             run = runs.get(str(record.get("run", "")))
             if run is None:
@@ -158,7 +168,7 @@ def read_log(path: str | Path, log: RunLog | None = None) -> RunLog:
 def read_case(folder: str | Path) -> RunLog | None:
     """All run logs of a case folder, or None if it has none."""
     folder = Path(folder)
-    paths = sorted(folder.glob(PATTERN))
+    paths = sorted((folder / FOLDER).glob(PATTERN)) + sorted(folder.glob(PATTERN))
     if not paths:
         return None
     log = RunLog(folder)
@@ -193,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     folder = Path(argv[0] if argv else ".")
     log = read_case(folder)
     if log is None:
-        print(f"no {PATTERN} in {folder}")
+        print(f"no {FOLDER}/{PATTERN} in {folder}")
         return 1
     for run in log.runs:
         span = (
