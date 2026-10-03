@@ -331,3 +331,15 @@ def test_sun_shadow_darkens_the_ground():
     _keep("render_shadow_off.png", images[False].astype(np.uint8))
     darker = (images[False] - images[True]).sum(axis=-1) > 30
     assert darker.sum() > 200, f"no visible shadow ({darker.sum()} darker pixels)"
+
+
+def test_render_wave_profiles(tmp_path):
+    from reef3d_fixtures import make_run
+
+    run = make_run(tmp_path / "lines", frames=4, volume=False, print_interval=0.5, profiles=True)
+    session = Session()
+    session.open_case(run)
+    image = render_session(session, (320, 180), time=1.0, view="perspective")
+    _keep("render_profiles.png", image)
+    blue = np.array([0x2B, 0x4C, 0x7E])  # first plot colour: line 1
+    assert (np.abs(image[..., :3].astype(int) - blue).sum(axis=-1) < 40).sum() > 5

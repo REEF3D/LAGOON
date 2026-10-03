@@ -407,9 +407,16 @@ class SceneRenderer:
         self.remove_gauges(marks.item_id)
         group = gfx.Group()
         group.visible = marks.visible
+        line_material = gfx.LineSegmentMaterial(thickness=2.5, color_mode="vertex")
+        if not len(marks.dots):
+            # a wave profile lies on the water it describes: draw it on top
+            for name, value in (("depth_test", False), ("render_queue", 3900)):
+                try:
+                    setattr(line_material, name, value)
+                except (AttributeError, ValueError, TypeError):
+                    pass
         staffs = gfx.Line(
-            gfx.Geometry(positions=staff_positions, colors=staff_colors),
-            gfx.LineSegmentMaterial(thickness=2.5, color_mode="vertex"),
+            gfx.Geometry(positions=staff_positions, colors=staff_colors), line_material
         )
         group.add(staffs)
         if wet.any():

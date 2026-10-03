@@ -31,6 +31,19 @@
   sun is lower, so waves show their shape.
 - View → Theme switches at once (no restart) and takes the 3D view along: light with
   the studio look, dark with the ocean look.
+- Proposed REEF3D run log (`lagoon-format/RUN.md`, draft 1): a JSON Lines file per
+  solver that states each run, the streams it writes and the time of every output,
+  plus `TimeValue`/`Step`/`RunId` field data in VTK files. Reference reader and
+  checker: `python -m lagoon_format.run <case>`. LAGOON will use it when present.
+- Compare side by side (View → Compare side by side, Ctrl+Shift+2): two 3D views,
+  each showing one case (chosen in its header); cameras move together and both
+  follow the timeline. With two cases open, each view gets one.
+- Wave profiles along lines (`REEF3D_*_WSFLINE`): new item kind *Wave profile*
+  (lines, wave theory, profile in 3D). A *Wave profiles* tab next to the plots shows
+  the elevation along x at the current time (FNPF's wave theory dashed) on a steady
+  axis; the 3D view draws each line at its y, in the same colours. Files are timed
+  by their `simtime`; a folder written by several runs shows the latest (unless it
+  is a short start). Opening a case adds the profiles of the shown run.
 - Wave gauges in 3D: each plotted gauge is a staff at its position with a dot at the
   water surface, in the colour of its plot line; the dot follows the timeline. Gauge
   files plot the first four gauges by default; *Gauges in 3D* turns them off.

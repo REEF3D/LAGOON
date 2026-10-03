@@ -78,8 +78,12 @@ class OffscreenView:
                 self.scene.remove(item_id)  # no output of this run at this time
             else:
                 self.scene.update(item.kind, session.data.display(item_id, mesh))
-        for item_id in session.data.series_items():
-            marks = session.data.gauge_marks(item_id)
+        profiles = set(session.data.profile_items())
+        for item_id in session.data.series_items() + sorted(profiles):
+            data = session.data
+            marks = (
+                data.profile_marks(item_id) if item_id in profiles else data.gauge_marks(item_id)
+            )
             if marks is None:
                 self.scene.remove_gauges(item_id)
             else:

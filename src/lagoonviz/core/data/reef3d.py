@@ -31,6 +31,7 @@ from lagoonviz.core.data.mesh import (
     triangulate,
     variable_names,
 )
+from lagoonviz.core.data.profiles import ProfileSet, find_profiles
 from lagoonviz.core.data.series import SeriesFile, find_series
 from lagoonviz.core.data.vtkxml import (
     legacy_point_arrays,
@@ -344,6 +345,8 @@ class Case:
     print_interval: float | None = None  # seconds between frames (ctrl.txt P 30)
     #: gauge, 6DOF and force tables (read on first use)
     series: dict[str, SeriesFile] = field(default_factory=dict)
+    #: wave profiles along lines (WSFLINE), by solver
+    profiles: dict[str, ProfileSet] = field(default_factory=dict)
 
     @property
     def solver(self) -> str:
@@ -360,6 +363,15 @@ class Case:
     def n_frames(self) -> int:
         """Length of the timeline: the highest output number plus one."""
         return max((d.last_step + 1 for d in self.datasets.values()), default=0)
+
+    def main_profiles(self) -> list[ProfileSet]:
+        """Wave profiles written during the shown run (as for :meth:`main_series`)."""
+        shown = list(self.main_datasets().values())
+        if not shown:
+            return list(self.profiles.values())
+        start = min(d.written_span()[0] for d in shown) - 600.0
+        end = max(d.written_span()[1] for d in shown) + 600.0
+        return [p for p in self.profiles.values() if start <= p.written_span()[1] <= end]
 
     def main_series(self, limit: int = 4) -> list[SeriesFile]:
         """Time series to plot when the case is opened: those of the shown run.
@@ -636,9 +648,15 @@ def open_case(path: str | Path) -> Case:
             # a plain folder with VTU/VTP files
             datasets = _dataset_from_folder(path)
     series = find_series(case_dir)
-    if not datasets and not series:
+    profiles = find_profiles(case_dir)
+    if not datasets and not series and not profiles:
         raise ValueError(f"no REEF3D VTU/VTP output or time series found in {path}")
-    case = Case(case_dir, print_interval=read_print_interval(case_dir), series=series)
+    case = Case(
+        case_dir,
+        print_interval=read_print_interval(case_dir),
+        series=series,
+        profiles=profiles,
+    )
     for dataset in datasets:
         key = dataset.key
         n = 2

@@ -21,6 +21,7 @@ import numpy as np
 
 from lagoonviz.core.colormaps import SERIES_PALETTES, plain_color
 from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
+from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
 from lagoonviz.core.scene import Scene, SceneItem
@@ -271,6 +272,9 @@ class DataManager:
         if provider == "series":
             case = self.case(item_id)
             return ["", *case.series] if case else [""]
+        if provider == "profiles":
+            case = self.case(item_id)
+            return ["", *case.profiles] if case else [""]
         raise ValueError(f"unknown choice provider {provider!r}")
 
     def labelled_choices(self, item_id: str, provider: str) -> list[tuple[str, str]]:
@@ -300,6 +304,11 @@ class DataManager:
             return [
                 ("first file" if v == "" else case.series[v].label if case else v, v)
                 for v in values
+            ]
+        if provider == "profiles":
+            case = self.case(item_id)
+            return [
+                ("first" if v == "" else case.profiles[v].label if case else v, v) for v in values
             ]
         return [(v, v) for v in values]
 
@@ -641,6 +650,82 @@ class DataManager:
                 level = self.still_water_level(other.id, mesh)
             return level, exaggeration
         return 0.0, 1.0
+
+    # ------------------------------------------------------------- wave profiles
+    def profile_items(self) -> list[str]:
+        return [item.id for item in self.scene if item.kind == "profile"]
+
+    def profile_set(self, item_id: str) -> ProfileSet | None:
+        case = self.case(item_id)
+        if case is None or not case.profiles:
+            return None
+        source = str(self.scene.get(item_id).properties.get("source", ""))
+        if source in case.profiles:
+            return case.profiles[source]
+        return None if source else next(iter(case.profiles.values()))
+
+    def profile(self, item_id: str, time: float | None = None) -> Profile | None:
+        """The profile file shown at a time (the scene time in seconds by default)."""
+        found = self.profile_set(item_id)
+        if found is None or not found.paths:
+            return None
+        time = self.scene.time if time is None else time
+        try:
+            return found.at(float(time))
+        except (OSError, ValueError):
+            return None
+
+    def profile_lines(self, item_id: str, time: float | None = None) -> list[ProfileLine]:
+        """The lines an item shows, in the order of its ``lines`` property."""
+        profile = self.profile(item_id, time)
+        if profile is None:
+            return []
+        text = str(self.scene.get(item_id).properties.get("lines", ""))
+        wanted = [int(t) for t in text.replace(";", ",").split(",") if t.strip().isdigit()]
+        numbers = [n for n in wanted if n in profile.lines] or sorted(profile.lines)
+        return [profile.lines[n] for n in numbers]
+
+    def profile_marks(self, item_id: str, palette: list[str] | None = None) -> GaugeMarks | None:
+        """A shown profile as lines in 3D, at the still water level of the case's free
+        surface (exaggerated like it), in the colours of its plot lines. The lines
+        travel as segments in ``staffs``; ``dots`` stays empty."""
+        if item_id not in self.scene:
+            return None
+        item = self.scene.get(item_id)
+        lines = self.profile_lines(item_id)
+        if not lines:
+            return None
+        palette = list(palette or SERIES_PALETTES["light"])
+        level, exaggeration = self._water_reference(item_id)
+        segments, colors, names = [], [], []
+        for index, line in enumerate(lines):
+            ok = np.isfinite(line.x) & np.isfinite(line.eta)
+            x, eta = line.x[ok], line.eta[ok]
+            if x.size < 2:
+                continue
+            # elevation above still water, or (some solvers) the surface height
+            absolute = level and abs(float(np.median(eta)) - level) < 0.5 * abs(level)
+            z = level + exaggeration * ((eta - level) if absolute else eta)
+            points = np.stack([x, np.full_like(x, line.y), z], axis=1)
+            segments.append(np.stack([points[:-1], points[1:]], axis=1))
+            colors += [palette[index % len(palette)]] * (x.size - 1)
+            names.append(f"line {line.number}")
+        if not segments:
+            return None
+        case_item = self.case_item(item_id)
+        visible = bool(
+            item.visible
+            and item.properties.get("profile_3d", True)
+            and (case_item is None or case_item.visible)
+        )
+        return GaugeMarks(
+            item_id,
+            names,
+            np.concatenate(segments).astype(np.float32),
+            np.zeros((0, 3), np.float32),
+            colors,
+            visible,
+        )
 
     def series_end(self) -> float:
         """Last time of the shown time series (0 without any)."""

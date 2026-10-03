@@ -21,6 +21,7 @@ deletes the request. Only the actions below exist; there is no way to run code.
         {"fps": 30},                         # playback speed
         {"clear_cache": true},               # forget loaded frames (timing tests)
         {"diagnose": true},                  # renderer state: items, bounds, camera, sun
+        {"dock": "profiles"},                # bring a panel to the front
         {"measure_play": 5.0}                # play for 5 s and report frames per second
     ]}
 """
@@ -165,6 +166,11 @@ class DevRemote(QObject):
         if name == "fps":
             window.timeline.fps.setValue(int(value))
             return f"fps {value}"
+        if name == "dock":
+            dock = window.docks[str(value)]
+            dock.show()
+            dock.raise_()
+            return f"dock {value} shown"
         if name == "diagnose":
             view = getattr(window.viewport, "view", None)
             return "diagnose " + json.dumps(view.diagnostics() if view else None, default=str)

@@ -23,7 +23,14 @@ import traceback
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from lagoonviz.core.data.manager import BackgroundLoader, FrameKey
 from lagoonviz.gui.bridge import SessionBridge
@@ -52,6 +59,21 @@ class ViewportPlaceholder(QWidget):
         self.message = "3D viewport" + (f"\n{reason}" if reason else "")
 
     # the same small interface as Viewport3D
+    case_filter = ""
+    comparing = False
+    partner = None
+
+    def items(self) -> list[str]:
+        return []
+
+    def set_case_filter(self, case_id: str | None) -> None:
+        self.case_filter = case_id or ""
+
+    def set_compare(self, on: bool) -> None:
+        self.comparing = on
+        if not on:
+            self.case_filter = ""
+
     @property
     def busy(self) -> bool:
         return False
@@ -174,6 +196,12 @@ class Viewport3D(QWidget):
         self.loader = loader
         self._wanted: dict[str, FrameKey] = {}
         self._shown_keys: dict[str, FrameKey] = {}
+        #: compare mode: the case this view shows ("" = all), and the view whose camera
+        #: moves with this one
+        self.case_filter = ""
+        self.partner: Viewport3D | None = None
+        self.comparing = False
+        self._camera_seen: dict | None = None
 
         try:
             self.canvas = QRenderWidget(self, update_mode="ondemand")
@@ -225,6 +253,15 @@ class Viewport3D(QWidget):
         self.ortho_button.setToolTip("Orthographic projection (5)")
         self.ortho_button.toggled.connect(self._set_ortho)
         bar.addWidget(self.ortho_button)
+        self.case_box = QComboBox()
+        self.case_box.setToolTip("The case this view shows")
+        self.case_box.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.case_box.activated.connect(
+            lambda _i: self.set_case_filter(self.case_box.currentData())
+        )
+        self.case_box.hide()  # only when comparing
+        bar.addSpacing(8)
+        bar.addWidget(self.case_box)
         bar.addStretch(1)
         bar.addWidget(self.info)
         header = QWidget()
@@ -259,8 +296,62 @@ class Viewport3D(QWidget):
         return any(self._wanted.get(i) != self._shown_keys.get(i) for i in self._wanted)
 
     def _draw(self) -> None:
+        self._follow_camera()
         with PERF.track("render"):
             self.view.render(self.renderer)
+
+    def _follow_camera(self) -> None:
+        """Compare mode: when this camera moved, move the partner's the same way."""
+        if self.partner is None or not self.partner.isVisible() or not self.isVisible():
+            return
+        state = self.view.camera.get_state()
+        if self._camera_seen is not None and _same_camera(state, self._camera_seen):
+            return
+        self._camera_seen = state
+        partner = self.partner
+        partner.view.camera.set_state(state)
+        partner._camera_seen = partner.view.camera.get_state()  # no echo back
+        partner.redraw()
+
+    # ------------------------------------------------------------- compare
+    def items(self) -> list[str]:
+        """The data items this view shows: all, or those of its case."""
+        data = self.session.data
+        ids = data.data_items()
+        return [i for i in ids if self._in_view(i)]
+
+    def _in_view(self, item_id: str) -> bool:
+        if not self.case_filter:
+            return True
+        case_item = self.session.data.case_item(item_id)
+        return case_item is not None and case_item.id == self.case_filter
+
+    def set_case_filter(self, case_id: str | None) -> None:
+        """Show only one case ("" or None: everything)."""
+        self.case_filter = case_id or ""
+        self._fill_cases()
+        self.refresh()
+
+    def set_compare(self, on: bool) -> None:
+        """Show the case selector (compare mode) or not."""
+        self.comparing = on
+        self.case_box.setVisible(on)
+        if not on:
+            self.case_filter = ""
+        self._fill_cases()
+        self.refresh()
+
+    def _fill_cases(self) -> None:
+        box = self.case_box
+        box.blockSignals(True)
+        box.clear()
+        box.addItem("All cases", "")
+        for item in self.session.scene:
+            if item.kind == "case":
+                box.addItem(item.name, item.id)
+        index = box.findData(self.case_filter)
+        box.setCurrentIndex(max(index, 0))
+        box.blockSignals(False)
 
     def redraw(self) -> None:
         self.canvas.request_draw()
@@ -269,7 +360,9 @@ class Viewport3D(QWidget):
     def refresh(self, item_ids: list[str] | None = None) -> None:
         """Bring the shown meshes up to date with the scene and the current time."""
         data = self.session.data
-        current = set(data.data_items())
+        if self.case_filter and self.case_filter not in self.session.scene:
+            self.case_filter = ""  # its case was removed
+        current = set(self.items())
         for item_id in list(self.view.item_ids):
             if item_id not in current:
                 self.view.remove(item_id)
@@ -299,18 +392,22 @@ class Viewport3D(QWidget):
 
     def _update_gauges(self) -> None:
         with PERF.track("update gauges"):
-            self.__update_gauges_now()
+            self._update_gauges_now()
 
-    def __update_gauges_now(self) -> None:
-        """Wave gauge positions, in the colours of their plot lines."""
+    def _update_gauges_now(self) -> None:
+        """Wave gauge positions and wave profiles, in the colours of their plot lines."""
         data = self.session.data
-        wanted = set(data.series_items())
+        profiles = {i for i in data.profile_items() if self._in_view(i)}
+        wanted = {i for i in data.series_items() if self._in_view(i)} | profiles
         for item_id in self.view.gauge_ids:
             if item_id not in wanted:
                 self.view.remove_gauges(item_id)
         for item_id in wanted:
             try:
-                marks = data.gauge_marks(item_id, SERIES_COLORS)
+                if item_id in profiles:
+                    marks = data.profile_marks(item_id, SERIES_COLORS)
+                else:
+                    marks = data.gauge_marks(item_id, SERIES_COLORS)
             except Exception:  # noqa: BLE001 (a bad file must not take the window down)
                 log.error("gauges of %s:\n%s", item_id, traceback.format_exc())
                 marks = None
@@ -369,6 +466,8 @@ class Viewport3D(QWidget):
                 self.view.update(other.kind, self.session.data.display(other.id, mesh))
 
     def _on_scene(self, event: str, item_id: str) -> None:
+        if self.comparing:
+            self._fill_cases()
         if event == "reset":
             self.view.clear()
             self._wanted.clear()
@@ -387,9 +486,9 @@ class Viewport3D(QWidget):
 
     def _update_overlays(self) -> None:
         with PERF.track("update overlays"):
-            self.__update_overlays_now()
+            self._update_overlays_now()
 
-    def __update_overlays_now(self) -> None:
+    def _update_overlays_now(self) -> None:
         self._update_probe()  # a probe follows the timeline
         entries = []
         frames = []
@@ -555,3 +654,12 @@ class Viewport3D(QWidget):
             self.session.set_camera(self.view.camera_state())
         except Exception:  # noqa: BLE001
             log.warning("could not store the camera:\n%s", traceback.format_exc())
+
+
+def _same_camera(a: dict, b: dict) -> bool:
+    """True if two camera states match (positions, rotations, sizes)."""
+    for key in ("position", "rotation", "width", "height", "fov", "zoom"):
+        if key in a or key in b:
+            if not np.allclose(np.asarray(a.get(key, 0.0)), np.asarray(b.get(key, 0.0))):
+                return False
+    return True

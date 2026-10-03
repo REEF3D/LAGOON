@@ -2,6 +2,13 @@
 
 Version: 0.0 (draft stub, not yet usable)
 
+## Run metadata
+
+What a run is, what it writes and the time of every output is specified in
+[RUN.md](RUN.md) (the REEF3D run log). REEF3D can write it today next to its VTK
+output; the LAGOON format stores the same records as the store's metadata (root
+attribute `reef3d_run`, arrays `/outputs/step|time|iteration`).
+
 ## Scope
 
 One dataset per simulation run, stored as a Zarr store. Structured grids are

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QSizePolicy,
+    QSplitter,
     QWidget,
 )
 
@@ -31,6 +32,7 @@ from lagoonviz.gui.icons import icon
 from lagoonviz.gui.panels import (
     ConsolePanel,
     PlotsPanel,
+    ProfilesPanel,
     PropertiesPanel,
     SceneTreePanel,
     TimelinePanel,
@@ -42,7 +44,7 @@ from lagoonviz.gui.theme import DEFAULT_THEME, THEME_LOOKS, apply_theme
 SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 OUTPUT_FILTER = "REEF3D output (*.pvtu *.pvtp *.vtu *.vtp);;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
-LAYOUT_VERSION = 2
+LAYOUT_VERSION = 3
 
 
 class MainWindow(QMainWindow):
@@ -72,13 +74,18 @@ class MainWindow(QMainWindow):
             self.bridge, self.loader, self, str(self.settings.value("view/look", "studio"))
         )
         self.viewport.statusMessage.connect(lambda text: self.statusBar().showMessage(text, 8000))
-        self.setCentralWidget(self.viewport)
+        # the 3D views sit in a splitter: one normally, two when comparing cases
+        self.viewports = QSplitter(Qt.Horizontal)
+        self.viewports.setObjectName("viewports")
+        self.viewports.setChildrenCollapsible(False)
+        self.viewports.addWidget(self.viewport)
+        self.setCentralWidget(self.viewports)
+        self.viewport2 = None
         self.scene_tree = SceneTreePanel(self.bridge)
         self.properties = PropertiesPanel(self.bridge)
-        self.timeline = TimelinePanel(
-            self.bridge, loader=self.loader, busy=lambda: self.viewport.busy
-        )
+        self.timeline = TimelinePanel(self.bridge, loader=self.loader, busy=self._views_busy)
         self.plots = PlotsPanel(self.bridge)
+        self.profiles = ProfilesPanel(self.bridge)
         self.console = ConsolePanel(self.bridge)
 
         self.docks: dict[str, QDockWidget] = {}
@@ -89,6 +96,10 @@ class MainWindow(QMainWindow):
         self._dock("console", "Python console", self.console, Qt.BottomDockWidgetArea)
         self.splitDockWidget(self.docks["plots"], self.docks["timeline"], Qt.Vertical)
         self.splitDockWidget(self.docks["timeline"], self.docks["console"], Qt.Horizontal)
+        # wave profiles share the plots' place, as a tab next to them
+        self._dock("profiles", "Wave profiles", self.profiles, Qt.BottomDockWidgetArea)
+        self.tabifyDockWidget(self.docks["plots"], self.docks["profiles"])
+        self.docks["plots"].raise_()
         self._default_state = self.saveState(LAYOUT_VERSION)
         self._sized = False
 
@@ -173,6 +184,13 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+E",
             tip="Film the 3D view over the timeline into an MP4 video",
         )
+        self.act_compare = self._action(
+            "&Compare side by side",
+            self.toggle_compare,
+            "Ctrl+Shift+2",
+            tip="Two 3D views, one case each; cameras and time move together",
+        )
+        self.act_compare.setCheckable(True)
         self.act_play = self._action(
             "&Play / pause", lambda: self.timeline.play_button.toggle(), "Space"
         )
@@ -226,6 +244,7 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _=False, n=name: self.set_viewport_look(n))
             self.look_actions[name] = action
         view_menu.addSeparator()
+        view_menu.addAction(self.act_compare)
         view_menu.addAction(self.act_play)
         view_menu.addAction(self.act_screenshot)
         view_menu.addAction(self.act_reset_layout)
@@ -297,12 +316,58 @@ class MainWindow(QMainWindow):
             return self.session.add_slice("y")
         return self.session.add_item(kind)
 
+    # ------------------------------------------------------------- compare
+    def _views_busy(self) -> bool:
+        second = self.viewport2
+        return self.viewport.busy or (second is not None and not second.isHidden() and second.busy)
+
+    def toggle_compare(self, on: bool | None = None) -> None:
+        """Two 3D views side by side, one case each, cameras linked (or back to one)."""
+        on = self.act_compare.isChecked() if on is None else bool(on)
+        self.act_compare.setChecked(on)
+        if on and self.viewport2 is None:
+            self.viewport2 = create_viewport(
+                self.bridge, self.loader, self, str(self.settings.value("view/look", "studio"))
+            )
+            self.viewport2.setObjectName("viewport2")
+            self.viewport2.statusMessage.connect(
+                lambda text: self.statusBar().showMessage(text, 8000)
+            )
+            self.viewports.addWidget(self.viewport2)
+            self.viewport.partner = self.viewport2
+            self.viewport2.partner = self.viewport
+        if self.viewport2 is None:
+            return
+        cases = [item.id for item in self.session.scene if item.kind == "case"]
+        if on:
+            self.viewport2.show()
+            self.viewport.set_compare(True)
+            self.viewport2.set_compare(True)
+            if len(cases) >= 2:
+                self.viewport.set_case_filter(cases[0])
+                self.viewport2.set_case_filter(cases[1])
+            camera = getattr(self.viewport, "view", None)
+            if camera is not None and hasattr(self.viewport2, "view"):
+                self.viewport2.view.camera.set_state(camera.camera.get_state())
+            width = max(self.viewports.width(), 2)
+            self.viewports.setSizes([width // 2, width - width // 2])
+        else:
+            self.viewport.set_compare(False)
+            self.viewport2.set_compare(False)
+            self.viewport2.hide()
+        self.statusBar().showMessage(
+            "Comparing: pick the case of each view in its header" if on else "One 3D view",
+            8000,
+        )
+
     def set_viewport_look(self, name: str) -> None:
         """Background and lighting of the 3D view; remembered for the next start."""
         self.settings.setValue("view/look", name)
         for key, action in self.look_actions.items():
             action.setChecked(key == name)
-        self.viewport.set_style(name)
+        for view in (self.viewport, self.viewport2):
+            if view is not None:
+                view.set_style(name)
 
     def set_theme(self, name: str) -> None:
         """Switch the whole window to the light or dark theme, viewport included."""
@@ -313,9 +378,12 @@ class MainWindow(QMainWindow):
         self._set_icons()
         self.timeline.refresh_icons()
         self.set_viewport_look(THEME_LOOKS.get(name, "studio"))
-        if hasattr(self.viewport, "apply_theme_colors"):
-            self.viewport.apply_theme_colors()
-        self.viewport.refresh()  # gauges take the new plot colours
+        for view in (self.viewport, self.viewport2):
+            if view is None:
+                continue
+            if hasattr(view, "apply_theme_colors"):
+                view.apply_theme_colors()
+            view.refresh()  # gauges take the new plot colours
         for widget in QApplication.allWidgets():
             widget.update()
 
@@ -400,6 +468,8 @@ class MainWindow(QMainWindow):
         summary = ", ".join(f"{d.label} ({len(d)} frames)" for d in case.datasets.values())
         self.statusBar().showMessage(f"Opened {Path(path).name}: {summary}", 10000)
         self.viewport.reframe()
+        if self.viewport2 is not None:
+            self.viewport2.reframe()
         return case_id
 
     def open_session_dialog(self) -> None:
@@ -482,8 +552,13 @@ class MainWindow(QMainWindow):
         drawn over the canvas area of the window grab.
         """
         image = self.grab().toImage()
-        snapshot = self.viewport.canvas_snapshot()
-        if snapshot is not None:
+        views = [self.viewport]
+        if self.viewport2 is not None and not self.viewport2.isHidden():
+            views.append(self.viewport2)
+        for view in views:
+            snapshot = view.canvas_snapshot()
+            if snapshot is None:
+                continue
             widget, pixels = snapshot
             pixels = np.ascontiguousarray(np.asarray(pixels)[..., :4], dtype=np.uint8)
             height, width = pixels.shape[:2]

@@ -139,6 +139,22 @@ KINDS: dict[str, KindSpec] = {
             **_colouring("velocity", "ocean"),
         },
     ),
+    "profile": KindSpec(
+        "Wave profile",
+        {
+            "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
+            "source": PropertySpec(
+                "", "Profiles", provider="profiles", tip="WSFLINE output of the case"
+            ),
+            "lines": PropertySpec("", "Lines", tip="Comma-separated line numbers (empty: all)"),
+            "theory": PropertySpec(
+                True, "Wave theory", tip="Also draw the wave theory (FNPF), dashed"
+            ),
+            "profile_3d": PropertySpec(
+                True, "Profile in 3D", tip="Draw the profile as a line in the 3D view"
+            ),
+        },
+    ),
     "gauge": KindSpec(
         "Gauge",
         {

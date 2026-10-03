@@ -100,6 +100,8 @@ class Session:
             children.append(AddItem(kind, None, props))
         for series in case.main_series():
             children.append(AddItem("series", series.name, {"source": series.key}))
+        for profiles in case.main_profiles():
+            children.append(AddItem("profile", profiles.name, {"source": profiles.key}))
         command = OpenCase(path, name, children)
         if name is None:
             command.case.name = Path(path).expanduser().name or str(path)

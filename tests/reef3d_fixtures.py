@@ -213,6 +213,7 @@ def make_run(
     print_interval: float | None = None,
     series: bool = False,
     objects: bool = False,
+    profiles: bool = False,
 ) -> Path:
     """Write a REEF3D-like case folder with free surface, bed and volume output."""
     root.mkdir(parents=True, exist_ok=True)
@@ -247,7 +248,43 @@ def make_run(
         write_series(root, solver, (frames - 1) * (print_interval or 1.0))
     if objects:
         write_objects(root, solver, frames)
+    if profiles:
+        write_profiles(root, solver, (frames - 1) * (print_interval or 1.0))
     return root
+
+
+#: y of the wave profile lines, and their x points
+PROFILE_LINES = {1: 1.0, 2: 3.0}
+PROFILE_X = np.linspace(0.0, 8.0, 17)
+
+
+def profile_eta(x: np.ndarray, y: float, t: float) -> np.ndarray:
+    return 0.1 * np.sin(x - 0.5 * t) + 0.01 * y
+
+
+def write_profiles(root: Path, solver: str, end: float, files: int = 6) -> None:
+    """WSFLINE files as REEF3D writes them: numbered by iteration, timed by simtime;
+    FNPF adds a wave theory column."""
+    folder = root / f"REEF3D_{solver}_WSFLINE"
+    folder.mkdir(exist_ok=True)
+    theory = solver == "FNPF"
+    for number, t in enumerate(np.linspace(0.0, end, files)):
+        lines = [f"simtime:  {t:.12g}", f"number of wsf-lines:  {len(PROFILE_LINES)}", ""]
+        lines += ["line_No     y_coord"]
+        lines += [f"{n}\t {y:g}" for n, y in PROFILE_LINES.items()]
+        lines += ["", ""]
+        header = []
+        for n in PROFILE_LINES:
+            header += [f"X {n}", f"P {n}"] + ([f"W {n}"] if theory else [])
+        lines.append("\t ".join(header))
+        for x in PROFILE_X:
+            row = []
+            for y in PROFILE_LINES.values():
+                eta = profile_eta(np.array([x]), y, t)[0]
+                row += [f"{x:g}", f"{eta:.9g}"] + ([f"{eta * 0.9:.9g}"] if theory else [])
+            lines.append(" \t ".join(row) + " \t ")
+        name = f"REEF3D-{solver}-wsfline-{number * 37:06d}.dat"
+        (folder / name).write_text("\n".join(lines) + "\n")
 
 
 BOX = np.array(

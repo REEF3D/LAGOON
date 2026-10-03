@@ -18,8 +18,16 @@ def window(qtbot, tmp_path):
 
 
 def test_panels_exist(window):
-    assert set(window.docks) == {"scene", "properties", "plots", "timeline", "console"}
-    assert window.centralWidget().objectName() == "viewport"
+    assert set(window.docks) == {
+        "scene",
+        "properties",
+        "plots",
+        "profiles",
+        "timeline",
+        "console",
+    }
+    assert window.centralWidget().objectName() == "viewports"
+    assert window.viewport.objectName() == "viewport"
     assert window.windowTitle() == "Untitled - LAGOON"
 
 
@@ -356,3 +364,35 @@ def test_export_dialog_and_overlay(window, reef3d_run):
     image = np.full((180, 320, 4), 255, np.uint8)
     drawn = make_overlay(window.session)(image.copy(), 1.0)
     assert drawn.shape == image.shape and (drawn != 255).any()  # time and colour bar
+
+
+def test_profiles_panel_shows_wave_profiles(window, tmp_path):
+    from reef3d_fixtures import make_run
+
+    run = make_run(
+        tmp_path / "fnpf", solver="FNPF", frames=6, volume=False, print_interval=0.5, profiles=True
+    )
+    window.open_case(run)
+    item = next(i for i in window.session.scene if i.kind == "profile")
+    assert window.profiles.row_ids == [item.id]
+    window.session.set_time(1.0)
+    window.profiles.resize(500, 200)
+    window.profiles.grab()  # paints lines, dashed theory and legend
+    window.session.set_visible(item.id, False)
+    assert window.profiles.row_ids == []
+    window.profiles.grab()  # the hint
+
+
+def test_compare_two_cases_side_by_side(window, tmp_path):
+    from reef3d_fixtures import make_run
+
+    first = window.open_case(make_run(tmp_path / "a", frames=3, volume=False))
+    second = window.open_case(make_run(tmp_path / "b", solver="FNPF", frames=3, volume=False))
+    window.toggle_compare(True)
+    assert window.act_compare.isChecked() and not window.viewport2.isHidden()
+    assert window.viewport.case_filter == first and window.viewport2.case_filter == second
+    window.viewport2.set_case_filter("")
+    assert window.viewport2.case_filter == ""
+    window.screenshot()  # both views pasted in
+    window.toggle_compare(False)
+    assert window.viewport2.isHidden() and window.viewport.case_filter == ""
