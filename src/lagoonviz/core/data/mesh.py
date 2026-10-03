@@ -36,6 +36,8 @@ class SurfaceMesh:
     point_data: dict[str, np.ndarray] = field(default_factory=dict)
     #: (n, 3) float32 unit vertex normals; computed by the reader (in a worker thread)
     normals: np.ndarray | None = None
+    #: (k, 2) uint32 line segments (mooring lines, rods); drawn as lines
+    segments: np.ndarray | None = None
 
     def with_normals(self) -> SurfaceMesh:
         if self.normals is None:

@@ -105,3 +105,39 @@ def test_render_slice(reef3d_run):
     image = render_session(session, (320, 180), view="front")
     _keep("render_slice.png", image)
     assert _colours(image) > 50
+
+
+def test_render_body_and_mooring(tmp_path):
+    from reef3d_fixtures import make_run
+
+    run = make_run(tmp_path / "moored", frames=3, volume=False, objects=True)
+    session = Session()
+    session.open_case(run)
+    session.set_visible("free_surface-1", False)
+    image = render_session(session, (320, 180), time=1, view="front")
+    _keep("render_body_mooring.png", image)
+    assert _colours(image) > 50
+
+
+def test_marker(reef3d_run):
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    view = SceneRenderer()
+    view.set_marker((1.0, 2.0, 3.0))
+    view.set_marker((2.0, 2.0, 3.0))
+    np.testing.assert_allclose(view._marker.geometry.positions.data[0], (2, 2, 3))
+    view.set_marker(None)
+    assert not view._marker.visible
+
+
+def test_styles(reef3d_run):
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    studio = render_session(session, (160, 90), style="studio")
+    ocean = render_session(session, (160, 90), style="ocean")
+    assert studio[0, 0, :3].mean() > 200 > ocean[0, 0, :3].mean()  # white vs dark blue sky
+    view = SceneRenderer("ocean")
+    view.set_style("studio")
+    assert view.style_name == "studio" and view.ambient.intensity == 0.75

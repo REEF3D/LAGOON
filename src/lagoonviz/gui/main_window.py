@@ -67,7 +67,9 @@ class MainWindow(QMainWindow):
         self.loader = BackgroundLoader(self.session.data)
 
         # panels
-        self.viewport = create_viewport(self.bridge, self.loader, self)
+        self.viewport = create_viewport(
+            self.bridge, self.loader, self, str(self.settings.value("view/viewport", "studio"))
+        )
         self.viewport.statusMessage.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.setCentralWidget(self.viewport)
         self.scene_tree = SceneTreePanel(self.bridge)
@@ -205,6 +207,15 @@ class MainWindow(QMainWindow):
             action.setChecked(name == current)
             action.triggered.connect(lambda _=False, n=name: self.set_theme(n))
             self.theme_actions[name] = action
+        look_menu = view_menu.addMenu("&Viewport look")
+        current_look = str(self.settings.value("view/viewport", "studio"))
+        self.look_actions = {}
+        for name, label in (("studio", "&Studio (light)"), ("ocean", "&Ocean (dark blue)")):
+            action = look_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(name == current_look)
+            action.triggered.connect(lambda _=False, n=name: self.set_viewport_look(n))
+            self.look_actions[name] = action
         view_menu.addSeparator()
         view_menu.addAction(self.act_play)
         view_menu.addAction(self.act_screenshot)
@@ -273,6 +284,13 @@ class MainWindow(QMainWindow):
         if kind == "slice":
             return self.session.add_slice("y")
         return self.session.add_item(kind)
+
+    def set_viewport_look(self, name: str) -> None:
+        """Background and lighting of the 3D view; remembered for the next start."""
+        self.settings.setValue("view/viewport", name)
+        for key, action in self.look_actions.items():
+            action.setChecked(key == name)
+        self.viewport.set_style(name)
 
     def set_theme(self, name: str) -> None:
         """Remember the theme; it is applied when LAGOON starts next time."""

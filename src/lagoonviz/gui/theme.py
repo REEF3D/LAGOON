@@ -29,8 +29,8 @@ THEMES: dict[str, dict[str, str]] = {
         "selection_text": "#12233a",
         "pressed": "#bcd6f2",
         "cursor": "#e07b39",  # REEF3D orange: the current time everywhere
-        "viewport_top": "#3b5f8f",
-        "viewport_bottom": "#1c3354",
+        "viewport_top": "#ffffff",
+        "viewport_bottom": "#e6eaef",
     },
     "dark": {
         "window": "#1d2228",

@@ -203,7 +203,7 @@ def test_session_open_case_items_and_replay(reef3d_run):
     kinds = [item.kind for item in s.scene]
     assert kinds == ["case", "bathymetry", "free_surface"]
     assert s.scene.get("free_surface-1").properties["case"] == case_id
-    assert s.scene.get("bathymetry-1").properties["variable"] == "elevation"
+    assert s.scene.get("bathymetry-1").properties["variable"] == "none"  # plain sand
     assert s.stack.undo_label == "Open run"
     s.undo()
     assert len(s.scene) == 0
@@ -239,7 +239,7 @@ def test_display_exaggeration_and_range(reef3d_run):
     s.open_case(reef3d_run)
     mesh = s.data.load("free_surface-1")
     shown = s.data.display("free_surface-1", mesh)
-    assert shown.variable == "eta" and shown.colormap == "balance"
+    assert shown.variable == "eta" and shown.colormap == "reef3d"
     assert shown.vmin == pytest.approx(-shown.vmax)  # eta changes sign: symmetric
     assert s.data.still_water_level("free_surface-1", mesh) == pytest.approx(DEPTH, abs=1e-5)
     s.set_property("free_surface-1", "exaggeration", 10.0)

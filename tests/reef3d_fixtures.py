@@ -212,6 +212,7 @@ def make_run(
     volume: bool = True,
     print_interval: float | None = None,
     series: bool = False,
+    objects: bool = False,
 ) -> Path:
     """Write a REEF3D-like case folder with free surface, bed and volume output."""
     root.mkdir(parents=True, exist_ok=True)
@@ -244,7 +245,67 @@ def make_run(
             write_parallel(folder / f"{stem}-{frame:08d}.p{ext}", kind, names, components)
     if series:
         write_series(root, solver, (frames - 1) * (print_interval or 1.0))
+    if objects:
+        write_objects(root, solver, frames)
     return root
+
+
+BOX = np.array(
+    [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]],
+    np.float32,
+)
+BOX_FACES = np.array(
+    [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]
+)
+
+
+def body_offset(frame: int) -> np.ndarray:
+    """Where the floating box is at a frame (it heaves)."""
+    return np.array([3.0, 1.5, 1.5 + 0.2 * np.sin(frame)], np.float32)
+
+
+def write_objects(root: Path, solver: str, frames: int) -> None:
+    """A floating box (6DOF VTP, triangles) and two mooring lines (legacy VTK)."""
+    bodies = root / f"REEF3D_{solver}_6DOF_VTP"
+    bodies.mkdir(exist_ok=True)
+    tris = np.concatenate([BOX_FACES[:, [0, 1, 2]], BOX_FACES[:, [0, 2, 3]]])
+    for frame in range(frames):
+        points = (BOX * 0.5 + body_offset(frame)).astype(np.float32)
+        # REEF3D writes every triangle with its own three points
+        flat = points[tris.ravel()]
+        write_piece(
+            bodies / f"REEF3D-6DOF-0-{frame:06d}.vtp",
+            "PolyData",
+            flat,
+            {},
+            np.arange(flat.shape[0]),
+            np.arange(3, flat.shape[0] + 1, 3),
+        )
+    mooring = root / f"REEF3D_{solver}_6DOF_Mooring"
+    mooring.mkdir(exist_ok=True)
+    for line in range(2):
+        for frame in range(1, frames):  # REEF3D starts mooring output at 1
+            anchor = np.array([0.0, 1.0 + line, 0.0])
+            top = body_offset(frame) + np.array([0.0, 0.25 * line, 0.0])
+            points = np.linspace(anchor, top, 6)
+            tension = 1000.0 + 100 * frame + np.arange(6)
+            lines = [
+                "# vtk DataFile Version 2.0",
+                f"Mooring line {line}",
+                "ASCII ",
+                "DATASET POLYDATA",
+                f"POINTS {len(points)} float",
+                *(f"{x:g} {y:g} {z:g}" for x, y, z in points),
+                f"LINES {len(points) - 1} {3 * (len(points) - 1)}",
+                *(f"2 {i} {i + 1}" for i in range(len(points) - 1)),
+                f"POINT_DATA {len(points)}",
+                "SCALARS Tension float 1 ",
+                "LOOKUP_TABLE default",
+                *(f"{t:g}" for t in tension),
+            ]
+            (mooring / f"REEF3D-Mooring-{line:08d}-{frame:06d}.vtk").write_text(
+                "\n".join(lines) + "\n"
+            )
 
 
 GAUGES = [(1.0, 2.0), (4.0, 2.0), (7.0, 2.0)]

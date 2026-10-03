@@ -15,7 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-COLORMAPS = ("lagoon_blue", "balance", "viridis", "cividis", "sand", "greys")
+MATERIALS = ("steel", "concrete", "rock", "ice", "wood")
+COLORMAPS = ("reef3d", "ocean", "lagoon_blue", "balance", "viridis", "cividis", "sand", "greys")
 
 
 @dataclass(frozen=True)
@@ -74,7 +75,7 @@ KINDS: dict[str, KindSpec] = {
         "Free surface",
         {
             **_data_source("free surface"),
-            **_colouring("eta", "balance"),
+            **_colouring("eta", "reef3d"),
             "exaggeration": PropertySpec(
                 1.0,
                 "Vertical exaggeration",
@@ -86,11 +87,11 @@ KINDS: dict[str, KindSpec] = {
     ),
     "bathymetry": KindSpec(
         "Bathymetry",
-        {**_data_source("bed"), **_colouring("elevation", "sand")},
+        {**_data_source("bed"), **_colouring("none", "sand")},
     ),
     "volume": KindSpec(
         "Volume",
-        {**_data_source("volume"), **_colouring("velocity", "viridis")},
+        {**_data_source("volume"), **_colouring("velocity", "ocean")},
     ),
     "series": KindSpec(
         "Time series",
@@ -110,7 +111,7 @@ KINDS: dict[str, KindSpec] = {
             **_data_source("volume"),
             "normal": PropertySpec("y", "Normal", choices=("x", "y", "z")),
             "position": PropertySpec(0.0, "Position [m]", tip="Where the plane cuts the axis"),
-            **_colouring("velocity", "balance"),
+            **_colouring("velocity", "ocean"),
         },
     ),
     "gauge": KindSpec(
@@ -122,12 +123,27 @@ KINDS: dict[str, KindSpec] = {
         },
     ),
     "body": KindSpec(
-        "Body",
+        "Bodies",
         {
-            "material": PropertySpec(
-                "steel", "Material", choices=("steel", "concrete", "rock", "ice")
-            ),
-            "opacity": PropertySpec(1.0, "Opacity", minimum=0.0, maximum=1.0),
+            **_data_source("bodies"),
+            "material": PropertySpec("steel", "Material", choices=MATERIALS),
+            **_colouring("none", "viridis"),
+        },
+    ),
+    "mooring": KindSpec(
+        "Mooring lines",
+        {
+            **_data_source("mooring lines"),
+            **_colouring("Tension", "viridis"),
+            "line_width": PropertySpec(3.0, "Line width [px]", minimum=0.5, maximum=20.0),
+        },
+    ),
+    "structure": KindSpec(
+        "Structures",
+        {
+            **_data_source("structures"),
+            "material": PropertySpec("concrete", "Material", choices=MATERIALS),
+            **_colouring("none", "greys"),
         },
     ),
 }

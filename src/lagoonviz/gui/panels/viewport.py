@@ -61,6 +61,9 @@ class ViewportPlaceholder(QWidget):
     def reframe(self) -> None:
         pass
 
+    def set_style(self, style: str) -> None:
+        pass
+
     def canvas_snapshot(self):
         return None
 
@@ -85,7 +88,7 @@ class ViewportPlaceholder(QWidget):
             painter.setOpacity(0.45)
             painter.drawPixmap((self.width() - size) // 2, self.height() // 2 - size, icon)
             painter.setOpacity(1.0)
-        painter.setPen(QColor(255, 255, 255, 200))
+        painter.setPen(QColor(COLORS["dim"]))
         text_rect = self.rect().adjusted(20, self.height() // 2 + 12, -20, 0)
         painter.drawText(text_rect, Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, self.message)
         painter.end()
@@ -105,12 +108,14 @@ def gpu_unavailable_reason() -> str | None:
     return None
 
 
-def create_viewport(bridge: SessionBridge, loader: BackgroundLoader, parent: QWidget) -> QWidget:
+def create_viewport(
+    bridge: SessionBridge, loader: BackgroundLoader, parent: QWidget, style: str = "studio"
+) -> QWidget:
     """The GPU viewport, or a placeholder that says why there is none."""
     reason = gpu_unavailable_reason()
     if reason is None:
         try:
-            return Viewport3D(bridge, loader, parent)
+            return Viewport3D(bridge, loader, parent, style)
         except Exception as error:  # noqa: BLE001
             log.error("could not create the 3D viewport:\n%s", traceback.format_exc())
             reason = f"3D viewport failed to start: {error}"
@@ -140,7 +145,13 @@ class Viewport3D(QWidget):
     #: (key, mesh, error) from a loader thread, delivered on the GUI thread
     _loaded = Signal(object, object, object)
 
-    def __init__(self, bridge: SessionBridge, loader: BackgroundLoader, parent: QWidget | None):
+    def __init__(
+        self,
+        bridge: SessionBridge,
+        loader: BackgroundLoader,
+        parent: QWidget | None,
+        style: str = "studio",
+    ):
         super().__init__(parent)
         import pygfx as gfx
         from rendercanvas.qt import QRenderWidget
@@ -160,7 +171,7 @@ class Viewport3D(QWidget):
         except TypeError:  # rendercanvas without update modes
             self.canvas = QRenderWidget(self)
         self.renderer = gfx.WgpuRenderer(self.canvas)
-        self.view = SceneRenderer()
+        self.view = SceneRenderer(style)
         self.controller = gfx.OrbitController(self.view.camera, register_events=self.renderer)
         for control, action in BLENDER_CONTROLS.items():
             try:
@@ -366,6 +377,11 @@ class Viewport3D(QWidget):
             log.warning("no snapshot of the 3D view:\n%s", traceback.format_exc())
             return None
         return self.canvas, image
+
+    def set_style(self, style: str) -> None:
+        """Switch the viewport look ("studio" or "ocean")."""
+        self.view.set_style(style)
+        self.redraw()
 
     def reframe(self) -> None:
         """Frame everything again once the next meshes arrive (after opening a case)."""

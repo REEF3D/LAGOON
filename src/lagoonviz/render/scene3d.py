@@ -13,13 +13,30 @@ from dataclasses import dataclass
 import numpy as np
 import pygfx as gfx
 
-from lagoonviz.core.colormaps import lut, normalize
+from lagoonviz.core.colormaps import colors, lut, normalize
 from lagoonviz.core.data.manager import DisplaySurface
 
-#: viewport background as pygfx expects it: bottom colour, then top (LAGOON blue)
-BACKGROUND = ("#1c3354", "#3b5f8f")
-#: colour of surfaces shown without a variable
-PLAIN = {"free_surface": "#4f8fcf", "bathymetry": "#b39c72", "volume": "#9aa7b4"}
+#: Viewport looks. "studio" is the light look of the REEF3D result animations:
+#: white background, soft light from above, matt surfaces. "ocean" is dark blue.
+STYLES = {
+    "studio": {
+        "background": ("#e6eaef", "#ffffff"),  # bottom, top (pygfx order)
+        "ambient": 0.75,
+        "sun": 1.5,  # fixed light from above
+        "headlamp": 0.9,  # light that moves with the camera
+        "shininess": 12,
+        "specular": "#2a2a2a",
+    },
+    "ocean": {
+        "background": ("#1c3354", "#3b5f8f"),
+        "ambient": 0.55,
+        "sun": 0.6,
+        "headlamp": 2.0,
+        "shininess": 20,
+        "specular": "#494949",
+    },
+}
+DEFAULT_STYLE = "studio"
 
 #: named views: (view direction, up). z is up, as in REEF3D.
 VIEWS = {
@@ -33,10 +50,15 @@ VIEWS = {
 }
 
 
-def _background() -> gfx.Background:
+def _background(colors: tuple[str, str]) -> gfx.Background:
     if hasattr(gfx.Background, "from_color"):
-        return gfx.Background.from_color(*BACKGROUND)
-    return gfx.Background(None, gfx.BackgroundMaterial(*BACKGROUND))
+        return gfx.Background.from_color(*colors)
+    return gfx.Background(None, gfx.BackgroundMaterial(*colors))
+
+
+def _rgba(color: str) -> tuple[float, float, float, float]:
+    color = color.lstrip("#")
+    return tuple(int(color[i : i + 2], 16) / 255 for i in (0, 2, 4)) + (1.0,)  # type: ignore[return-value]
 
 
 def _update_buffer(geometry: gfx.Geometry, name: str, data: np.ndarray) -> bool:
@@ -63,25 +85,33 @@ class _Shown:
 class SceneRenderer:
     """Keeps a pygfx scene in sync with the display data of LAGOON items."""
 
-    def __init__(self) -> None:
+    def __init__(self, style: str = DEFAULT_STYLE) -> None:
+        self.style_name = style if style in STYLES else DEFAULT_STYLE
+        look = STYLES[self.style_name]
         self.scene = gfx.Scene()
-        self.scene.add(_background())
-        self.scene.add(gfx.AmbientLight(intensity=0.55))
+        self.background = _background(look["background"])
+        self.scene.add(self.background)
+        self.ambient = gfx.AmbientLight(intensity=look["ambient"])
+        self.scene.add(self.ambient)
+        # a sun from above, fixed in the scene: wave crests read the same from any side
+        self.sun = gfx.DirectionalLight(intensity=look["sun"])
+        self.sun.local.position = (-0.4, -0.7, 1.0)
+        self.scene.add(self.sun)
         self.camera = gfx.PerspectiveCamera(45, 16 / 9)
         try:
             self.camera.world.reference_up = (0, 0, 1)
         except AttributeError:  # older pygfx: up is given per call
             pass
-        light = gfx.DirectionalLight(intensity=2.2)
-        light.local.position = (0.4, -0.6, 1.0)
-        self.camera.add(light)  # the light moves with the camera, like a headlamp
+        self.headlamp = gfx.DirectionalLight(intensity=look["headlamp"])
+        self.headlamp.local.position = (0.4, -0.6, 1.0)
+        self.camera.add(self.headlamp)  # moves with the camera
         self.scene.add(self.camera)
         self.content = gfx.Group()
         self.scene.add(self.content)
         self._shown: dict[str, _Shown] = {}
         self._textures: dict[str, gfx.Texture] = {}
         self._framed = False
-        self._marker: gfx.Mesh | None = None
+        self._marker: gfx.Points | None = None
 
     # ------------------------------------------------------------- items
     def _texture(self, colormap: str) -> gfx.Texture:
@@ -90,7 +120,12 @@ class SceneRenderer:
         return self._textures[colormap]
 
     def _material(self, kind: str, shown: DisplaySurface) -> gfx.Material:
-        material = gfx.MeshPhongMaterial(side="both", shininess=20)
+        look = STYLES[self.style_name]
+        material = gfx.MeshPhongMaterial(side="both", shininess=look["shininess"])
+        try:
+            material.specular = look["specular"]
+        except (AttributeError, ValueError):
+            pass
         try:
             material.pick_write = True  # clicks report which triangle was hit
         except AttributeError:
@@ -106,7 +141,7 @@ class SceneRenderer:
         else:
             material.color_mode = "uniform"
             material.map = None
-            material.color = PLAIN.get(kind, "#cccccc")
+            material.color = shown.color
         material.opacity = shown.opacity
         # transparent surfaces must not hide what lies behind them
         if hasattr(material, "alpha_mode"):
@@ -116,31 +151,40 @@ class SceneRenderer:
                 pass
 
     def update(self, kind: str, shown: DisplaySurface) -> None:
-        """Create or update the mesh of an item from its display data."""
+        """Create or update the mesh (or lines) of an item from its display data."""
+        if shown.segments is not None and shown.triangles.size == 0:
+            self._update_lines(kind, shown)
+            return
         normals = shown.normals
         texcoords = (
             normalize(shown.values, shown.vmin, shown.vmax)
             if shown.values is not None
             else np.zeros(shown.positions.shape[0], np.float32)
         )
+        indices = np.ascontiguousarray(shown.triangles, dtype=np.uint32)
         current = self._shown.get(shown.item_id)
-        same_topology = current is not None and current.triangles_id == id(shown.triangles)
-        if same_topology:
+        same_sizes = (
+            current is not None
+            and isinstance(current.mesh, gfx.Mesh)
+            and current.mesh.geometry.positions.data.shape == shown.positions.shape
+            and current.mesh.geometry.indices.data.shape == indices.shape
+        )
+        if same_sizes:
             geometry = current.mesh.geometry
-            ok = (
+            same_sizes = (
                 _update_buffer(geometry, "positions", shown.positions)
                 and _update_buffer(geometry, "normals", normals)
                 and _update_buffer(geometry, "texcoords", texcoords)
+                and (
+                    current.triangles_id == id(shown.triangles)
+                    or _update_buffer(geometry, "indices", indices)
+                )
             )
-            same_topology = ok
-        if not same_topology:
+        if not same_sizes:
             if current is not None:
                 self.content.remove(current.mesh)
             geometry = gfx.Geometry(
-                positions=shown.positions,
-                indices=np.ascontiguousarray(shown.triangles, dtype=np.uint32),
-                normals=normals,
-                texcoords=texcoords,
+                positions=shown.positions, indices=indices, normals=normals, texcoords=texcoords
             )
             mesh = gfx.Mesh(geometry, self._material(kind, shown))
             self.content.add(mesh)
@@ -148,13 +192,64 @@ class SceneRenderer:
             self._shown[shown.item_id] = current
         else:
             self._style(current.mesh.material, kind, shown)
+        current.triangles_id = id(shown.triangles)
         current.mesh.visible = shown.visible
         current.colormap = shown.colormap
         current.has_values = shown.values is not None
 
+    def _update_lines(self, kind: str, shown: DisplaySurface) -> None:
+        """Mooring lines and other segment data, drawn as screen-space lines.
+
+        Line colours are computed here (one RGBA per vertex), which works the same
+        on every pygfx version.
+        """
+        order = shown.segments.astype(np.int64).ravel()
+        positions = np.ascontiguousarray(shown.positions[order], dtype=np.float32)
+        if shown.values is not None:
+            rgba = colors(shown.values[order], shown.colormap, shown.vmin, shown.vmax)
+        else:
+            rgba = np.tile(np.array(_rgba(shown.color), np.float32), (order.size, 1))
+        rgba = np.ascontiguousarray(rgba, dtype=np.float32)
+        rgba[:, 3] = shown.opacity
+        current = self._shown.get(shown.item_id)
+        if current is not None and isinstance(current.mesh, gfx.Line):
+            geometry = current.mesh.geometry
+            if not (
+                _update_buffer(geometry, "positions", positions)
+                and _update_buffer(geometry, "colors", rgba)
+            ):
+                self.content.remove(current.mesh)
+                current = None
+        elif current is not None:
+            self.content.remove(current.mesh)
+            current = None
+        if current is None:
+            material = gfx.LineSegmentMaterial(thickness=shown.line_width, color_mode="vertex")
+            line = gfx.Line(gfx.Geometry(positions=positions, colors=rgba), material)
+            self.content.add(line)
+            current = _Shown(line, shown.colormap, id(shown.segments), shown.values is not None)
+            self._shown[shown.item_id] = current
+        current.mesh.material.thickness = shown.line_width
+        current.mesh.visible = shown.visible
+
     def set_visible(self, item_id: str, visible: bool) -> None:
         if item_id in self._shown:
             self._shown[item_id].mesh.visible = visible
+
+    def set_style(self, style: str) -> None:
+        """Switch the look (background and lights) of the viewport."""
+        self.style_name = style if style in STYLES else DEFAULT_STYLE
+        look = STYLES[self.style_name]
+        self.scene.remove(self.background)
+        self.background = _background(look["background"])
+        self.scene.add(self.background)
+        self.ambient.intensity = look["ambient"]
+        self.sun.intensity = look["sun"]
+        self.headlamp.intensity = look["headlamp"]
+        for shown in self._shown.values():
+            material = shown.mesh.material
+            if hasattr(material, "shininess"):
+                material.shininess = look["shininess"]
 
     def item_at(self, world_object) -> str | None:
         """The item a picked pygfx object belongs to."""
@@ -164,22 +259,24 @@ class SceneRenderer:
         return None
 
     def set_marker(self, point: tuple[float, float, float] | None) -> None:
-        """Show (or hide) the orange probe marker at a point."""
+        """Show (or hide) the orange probe marker at a point; it keeps a fixed size on
+        screen and is drawn on top, so it stays visible at any zoom."""
         if point is None:
             if self._marker is not None:
                 self._marker.visible = False
             return
         if self._marker is None:
-            radius = 1.0
-            box = self.content.get_world_bounding_box()
-            if box is not None:
-                radius = max(float(np.linalg.norm(np.asarray(box[1]) - np.asarray(box[0]))), 1e-6)
-                radius *= 0.006
-            self._marker = gfx.Mesh(
-                gfx.sphere_geometry(radius, 16, 12), gfx.MeshBasicMaterial(color="#e07b39")
+            material = gfx.PointsMaterial(size=14, color="#e07b39")
+            for name, value in (("depth_test", False), ("render_queue", 4000)):
+                try:
+                    setattr(material, name, value)
+                except (AttributeError, ValueError, TypeError):
+                    pass
+            self._marker = gfx.Points(
+                gfx.Geometry(positions=np.zeros((1, 3), np.float32)), material
             )
             self.scene.add(self._marker)
-        self._marker.local.position = tuple(point)
+        _update_buffer(self._marker.geometry, "positions", np.array([point], np.float32))
         self._marker.visible = True
 
     def remove(self, item_id: str) -> None:

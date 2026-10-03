@@ -19,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
+from lagoonviz.core.colormaps import plain_color
 from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
 from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
@@ -45,6 +46,11 @@ class DisplaySurface:
     visible: bool
     variable: str
     frame: int
+    #: colour without a colour map (material or kind)
+    color: str = "#cccccc"
+    #: (k, 2) uint32 line segments for line items (mooring lines)
+    segments: np.ndarray | None = None
+    line_width: float = 3.0
 
 
 @dataclass
@@ -443,6 +449,9 @@ class DataManager:
             visible=item.visible and (case_item is None or case_item.visible),
             variable=variable if values is not None else "none",
             frame=index if index is not None else 0,
+            color=plain_color(item.kind, props.get("material")),
+            segments=mesh.segments,
+            line_width=float(props.get("line_width", 3.0)),
         )
 
     # ------------------------------------------------------------- time series

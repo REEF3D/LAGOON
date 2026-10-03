@@ -14,8 +14,18 @@
 - Slices through volume output (x, y or z plane), coloured by any variable, cut with
   marching tetrahedra in NumPy; vertical slices of σ-grids reuse their cut plan, so
   playing a slice costs only interpolation. *Add → Slice* cuts the middle of the volume.
+- Floating bodies (`REEF3D_*_6DOF_VTP`), mooring lines with their tension
+  (`REEF3D_*_6DOF_Mooring`, legacy VTK) and porous or forced structures
+  (`REEF3D_*_VRANS_VTP`, `_FORCING_VTP`) are shown in 3D and move with the timeline;
+  opening a case adds those of the shown run. Bodies take a material colour.
 - Click on a surface in the 3D view to read its values at that point; the marker
-  stays and its values follow the timeline.
+  stays (same size at any zoom, drawn on top) and its values follow the timeline.
+- Viewport in the style of the REEF3D result animations ("studio"): white background,
+  a fixed sun from above plus a headlamp, matt surfaces, plain sand bed, free surface in
+  the new REEF3D colour map (blue troughs, white still water, orange crests), magnitudes
+  in "ocean" (white to REEF3D blue). The dark blue look stays under View → Viewport look;
+  `lagoon-render --style ocean` too.
+- Mooring lines are coloured per vertex (tension).
 - Fresher look: light theme in REEF3D blues by default, dark theme under View → Theme
   (Fusion style on every platform), icons drawn in code, toolbar with icons and labels,
   larger player buttons, Space to play and pause.

@@ -13,6 +13,20 @@ import numpy as np
 from lagoonviz.core.kinds import COLORMAPS
 
 _STOPS: dict[str, list[str]] = {
+    # REEF3D's look: troughs in REEF3D blue, still water white, crests in REEF3D orange
+    "reef3d": [
+        "#142a4d",
+        "#2b4c7e",
+        "#4f8fcf",
+        "#a9cbea",
+        "#f7f7f5",
+        "#f4c49c",
+        "#e07b39",
+        "#a8521d",
+        "#5c2a0b",
+    ],
+    # sequential for magnitudes (speed, depth): white to deep REEF3D blue
+    "ocean": ["#f5f8fb", "#cfe0f1", "#8fbbe3", "#4f8fcf", "#2b4c7e", "#142a4d"],
     # REEF3D blues: deep water to foam
     "lagoon_blue": ["#0b1d36", "#1b365d", "#2b4c7e", "#3a6ea8", "#4f8fcf", "#8fbfe6", "#d6ecfa"],
     # diverging, after cmocean "balance": troughs blue, crests red, zero light
@@ -103,3 +117,30 @@ def colors(values: np.ndarray, name: str, vmin: float, vmax: float) -> np.ndarra
     table = lut(name)
     index = np.nan_to_num(normalize(values, vmin, vmax) * (len(table) - 1)).astype(int)
     return table[index]
+
+
+#: colours of items shown without a variable
+PLAIN_COLORS = {
+    "free_surface": "#4f8fcf",
+    "bathymetry": "#c4ae86",  # sand
+    "volume": "#9aa7b4",
+    "slice": "#9aa7b4",
+    "mooring": "#e0a030",
+    "body": "#8f9aa6",
+    "structure": "#a7a39b",
+}
+#: colours of the materials of bodies and structures
+MATERIAL_COLORS = {
+    "steel": "#8f9aa6",
+    "concrete": "#b4afa6",
+    "rock": "#6f6a64",
+    "ice": "#e3f1fa",
+    "wood": "#9c7a4f",
+}
+
+
+def plain_color(kind: str, material: str | None = None) -> str:
+    """The colour of an item drawn without a colour map."""
+    if material in MATERIAL_COLORS:
+        return MATERIAL_COLORS[material]
+    return PLAIN_COLORS.get(kind, "#cccccc")

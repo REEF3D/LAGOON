@@ -304,3 +304,9 @@ def test_add_slice_from_toolbar(window, reef3d_run):
     combo = window.properties.editors["variable"]
     choices = [combo.itemText(i) for i in range(combo.count())]
     assert "pressure" in choices and "velocity.z" in choices
+
+
+def test_viewport_look_is_remembered(window):
+    window.look_actions["ocean"].trigger()
+    assert window.settings.value("view/viewport") == "ocean"
+    assert window.look_actions["ocean"].isChecked()

@@ -39,6 +39,7 @@ def render_session(
     size: tuple[int, int] = (1600, 900),
     time: float | None = None,
     view: str | None = None,
+    style: str = "studio",
 ) -> np.ndarray:
     """Draw the session's visible items and return an (h, w, 4) uint8 RGBA image."""
     import pygfx as gfx
@@ -49,7 +50,7 @@ def render_session(
         session.set_time(time)
     canvas = _offscreen_canvas(size)
     renderer = gfx.WgpuRenderer(canvas)
-    scene = SceneRenderer()
+    scene = SceneRenderer(style)
     for item_id in session.data.data_items():
         item = session.scene.get(item_id)
         mesh = session.data.load(item_id)
@@ -105,10 +106,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--time", type=float, help="time (or frame) to show")
     parser.add_argument("--size", default="1600x900", help="image size, e.g. 1920x1080")
     parser.add_argument("--view", choices=["perspective", "top", "front", "right"])
+    parser.add_argument("--style", choices=["studio", "ocean"], default="studio")
     args = parser.parse_args(argv)
     width, _, height = args.size.lower().partition("x")
     session = _session_for(Path(args.source).expanduser())
-    image = render_session(session, (int(width), int(height)), args.time, args.view)
+    image = render_session(session, (int(width), int(height)), args.time, args.view, args.style)
     write_png(args.output, image)
     shown = [i.name for i in session.scene if i.kind in KINDS and i.visible and i.kind != "case"]
     print(f"wrote {args.output} ({width}x{height}): {', '.join(shown) or 'nothing to show'}")

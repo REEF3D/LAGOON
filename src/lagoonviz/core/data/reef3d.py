@@ -33,7 +33,9 @@ from lagoonviz.core.data.mesh import (
 )
 from lagoonviz.core.data.series import SeriesFile, find_series
 from lagoonviz.core.data.vtkxml import (
+    legacy_point_arrays,
     read_header,
+    read_legacy,
     read_parallel_header,
     read_piece,
     split_name,
@@ -46,10 +48,26 @@ ROLES = {
     "free_surface": "free_surface",
     "bed": "bathymetry",
     "volume": "volume",
+    "body": "body",
+    "mooring": "mooring",
+    "structure": "structure",
 }
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
-_SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp")
+_SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp", ".vtk")
+#: folders of objects in the flow: floating bodies, mooring lines, porous or forced structures
+_OBJECT_FOLDER = re.compile(
+    r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>6DOF_VTP|6DOF_Mooring|VRANS_VTP|FORCING_VTP)$"
+)
+_OBJECT_ROLES = {
+    "6DOF_VTP": "body",
+    "6DOF_Mooring": "mooring",
+    "VRANS_VTP": "structure",
+    "FORCING_VTP": "structure",
+}
+#: roles whose files are drawn as they are (no merging of MPI pieces)
+PLAIN_ROLES = ("body", "mooring", "structure")
+_PIECE_STEP = re.compile(r"^(?P<stem>.+?)-(?P<piece>\d+)-(?P<step>\d+)$")
 
 
 def _role(what: str, tag: str | None, kind: str) -> str:
@@ -62,7 +80,14 @@ def _role(what: str, tag: str | None, kind: str) -> str:
     return (tag or "surface").lower()
 
 
-ROLE_LABELS = {"free_surface": "free surface", "bed": "bed", "volume": "volume"}
+ROLE_LABELS = {
+    "free_surface": "free surface",
+    "bed": "bed",
+    "volume": "volume",
+    "body": "bodies",
+    "mooring": "mooring lines",
+    "structure": "structures",
+}
 
 
 @dataclass
@@ -86,9 +111,13 @@ class Dataset:
         self.frames = frames
         self.folder = folder
         first = frames[0]
-        header = read_header(first.pieces[0])
-        self.kind = header.kind
-        self.components = {name: info.components for name, info in header.point_data.items()}
+        if first.pieces[0].suffix == ".vtk":
+            self.kind = "Lines"
+            self.components = legacy_point_arrays(first.pieces[0])
+        else:
+            header = read_header(first.pieces[0])
+            self.kind = header.kind
+            self.components = {name: info.components for name, info in header.point_data.items()}
         self._merger = PieceMerger("xy" if self.surface_like else "xyz")
         self._triangles = np.zeros((0, 3), np.uint32)
         self._volume_plan: VolumePlan | None = None
@@ -127,9 +156,11 @@ class Dataset:
     def default_variable(self) -> str:
         preferred = {
             "free_surface": ("eta", "elevation", "WL"),
-            "bed": ("elevation", "depth", "ST_bedch"),
+            "bed": (),  # plain sand; elevation and sediment fields stay one click away
             "volume": ("velocity", "pressure", "elevation"),
         }.get(self.role, ())
+        if self.role in ("bed", "body", "structure"):
+            return "none"  # drawn in their material colour, like sand or steel
         for name in preferred:
             if name in self.components:
                 return name
@@ -182,6 +213,8 @@ class Dataset:
             arrays = [name for name in arrays if name in self.components]
             if self.role == "free_surface" and "eta" in self.components and "eta" not in arrays:
                 arrays.append("eta")  # needed for vertical exaggeration
+        if self.role in PLAIN_ROLES:
+            return self._read_plain(frame, arrays)
         # reading runs in parallel; only making a new plan is serialised
         light = [read_piece(path, point_arrays=arrays, with_cells=False) for path in frame.pieces]
         if self.kind == "UnstructuredGrid":
@@ -211,6 +244,34 @@ class Dataset:
             point_data=data,
         )
         return mesh.with_normals()  # here, so it runs in the loader thread
+
+    @staticmethod
+    def _read_plain(frame: Frame, arrays: list[str] | None) -> SurfaceMesh:
+        """Bodies, mooring lines, structures: the pieces side by side, not merged."""
+        points, triangles, segments, data_parts = [], [], [], []
+        offset = 0
+        for path in frame.pieces:
+            if path.suffix == ".vtk":
+                piece = read_legacy(path, arrays)
+            else:
+                piece = read_piece(path, point_arrays=arrays)
+            points.append(piece.points)
+            if piece.kind == "Lines":
+                segments.append(piece.connectivity.reshape(-1, 2) + offset)
+            elif piece.offsets.size:
+                triangles.append(triangulate(piece.connectivity, piece.offsets) + offset)
+            data_parts.append(piece.point_data)
+            offset += piece.points.shape[0]
+        names = set.intersection(*(set(d) for d in data_parts)) if data_parts else set()
+        mesh = SurfaceMesh(
+            points=np.ascontiguousarray(np.concatenate(points), dtype=np.float32),
+            triangles=np.ascontiguousarray(
+                np.concatenate(triangles) if triangles else np.zeros((0, 3)), dtype=np.uint32
+            ),
+            point_data={name: np.concatenate([d[name] for d in data_parts]) for name in names},
+            segments=np.concatenate(segments).astype(np.uint32) if segments else None,
+        )
+        return mesh.with_normals()
 
     def read_slice(
         self, index: int, axis: int, position: float, variables: list[str] | None = None
@@ -351,8 +412,14 @@ class Case:
             options = [d for d in surfaces if d.role == role and d.same_run_as(lead)]
             if options:
                 chosen[role] = max(options, key=len)
+        # objects of the same run: bodies, mooring lines, structures
+        for role in ("body", "mooring", "structure"):
+            options = [d for d in self.datasets.values() if d.role == role and d.same_run_as(lead)]
+            if options:
+                chosen[role] = max(options, key=len)
         # beds are drawn first, so a transparent free surface shows them
-        return {role: chosen[role] for role in ("bed", "free_surface") if role in chosen}
+        order = ("bed", "structure", "body", "mooring", "free_surface")
+        return {role: chosen[role] for role in order if role in chosen}
 
     def describe(self) -> str:
         lines = [f"REEF3D case {self.path}"]
@@ -366,8 +433,39 @@ class Case:
 
 
 # ----------------------------------------------------------------- discovery
+def _frames_by_piece(folder: Path) -> dict[str, list[Frame]]:
+    """Series named ``<stem>-<piece>-<step>`` (bodies, mooring lines) or unnumbered.
+
+    Each output step becomes one frame whose pieces are the bodies or lines; a file
+    without numbers (a fixed structure) is one frame at step 0.
+    """
+    steps: dict[str, dict[int, dict[int, Path]]] = {}
+    for path in folder.iterdir():
+        if path.suffix not in _SUFFIXES or path.name.startswith("."):
+            continue
+        match = _PIECE_STEP.match(path.stem)
+        if match:
+            stem, piece, step = (
+                match.group("stem"),
+                int(match.group("piece")),
+                int(match.group("step")),
+            )
+        else:
+            stem, piece, step = path.stem, 0, 0
+        steps.setdefault(stem, {}).setdefault(step, {})[piece] = path
+    series = {}
+    for stem, by_step in steps.items():
+        series[stem] = [
+            Frame(step, pieces[min(pieces)], [pieces[k] for k in sorted(pieces)])
+            for step, pieces in sorted(by_step.items())
+        ]
+    return series
+
+
 def _frames_in(folder: Path) -> dict[str, list[Frame]]:
     """Group the files of a folder into series of frames, keyed by file stem."""
+    if _OBJECT_FOLDER.match(folder.name):
+        return _frames_by_piece(folder)
     parallel: dict[str, dict[int, Path]] = {}
     serial: dict[str, dict[int, Path]] = {}
     for path in folder.iterdir():
@@ -409,8 +507,20 @@ def _width(path: Path) -> int:
 
 def _dataset_from_folder(folder: Path) -> list[Dataset]:
     match = _FOLDER.match(folder.name)
+    objects = _OBJECT_FOLDER.match(folder.name)
     datasets = []
     for stem, frames in _frames_in(folder).items():
+        if objects:
+            solver = objects.group("solver")
+            role = _OBJECT_ROLES[objects.group("what")]
+            key = f"{solver.lower()}_{role}"
+            for number, run in enumerate(split_runs(frames)):
+                dataset = Dataset(
+                    key if number == 0 else f"{key}_earlier{number}", solver, role, run, folder
+                )
+                dataset.earlier_run = number > 0
+                datasets.append(dataset)
+            continue
         # REEF3D-NHFLOW-FSF -> solver NHFLOW, tag FSF
         parts = stem.split("-")
         solver = parts[1] if len(parts) > 1 and parts[0] == "REEF3D" else "REEF3D"
@@ -505,7 +615,7 @@ def open_case(path: str | Path) -> Case:
         found = [d for d in _dataset_from_folder(folder) if d.frames[0].path.name.startswith(stem)]
         datasets = found
         case_dir = folder.parent if _FOLDER.match(folder.name) else folder
-    elif _FOLDER.match(path.name):
+    elif _FOLDER.match(path.name) or _OBJECT_FOLDER.match(path.name):
         datasets = _dataset_from_folder(path)
         case_dir = path.parent
     elif path.name.startswith("REEF3D_"):  # e.g. REEF3D_NHFLOW_6DOF
@@ -513,7 +623,9 @@ def open_case(path: str | Path) -> Case:
     else:
         case_dir = path
         for folder in sorted(path.iterdir()):
-            if folder.is_dir() and _FOLDER.match(folder.name):
+            if folder.is_dir() and (
+                _FOLDER.match(folder.name) or _OBJECT_FOLDER.match(folder.name)
+            ):
                 datasets += _dataset_from_folder(folder)
         if not datasets:
             # a plain folder with VTU/VTP files

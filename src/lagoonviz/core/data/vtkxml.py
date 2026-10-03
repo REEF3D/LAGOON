@@ -362,3 +362,93 @@ def split_name(path: str | Path) -> tuple[str, int | None, int | None]:
         return Path(path).stem, None, None
     rank = match.group("rank")
     return match.group("stem"), int(match.group("step")), int(rank) if rank else None
+
+
+# ----------------------------------------------------------------- legacy .vtk
+def read_legacy(path: str | Path, point_arrays: list[str] | None = None) -> Piece:
+    """Read an ASCII legacy VTK POLYDATA file (points, lines, polygons, point data).
+
+    REEF3D writes mooring lines this way. Lines are returned as two-node segments
+    in ``connectivity``/``offsets`` with ``kind="Lines"``; polygons as ``"PolyData"``.
+    """
+    path = Path(path)
+    tokens = path.read_text(errors="replace").split()
+    position = 0
+
+    def take(n: int) -> list[str]:
+        nonlocal position
+        chunk = tokens[position : position + n]
+        position += n
+        return chunk
+
+    points = np.zeros((0, 3), np.float32)
+    segments: list[np.ndarray] = []
+    polys_conn: list[int] = []
+    polys_off: list[int] = []
+    data: dict[str, np.ndarray] = {}
+    n_points = 0
+    try:
+        start = tokens.index("POINTS")
+    except ValueError:
+        raise VTKFormatError(f"{path}: no POINTS in legacy VTK file") from None
+    if "POLYDATA" not in tokens[:start]:
+        raise VTKFormatError(f"{path}: only legacy POLYDATA files are supported")
+    position = start
+    while position < len(tokens):
+        word = tokens[position].upper()
+        position += 1
+        if word == "POINTS":
+            n_points = int(take(2)[0])
+            points = np.array(take(3 * n_points), dtype=np.float32).reshape(-1, 3)
+        elif word in ("LINES", "POLYGONS", "VERTICES", "TRIANGLE_STRIPS"):
+            n_cells, size = (int(v) for v in take(2))
+            values = np.array(take(size), dtype=np.int64)
+            index = 0
+            for _ in range(n_cells):
+                count = int(values[index])
+                cell = values[index + 1 : index + 1 + count]
+                index += 1 + count
+                if word == "LINES":
+                    segments.append(np.stack([cell[:-1], cell[1:]], axis=1))
+                elif word == "POLYGONS":
+                    polys_conn.extend(cell.tolist())
+                    polys_off.append(len(polys_conn))
+        elif word == "POINT_DATA":
+            take(1)
+        elif word == "SCALARS":
+            name, _dtype = take(2)
+            components = 1
+            if position < len(tokens) and tokens[position].isdigit():
+                components = int(take(1)[0])
+            if position < len(tokens) and tokens[position].upper() == "LOOKUP_TABLE":
+                take(2)
+            values = np.array(take(n_points * components), dtype=np.float32)
+            data[name] = values.reshape(n_points, components) if components > 1 else values
+        elif word in ("VECTORS", "NORMALS"):
+            name, _dtype = take(2)
+            data[name] = np.array(take(3 * n_points), dtype=np.float32).reshape(n_points, 3)
+        elif word in ("CELL_DATA", "FIELD"):
+            break  # cell data is not used
+    if point_arrays is not None:
+        data = {name: values for name, values in data.items() if name in point_arrays}
+    if segments:
+        lines = np.concatenate(segments)
+        return Piece(
+            "Lines", points, lines.ravel(), np.arange(2, 2 * len(lines) + 1, 2), None, data
+        )
+    return Piece(
+        "PolyData",
+        points,
+        np.array(polys_conn, np.int64),
+        np.array(polys_off, np.int64),
+        None,
+        data,
+    )
+
+
+def legacy_point_arrays(path: str | Path) -> dict[str, int]:
+    """Names and components of the point arrays of a legacy file (reads the file)."""
+    return {
+        name: (values.shape[1] if values.ndim == 2 else 1)
+        for name, values in read_legacy(path).point_data.items()
+    }
