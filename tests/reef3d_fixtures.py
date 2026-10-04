@@ -621,3 +621,125 @@ def write_rodtree(root: Path, end: float, interval: float, times: bool = True) -
         lines += _xml_array("offsets", [2 * e + 2 for e in range(n)], "Int32")
         lines += ["</Lines>", "</Piece>", "</PolyData>", "</VTKFile>"]
         (folder / f"REEF3D-RodTree-{count:08d}.vtp").write_text("\n".join(lines) + "\n")
+
+
+# ----------------------------------------------------------------- particles
+def particle_cloud(t: float, rank: int = 0, n0: int = 30) -> np.ndarray:
+    """Positions of a sediment cloud that grows and drifts: (n, 3) float32."""
+    rng = np.random.default_rng(1000 * rank + int(round(100 * t)))
+    n = n0 + 5 * int(round(4 * t)) + 3 * rank
+    base = rng.uniform([0.5 + 4 * rank, 0.5, 0.2], [4.0 + 4 * rank, 3.5, 1.5], (n, 3))
+    return (base + [0.3 * t, 0.0, 0.05 * t]).astype(np.float32)
+
+
+def _particle_vtp(path: Path, t: float, arrays: list[tuple[str, np.ndarray]], points, time_value):
+    """A particle VTP as REEF3D writes it: Verts, raw appended data, int32 sizes,
+    the arrays in the order of the header, then points, connectivity and offsets."""
+    n = len(points)
+    blobs, offset, elements = [], 0, []
+    for name, values in arrays:
+        values = np.ascontiguousarray(values)
+        components = values.shape[1] if values.ndim == 2 else 1
+        attrs = f'type="{TYPE_NAMES[values.dtype]}" Name="{name}"'
+        if components > 1:
+            attrs += f' NumberOfComponents="{components}"'
+        elements.append(f'<DataArray {attrs} format="appended" offset="{offset}"/>')
+        blob = np.int32(values.nbytes).tobytes() + values.tobytes()
+        blobs.append(blob)
+        offset += len(blob)
+    tail = []
+    for values in (
+        points.astype(np.float32),
+        np.arange(n, dtype=np.int32),
+        np.arange(1, n + 1, dtype=np.int32),
+    ):
+        tail.append(offset)
+        blob = np.int32(values.nbytes).tobytes() + values.tobytes()
+        blobs.append(blob)
+        offset += len(blob)
+    field = (
+        f'<FieldData>\n<DataArray type="Float64" Name="TimeValue" NumberOfTuples="1"> {t:g}\n'
+        "</DataArray>\n</FieldData>\n"
+        if time_value
+        else "<FieldData>\n</FieldData>\n"
+    )
+    head = (
+        '<?xml version="1.0"?>\n'
+        '<VTKFile type="PolyData" version="1.0" byte_order="LittleEndian">\n<PolyData>\n'
+        f'<Piece NumberOfPoints="{n}" NumberOfVerts="{n}" NumberOfLines="0" '
+        'NumberOfStrips="0" NumberOfPolys="0">\n'
+        + field
+        + "<PointData>\n"
+        + "\n".join(elements)
+        + "\n</PointData>\n<Points>\n"
+        f'<DataArray type="Float32" NumberOfComponents="3" format="appended" offset="{tail[0]}"/>\n'
+        "</Points>\n<Verts>\n"
+        f'<DataArray type="Int32" Name="connectivity" format="appended" offset="{tail[1]}"/>\n'
+        f'<DataArray type="Int32" Name="offsets" format="appended" offset="{tail[2]}"/>\n'
+        "</Verts>\n</Piece>\n</PolyData>\n"
+    )
+    with open(path, "wb") as handle:
+        handle.write(head.encode())
+        handle.write(b'<AppendedData encoding="raw">\n_')
+        for blob in blobs:
+            handle.write(blob)
+        handle.write(b"\n</AppendedData>\n</VTKFile>\n")
+
+
+def cpm_arrays(points: np.ndarray, t: float) -> list[tuple[str, np.ndarray]]:
+    n = len(points)
+    velocity = np.stack([np.full(n, 0.3), np.zeros(n), np.full(n, 0.05)], axis=1)
+    return [
+        ("Flag", np.ones(n, np.float32)),
+        ("velocity", velocity.astype(np.float32)),
+        ("radius", np.full(n, 0.0005, np.float32)),
+        ("fluid velocity", (velocity * 1.5).astype(np.float32)),
+        ("bedChange", (points[:, 0] * 0.01 * t).astype(np.float32)),
+    ]
+
+
+def write_cpm(root: Path, end: float, interval: float, ranks: int = 2) -> None:
+    """CFD's CPM particles (REEF3D_CFD_CPM_Particle): per output a .pvtp and a VTP per
+    rank, at their own interval (Q 182), with TimeValue. The .pvtp names the vector
+    arrays with <DataArray> as REEF3D does."""
+    folder = root / "REEF3D_CFD_CPM_Particle"
+    folder.mkdir(exist_ok=True)
+    (folder / "REEF3D-CFD-CPM-Log.dat").write_text("log\n")
+    for count, t in enumerate(np.arange(0.0, end + 1e-9, interval)):
+        names = []
+        for rank in range(ranks):
+            points = particle_cloud(float(t), rank)
+            name = f"REEF3D-Particle-{count:08d}-{rank + 1:06d}.vtp"
+            _particle_vtp(folder / name, float(t), cpm_arrays(points, float(t)), points, True)
+            names.append(name)
+        (folder / f"REEF3D-Particle-{count:08d}.pvtp").write_text(
+            '<?xml version="1.0"?>\n<VTKFile type="PPolyData" version="1.0" '
+            'byte_order="LittleEndian">\n<PPolyData GhostLevel="0">\n<PPointData>\n'
+            '<PDataArray type="Float32" Name="Flag"/>\n'
+            '<DataArray type="Float32" Name="velocity" NumberOfComponents="3"/>\n'
+            '<PDataArray type="Float32" Name="radius"/>\n'
+            '<DataArray type="Float32" Name="fluid velocity" NumberOfComponents="3"/>\n'
+            '<PDataArray type="Float32" Name="bedChange"/>\n</PPointData>\n<PPoints>\n'
+            '<PDataArray type="Float32" NumberOfComponents="3"/>\n</PPoints>\n'
+            + "".join(f'<Piece Source="{n}"/>\n' for n in names)
+            + "</PPolyData>\n</VTKFile>\n"
+        )
+
+
+def write_nhflow_particles(root: Path, end: float, interval: float) -> None:
+    """NHFLOW's particles (REEF3D_NHFLOW_Particles): one serial VTP per output."""
+    folder = root / "REEF3D_NHFLOW_Particles"
+    folder.mkdir(exist_ok=True)
+    (folder / "REEF3D-NHFLOW-Particles-Tracks.csv").write_text("id,t,x,y,z\n")
+    for count, t in enumerate(np.arange(0.0, end + 1e-9, interval)):
+        points = particle_cloud(float(t), 0, n0=20)
+        n = len(points)
+        arrays = [
+            ("velocity", np.tile(np.float32([0.3, 0, 0.05]), (n, 1))),
+            ("id", np.arange(n, dtype=np.int32)),
+            ("release", np.zeros(n, np.int32)),
+            ("state", np.ones(n, np.int32)),
+            ("age", np.full(n, float(t), np.float32)),
+        ]
+        path = folder / f"REEF3D-NHFLOW-Particles-{count:08d}.vtp"
+        _particle_vtp(path, float(t), arrays, points, True)

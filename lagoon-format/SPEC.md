@@ -3,13 +3,13 @@
 Version: 0.2 (draft for review)
 Status: σ-grid volumes (FNPF, NHFLOW), Cartesian volumes (CFD), structured
 surfaces (free surface, bed), time series (wave gauges, 6DOF, forces), wave
-profiles and floating bodies are specified and implemented (`lagoon_format.store`,
-converter `lagoon-convert`). Particles, rod trees, mooring lines and ice floes
-are listed at the end.
+profiles, floating bodies, particles (CPM, NHFLOW) and objects (DEM elements, ice
+floes, rod trees, mooring lines) are specified and implemented
+(`lagoon_format.store`, converter `lagoon-convert`).
 
-Changes in 0.2: time series tables (section 7), wave profiles (section 8) and
-floating bodies (section 9). A 0.1 reader opens 0.2 stores and ignores the new
-groups.
+Changes in 0.2: time series tables (section 7), wave profiles (section 8),
+floating bodies (section 9), particles and objects (section 10). A 0.1 reader
+opens 0.2 stores and ignores the new groups.
 
 ## Goals
 
@@ -66,6 +66,8 @@ case/
       nhflow_wsfline/            time/, line_1/x eta theory, ...
     bodies/                      floating bodies (section 9)
       nhflow_body/               time/, step/, body_0/vertices triangles translation rotation
+    particles/                   particles and objects (section 10)
+      cfd_particles/             time/, step/, point_end/, position/, point_data/velocity ...
 ```
 
 Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
@@ -92,8 +94,8 @@ Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
 - `version`: `major.minor` of this specification. A reader accepts stores of the
   same major version and ignores attributes, groups and arrays it does not know.
 - `outputs`: the output groups in the store (section 2).
-- `series`, `profiles`, `bodies`: the time series tables, wave profile sets and
-  body sets (sections 7, 8 and 9), optional.
+- `series`, `profiles`, `bodies`, `particles`: the time series tables, wave
+  profile sets, body sets and particle sets (sections 7 to 10), optional.
 - `reef3d_run`: the `run` record of the run log (RUN.md), unchanged, when known.
 - `units`: optional, as in RUN.md (`{"length": "m", "time": "s", ...}`); SI if absent.
 
@@ -320,6 +322,10 @@ it is the only codec outside the Zarr v3 core.
   (section 9): the first output's vertices and triangles, then a fitted rigid
   motion per output. A body whose vertices are once not where the motion puts
   them is written again, from the first output, with its vertices per output.
+- **Particles and objects** (CPM particles `REEF3D_CFD_CPM_Particle`, NHFLOW
+  particles, DEM elements, ice floes, rod trees, mooring lines) become particle
+  sets (section 10): the files of an output (MPI ranks, lines) are joined in the
+  order of their numbers, their cells renumbered; converting again appends.
 
 ## 7. Time series tables
 
@@ -411,8 +417,51 @@ largest distance of any accepted output [m]. Otherwise the body is not rigid
 Chunks: 4096 outputs of the motion arrays, one output of vertices and fields;
 codecs as for fields (`elementsize` 4 or 8).
 
-## 10. To be specified
+## 10. Particles and objects
 
-- **Particles** (DEM, Lagrangian): ragged arrays per output (`count` (nt,),
-  `offset` (nt,), `position` (n, 3), fields (n, ...)).
-- **Rod trees, mooring lines, ice floes**: as particles with connectivity.
+Particle clouds (CFD's CPM particles, NHFLOW's particles) and objects made of
+points (DEM elements, ice floes, rod trees, mooring lines) have a different
+number of points at every output. A *particle set* `particles/<key>` keeps the
+points of all outputs one after another:
+
+```json
+{"lagoon": {"kind": "particles", "dataset": "cfd_particles", "role": "particles",
+            "source": "REEF3D_CFD_CPM_Particle", "cells": null,
+            "point_fields": {"velocity": {"components": 3, "data_type": "float32",
+                                          "array": "velocity"},
+                             "fluid velocity": {"components": 3, "data_type": "float32",
+                                                "array": "fluid_velocity"}},
+            "cell_fields": {}}}
+```
+
+- `cells`: `null` (points only), `"polys"` (polygons: DEM elements, ice floes) or
+  `"lines"` (rods, mooring lines).
+- `point_fields`, `cell_fields`: the arrays as written (name → components, data
+  type, and the array that holds them: the name with characters other than
+  `[A-Za-z0-9_.-]` replaced by `_`).
+- `role`: what LAGOON shows it as (`particles`, `dem`, `ice`, `rods`, `mooring`).
+
+| array                 | shape        | dtype   | content |
+|-----------------------|--------------|---------|---------|
+| `time`                | (nt,)        | float64 | time of each output [s]; counts the outputs, extended last |
+| `step`                | (nt,)        | int64   | output number |
+| `point_end`           | (nt,)        | int64   | end of each output's points: output t has points `point_end[t-1]` … `point_end[t]-1` |
+| `position`            | (np, 3)      | float32 | points of all outputs [m] |
+| `point_data/<array>`  | (np[, c])    | as written | point fields |
+| `cell_set`            | (nt,)        | int64   | with cells: the cell set of each output |
+| `cell_sets/cell_end`, `cell_sets/connectivity_end` | (ns,) | int64 | end of each cell set's cells and corners |
+| `cell_sets/offsets`   | (nc,)        | int32   | VTK offsets (end of each cell's corners) within its set |
+| `cell_sets/connectivity` | (nk,)     | int32   | corners, as the output's point numbers (0 is its first point) |
+| `cell_data_end`       | (nt,)        | int64   | with cell fields: end of each output's cells in the cell fields |
+| `cell_data/<array>`   | (ncd[, c])   | as written | cell fields (one value per floe, per rod) |
+
+A cell set is stored only when an output's cells differ from those of the output
+before; objects that keep their shape (DEM elements, rods, mooring lines) have
+one. The growing arrays are sharded: shards of 1,048,576 rows, inner chunks of
+65,536 rows, codecs as for fields. Writers keep rows and write them in large
+pieces; `time` is extended last.
+
+## 11. To be specified
+
+- Particle tracks by particle id (from `id` fields) for path lines.
+- ParaView reader support for bodies and particle sets.

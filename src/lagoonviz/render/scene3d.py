@@ -225,6 +225,9 @@ class SceneRenderer:
 
     def update(self, kind: str, shown: DisplaySurface) -> None:
         """Create or update the mesh (or lines) of an item from its display data."""
+        if shown.point_size is not None:
+            self._update_points(kind, shown)
+            return
         if shown.segments is not None and shown.triangles.size == 0:
             self._update_lines(kind, shown)
             return
@@ -346,6 +349,46 @@ class SceneRenderer:
             current = _Shown(line, kind, shown.colormap, shown.segments, shown.values is not None)
             self._shown[shown.item_id] = current
         current.mesh.material.thickness = shown.line_width
+        current.low, current.high = _corners(positions)
+        current.mesh.visible = shown.visible
+
+    def _update_points(self, kind: str, shown: DisplaySurface) -> None:
+        """Particles: one screen-space point each, coloured per point."""
+        positions = np.ascontiguousarray(shown.positions, dtype=np.float32)
+        if not len(positions):
+            self.remove(shown.item_id)  # no particles at this time
+            return
+        if shown.values is not None:
+            rgba = colors(shown.values, shown.colormap, shown.vmin, shown.vmax)
+        else:
+            rgba = np.tile(np.array(_rgba(shown.color), np.float32), (len(positions), 1))
+        rgba = np.ascontiguousarray(rgba, dtype=np.float32)
+        rgba[:, 3] = shown.opacity
+        current = self._shown.get(shown.item_id)
+        if current is not None and isinstance(current.mesh, gfx.Points):
+            geometry = current.mesh.geometry
+            if not (
+                _update_buffer(geometry, "positions", positions)
+                and _update_buffer(geometry, "colors", rgba)
+            ):
+                self.content.remove(current.mesh)
+                current = None
+        elif current is not None:
+            self.content.remove(current.mesh)
+            current = None
+        if current is None:
+            material = gfx.PointsMaterial(size=shown.point_size, color_mode="vertex")
+            try:
+                material.pick_write = True
+            except AttributeError:
+                pass
+            points = gfx.Points(
+                gfx.Geometry(positions=np.array(positions), colors=np.array(rgba)), material
+            )
+            self.content.add(points)
+            current = _Shown(points, kind, shown.colormap, None, shown.values is not None)
+            self._shown[shown.item_id] = current
+        current.mesh.material.size = shown.point_size
         current.low, current.high = _corners(positions)
         current.mesh.visible = shown.visible
 

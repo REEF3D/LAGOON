@@ -36,6 +36,7 @@ from typing import Any
 import numpy as np
 
 from lagoon_format.bodies import BodySet, BodyWriter
+from lagoon_format.particles import ParticleSet, ParticleWriter
 from lagoon_format.series import ProfileSet, ProfileWriter, Table, write_table
 from lagoon_format.zarr3 import Array, Group, ZarrError, codecs_for, node_type
 
@@ -392,6 +393,13 @@ class Store:
             for key in info.get("bodies", bodies.members()):
                 if key in bodies:
                     self.bodies[key] = BodySet.open(bodies.group(key))
+        #: particles, DEM elements, ice floes, rods, mooring lines (SPEC 10), by key
+        self.particles: dict[str, ParticleSet] = {}
+        if "particles" in self.root:
+            particles = self.root.group("particles")
+            for key in info.get("particles", particles.members()):
+                if key in particles:
+                    self.particles[key] = ParticleSet.open(particles.group(key))
 
     @property
     def run_id(self) -> str | None:
@@ -539,6 +547,7 @@ class StoreWriter:
         self.root = Group(self.path)
         self.writers: dict[str, OutputWriter] = {}
         self.body_writers: list[BodyWriter] = []
+        self.particle_writers: list[ParticleWriter] = []
 
     @classmethod
     def create(
@@ -708,6 +717,22 @@ class StoreWriter:
         self._list("bodies", key)
         return writer
 
+    def particle_writer(self, key: str, create: dict[str, Any] | None = None) -> ParticleWriter:
+        """The writer of a particle set; ``create`` (the arguments of
+        :meth:`ParticleWriter.create` after the key) makes it new (or replaces it)."""
+        if "particles" not in self.root:
+            Group.create(self.path / "particles")
+        parent = self.root.group("particles")
+        if key in parent and create is None:
+            writer = ParticleWriter(parent.group(key))
+        else:
+            if key in parent:
+                _remove_tree(parent.path / key)
+            writer = ParticleWriter.create(parent, key, **(create or {"point_fields": {}}))
+        self.particle_writers.append(writer)
+        self._list("particles", key)
+        return writer
+
     def output(self, name: str, shard_time: int = 16, tile: int = 64) -> OutputWriter:
         """The writer of an existing output group (to append to it)."""
         writer = self.writers.get(name)
@@ -720,3 +745,5 @@ class StoreWriter:
             writer.close()
         for body_writer in self.body_writers:
             body_writer.close()
+        for particle_writer in self.particle_writers:
+            particle_writer.close()

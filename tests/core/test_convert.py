@@ -348,3 +348,67 @@ def test_a_body_that_is_not_rigid_keeps_its_vertices(tmp_path):
     vtk = open_case(run, stores=False).datasets["nhflow_body"]
     stored = open_case(run).datasets["nhflow_body"]
     assert np.abs(vtk.read(3).points - stored.read(3).points).max() < 1e-5
+
+
+def _same_meshes(vtk, stored, indices):
+    assert stored.steps == vtk.steps and stored.role == vtk.role
+    if vtk.times is not None:  # else the store has P 30 times the output number
+        np.testing.assert_allclose(stored.times, vtk.times)
+    for index in indices:
+        a, b = vtk.read(index, None), stored.read(index, None)
+        assert np.array_equal(a.points, b.points)
+        assert np.array_equal(a.triangles, b.triangles)
+        if a.segments is None:
+            assert b.segments is None
+        else:
+            assert np.array_equal(a.segments, b.segments)
+        assert set(a.point_data) == set(b.point_data)
+        for name, values in a.point_data.items():
+            assert np.array_equal(values, b.point_data[name]), name
+
+
+def test_particles_and_objects_in_the_store(tmp_path):
+    from reef3d_fixtures import write_cpm
+
+    from lagoonviz.core.data.lagoon import StoreParticleDataset
+
+    run = make_run(tmp_path / "cfd", solver="CFD", frames=4, print_interval=0.5)
+    write_cpm(run, end=1.5, interval=0.25)
+    vtk = open_case(run, stores=False).datasets["cfd_particles"]
+    report = convert(run, limit=4)
+    assert report.outputs["particles"] == 4
+    assert convert(run).outputs["particles"] == 3  # appended
+    stored = open_case(run).datasets["cfd_particles"]
+    assert isinstance(stored, StoreParticleDataset) and stored.label.endswith("(LAGOON)")
+    _same_meshes(vtk, stored, range(7))
+    sets = Store(report.store).particles["cfd_particles"]
+    assert sets.cells is None and "fluid velocity" in sets.point_fields
+
+
+def test_dem_ice_rods_and_mooring_in_the_store(tmp_path):
+    run = make_run(
+        tmp_path / "objects", frames=4, print_interval=0.5, objects=True, dem=0.25, rods=0.5
+    )
+    vtk = open_case(run, stores=False)
+    report = convert(run)
+    for role in ("dem", "rods", "mooring"):
+        assert report.outputs[role] > 0, role
+    case = open_case(run)
+    for key in ("dem_dem", "nhflow_mooring"):
+        _same_meshes(vtk.datasets[key], case.datasets[key], range(len(vtk.datasets[key])))
+    rods = next(k for k, d in vtk.datasets.items() if d.role == "rods")
+    _same_meshes(vtk.datasets[rods], case.datasets[rods], range(len(vtk.datasets[rods])))
+    store = Store(report.store)
+    mooring = store.particles["nhflow_mooring"]
+    assert mooring.cells == "lines"
+    # the lines keep their cells: one cell set for all outputs
+    assert mooring.group.array("cell_sets/cell_end").shape[0] == 1
+
+
+def test_ice_floes_in_the_store(tmp_path):
+    run = make_run(tmp_path / "ice", solver="FNPF", frames=3, print_interval=0.5, ice=0.25)
+    vtk = open_case(run, stores=False)
+    report = convert(run)
+    assert report.outputs["ice"] > 0
+    key = next(k for k, d in vtk.datasets.items() if d.role == "ice")
+    _same_meshes(vtk.datasets[key], open_case(run).datasets[key], range(len(vtk.datasets[key])))

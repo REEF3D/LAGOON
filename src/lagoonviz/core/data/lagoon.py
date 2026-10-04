@@ -15,13 +15,14 @@ from pathlib import Path
 
 import numpy as np
 from lagoon_format.bodies import BodySet
+from lagoon_format.particles import ParticleSet
 from lagoon_format.series import ProfileSet as StoredProfiles
 from lagoon_format.series import Table
 from lagoon_format.store import Output, Store, is_store, sigma_heights
 
 from lagoonviz.core.data.mesh import SurfaceMesh
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
-from lagoonviz.core.data.reef3d import Dataset, Frame, _joined
+from lagoonviz.core.data.reef3d import CELL_DATA_ROLES, Dataset, Frame, _joined
 from lagoonviz.core.data.series import SeriesFile, TimeSeries
 from lagoonviz.core.data.vtkxml import Piece
 
@@ -460,6 +461,86 @@ class StoreBodyDataset(Dataset):
         return mesh.with_normals()
 
 
+class StoreParticleDataset(Dataset):
+    """Particles or objects of a store (SPEC 10): one point set per output, read
+    by the same code as the VTK files (each output is one piece)."""
+
+    source = "lagoon"
+
+    def __init__(self, store: Store, particles: ParticleSet):
+        self.store = store
+        self.particles = particles
+        info = particles.info
+        role = str(info.get("role", "particles"))
+        key = info.get("dataset") or f"{store.solver.lower()}_{role}"
+        super().__init__(key, store.solver, role, self._frames(), particles.group.path)
+        self.solver = self._solver(key, store.solver)
+        self.times = np.asarray(particles.times, np.float64)
+        self.run_id = store.run_id
+        self.run_started = str(store.run.get("started", "")) if store.run else ""
+
+    @staticmethod
+    def _solver(key: str, solver: str) -> str:
+        """DEM output (``dem_dem``) keeps its own solver name, as in the VTK case."""
+        prefix = key.split("_", 1)[0].upper()
+        return prefix if prefix in ("DEM", "REEF3D") else solver
+
+    @property
+    def recorded(self) -> str | None:
+        return self.particles.info.get("dataset")
+
+    def _frames(self) -> list[Frame]:
+        path = self.particles.group.path
+        return [
+            Frame(int(step), path, [path / f"t{t}"]) for t, step in enumerate(self.particles.steps)
+        ]
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        components = {n: c for n, (c, _d) in self.particles.point_fields.items()}
+        if self.role in CELL_DATA_ROLES:
+            for name, (c, _d) in self.particles.cell_fields.items():
+                components.setdefault(name, c)
+        kind = "Lines" if self.particles.cells == "lines" else "PolyData"
+        return kind, components
+
+    @property
+    def label(self) -> str:
+        return super().label + " (LAGOON)"
+
+    def written_span(self) -> tuple[float, float]:
+        if self._span is None:
+            try:
+                first = (self.particles.group.path / "zarr.json").stat().st_mtime
+                last = (self.particles.group.path / "time" / "zarr.json").stat().st_mtime
+            except OSError:
+                first = last = 0.0
+            self._span = (min(first, last), max(first, last))
+        return self._span
+
+    def _plain_piece(self, path: Path, arrays: list[str] | None, cell_data: bool) -> Piece:
+        t = int(path.name[1:])
+        particles = self.particles
+        points = particles.positions(t)
+        point_fields = particles.point_fields
+        cell_fields = particles.cell_fields if cell_data else {}
+        names = list(point_fields) + list(cell_fields) if arrays is None else arrays
+        connectivity, offsets = particles.cell_set(t)
+        data = {}
+        for name in names:
+            if name in point_fields:
+                data[name] = particles.point_field(name, t)
+            elif name in cell_fields and offsets.size:
+                values = particles.cell_field(name, t)
+                sizes = np.diff(np.concatenate(([0], offsets)))
+                spread = np.zeros((len(points), *values.shape[1:]), values.dtype)
+                spread[connectivity] = np.repeat(values, sizes, axis=0)
+                data[name] = spread
+            elif name not in cell_fields:
+                raise KeyError(f"{particles.key}: no array {name!r}")
+        kind = "Lines" if particles.cells == "lines" else "PolyData"
+        return Piece(kind, points, connectivity, offsets, None, data)
+
+
 def store_datasets(path: str | Path) -> list[Dataset]:
     """The datasets of a LAGOON store, keyed like REEF3D's (``fnpf_volume``)."""
     store = Store(path)
@@ -471,6 +552,7 @@ def store_datasets(path: str | Path) -> list[Dataset]:
         if len(output.times)
     ]
     datasets += [StoreBodyDataset(store, bodies) for bodies in store.bodies.values() if len(bodies)]
+    datasets += [StoreParticleDataset(store, p) for p in store.particles.values() if len(p)]
     return datasets
 
 

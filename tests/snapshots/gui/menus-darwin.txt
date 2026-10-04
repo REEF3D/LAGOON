@@ -38,6 +38,7 @@ Add
   DEM elements
   Ice floes
   Rod trees
+  Particles
 View
   [x] Scene
   [x] Properties

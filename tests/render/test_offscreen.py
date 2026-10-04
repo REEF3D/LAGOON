@@ -119,6 +119,33 @@ def test_render_body_and_mooring(tmp_path):
     assert _colours(image) > 50
 
 
+def test_render_particles(tmp_path):
+    from reef3d_fixtures import make_run, write_cpm
+
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    run = make_run(tmp_path / "cpm", solver="CFD", frames=4, print_interval=0.5)
+    write_cpm(run, end=1.5, interval=0.25)
+    session = Session()
+    session.open_case(run)
+    session.set_visible("free_surface-1", False)
+    item = next(i for i in session.scene if i.kind == "particles")
+    session.set_property(item.id, "point_size", 10.0)
+    image = render_session(session, (320, 180), time=1, view="front")
+    _keep("render_particles.png", image)
+    assert _colours(image) > 20
+    # a later output has more particles: the points are made again
+    view = SceneRenderer()
+    for time in (0.25, 1.5):
+        session.set_time(time)
+        view.update("particles", session.data.display(item.id, session.data.load(item.id)))
+    import pygfx as gfx
+
+    points = view._shown[item.id].mesh
+    assert isinstance(points, gfx.Points) and points.material.size == 10.0
+    assert len(points.geometry.positions.data) == len(session.data.load(item.id).points)
+
+
 def test_marker(reef3d_run):
     from lagoonviz.render.scene3d import SceneRenderer
 

@@ -28,6 +28,15 @@
   fitted to the written vertices and checked (to 4 float32 steps); a body that
   does not move rigidly keeps its vertices per output. On the NHFLOW ship run
   (75,696 vertices, 697 outputs): 1420× smaller than the VTP files, within 0.06 mm.
+- Particles: CFD's CPM particles (`REEF3D_CFD_CPM_Particle`, a file per MPI rank)
+  and NHFLOW's particles open as a *Particles* item, drawn as points coloured by
+  a variable (velocity by default), with their own output times (TimeValue).
+- LAGOON format 0.2: particles and objects (section 10). CPM and NHFLOW particles,
+  DEM elements, ice floes, rod trees and mooring lines are particle sets: the
+  points of every output one after another, cells stored again only when they
+  change; the converter writes and appends them, the app reads them from the
+  store. Mooring lines of the NHFLOW ship run: bit for bit, 5.2× smaller, an
+  output read in 0.1 ms instead of 1 ms.
 - The theme switch repainted every widget of the application, including those of
   closed windows Qt was deleting, which crashed the test suite now and then; it
   now repaints only its own window.

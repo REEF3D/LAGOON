@@ -64,6 +64,7 @@ ROLES = {
     "dem": "dem",
     "ice": "ice",
     "rods": "rods",
+    "particles": "particles",
 }
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
@@ -72,7 +73,8 @@ _SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp", ".vtk")
 #: structures, DEM elements (REEF3D_DEM_VTP, written by the DEM for any solver)
 _OBJECT_FOLDER = re.compile(
     r"^REEF3D_(?:(?P<solver>[A-Z0-9]+)_)?"
-    r"(?P<what>6DOF_VTP|6DOF_Mooring|VRANS_VTP|FORCING_VTP|DEM_VTP|ICE|RodTree)$"
+    r"(?P<what>6DOF_VTP|6DOF_Mooring|VRANS_VTP|FORCING_VTP|DEM_VTP|ICE|RodTree"
+    r"|CPM_Particle|Particles)$"
 )
 _OBJECT_ROLES = {
     "6DOF_VTP": "body",
@@ -82,11 +84,16 @@ _OBJECT_ROLES = {
     "DEM_VTP": "dem",
     "ICE": "ice",  # FNPF ice floes
     "RodTree": "rods",  # rod trees (corals, vegetation): lines with a radius
+    "CPM_Particle": "particles",  # CFD's CPM sediment particles (one file per MPI rank)
+    "Particles": "particles",  # NHFLOW's Lagrangian particles
 }
+#: object folders written like the main output: per output a .pvtp and a file per
+#: MPI rank, or one serial file per output (not one file per object)
+_PARALLEL_OBJECTS = ("CPM_Particle", "Particles")
 #: roles whose files are drawn as they are (no merging of MPI pieces)
-PLAIN_ROLES = ("body", "mooring", "structure", "dem", "ice", "rods")
+PLAIN_ROLES = ("body", "mooring", "structure", "dem", "ice", "rods", "particles")
 #: roles whose outputs have their own interval: their times come from the files
-OWN_TIME_ROLES = ("dem", "ice", "rods")
+OWN_TIME_ROLES = ("dem", "ice", "rods", "particles")
 #: roles whose cell data (one value per floe or rod) is shown on their points
 CELL_DATA_ROLES = ("ice", "rods")
 #: folders whose files are numbered one per output (not one per object)
@@ -115,6 +122,7 @@ ROLE_LABELS = {
     "dem": "DEM elements",
     "ice": "ice floes",
     "rods": "rod trees",
+    "particles": "particles",
 }
 
 
@@ -198,6 +206,7 @@ class Dataset:
             "free_surface": ("eta", "elevation", "WL"),
             "bed": (),  # plain sand; elevation and sediment fields stay one click away
             "volume": ("velocity", "pressure", "elevation"),
+            "particles": ("velocity", "age"),
         }.get(self.role, ())
         if self.role in ("bed", "body", "structure", "dem", "ice", "rods"):
             return "none"  # drawn in their material colour, like sand or steel
@@ -305,16 +314,21 @@ class Dataset:
         )
         return mesh.with_normals()  # here, so it runs in the loader thread
 
-    @staticmethod
-    def _read_plain(frame: Frame, arrays: list[str] | None, cell_data: bool = False) -> SurfaceMesh:
-        """Bodies, mooring lines, structures: the pieces side by side, not merged."""
+    def _plain_piece(self, path: Path, arrays: list[str] | None, cell_data: bool):
+        """One file of an object output (a store hands out its points instead)."""
+        if path.suffix == ".vtk":
+            return read_legacy(path, arrays)
+        return read_piece(path, point_arrays=arrays, cell_to_points=cell_data)
+
+    def _read_plain(
+        self, frame: Frame, arrays: list[str] | None, cell_data: bool = False
+    ) -> SurfaceMesh:
+        """Bodies, mooring lines, structures, particles: the pieces side by side, not
+        merged."""
         points, triangles, segments, data_parts = [], [], [], []
         offset = 0
         for path in frame.pieces:
-            if path.suffix == ".vtk":
-                piece = read_legacy(path, arrays)
-            else:
-                piece = read_piece(path, point_arrays=arrays, cell_to_points=cell_data)
+            piece = self._plain_piece(path, arrays, cell_data)
             points.append(piece.points)
             if piece.kind == "Lines":
                 segments.append(piece.connectivity.reshape(-1, 2) + offset)
@@ -635,12 +649,22 @@ class Case:
             if options:
                 chosen[role] = max(options, key=len)
         # objects of the same run: bodies, mooring lines, structures
-        for role in ("body", "mooring", "structure", "dem", "ice", "rods"):
+        for role in ("body", "mooring", "structure", "dem", "ice", "rods", "particles"):
             options = [d for d in self.datasets.values() if d.role == role and d.same_run_as(lead)]
             if options:
                 chosen[role] = max(options, key=len)
         # beds are drawn first, so a transparent free surface shows them
-        order = ("bed", "structure", "body", "dem", "ice", "rods", "mooring", "free_surface")
+        order = (
+            "bed",
+            "structure",
+            "body",
+            "dem",
+            "ice",
+            "rods",
+            "particles",
+            "mooring",
+            "free_surface",
+        )
         return {role: chosen[role] for role in order if role in chosen}
 
     def describe(self) -> str:
@@ -691,7 +715,8 @@ def _frames_by_piece(folder: Path) -> dict[str, list[Frame]]:
 
 def _frames_in(folder: Path) -> dict[str, list[Frame]]:
     """Group the files of a folder into series of frames, keyed by file stem."""
-    if _OBJECT_FOLDER.match(folder.name):
+    objects = _OBJECT_FOLDER.match(folder.name)
+    if objects and objects.group("what") not in _PARALLEL_OBJECTS:
         return _frames_by_piece(folder)
     parallel: dict[str, dict[int, Path]] = {}
     serial: dict[str, dict[int, Path]] = {}

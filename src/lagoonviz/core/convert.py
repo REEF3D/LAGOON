@@ -31,13 +31,22 @@ from lagoon_format.store import Store, StoreError, StoreWriter, is_store
 from lagoonviz import __version__
 from lagoonviz.core.data.mesh import triangulate
 from lagoonviz.core.data.reef3d import Case, Dataset, open_case, preferred, run_log
-from lagoonviz.core.data.vtkxml import read_piece, read_time_value
+from lagoonviz.core.data.vtkxml import (
+    read_array,
+    read_header,
+    read_legacy,
+    read_piece,
+    read_time_value,
+)
 
 #: roles that are converted, and the grid each becomes
 ROLES = {"volume": "sigma", "free_surface": "surface", "bed": "surface"}
+#: object outputs stored as particle sets (format 0.2, section 10): points that
+#: change in number from output to output, with cells for objects
+OBJECT_ROLES = ("particles", "dem", "ice", "rods", "mooring")
 #: what else is converted (format 0.2): floating bodies (mesh once, a rigid motion
-#: per output), time series tables and wave profiles
-EXTRAS = ("bodies", "series", "profiles")
+#: per output), particles and objects, time series tables and wave profiles
+EXTRAS = ("bodies", *OBJECT_ROLES, "series", "profiles")
 SIGMA_SOLVERS = ("FNPF", "NHFLOW")
 #: solvers whose volume is converted: σ-grids, and CFD's Cartesian grid
 VOLUME_SOLVERS = (*SIGMA_SOLVERS, "CFD")
@@ -196,7 +205,8 @@ def chosen_datasets(case: Case, roles=tuple(ROLES)) -> dict[str, Dataset]:
             continue
         options = [d for d in case.datasets.values() if d.role == role]
         if lead is not None:
-            options = [d for d in options if d.solver == lead.solver]
+            # DEM and rod trees are written for the solver they are coupled to
+            options = [d for d in options if d.solver == lead.solver or d.same_run_as(lead)]
         if role == "volume":
             options = [
                 d for d in options if d.solver in VOLUME_SOLVERS and d.kind == "UnstructuredGrid"
@@ -246,13 +256,23 @@ def convert(
             bodies = None
         if lead is None and bodies is not None:
             lead = bodies
+    objects = chosen_datasets(case, tuple(r for r in roles if r in OBJECT_ROLES))
+    if lead is not None:
+        objects = {
+            r: d for r, d in objects.items() if d.solver == lead.solver or d.same_run_as(lead)
+        }
+    elif objects:  # only particles or objects: their solver names the store
+        lead = next((d for d in objects.values() if d.solver not in ("DEM", "REEF3D")), None)
+        lead = lead or next(iter(objects.values()))
     solver = lead.solver if lead is not None else _series_solver(case)
     series = {k: f for k, f in case.series.items() if f.solver == solver and "series" in roles}
     profiles = {
         k: f for k, f in case.profiles.items() if f.solver == solver and "profiles" in roles
     }
-    if not datasets and bodies is None and not series and not profiles:
-        raise ConvertError(f"{case.path}: no volume, surface, body or time series to convert")
+    if not datasets and bodies is None and not objects and not series and not profiles:
+        raise ConvertError(
+            f"{case.path}: no volume, surface, body, particles or time series to convert"
+        )
     path = Path(out) if out is not None else case.path / f"REEF3D_{solver}.lagoon"
     run = _run_record(case, lead) if lead is not None else None
     if is_store(path):
@@ -281,6 +301,10 @@ def convert(
         if bodies is not None:
             n, size = _convert_bodies(case, bodies, writer, pool, progress, limit)
             added["bodies"] = n
+            vtk_bytes += size
+        for role, dataset in objects.items():
+            n, size = _convert_objects(case, dataset, role, writer, pool, progress, limit)
+            added[role] = n
             vtk_bytes += size
     if series:
         added["series"] = _convert_series(series, writer)
@@ -540,6 +564,126 @@ def _convert_bodies(case, dataset, writer, pool, progress, limit) -> tuple[int, 
         return len(todo), size
 
 
+@dataclass
+class ObjectFrame:
+    """The files of one output of particles or objects, as one set of points."""
+
+    points: np.ndarray
+    point_data: dict[str, np.ndarray]
+    cells: str | None  # "polys", "lines" or None
+    connectivity: np.ndarray
+    offsets: np.ndarray
+    cell_data: dict[str, np.ndarray]
+
+
+def _object_file(path: Path):
+    """Points, cells (kind, connectivity, offsets), point and cell arrays of one file."""
+    if path.suffix == ".vtk":
+        piece = read_legacy(path)
+        kind = "lines" if piece.kind == "Lines" else ("polys" if piece.offsets.size else None)
+        return piece.points, kind, piece.connectivity, piece.offsets, piece.point_data, {}
+    header = read_header(path)
+    piece = read_piece(path, header=header)
+    kind = None
+    if header.n_cells:
+        kind = "lines" if header.lines else "polys"
+    cell_data = {
+        name: read_array(header, info, header.n_cells) for name, info in header.cell_data.items()
+    }
+    return piece.points, kind, piece.connectivity, piece.offsets, piece.point_data, cell_data
+
+
+def read_objects(frame) -> ObjectFrame:
+    """The files of one output side by side (MPI ranks, bodies, lines), cells renumbered."""
+    points, conns, offs, kinds = [], [], [], set()
+    point_parts: list[dict] = []
+    cell_parts: list[dict] = []
+    shift = corner = 0
+    for path in frame.pieces:
+        p, kind, conn, off, pdata, cdata = _object_file(path)
+        points.append(np.asarray(p, np.float32).reshape(-1, 3))
+        if kind:
+            kinds.add(kind)
+            conns.append(np.asarray(conn, np.int64) + shift)
+            offs.append(np.asarray(off, np.int64) + corner)
+            corner += len(conn)
+        point_parts.append(pdata)
+        cell_parts.append(cdata if kind else {})
+        shift += len(p)
+    if len(kinds) > 1:
+        raise ConvertError(f"output {frame.step}: lines and polygons together")
+    names = set.intersection(*(set(d) for d in point_parts)) if point_parts else set()
+    cells = next(iter(kinds), None)
+    with_cells = [d for d in cell_parts if d] if cells else []
+    cell_names = set.intersection(*(set(d) for d in with_cells)) if with_cells else set()
+    return ObjectFrame(
+        np.concatenate(points) if points else np.zeros((0, 3), np.float32),
+        {n: np.concatenate([d[n] for d in point_parts]) for n in sorted(names)},
+        cells,
+        np.concatenate(conns) if conns else np.zeros(0, np.int64),
+        np.concatenate(offs) if offs else np.zeros(0, np.int64),
+        {n: np.concatenate([d[n] for d in with_cells]) for n in sorted(cell_names)},
+    )
+
+
+def _layout(arrays: dict[str, np.ndarray]) -> dict[str, tuple[int, str]]:
+    return {n: (_components(v), np.asarray(v).dtype.name) for n, v in arrays.items()}
+
+
+def _convert_objects(case, dataset, role, writer, pool, progress, limit) -> tuple[int, int]:
+    """Particles, DEM elements, ice floes, rods, mooring lines (SPEC 10): the points
+    of every output one after another; cells stored again only when they change."""
+    key = dataset.key
+    times = _frame_times(case, dataset)
+    stored = Store(writer.path).particles.get(key)
+    if stored is not None:
+        if stored.info.get("dataset", key) != key:
+            raise ConvertError(f"{role}: the store holds {stored.info.get('dataset')}")
+        set_writer = writer.particle_writer(key)
+        done = {int(s) for s in stored.steps}
+    else:
+        first = read_objects(dataset.frames[0])
+        set_writer = writer.particle_writer(
+            key,
+            {
+                "point_fields": _layout(first.point_data),
+                "cells": first.cells,
+                "cell_fields": _layout(first.cell_data),
+                "source": dataset.folder.name,
+                "attributes": {"dataset": key, "role": role},
+            },
+        )
+        done = set()
+    todo = [(k, f) for k, f in enumerate(dataset.frames) if f.step not in done]
+    if limit is not None:
+        todo = todo[:limit]
+    size = 0
+    for count, (k, frame, objects) in enumerate(
+        _prefetched(pool, lambda item: (*item, read_objects(item[1])), todo), start=1
+    ):
+        if objects.cells != set_writer.cells and len(objects.points):
+            raise ConvertError(f"{role}: output {frame.step} has other cells than the first")
+        try:
+            set_writer.append(
+                times[k],
+                frame.step,
+                objects.points,
+                objects.point_data,
+                objects.connectivity,
+                objects.offsets,
+                objects.cell_data,
+            )
+        except ValueError as error:
+            raise ConvertError(f"{role}: {error}") from error
+        size += sum(p.stat().st_size for p in frame.pieces)
+        if frame.path not in frame.pieces and frame.path.exists():
+            size += frame.path.stat().st_size  # the .pvtp
+        if progress is not None:
+            progress(role, count, len(todo))
+    set_writer.flush()
+    return len(todo), size
+
+
 def _components(values: np.ndarray) -> int:
     return int(values.shape[1]) if values.ndim > 1 else 1
 
@@ -574,7 +718,7 @@ def main(argv: list[str] | None = None) -> int:
         "--outputs",
         default=",".join((*ROLES, *EXTRAS)),
         help="what to convert, comma separated (default: everything: "
-        "volume,free_surface,bed,bodies,series,profiles)",
+        "volume,free_surface,bed,bodies,particles,dem,ice,rods,mooring,series,profiles)",
     )
     parser.add_argument("--limit", type=int, help="convert at most this many outputs per stream")
     parser.add_argument("--shard-time", type=int, default=16, help="outputs per shard file")

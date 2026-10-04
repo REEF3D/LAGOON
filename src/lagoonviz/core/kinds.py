@@ -311,6 +311,16 @@ KINDS: dict[str, KindSpec] = {
             **_colouring("none", "viridis"),
         },
     ),
+    "particles": KindSpec(
+        "Particles",
+        {
+            **_data_source("particle"),
+            **_colouring("velocity", "viridis"),
+            "point_size": PropertySpec(
+                4.0, "Point size [px]", minimum=1.0, maximum=40.0, tip="Size on screen"
+            ),
+        },
+    ),
 }
 
 

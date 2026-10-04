@@ -47,6 +47,7 @@ PLAN_LAYERS = {
     "dem": 1.5,
     "ice": 1.5,
     "rods": 1.5,
+    "particles": 2.2,
     "mooring": 2.0,
     "free_surface": 3.0,
 }
@@ -76,6 +77,8 @@ class DisplaySurface:
     #: (k, 2) uint32 line segments for line items (mooring lines)
     segments: np.ndarray | None = None
     line_width: float = 3.0
+    #: point items (particles): drawn as points of this size [px], not triangles
+    point_size: float | None = None
 
 
 @dataclass
@@ -839,6 +842,7 @@ class DataManager:
             color=self._plain_color(item),
             segments=mesh.segments,
             line_width=float(props.get("line_width", 3.0)),
+            point_size=float(props.get("point_size", 4.0)) if item.kind == "particles" else None,
         )
 
     # ------------------------------------------------------------- time series
