@@ -71,6 +71,28 @@ def _contours(variable: str = "none") -> dict[str, PropertySpec]:
     }
 
 
+def _vectors() -> dict[str, PropertySpec]:
+    return {
+        "vectors_of": PropertySpec(
+            "none",
+            "Vectors of",
+            provider="vectors",
+            tip="Draw arrows of a vector variable, e.g. the velocity (none: no arrows)",
+        ),
+        "vector_count": PropertySpec(
+            400, "Arrows", minimum=10, maximum=20000, tip="About how many arrows, evenly spread"
+        ),
+        "vector_scale": PropertySpec(
+            1.0,
+            "Arrow length",
+            minimum=0.1,
+            maximum=10.0,
+            slider="log",
+            tip="1: the largest arrows reach the next arrow",
+        ),
+    }
+
+
 def _exaggeration(tip: str) -> dict[str, PropertySpec]:
     return {
         "exaggeration": PropertySpec(
@@ -129,6 +151,7 @@ KINDS: dict[str, KindSpec] = {
             **_data_source("free surface"),
             **_colouring("eta", "reef3d"),
             **_contours(),
+            **_vectors(),
             **_exaggeration("Scales the surface elevation about the still water level"),
             "hide_dry": PropertySpec(
                 True, "Hide dry land", tip="Leave out the surface where the depth is zero"
@@ -136,7 +159,7 @@ KINDS: dict[str, KindSpec] = {
         },
     ),
     "bathymetry": KindSpec(
-        "Bathymetry",
+        "Bed",
         {
             **_data_source("bed"),
             **_colouring("none", "sand"),
@@ -176,6 +199,44 @@ KINDS: dict[str, KindSpec] = {
             "position": PropertySpec(0.0, "Position [m]", tip="Where the plane cuts the axis"),
             **_colouring("velocity", "ocean"),
             **_contours(),
+            **_vectors(),
+        },
+    ),
+    "iso_surface": KindSpec(
+        "Iso-surface",
+        {
+            **_data_source("volume"),
+            "iso_by": PropertySpec(
+                "none",
+                "Iso-surface of",
+                provider="variables",
+                tip="The variable whose surface of equal value is drawn",
+            ),
+            "iso_value": PropertySpec(0.0, "Value", tip="Where the surface lies"),
+            **_colouring("none", "ocean"),
+        },
+    ),
+    "streamlines": KindSpec(
+        "Streamlines",
+        {
+            **_data_source("volume"),
+            "streamlines_of": PropertySpec(
+                "velocity", "Streamlines of", provider="vectors", tip="The vector field to follow"
+            ),
+            "lines_in": PropertySpec(
+                "volume",
+                "Lines in",
+                choices=("volume", "seed plane", "free surface"),
+                tip="Through the volume; in the seed plane only (as on a slice); or on the "
+                "free surface (its horizontal flow)",
+            ),
+            "seed_normal": PropertySpec(
+                "y", "Seeds on plane", choices=("x", "y", "z"), tip="The plane the lines start on"
+            ),
+            "seed_position": PropertySpec(0.0, "Plane at [m]", tip="Where the plane cuts the axis"),
+            "seeds": PropertySpec(60, "Lines", minimum=1, maximum=2000, tip="About how many lines"),
+            **_colouring("velocity", "ocean"),
+            "line_width": PropertySpec(2.0, "Line width [px]", minimum=0.5, maximum=20.0),
         },
     ),
     "profile": KindSpec(

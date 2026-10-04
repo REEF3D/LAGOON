@@ -152,6 +152,33 @@
 - Rotation goes all the way round (pygfx stopped 1 degree short of the poles), always
   about the centre of the view. After the top view the scene no longer tips over when
   turned (the top view's "up" had become the orbit axis).
+- Streamlines can also lie in their seed plane (*Lines in: seed plane*, the part of the
+  flow across the plane left out, as on a slice) or on the free surface (its
+  horizontal flow, from the free surface output, dry land left out). *Add →
+  Streamlines* with a slice selected starts in its plane, with the free surface
+  selected on the free surface.
+- "Bathymetry" is called "Bed" (new items, menus, toolbar); sessions and scripts keep
+  working.
+- Streamlines through volume output (*Add → Streamlines*): lines along a vector field
+  (the velocity) from seeds spread over a plane (x, y or z, through the middle at first),
+  traced forwards and backwards until they leave the water, coloured by any variable
+  (speed by default). REEF3D's volumes are columns (fixed levels for CFD, σ-levels for
+  NHFLOW and FNPF), which makes finding points fast without a search tree; the volume
+  of every MPI rank is joined first. Dry columns stop the lines. How the points form
+  columns is worked out once per grid; later frames only pick their values, so
+  playing with streamlines keeps up.
+- Iso-surfaces of volume output (*Add → Iso-surface*): the surface where a variable has
+  a value, e.g. REEF3D's level set `phi` at 0 (the free surface of a CFD run), a
+  pressure or a speed; coloured by any variable, played like the rest. A new one
+  starts on `phi` = 0 if the volume has it, else on the middle speed. Cut with
+  marching tetrahedra like slices, with shared points merged and every triangle
+  facing the rising field, so it shades smoothly (mixed windings shaded in stripes). At
+  a time when the field does not reach the value, nothing is drawn.
+- Vector arrows on the free surface and slices: *Vectors of* (e.g. the velocity), about
+  how many arrows (spread evenly over the surface, also over the height of a vertical
+  slice) and their length (1: the longest reach the next arrow; the scale stays put
+  while playing). Vertical parts are exaggerated like the surface; in 2D the arrows
+  lie flat on top. Filmed by the export too.
 - Contour lines on the free surface, the bed and slices: *Contour lines of* (any
   variable, e.g. the bed's elevation or the surface's eta) and about how many lines.
   Levels are round numbers over the variable's automatic range and stay put while

@@ -28,7 +28,10 @@ from lagoonviz.core.data.mesh import (
     PieceMerger,
     SurfaceMesh,
     VolumePlan,
+    orient_by_field,
     plan_cut,
+    plan_level,
+    scalar_values,
     triangulate,
     variable_names,
 )
@@ -134,6 +137,7 @@ class Dataset:
         self._volume_plan: VolumePlan | None = None
         self._step_array: np.ndarray | None = None
         self._cells: dict[int, tuple] = {}  # piece number -> cells, for slices
+        self._column_plans: dict[tuple, object] = {}  # piece sizes -> ColumnPlan (streamlines)
         self._cuts: dict[tuple, CutPlan] = {}  # vertical slices: cut plans per piece
         #: set for output left over from an earlier run in the same folder
         self.earlier_run = False
@@ -318,18 +322,7 @@ class Dataset:
         parts = []
         for number, path in enumerate(frame.pieces):
             piece = read_piece(path, point_arrays=arrays, with_cells=False)
-            with self._lock:
-                cells = self._cells.get(number)
-                if cells is None or cells[0] != piece.points.shape[0]:
-                    full = read_piece(path, point_arrays=[])
-                    cells = (
-                        full.points.shape[0],
-                        full.connectivity.astype(np.int32),
-                        full.offsets.astype(np.int64),
-                        full.types,
-                    )
-                    self._cells[number] = cells
-            _, connectivity, offsets, types = cells
+            _, connectivity, offsets, types = self._piece_cells(number, path, piece)
             # σ-grids move only vertically: an x or y plane cuts the same edges in every frame
             key = (number, axis, float(position), piece.points.shape[0])
             plan = self._cuts.get(key) if axis in (0, 1) else None
@@ -340,15 +333,109 @@ class Dataset:
                         self._cuts.clear()
                     self._cuts[key] = plan
             parts.append(plan.apply(piece.points, piece.point_data))
-        points = np.concatenate([p.points for p in parts])
-        shift = np.cumsum([0] + [p.n_points for p in parts[:-1]])
-        triangles = np.concatenate(
-            [p.triangles.astype(np.int64) + s for p, s in zip(parts, shift, strict=True)]
+        return _joined(parts)
+
+    def read_iso(
+        self, index: int, variable: str, value: float, variables: list[str] | None = None
+    ) -> SurfaceMesh:
+        """The iso-surface of a volume frame where ``variable`` equals ``value``.
+
+        Planned anew for every frame (the field moves), with the cells of each piece
+        read once and kept, like slices; neighbouring cut points are merged so the
+        surface shades smoothly.
+        """
+        if self.kind != "UnstructuredGrid":
+            raise ValueError(f"{self.label}: iso-surfaces need a volume")
+        frame = self.frames[index]
+        arrays = self._arrays([*(variables or []), variable]) or []
+        parts = []
+        for number, path in enumerate(frame.pieces):
+            piece = read_piece(path, point_arrays=arrays, with_cells=False)
+            _, connectivity, offsets, types = self._piece_cells(number, path, piece)
+            field = scalar_values(piece.point_data, variable)
+            if field is None:
+                raise ValueError("an iso-surface needs a variable")
+            plan = plan_level(field.astype(np.float64) - value, connectivity, offsets, types, True)
+            plan = orient_by_field(plan, piece.points, field)
+            parts.append(plan.apply(piece.points, piece.point_data))
+        return _joined(parts)
+
+    def read_streamlines(
+        self,
+        index: int,
+        vector: str,
+        axis: int,
+        position: float,
+        count: int,
+        variables: list[str] | None = None,
+        lines_in: str = "volume",
+    ) -> SurfaceMesh:
+        """Streamlines of a vector field, as line segments carrying the sampled
+        variables. ``lines_in``:
+
+        * ``"volume"``: through the volume, seeded on the plane ``x[axis] = position``;
+        * ``"seed plane"``: in that plane only (the part of the field across the plane
+          left out), like on a slice;
+        * ``"free surface"``: on this free surface output, along the horizontal part
+          of the field, seeded over the wet surface.
+        """
+        from lagoonviz.core.streamlines import ColumnPlan, SheetGrid, trace, trace_on_sheet
+
+        arrays = self._arrays([*(variables or []), vector]) or []
+        if lines_in == "free surface":
+            extra = ["depth"] if "depth" in self.components else []
+            mesh = self.read(index, [*arrays, *extra])
+            if vector not in mesh.point_data or mesh.point_data[vector].ndim != 2:
+                raise ValueError(f"{vector!r} is not a vector field of {self.label}")
+            depth = mesh.point_data.get("depth")
+            sheet = SheetGrid.from_points(
+                mesh.points, mesh.point_data, wet=None if depth is None else depth > 0
+            )
+            lines = trace_on_sheet(sheet, vector, sheet.seeds(count))
+            return _lines_mesh(lines, sheet)
+        if self.kind != "UnstructuredGrid":
+            raise ValueError(f"{self.label}: streamlines need a volume")
+        pieces = [
+            read_piece(p, point_arrays=arrays, with_cells=False) for p in self.frames[index].pieces
+        ]
+        names = set.intersection(*(set(p.point_data) for p in pieces)) if pieces else set()
+        sizes = tuple(len(p.points) for p in pieces)
+        with self._lock:
+            plan = self._column_plans.get(sizes)
+        if plan is None:  # once per grid: later frames only pick their values
+            plan = ColumnPlan.build([p.points for p in pieces])
+            with self._lock:
+                self._column_plans[sizes] = plan
+        grid = plan.grid(
+            np.concatenate([p.points for p in pieces]),
+            {n: np.concatenate([p.point_data[n] for p in pieces]) for n in names},
         )
-        names = set.intersection(*(set(p.point_data) for p in parts)) if parts else set()
-        data = {name: np.concatenate([p.point_data[name] for p in parts]) for name in names}
-        mesh = SurfaceMesh(points, np.ascontiguousarray(triangles, dtype=np.uint32), data)
-        return mesh.with_normals()
+        if vector not in grid.fields or grid.fields[vector].ndim != 4:
+            raise ValueError(f"{vector!r} is not a vector field of {self.label}")
+        follow = vector
+        if lines_in == "seed plane":
+            in_plane = grid.fields[vector].copy()
+            in_plane[..., axis] = 0.0  # what crosses the plane is left out
+            grid.fields["_in_plane"] = in_plane
+            follow = "_in_plane"
+        lines = trace(grid, follow, grid.seeds(axis, position, count))
+        grid.fields.pop("_in_plane", None)
+        return _lines_mesh(lines, grid)
+
+    def _piece_cells(self, number: int, path: Path, piece) -> tuple:
+        """The cells of one MPI piece, read once (the grid does not change)."""
+        with self._lock:
+            cells = self._cells.get(number)
+            if cells is None or cells[0] != piece.points.shape[0]:
+                full = read_piece(path, point_arrays=[])
+                cells = (
+                    full.points.shape[0],
+                    full.connectivity.astype(np.int32),
+                    full.offsets.astype(np.int64),
+                    full.types,
+                )
+                self._cells[number] = cells
+        return cells
 
     def bounds(self, index: int = 0) -> tuple[np.ndarray, np.ndarray]:
         """Lower and upper corner of a frame's points."""
@@ -606,6 +693,43 @@ def _split(frames: list[Frame], owners: dict) -> list[tuple[list[Frame], Run | N
             result += [(run, None, []) for run in split_runs(unknown)] if unknown else []
             return result
     return [(run, None, []) for run in split_runs(frames)]
+
+
+def _lines_mesh(lines: list[np.ndarray], grid) -> SurfaceMesh:
+    """Polylines as one mesh of segments, with every field of ``grid`` sampled."""
+    if not lines:
+        empty = np.zeros((0, 3), np.float32)
+        return SurfaceMesh(
+            empty, np.zeros((0, 3), np.uint32), {}, segments=np.zeros((0, 2), np.uint32)
+        )
+    points = np.concatenate(lines)
+    starts = np.cumsum([0] + [len(line) for line in lines[:-1]])
+    segments = np.concatenate(
+        [
+            np.stack([s + np.arange(len(line) - 1), s + np.arange(1, len(line))], axis=1)
+            for s, line in zip(starts, lines, strict=True)
+        ]
+    )
+    data = {name: grid.sample(name, points)[0].astype(np.float32) for name in grid.fields}
+    return SurfaceMesh(
+        points.astype(np.float32),
+        np.zeros((0, 3), np.uint32),
+        data,
+        segments=segments.astype(np.uint32),
+    )
+
+
+def _joined(parts: list[SurfaceMesh]) -> SurfaceMesh:
+    """The surfaces cut from each MPI piece as one mesh."""
+    points = np.concatenate([p.points for p in parts])
+    shift = np.cumsum([0] + [p.points.shape[0] for p in parts[:-1]])
+    triangles = np.concatenate(
+        [p.triangles.astype(np.int64) + s for p, s in zip(parts, shift, strict=True)]
+    )
+    names = set.intersection(*(set(p.point_data) for p in parts)) if parts else set()
+    data = {name: np.concatenate([p.point_data[name] for p in parts]) for name in names}
+    mesh = SurfaceMesh(points, np.ascontiguousarray(triangles, dtype=np.uint32), data)
+    return mesh.with_normals()
 
 
 def _dataset_from_folder(folder: Path) -> list[Dataset]:

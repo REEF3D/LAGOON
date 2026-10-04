@@ -22,10 +22,12 @@ Edit
 Add
   Case
   Free surface
-  Bathymetry
+  Bed
   Volume
   Time series
   Slice
+  Iso-surface
+  Streamlines
   Wave profile
   Gauge
   Bodies

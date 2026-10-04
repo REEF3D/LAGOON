@@ -126,6 +126,33 @@ class Session:
             position = round(center["xyz".index(normal)], 6) if center else 0.0
         return self.add_item("slice", normal=normal, position=position, **properties)
 
+    def add_iso_surface(
+        self, iso_by: str | None = None, iso_value: float | None = None, **properties: Any
+    ) -> str:
+        """Add an iso-surface of the volume where ``iso_by`` equals ``iso_value``;
+        without a variable, a sensible first one (see :meth:`DataManager.iso_default`),
+        recorded so the script repeats it. Other properties (e.g. ``variable`` to colour
+        by) as for :meth:`add_item`."""
+        if iso_by is None:
+            chosen = self.data.iso_default(properties)
+            iso_by, default = chosen if chosen else ("none", 0.0)
+            iso_value = default if iso_value is None else iso_value
+        return self.add_item(
+            "iso_surface", iso_by=iso_by, iso_value=float(iso_value or 0.0), **properties
+        )
+
+    def add_streamlines(
+        self, seed_normal: str = "y", seed_position: float | None = None, **properties: Any
+    ) -> str:
+        """Add streamlines of the volume's velocity, seeded on a plane through the
+        middle of the volume (the position is recorded, like a slice's)."""
+        if seed_position is None:
+            center = self.data.domain_center("streamlines", properties)
+            seed_position = round(center["xyz".index(seed_normal)], 6) if center else 0.0
+        return self.add_item(
+            "streamlines", seed_normal=seed_normal, seed_position=seed_position, **properties
+        )
+
     def remove_item(self, item_id: str) -> None:
         self.scene.get(item_id)
         self.stack.execute(RemoveItem(item_id))

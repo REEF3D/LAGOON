@@ -348,10 +348,30 @@ class MainWindow(QMainWindow):
         for kind in ("free_surface", "bathymetry", "volume", "slice", "series"):
             self.add_actions[kind].setIcon(icon(kind))
 
+    def _streamline_start(self) -> dict:
+        """New streamlines where the user is looking: in the plane of the selected
+        slice, or on the selected free surface; else through the volume."""
+        selected = self.scene_tree.selected_id()
+        if selected and selected in self.session.scene:
+            item = self.session.scene.get(selected)
+            if item.kind == "slice":
+                return {
+                    "seed_normal": item.properties["normal"],
+                    "seed_position": item.properties["position"],
+                    "lines_in": "seed plane",
+                }
+            if item.kind == "free_surface":
+                return {"lines_in": "free surface"}
+        return {}
+
     def add_item(self, kind: str) -> str:
         """Add an item from the menu or toolbar (slices start in the middle of the volume)."""
         if kind == "slice":
             return self.session.add_slice("y")
+        if kind == "iso_surface":
+            return self.session.add_iso_surface()
+        if kind == "streamlines":
+            return self.session.add_streamlines(**self._streamline_start())
         return self.session.add_item(kind)
 
     # ------------------------------------------------------------- compare

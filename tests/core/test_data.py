@@ -784,3 +784,34 @@ def test_plan_view_draws_everything_flat(tmp_path):
     s.set_plan_view(False)
     bed = next(i.id for i in s.scene if i.kind == "bathymetry")
     assert np.ptp(s.data.display(bed, s.data.load(bed)).positions[:, 2]) > 0  # 3D again
+
+
+def test_iso_surface_of_a_volume(reef3d_run):
+    """Pressure grows linearly with depth in the test volume: its iso-surface at
+    9810 Pa is the plane 1 m below the still water level, connected (shared points)."""
+    from reef3d_fixtures import DEPTH
+
+    s = Session()
+    s.open_case(reef3d_run)
+    iso = s.add_iso_surface("pressure", 9810.0)
+    item = s.scene.get(iso)
+    assert (item.properties["iso_by"], item.properties["iso_value"]) == ("pressure", 9810.0)
+    mesh = s.data.load(iso)
+    assert mesh.triangles.shape[0] > 0
+    np.testing.assert_allclose(mesh.points[:, 2], DEPTH - 1.0, atol=1e-4)
+    # cut points shared by neighbouring tetrahedra are made once (a sheet has about
+    # half as many points as triangles; unmerged, three per triangle)
+    assert len(mesh.points) < mesh.triangles.shape[0]
+    # all triangles face the same way (towards higher pressure: down), so it shades smoothly
+    tri = mesh.triangles.astype(int)
+    p = mesh.points.astype(float)
+    normal_z = np.cross(p[tri[:, 1]] - p[tri[:, 0]], p[tri[:, 2]] - p[tri[:, 0]])[:, 2]
+    assert np.all(normal_z[np.abs(normal_z) > 1e-9] < 0)
+    shown = s.data.display(iso, mesh)
+    assert shown.triangles.shape == mesh.triangles.shape
+    # without a variable: a sensible first one, recorded in the script
+    auto = s.add_iso_surface()
+    props = s.scene.get(auto).properties
+    assert props["iso_by"] == "velocity" and props["iso_value"] > 0
+    assert s.data.load(auto) is not None
+    assert "session.add_item('iso_surface'" in s.to_script()

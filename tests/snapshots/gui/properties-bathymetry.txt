@@ -1,6 +1,6 @@
 QWidget
-  Name: text 'Bathymetry'
-  Kind: label 'Bathymetry'
+  Name: text 'Bed'
+  Kind: label 'Bed'
   Visible: checkbox '' on
   Case: choice 'run [case-1]' of ['first case', 'run [case-1]']
   Dataset: choice 'automatic (NHFLOW bed)' of ['automatic (NHFLOW bed)', 'NHFLOW bed [nhflow_bed]', 'NHFLOW free surface [nhflow_free_surface]', 'NHFLOW volume [nhflow_volume]']

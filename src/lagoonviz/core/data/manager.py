@@ -27,14 +27,21 @@ from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
 from lagoonviz.core.kinds import kind_spec
 from lagoonviz.core.scene import Scene, SceneItem
+from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
 
 #: item kinds that show a dataset, and the dataset role they use by default
-DATA_KINDS = {kind: role for role, kind in ROLES.items()} | {"slice": "volume"}
+DATA_KINDS = {kind: role for role, kind in ROLES.items()} | {
+    "slice": "volume",
+    "iso_surface": "volume",
+    "streamlines": "volume",
+}
 #: 2D: heights of the flat layers (the free surface over objects over the bed)
 PLAN_LAYERS = {
     "bathymetry": 0.0,
     "volume": 0.5,
     "slice": 0.5,
+    "iso_surface": 0.5,
+    "streamlines": 2.5,
     "structure": 1.0,
     "body": 1.5,
     "dem": 1.5,
@@ -76,6 +83,15 @@ class ContourLines:
     item_id: str
     segments: np.ndarray  # (k, 2, 3) float32
     levels: list[float]
+    visible: bool
+
+
+@dataclass
+class VectorArrows:
+    """Arrows of one item: shafts and head strokes as segments in 3D."""
+
+    item_id: str
+    segments: np.ndarray  # (k, 2, 3) float32
     visible: bool
 
 
@@ -328,6 +344,8 @@ class DataManager:
         if key and key in case.datasets:
             return case.datasets[key]
         role = DATA_KINDS.get(kind)
+        if kind == "streamlines" and properties.get("lines_in") == "free surface":
+            role = "free_surface"  # streamlines on the free surface use its output
         return case.by_role(role) if role else None
 
     # ------------------------------------------------------------- choices
@@ -352,6 +370,10 @@ class DataManager:
         if provider == "profiles":
             case = self.case(item_id)
             return ["", *case.profiles] if case else [""]
+        if provider == "vectors":
+            dataset = self.dataset(item_id)
+            names = [n for n, c in dataset.components.items() if c == 3] if dataset else []
+            return ["none", *names]
         raise ValueError(f"unknown choice provider {provider!r}")
 
     def labelled_choices(self, item_id: str, provider: str) -> list[tuple[str, str]]:
@@ -519,7 +541,8 @@ class DataManager:
     @staticmethod
     def arrays_for(item: SceneItem) -> tuple[str, ...]:
         arrays = set()
-        for key in ("variable", "contour_by"):  # colours and contour lines
+        # colours, contour lines, iso-surfaces, arrows
+        for key in ("variable", "contour_by", "iso_by", "vectors_of", "streamlines_of"):
             variable = str(item.properties.get(key, "none"))
             if variable and variable != "none":
                 arrays.add(variable.partition(".")[0])
@@ -543,6 +566,24 @@ class DataManager:
         if item.kind == "slice":
             axis = AXES.get(str(item.properties.get("normal", "y")), 1)
             extra = ("slice", axis, float(item.properties.get("position", 0.0)))
+        elif item.kind == "iso_surface":
+            variable = str(item.properties.get("iso_by", "none"))
+            if variable == "none":
+                return None  # nothing chosen yet
+            extra = ("iso", variable, float(item.properties.get("iso_value", 0.0)))
+        elif item.kind == "streamlines":
+            props = item.properties
+            vector = str(props.get("streamlines_of", "none"))
+            if vector == "none":
+                return None
+            extra = (
+                "stream",
+                vector,
+                AXES.get(str(props.get("seed_normal", "y")), 1),
+                float(props.get("seed_position", 0.0)),
+                int(props.get("seeds", 60)),
+                str(props.get("lines_in", "volume")),
+            )
         return FrameKey(str(case.path), dataset.key, index, arrays, extra)
 
     def cached(self, item_id: str, time: float | None = None) -> SurfaceMesh | None:
@@ -557,6 +598,13 @@ class DataManager:
         dataset = case.datasets[key.dataset]
         if key.extra and key.extra[0] == "slice":
             mesh = dataset.read_slice(key.index, key.extra[1], key.extra[2], list(key.arrays))
+        elif key.extra and key.extra[0] == "iso":
+            mesh = dataset.read_iso(key.index, key.extra[1], key.extra[2], list(key.arrays))
+        elif key.extra and key.extra[0] == "stream":
+            _, vector, axis, position, count, lines_in = key.extra
+            mesh = dataset.read_streamlines(
+                key.index, vector, axis, position, count, list(key.arrays), lines_in
+            )
         else:
             mesh = dataset.read(key.index, list(key.arrays))
         self.cache.put(key, mesh)
@@ -592,6 +640,45 @@ class DataManager:
                 values += self._sampled_values(dataset, variable)
             self._auto_ranges[key] = auto_range(np.concatenate([v.ravel() for v in values]))
         return self._auto_ranges[key]
+
+    def vector_arrows(
+        self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
+    ) -> VectorArrows | None:
+        """Arrows of an item's "vectors_of" variable at about "vector_count" points
+        spread evenly over its surface as shown. The longest arrows (the variable's
+        automatic range, kept from frame to frame) reach about the next arrow, times
+        "vector_scale". Vertical parts are exaggerated like the surface; in 2D the
+        arrows lie flat on top and show the horizontal part."""
+        item = self.scene.get(item_id)
+        props = item.properties
+        name = str(props.get("vectors_of", "none"))
+        vectors = mesh.point_data.get(name) if name != "none" else None
+        if vectors is None or vectors.ndim != 2 or vectors.shape[1] != 3:
+            return None
+        if vectors.shape[0] != shown.positions.shape[0] or shown.triangles.size == 0:
+            return None
+        triangles = shown.triangles
+        shown_triangles = triangles[
+            ~((triangles[:, 0] == triangles[:, 1]) & (triangles[:, 1] == triangles[:, 2]))
+        ]
+        used = np.unique(shown_triangles)  # not on hidden dry land
+        count = int(props.get("vector_count", 400))
+        picked = pick_points(mesh.points, used, count)
+        if not picked.size:
+            return None
+        spacing = grid_spacing(mesh.points[used], count)
+        _, high = self._range_of(item_id, name, mesh)  # the speed of the longest arrows
+        length = 0.9 * spacing * float(props.get("vector_scale", 1.0)) / max(high, 1e-12)
+        direction = np.array(vectors[picked], dtype=np.float64)
+        base = np.array(shown.positions[picked], dtype=np.float64)
+        if self.scene.plan_view:
+            direction[:, 2] = 0.0
+            base[:, 2] = PLAN_MARKS - 0.5
+        else:
+            direction[:, 2] *= self.exaggeration(item_id)
+            base[:, 2] += 2e-3 * float(max(np.ptp(shown.positions, axis=0).max(), 1e-9))
+        segments = arrow_segments(base, direction, length)
+        return VectorArrows(item_id, segments, shown.visible)
 
     def contour_lines(
         self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
@@ -1001,6 +1088,23 @@ class DataManager:
             if (table := self.series(item_id)) is not None and len(table)
         ]
         return max(ends, default=0.0)
+
+    def iso_default(self, properties: dict) -> tuple[str, float] | None:
+        """A first iso-surface for a volume: REEF3D's level set ``phi`` at 0 (the free
+        surface of CFD runs), else the middle of the velocity (or the first variable)."""
+        dataset = self.dataset_for("iso_surface", properties)
+        if dataset is None or dataset.kind != "UnstructuredGrid":
+            return None
+        names = dataset.variables()
+        if "phi" in names:
+            return "phi", 0.0
+        variable = "velocity" if "velocity" in names else (names[0] if names else None)
+        if variable is None:
+            return None
+        mesh = dataset.read(0, [variable])  # the volume's outer surface: a fair sample
+        low, high = auto_range(mesh.scalar(variable))
+        middle = 0.5 * (low + high) if not (low < 0.0 < high) else 0.5 * high
+        return variable, float(f"{middle:.3g}")
 
     def domain_center(self, kind: str, properties: dict) -> tuple[float, float, float] | None:
         """Centre of the first frame of the dataset an item would show (to place slices)."""

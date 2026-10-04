@@ -126,6 +126,8 @@ PLAIN_COLORS = {
     "body": "#8f9aa6",
     "structure": "#a7a39b",
     "dem": "#6f6a64",  # rock
+    "iso_surface": "#8fb3d1",
+    "streamlines": "#2b4c7e",
 }
 #: colours of the materials of bodies and structures
 MATERIAL_COLORS = {

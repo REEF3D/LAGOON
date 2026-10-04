@@ -64,6 +64,12 @@ LOOKS = {
         ("free_surface-1",),
     ),
     "surface-contours-2d": ({"fs__contour_by": "eta"}, "2d", "studio", ()),
+    "surface-vectors-2d": (
+        {"fs__vectors_of": "velocity", "fs__vector_count": 40},
+        "2d",
+        "studio",
+        (),
+    ),
 }
 
 
@@ -75,3 +81,21 @@ def test_agreed_look(reef3d_run, snapshots, name):
         session.set_visible(item_id, False)
     image = render_session(session, SIZE, time=1.0, view=view, style=look)
     snapshots.check_image(name, image)
+
+
+def test_agreed_look_of_an_iso_surface(reef3d_run, snapshots):
+    """The 1 m pressure surface of the test volume, over the bed, coloured by velocity."""
+    session = _session(reef3d_run)
+    session.set_visible("free_surface-1", False)
+    session.add_iso_surface("pressure", 9810.0, variable="velocity")
+    image = render_session(session, SIZE, time=1.0, view="perspective", style="studio")
+    snapshots.check_image("iso-surface", image)
+
+
+def test_agreed_look_of_streamlines(reef3d_run, snapshots):
+    """Streamlines of the test volume's velocity from the middle plane, by speed."""
+    session = _session(reef3d_run)
+    session.set_visible("free_surface-1", False)
+    session.add_streamlines("y", seeds=30)
+    image = render_session(session, SIZE, time=1.0, view="perspective", style="studio")
+    snapshots.check_image("streamlines", image)

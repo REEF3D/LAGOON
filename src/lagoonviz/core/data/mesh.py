@@ -450,6 +450,23 @@ def plan_cut(
     that cross the plane are processed, so a slice of a large grid is cheap.
     """
     distance = points[:, axis].astype(np.float64) - position
+    return plan_level(distance, connectivity, offsets, types)
+
+
+def plan_level(
+    distance: np.ndarray,
+    connectivity: np.ndarray,
+    offsets: np.ndarray,
+    types: np.ndarray,
+    merge: bool = False,
+) -> CutPlan:
+    """Plan the surface where a field given at the points is zero (marching
+    tetrahedra): a plane for slices, ``field - value`` for iso-surfaces.
+
+    With ``merge``, a point shared by neighbouring tetrahedra (the same cut edge) is
+    made once, so the surface is connected and shades smoothly.
+    """
+    distance = np.asarray(distance, dtype=np.float64)
     starts = np.concatenate(([0], offsets[:-1])).astype(np.int64)
     tets: list[np.ndarray] = []
     for cell_type in np.unique(types):
@@ -489,10 +506,45 @@ def plan_cut(
         return CutPlan(none, none, np.zeros(0), np.zeros((0, 3), np.uint32))
     a = np.concatenate(edges_a)
     b = np.concatenate(edges_b)
+    triangles = np.concatenate(triangles)
+    if merge and a.size:
+        low, high = np.minimum(a, b), np.maximum(a, b)
+        keys = low * (int(max(high.max(), 0)) + 1) + high
+        _, first, inverse = np.unique(keys, return_index=True, return_inverse=True)
+        a, b = a[first], b[first]
+        triangles = inverse.ravel()[triangles]
+        keep = (
+            (triangles[:, 0] != triangles[:, 1])
+            & (triangles[:, 1] != triangles[:, 2])
+            & (triangles[:, 0] != triangles[:, 2])
+        )
+        triangles = triangles[keep]
     da, db = distance[a], distance[b]
     denominator = np.where(da == db, 1.0, da - db)
     t = da / denominator
-    return CutPlan(a, b, t, np.ascontiguousarray(np.concatenate(triangles), dtype=np.uint32))
+    return CutPlan(a, b, t, np.ascontiguousarray(triangles, dtype=np.uint32))
+
+
+def orient_by_field(plan: CutPlan, points: np.ndarray, field: np.ndarray) -> CutPlan:
+    """Turn every triangle of an iso-surface to face the rising field.
+
+    Marching tetrahedra makes triangles in either winding. Averaged vertex normals
+    of mixed windings cancel, and the surface shaded in dark and light speckles and
+    stripes. Facing one way, they shade smoothly.
+    """
+    triangles = plan.triangles.astype(np.int64)
+    if not len(triangles):
+        return plan
+    pa, pb = points[plan.a].astype(np.float64), points[plan.b].astype(np.float64)
+    rising = (field[plan.b] > field[plan.a])[:, None]
+    up = np.where(rising, pb - pa, pa - pb)  # each cut edge, towards the higher value
+    cut = pa + plan.t[:, None] * (pb - pa)
+    normal = np.cross(
+        cut[triangles[:, 1]] - cut[triangles[:, 0]], cut[triangles[:, 2]] - cut[triangles[:, 0]]
+    )
+    flip = (normal * up[triangles].sum(axis=1)).sum(axis=1) < 0
+    triangles[flip] = triangles[flip][:, [0, 2, 1]]
+    return CutPlan(plan.a, plan.b, plan.t, np.ascontiguousarray(triangles, dtype=np.uint32))
 
 
 def cut_cells(

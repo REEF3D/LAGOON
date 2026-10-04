@@ -194,7 +194,7 @@ def test_open_case_fills_scene_and_timeline(window, reef3d_run):
     tree = window.scene_tree.tree
     assert tree.topLevelItemCount() == 1  # the case, with its items below it
     assert [tree.topLevelItem(0).child(i).text(0) for i in range(2)] == [
-        "Bathymetry",
+        "Bed",
         "Free surface",
     ]
     timeline = window.timeline

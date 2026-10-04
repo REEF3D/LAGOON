@@ -14,7 +14,7 @@ import numpy as np
 import pygfx as gfx
 
 from lagoonviz.core.colormaps import colors, lut, normalize
-from lagoonviz.core.data.manager import ContourLines, DisplaySurface, GaugeMarks
+from lagoonviz.core.data.manager import ContourLines, DisplaySurface, GaugeMarks, VectorArrows
 
 #: The lights and gloss of every look: a soft sun from above for the shadows, most of
 #: the light from a headlamp that moves with the camera, so slopes keep their shading
@@ -228,6 +228,11 @@ class SceneRenderer:
         if shown.segments is not None and shown.triangles.size == 0:
             self._update_lines(kind, shown)
             return
+        if shown.positions.shape[0] == 0 or shown.triangles.size == 0:
+            # nothing at this time (an iso-value the field does not reach, a slice
+            # outside the volume): show nothing rather than fail
+            self.remove(shown.item_id)
+            return
         normals = shown.normals
         texcoords = (
             _texel_coords(normalize(shown.values, shown.vmin, shown.vmax), shown.colormap)
@@ -311,6 +316,9 @@ class SceneRenderer:
         Line colours are computed here (one RGBA per vertex), which works the same
         on every pygfx version.
         """
+        if not len(shown.segments):
+            self.remove(shown.item_id)  # no lines at this time
+            return
         order = shown.segments.astype(np.int64).ravel()
         positions = np.ascontiguousarray(shown.positions[order], dtype=np.float32)
         if shown.values is not None:
@@ -461,14 +469,22 @@ class SceneRenderer:
         if shown is not None:
             self.content.remove(shown.mesh)
         self.update_contours(item_id, None)
+        self.update_vectors(item_id, None)
 
     def update_contours(self, item_id: str, lines: ContourLines | None) -> None:
         """Contour lines of an item (None or no segments: none), thin and dark."""
-        line = self._contours.get(item_id)
+        self._update_overlay_lines(item_id, lines, 1.2)
+
+    def update_vectors(self, item_id: str, arrows: VectorArrows | None) -> None:
+        """Arrows of an item (None or no segments: none), in the contour colour."""
+        self._update_overlay_lines(f"{item_id}#vectors", arrows, 1.4)
+
+    def _update_overlay_lines(self, key: str, lines, thickness: float) -> None:
+        line = self._contours.get(key)
         if lines is None or not lines.segments.size:
             if line is not None:
                 self.scene.remove(line)
-                del self._contours[item_id]
+                del self._contours[key]
             return
         positions = np.array(lines.segments.reshape(-1, 3), np.float32)
         if line is not None and _update_buffer(line.geometry, "positions", positions):
@@ -477,19 +493,21 @@ class SceneRenderer:
         if line is not None:
             self.scene.remove(line)
         look = STYLES[self.style_name]
-        material = gfx.LineSegmentMaterial(thickness=1.2, color=look.get("contours", "#1e2833"))
+        material = gfx.LineSegmentMaterial(
+            thickness=thickness, color=look.get("contours", "#1e2833")
+        )
         line = gfx.Line(gfx.Geometry(positions=positions), material)
         line.visible = lines.visible
         self.scene.add(line)
-        self._contours[item_id] = line
+        self._contours[key] = line
 
     def clear(self) -> None:
         for item_id in list(self._shown):
             self.remove(item_id)
         for item_id in list(self._gauges):
             self.remove_gauges(item_id)
-        for item_id in list(self._contours):
-            self.update_contours(item_id, None)
+        for key in list(self._contours):
+            self.scene.remove(self._contours.pop(key))
         self._framed = False
         self.set_marker(None)
 

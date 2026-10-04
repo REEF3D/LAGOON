@@ -91,3 +91,19 @@ def test_frame_all_fits_a_tall_scene(reef3d_run):
         clip = np.c_[corners, np.ones(8)] @ matrix.T
         ndc = clip[:, :2] / clip[:, 3:4]
         assert np.abs(ndc).max() <= 1.0, (name, np.abs(ndc).max(axis=0))
+
+
+def test_an_empty_surface_shows_nothing(reef3d_run):
+    """An iso-value the field does not reach gives no triangles: nothing is drawn
+    (pygfx refused empty buffers, and the item failed to show)."""
+    from lagoonviz.core import Session
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    iso = session.add_iso_surface("pressure", 1e9)
+    view = SceneRenderer()
+    mesh = session.data.load(iso)
+    assert mesh.triangles.size == 0
+    view.update("iso_surface", session.data.display(iso, mesh))
+    assert iso not in view.item_ids

@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Vector arrows on surfaces (NumPy only): which points get one, and the arrow lines.
+
+Arrows are thinned to about a wanted number on an even grid in the plane of the
+surface (the two directions it spreads most in), so a fine grid does not turn
+into a black mat and a vertical slice gets arrows over its whole height.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+
+def pick_points(points: np.ndarray, candidates: np.ndarray, count: int) -> np.ndarray:
+    """Indices (from ``candidates``) of about ``count`` points spread evenly: one per
+    cell of a square grid over the surface's two widest directions."""
+    candidates = np.asarray(candidates, dtype=np.int64)
+    if candidates.size == 0 or count <= 0:
+        return np.zeros(0, np.int64)
+    chosen = np.asarray(points, dtype=np.float64)[candidates]
+    extent = np.ptp(chosen, axis=0)
+    axes = np.argsort(extent)[::-1][:2]
+    area = float(max(extent[axes[0]], 1e-12) * max(extent[axes[1]], 1e-12))
+    if extent[axes[1]] <= 1e-9 * max(extent[axes[0]], 1e-12):  # a line of points
+        area = float(extent[axes[0]] ** 2) / max(count, 1)
+    spacing = np.sqrt(area / max(count, 1))
+    low = chosen[:, axes].min(axis=0)
+    cells = np.floor((chosen[:, axes] - low) / spacing).astype(np.int64)
+    keys = cells[:, 0] * (int(cells[:, 1].max()) + 1) + cells[:, 1]
+    _, first = np.unique(keys, return_index=True)  # the first point of every cell
+    return candidates[np.sort(first)]
+
+
+def grid_spacing(points: np.ndarray, count: int) -> float:
+    """The arrow spacing :func:`pick_points` uses for these points."""
+    extent = np.sort(np.ptp(np.asarray(points, dtype=np.float64), axis=0))[::-1]
+    area = float(max(extent[0], 1e-12) * max(extent[1], 1e-12))
+    return float(np.sqrt(area / max(count, 1)))
+
+
+def arrow_segments(base: np.ndarray, vectors: np.ndarray, length: float) -> np.ndarray:
+    """Line segments ``(3k, 2, 3)`` of arrows: a shaft and two head strokes each.
+
+    ``length`` is the drawn length per unit of the vector.
+    """
+    base = np.asarray(base, dtype=np.float64)
+    tip = base + np.asarray(vectors, dtype=np.float64) * length
+    shaft = tip - base
+    size = np.linalg.norm(shaft, axis=1)
+    keep = size > 1e-12
+    base, tip, shaft, size = base[keep], tip[keep], shaft[keep], size[keep]
+    if not len(base):
+        return np.zeros((0, 2, 3), np.float32)
+    direction = shaft / size[:, None]
+    # the head opens in the plane of the arrow and the vertical (or x, for vertical arrows)
+    side = np.cross(direction, np.array([0.0, 0.0, 1.0]))
+    flat = np.linalg.norm(side, axis=1) < 1e-6
+    side[flat] = np.cross(direction[flat], np.array([1.0, 0.0, 0.0]))
+    side /= np.linalg.norm(side, axis=1)[:, None]
+    back = tip - 0.3 * shaft
+    spread = 0.15 * size[:, None] * side
+    segments = np.concatenate(
+        [
+            np.stack([base, tip], axis=1),
+            np.stack([tip, back + spread], axis=1),
+            np.stack([tip, back - spread], axis=1),
+        ]
+    )
+    return segments.astype(np.float32)

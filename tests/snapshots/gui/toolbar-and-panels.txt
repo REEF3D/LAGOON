@@ -9,7 +9,7 @@ Undo
 Redo
 ----
 Free surface
-Bathymetry
+Bed
 Volume
 Slice
 Time series

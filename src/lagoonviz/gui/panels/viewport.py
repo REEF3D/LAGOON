@@ -480,10 +480,10 @@ class Viewport3D(QWidget):
                 shown = self.session.data.display(item_id, mesh)
             with PERF.track(f"upload {item.kind}"):
                 self.view.update(item.kind, shown)
-            with PERF.track("contours"):
-                self.view.update_contours(
-                    item_id, self.session.data.contour_lines(item_id, mesh, shown)
-                )
+            with PERF.track("contours and arrows"):
+                data = self.session.data
+                self.view.update_contours(item_id, data.contour_lines(item_id, mesh, shown))
+                self.view.update_vectors(item_id, data.vector_arrows(item_id, mesh, shown))
         except Exception:  # noqa: BLE001 (a bad frame must not take the window down)
             log.error("showing %s failed:\n%s", item_id, traceback.format_exc())
             self.statusMessage.emit(f"Could not show {item.name}; see the log")
