@@ -977,16 +977,18 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     """Open a REEF3D case folder, one output folder, one output file or a LAGOON
     store. ``stores=False`` leaves LAGOON stores in the case folder out (the
     converter reads the VTK output)."""
-    from lagoonviz.core.data.lagoon import find_stores, store_datasets
+    from lagoonviz.core.data.lagoon import find_stores, store_datasets, stored_series
 
     path = Path(path).expanduser()
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
     datasets: list[Dataset] = []
     stored: list[Dataset] = []
+    store_paths: list[Path] = []
     if path.is_dir() and path in find_stores(path.parent):  # a LAGOON store
         case_dir = path.parent
         stored = store_datasets(path)
+        store_paths = [path]
     elif path.is_file() and path.suffix == ".dat":
         # a gauge or force table: its case is the folder above REEF3D_*
         case_dir = path.parent.parent if path.parent.name.startswith("REEF3D_") else path.parent
@@ -1010,7 +1012,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
                 _FOLDER.match(folder.name) or _OBJECT_FOLDER.match(folder.name)
             ):
                 datasets += _dataset_from_folder(folder)
-        for store in find_stores(path) if stores else []:
+        store_paths = find_stores(path) if stores else []
+        for store in store_paths:
             stored += store_datasets(store)
         if not datasets and not stored:
             # a plain folder with VTU/VTP files
@@ -1018,6 +1021,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     datasets = _prefer_stores(datasets, stored)
     series = find_series(case_dir)
     profiles = find_profiles(case_dir)
+    if store_paths:  # tables and profiles of LAGOON stores replace the text files
+        series, profiles = stored_series(store_paths, series, profiles)
     if not datasets and not series and not profiles:
         raise ValueError(f"no REEF3D VTU/VTP output or time series found in {path}")
     case = Case(

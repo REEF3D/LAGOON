@@ -14,10 +14,14 @@ import threading
 from pathlib import Path
 
 import numpy as np
+from lagoon_format.series import ProfileSet as StoredProfiles
+from lagoon_format.series import Table
 from lagoon_format.store import Output, Store, is_store, sigma_heights
 
 from lagoonviz.core.data.mesh import SurfaceMesh
+from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import Dataset, Frame, _joined
+from lagoonviz.core.data.series import SeriesFile, TimeSeries
 from lagoonviz.core.data.vtkxml import Piece
 
 VTK_HEXAHEDRON = 12
@@ -393,3 +397,108 @@ def find_stores(case_dir: Path) -> list[Path]:
     if not case_dir.is_dir():
         return []
     return sorted(p for p in case_dir.glob("*.lagoon") if p.is_dir() and is_store(p))
+
+
+# ----------------------------------------------------------------- time series
+class StoreSeriesFile(SeriesFile):
+    """A time series table of a store, in place of the ``.dat`` file it came from."""
+
+    def __init__(self, key: str, path: Path, solver: str, group: str, table: Table):
+        super().__init__(key, path, solver, group)
+        self.table = table
+        self._series: TimeSeries | None = None
+
+    @property
+    def name(self) -> str:
+        return self.table.name or super().name
+
+    @property
+    def label(self) -> str:
+        return f"{self.solver} {self.name} (LAGOON)"
+
+    def read(self) -> TimeSeries:
+        with self._lock:
+            if self._series is None:
+                time, columns = self.table.read()
+                self._series = TimeSeries(
+                    self.path, time, columns, dict(self.table.units), dict(self.table.locations)
+                )
+            return self._series
+
+
+class StoreProfileSet(ProfileSet):
+    """Wave profiles of a store, in place of the WSFLINE files."""
+
+    def __init__(self, key: str, folder: Path, solver: str, stored: StoredProfiles):
+        times = np.asarray(stored.times, np.float64)
+        super().__init__(
+            key,
+            folder,
+            solver,
+            [folder / f"t{i}" for i in range(len(times))],  # one name per time
+            times,
+            {n: line.y for n, line in stored.lines.items()},
+        )
+        self.stored = stored
+
+    @property
+    def label(self) -> str:
+        return f"{self.solver} wave profiles ({len(self.paths)} times, LAGOON)"
+
+    def written_span(self) -> tuple[float, float]:
+        try:
+            stamp = (self.stored.group.path / "time" / "zarr.json").stat().st_mtime
+        except OSError:
+            stamp = 0.0
+        return stamp, stamp
+
+    def at(self, time: float) -> Profile:
+        index = self.index_at(time)
+        lines = {
+            n: ProfileLine(
+                n, line.y, line.x, line.eta(index).astype(np.float64), _maybe(line.theory(index))
+            )
+            for n, line in self.stored.lines.items()
+        }
+        return Profile(self.paths[index], float(self.times[index]), lines)
+
+
+def _maybe(values):
+    return None if values is None else np.asarray(values, np.float64)
+
+
+def _unchanged(path: Path, info: dict) -> bool:
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    return info.get("source_bytes") == stat.st_size and info.get("source_mtime") == stat.st_mtime
+
+
+def stored_series(stores: list[Path], series: dict, profiles: dict) -> tuple[dict, dict]:
+    """Time series and wave profiles from stores, in place of the text files they
+    came from where those did not change since (or are gone)."""
+    series, profiles = dict(series), dict(profiles)
+    for path in stores:
+        try:
+            store = Store(path)
+        except (OSError, ValueError):
+            continue
+        for key, table in store.tables.items():
+            source = store.path.parent / table.source if table.source else table.group.path
+            current = series.get(key)
+            if current is not None and not _unchanged(current.path, table.info):
+                continue  # the file is newer: a run still writing it
+            where = source if source.exists() else table.group.path
+            series[key] = StoreSeriesFile(key, where, store.solver, table.kind, table)
+        for key, stored in store.profiles.items():
+            current = profiles.get(key)
+            if (
+                current is not None
+                and len(current.times)
+                and (not len(stored.times) or current.times[-1] > stored.times[-1] + 1e-9)
+            ):
+                continue  # more profiles in the files
+            folder = store.path.parent / (stored.source or key)
+            profiles[key] = StoreProfileSet(key, folder, store.solver, stored)
+    return series, profiles

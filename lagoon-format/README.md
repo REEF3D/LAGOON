@@ -6,8 +6,9 @@ particles and gauges.
 
 This package holds
 
-- the format **specification** ([SPEC.md](SPEC.md), version 0.1: σ-grid volumes of
-  FNPF and NHFLOW, structured free surface and bed surfaces);
+- the format **specification** ([SPEC.md](SPEC.md), version 0.2: σ-grid volumes of
+  FNPF and NHFLOW, Cartesian volumes of CFD, structured free surface and bed
+  surfaces, time series tables and wave profiles);
 - the **reference reader and writer** (`lagoon_format.store`), with a small Zarr v3
   implementation (`lagoon_format.zarr3`) that needs only NumPy and the standard
   library; stores also open in zarr-python and xarray;
@@ -22,6 +23,7 @@ store = Store("case/REEF3D_FNPF.lagoon")
 volume = store["volume"]
 u = volume.read("velocity", 10)              # (nz, ny, nx, 3) at output 10
 eta = store["free_surface"].series("eta", i=40, j=12)   # over all outputs
+gauges = store.tables["fnpf_wsf_hg"]; p1 = gauges.column("P1")   # a wave gauge
 ```
 
 REEF3D output is converted with `lagoon-convert CASE` (LAGOON application);

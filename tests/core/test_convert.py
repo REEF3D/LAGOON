@@ -239,3 +239,52 @@ def test_cfd_pieces_split_in_z(tmp_path):
         section.point_data["pressure"], 2000.0 * (2.0 - section.points[:, 2])
     )
     assert section.points[:, 2].max() == pytest.approx(2.0)
+
+
+def test_time_series_and_wave_profiles_in_the_store(tmp_path):
+    """Format 0.2: gauge, 6DOF tables and wave profiles go into the store; the case
+    reads them from there while the text files are unchanged."""
+    import os
+
+    from lagoonviz.core.data.lagoon import StoreProfileSet, StoreSeriesFile
+    from lagoonviz.core.data.series import read_series
+
+    run = make_run(tmp_path / "run", frames=3, series=True, profiles=True, objects=True)
+    report = convert(run)
+    assert report.outputs["series"] == 4 and report.outputs["profiles"] == 6
+    store = Store(report.store)
+    assert store.info["version"] == "0.2"
+    gauges = store.tables["nhflow_wsf_hg"]
+    original = read_series(run / "REEF3D_NHFLOW_WSF" / "REEF3D-NHFLOW-WSF-HG.dat")
+    np.testing.assert_array_equal(gauges.time, original.time)
+    np.testing.assert_array_equal(gauges.column("P2"), original.columns["P2"])
+    assert gauges.locations["P1"] == original.locations["P1"] and gauges.kind == "wave gauges"
+    # the case reads the tables and profiles from the store
+    case = open_case(run)
+    series = case.series["nhflow_wsf_hg"]
+    assert isinstance(series, StoreSeriesFile) and series.name == "Wave gauges"
+    np.testing.assert_array_equal(series.read().columns["P3"], original.columns["P3"])
+    profiles = case.profiles["nhflow_wsfline"]
+    assert isinstance(profiles, StoreProfileSet) and len(profiles.times) == 6
+    vtk = open_case(run, stores=False).profiles["nhflow_wsfline"]
+    a, b = vtk.at(1.5), profiles.at(1.5)
+    assert a.time == b.time and set(a.lines) == set(b.lines)
+    np.testing.assert_allclose(b.lines[1].eta, a.lines[1].eta, atol=1e-6)
+    np.testing.assert_allclose(b.lines[2].x, a.lines[2].x)
+    # a file that grew (a running simulation) is read from the file again
+    path = run / "REEF3D_NHFLOW_WSF" / "REEF3D-NHFLOW-WSF-HG.dat"
+    path.write_text(path.read_text() + "\n")
+    os.utime(path, (1e9, 1e9))
+    assert not isinstance(open_case(run).series["nhflow_wsf_hg"], StoreSeriesFile)
+    assert convert(run).outputs["series"] == 1  # converted again
+
+
+def test_a_case_of_only_time_series_converts(tmp_path):
+    from reef3d_fixtures import write_series
+
+    root = tmp_path / "gauges"
+    root.mkdir()
+    write_series(root, "FNPF", 5.0)
+    report = convert(root)
+    assert set(report.outputs) == {"series"} and report.store.name == "REEF3D_FNPF.lagoon"
+    assert "fnpf_wsf_hg" in Store(report.store).tables

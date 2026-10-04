@@ -8,7 +8,7 @@ MIT-licensed, independent of the LAGOON application.
 __version__ = "0.1.0.dev0"
 
 #: Version of the format specification implemented by this package.
-SPEC_VERSION = "0.1"
+SPEC_VERSION = "0.2"
 
 #: Version of the REEF3D run log specification (RUN.md) read by ``lagoon_format.run``.
 RUN_LOG_VERSION = 1

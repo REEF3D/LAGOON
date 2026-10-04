@@ -34,10 +34,11 @@ from typing import Any
 
 import numpy as np
 
+from lagoon_format.series import ProfileSet, ProfileWriter, Table, write_table
 from lagoon_format.zarr3 import Array, Group, ZarrError, codecs_for, node_type
 
 FORMAT = "lagoon"
-VERSION = "0.1"
+VERSION = "0.2"
 GRIDS = ("sigma", "cartesian", "surface")
 #: per-output arrays of the grid itself, not variables
 GRID_ARRAYS = {"sigma": ("z_bed", "z_surface", "z_offset"), "cartesian": (), "surface": ("z",)}
@@ -363,6 +364,19 @@ class Store:
         for name in info.get("outputs", []):
             if name in self.root:
                 self.outputs[name] = Output(self.root.group(name))
+        #: time series tables (SPEC 7) and wave profile sets (SPEC 8), by key
+        self.tables: dict[str, Table] = {}
+        self.profiles: dict[str, ProfileSet] = {}
+        if "series" in self.root:
+            series = self.root.group("series")
+            for key in info.get("series", series.members()):
+                if key in series:
+                    self.tables[key] = Table.open(series.group(key))
+        if "profiles" in self.root:
+            profiles = self.root.group("profiles")
+            for key in info.get("profiles", profiles.members()):
+                if key in profiles:
+                    self.profiles[key] = ProfileSet.open(profiles.group(key))
 
     @property
     def run_id(self) -> str | None:
@@ -621,6 +635,39 @@ class StoreWriter:
         self.root.set_attrs(attrs)
         writer = OutputWriter(group, shard_time, tile, level)
         self.writers[name] = writer
+        return writer
+
+    def _list(self, entry: str, key: str) -> None:
+        """Name a table or profile set in the root's list of them."""
+        attrs = dict(self.root.attrs)
+        info = dict(attrs["lagoon"])
+        info[entry] = sorted({*info.get(entry, []), key})
+        info["version"] = VERSION
+        attrs["lagoon"] = info
+        self.root.set_attrs(attrs)
+
+    def write_table(self, key: str, time, columns, **kwargs) -> Table:
+        """Write (or replace) a time series table (see :func:`write_table`)."""
+        if "series" not in self.root:
+            Group.create(self.path / "series")
+        table = write_table(self.root.group("series"), key, time, columns, **kwargs)
+        self._list("series", key)
+        return table
+
+    def profile_writer(
+        self,
+        key: str,
+        lines: dict[int, tuple[float, np.ndarray, bool]] | None = None,
+        source: str = "",
+    ) -> ProfileWriter:
+        """The writer of a wave profile set; ``lines`` creates it (y, x, has theory)."""
+        if "profiles" not in self.root:
+            Group.create(self.path / "profiles")
+        parent = self.root.group("profiles")
+        if key in parent and lines is None:
+            return ProfileWriter(parent.group(key))
+        writer = ProfileWriter.create(parent, key, lines or {}, source)
+        self._list("profiles", key)
         return writer
 
     def output(self, name: str, shard_time: int = 16, tile: int = 64) -> OutputWriter:

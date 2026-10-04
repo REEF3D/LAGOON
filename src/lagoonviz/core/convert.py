@@ -30,6 +30,8 @@ from lagoonviz.core.data.vtkxml import read_piece, read_time_value
 
 #: roles that are converted, and the grid each becomes
 ROLES = {"volume": "sigma", "free_surface": "surface", "bed": "surface"}
+#: what else is converted: time series tables and wave profiles (format 0.2)
+EXTRAS = ("series", "profiles")
 SIGMA_SOLVERS = ("FNPF", "NHFLOW")
 #: solvers whose volume is converted: σ-grids, and CFD's Cartesian grid
 VOLUME_SOLVERS = (*SIGMA_SOLVERS, "CFD")
@@ -221,7 +223,7 @@ def _run_record(case: Case, dataset: Dataset) -> dict | None:
 def convert(
     case_path: str | Path,
     out: str | Path | None = None,
-    roles: tuple[str, ...] = tuple(ROLES),
+    roles: tuple[str, ...] = (*ROLES, *EXTRAS),
     progress: Progress | None = None,
     shard_time: int = 16,
     limit: int | None = None,
@@ -229,13 +231,17 @@ def convert(
     """Convert (or bring up to date) the LAGOON store of a REEF3D case."""
     began = _time.perf_counter()
     case = open_case(case_path, stores=False)
-    datasets = chosen_datasets(case, roles)
-    if not datasets:
-        raise ConvertError(f"{case.path}: no σ-grid volume or surface output to convert")
-    lead = next(iter(datasets.values()))
-    solver = lead.solver
+    datasets = chosen_datasets(case, tuple(r for r in roles if r in ROLES))
+    lead = next(iter(datasets.values()), None)
+    solver = lead.solver if lead is not None else _series_solver(case)
+    series = {k: f for k, f in case.series.items() if f.solver == solver and "series" in roles}
+    profiles = {
+        k: f for k, f in case.profiles.items() if f.solver == solver and "profiles" in roles
+    }
+    if not datasets and not series and not profiles:
+        raise ConvertError(f"{case.path}: no σ-grid volume, surface or time series to convert")
     path = Path(out) if out is not None else case.path / f"REEF3D_{solver}.lagoon"
-    run = _run_record(case, lead)
+    run = _run_record(case, lead) if lead is not None else None
     if is_store(path):
         existing = Store(path)
         if run and existing.run_id and existing.run_id != run.get("run"):
@@ -259,8 +265,85 @@ def convert(
             )
             added[role] = n
             vtk_bytes += size
+    if series:
+        added["series"] = _convert_series(series, writer)
+    if profiles:
+        added["profiles"] = _convert_profiles(profiles, writer, progress)
     writer.close()
     return Report(path, added, vtk_bytes, _time.perf_counter() - began)
+
+
+def _series_solver(case: Case) -> str:
+    solvers = [f.solver for f in case.series.values()] + [p.solver for p in case.profiles.values()]
+    return max(set(solvers), key=solvers.count) if solvers else "REEF3D"
+
+
+def _convert_series(files: dict, writer: StoreWriter) -> int:
+    """The time series tables whose files changed since the last conversion."""
+    store = Store(writer.path)
+    written = 0
+    for key, item in files.items():
+        try:
+            stat = item.path.stat()
+        except OSError:
+            continue
+        old = store.tables.get(key)
+        if (
+            old is not None
+            and old.info.get("source_bytes") == stat.st_size
+            and old.info.get("source_mtime") == stat.st_mtime
+        ):
+            continue  # unchanged
+        try:
+            table = item.read()
+        except (OSError, ValueError):
+            continue
+        writer.write_table(
+            key,
+            table.time,
+            table.columns,
+            name=item.name,
+            kind=item.group,
+            units=table.units,
+            locations=table.locations,
+            source=f"{item.path.parent.name}/{item.path.name}",
+            extra={"source_bytes": stat.st_size, "source_mtime": stat.st_mtime},
+        )
+        written += 1
+    return written
+
+
+def _convert_profiles(sets: dict, writer: StoreWriter, progress: Progress | None) -> int:
+    """Wave profiles written since the last conversion, appended."""
+    from lagoonviz.core.data.profiles import read_profile
+
+    store = Store(writer.path)
+    added = 0
+    for key, item in sets.items():
+        old = store.profiles.get(key)
+        last = float(old.times[-1]) if old is not None and len(old.times) else -np.inf
+        todo = [(t, p) for t, p in zip(item.times, item.paths, strict=True) if t > last + 1e-9]
+        if not todo:
+            continue
+        if old is None:
+            first = read_profile(todo[0][1])
+            lines = {
+                n: (line.y, line.x, line.theory is not None) for n, line in first.lines.items()
+            }
+            profile_writer = writer.profile_writer(key, lines, source=item.folder.name)
+        else:
+            profile_writer = writer.profile_writer(key)
+        for start in range(0, len(todo), 64):
+            batch = todo[start : start + 64]
+            profiles = []
+            for _, path in batch:
+                profile = read_profile(path)
+                profiles.append({n: (ln.eta, ln.theory) for n, ln in profile.lines.items()})
+            profile_writer.append([float(t) for t, _ in batch], profiles)
+            added += len(batch)
+            if progress is not None:
+                progress("profiles", added, len(todo))
+    return added
 
 
 def _convert_dataset(case, dataset, role, writer, pool, progress, shard_time, limit):
@@ -384,14 +467,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", help="store to write (default: CASE/REEF3D_<SOLVER>.lagoon)")
     parser.add_argument(
         "--outputs",
-        default=",".join(ROLES),
-        help="outputs to convert, comma separated (default: volume,free_surface,bed)",
+        default=",".join((*ROLES, *EXTRAS)),
+        help="what to convert, comma separated (default: everything: "
+        "volume,free_surface,bed,series,profiles)",
     )
     parser.add_argument("--limit", type=int, help="convert at most this many outputs per stream")
     parser.add_argument("--shard-time", type=int, default=16, help="outputs per shard file")
     args = parser.parse_args(argv)
     roles = tuple(r.strip() for r in args.outputs.split(",") if r.strip())
-    unknown = [r for r in roles if r not in ROLES]
+    unknown = [r for r in roles if r not in ROLES and r not in EXTRAS]
     if unknown:
         parser.error(f"unknown outputs: {', '.join(unknown)}")
     last = [0.0]

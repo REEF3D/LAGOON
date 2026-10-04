@@ -19,6 +19,10 @@
 - CFD volumes (format 0.1, section 3a): Cartesian grids keep the heights of their
   levels once (`z`); MPI blocks may split the levels too (`start` i0, j0, k0).
   The converter, the app and the REEF3D writer handle them.
+- LAGOON format 0.2: time series tables (wave gauges, 6DOF forces and motions, force
+  files; one column per quantity, 64k-row chunks) and wave profiles (WSFLINE, one
+  array per line). The converter writes them (again when a file changed; profiles
+  appended); a case reads them from the store while the text files are unchanged.
 - ParaView reader plugin (`lagoon-format/paraview/lagoon_reader.py`): a store's
   outputs as structured grids per block, with its times.
 - A case with a store opens it instead of the VTU/VTP output it was made from

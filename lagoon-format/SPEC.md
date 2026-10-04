@@ -1,10 +1,13 @@
 # LAGOON data format specification
 
-Version: 0.1 (draft for review)
-Status: σ-grid volumes (FNPF, NHFLOW), Cartesian volumes (CFD) and structured
-surfaces (free surface, bed) are specified and implemented (`lagoon_format.store`,
-converter `lagoon-convert`). Bodies, particles, rod trees and time series are
-listed at the end and follow in 0.2.
+Version: 0.2 (draft for review)
+Status: σ-grid volumes (FNPF, NHFLOW), Cartesian volumes (CFD), structured
+surfaces (free surface, bed), time series (wave gauges, 6DOF, forces) and wave
+profiles are specified and implemented (`lagoon_format.store`, converter
+`lagoon-convert`). Bodies, particles and rod trees are listed at the end.
+
+Changes in 0.2: time series tables (section 7) and wave profiles (section 8).
+A 0.1 reader opens 0.2 stores and ignores the new groups.
 
 ## Goals
 
@@ -55,6 +58,10 @@ case/
         b0001/ ...
     free_surface/                output group (the FSF VTP output)
     bed/                         output group (the BED VTP output)
+    series/                      time series tables (section 7)
+      nhflow_wsf_hg/             one table per file: time/, values/
+    profiles/                    wave profiles along lines (section 8)
+      nhflow_wsfline/            time/, line_1/x eta theory, ...
 ```
 
 Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
@@ -81,6 +88,8 @@ Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
 - `version`: `major.minor` of this specification. A reader accepts stores of the
   same major version and ignores attributes, groups and arrays it does not know.
 - `outputs`: the output groups in the store (section 2).
+- `series`, `profiles`: the time series tables and wave profile sets (sections 7
+  and 8), optional.
 - `reef3d_run`: the `run` record of the run log (RUN.md), unchanged, when known.
 - `units`: optional, as in RUN.md (`{"length": "m", "time": "s", ...}`); SI if absent.
 
@@ -299,13 +308,66 @@ it is the only codec outside the Zarr v3 core.
   through `z_bed`, `z_surface`, `z_offset` (volume) or `z` (surfaces).
 - Converting again appends the outputs written since (a running simulation); a
   store of another run is not appended to.
+- **Time series** (`.dat` tables of the solver's folders) become tables (section 7);
+  a table whose file has changed since is written again.
+- **Wave profiles** (WSFLINE) become profile sets (section 8); converting again
+  appends the profiles written since.
 
-## 7. To be specified (0.2)
+## 7. Time series tables
+
+Gauges, forces and motions are tables: rows at times, one column per quantity
+(REEF3D's `.dat` files: wave gauges `REEF3D_*_WSF`, `REEF3D_*_6DOF` forces,
+positions, velocities and mooring forces, force files). Each is a group
+`series/<key>`, the key named after the file (`nhflow_wsf_hg`,
+`nhflow_6dof_forces_0`), with the attributes
+
+```json
+{"lagoon": {"kind": "table", "name": "Wave gauges", "group": "wave gauges",
+            "columns": ["P1", "P2", "P3"], "units": {"P1": "m"},
+            "locations": {"P1": [2.5, 0.5], "P2": [5.0, 0.5]},
+            "rows": 20001, "source": "REEF3D_NHFLOW_WSF/REEF3D-NHFLOW-WSF-HG.dat"}}
+```
+
+- `columns`: the quantities in the order of `values`; `units` optional per column.
+- `locations`: optional, where a column was measured (x, y[, z]).
+- `group`: what kind of table (`wave gauges`, `6DOF`, `forces`, `probes`, ...).
+- `source`: optional, the file it was converted from; the converter also keeps its
+  size and modification time (`source_bytes`, `source_mtime`) to know when the
+  file has grown.
+
+| array    | shape       | dtype   | content |
+|----------|-------------|---------|---------|
+| `time`   | (n,)        | float64 | time of each row [s] |
+| `values` | (n, ncols)  | float64 | the columns; NaN where the file has no value (REEF3D's ±1e20) |
+
+Chunks: 65536 rows of one column (a plot reads only the columns it shows), codecs
+`bytes`, `numcodecs.shuffle` (`elementsize` 8), `gzip` level 1.
+
+## 8. Wave profiles
+
+The free surface along lines at many times (REEF3D's `REEF3D_*_WSFLINE` files,
+one file per time) is a group `profiles/<key>` with
+
+```json
+{"lagoon": {"kind": "profiles", "lines": {"1": {"y": 0.005, "points": 1200}},
+            "source": "REEF3D_FNPF_WSFLINE"}}
+```
+
+| array            | shape        | dtype   | content |
+|------------------|--------------|---------|---------|
+| `time`           | (nt,)        | float64 | time of each profile [s]; counts the profiles |
+| `line_<n>/x`     | (points,)    | float64 | position along line n |
+| `line_<n>/eta`   | (nt, points) | float32 | computed free surface elevation |
+| `line_<n>/theory`| (nt, points) | float32 | optional: wave theory (FNPF) |
+
+Chunks: 16 times of a line; codecs as for fields (`elementsize` 4). As for
+outputs, `time` is extended last when profiles are appended.
+
+## 9. To be specified
 
 - **Bodies**: triangle mesh once (`vertices`, `triangles`), a pose per output
-  (`position` (nt, 3), `rotation` (nt, 4) quaternion), surface fields.
+  (`position` (nt, 3), `rotation` (nt, 4) quaternion; fitted from the VTP
+  vertices and checked to be rigid, else the vertices per output), surface fields.
 - **Particles** (DEM, Lagrangian): ragged arrays per output (`count` (nt,),
   `offset` (nt,), `position` (n, 3), fields (n, ...)).
 - **Rod trees, mooring lines, ice floes**: as particles with connectivity.
-- **Time series** (wave gauges, forces, motions): one group per file, `time` and
-  one array per column.

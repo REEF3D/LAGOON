@@ -452,7 +452,11 @@ class MainWindow(QMainWindow):
             if hasattr(view, "apply_theme_colors"):
                 view.apply_theme_colors()
             view.refresh()  # gauges take the new plot colours
-        for widget in QApplication.allWidgets():
+        # only this window's own widgets (floating panels included): allWidgets()
+        # also hands out widgets of closed windows that Qt is deleting, and
+        # touching those crashed (segfault in the test suite)
+        self.update()
+        for widget in self.findChildren(QWidget):
             widget.update()
 
     def reset_layout(self) -> None:
