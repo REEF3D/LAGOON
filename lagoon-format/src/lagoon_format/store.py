@@ -26,6 +26,7 @@ from __future__ import annotations
 import datetime as _dt
 import math
 import os
+import shutil
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from typing import Any
 
 import numpy as np
 
+from lagoon_format.bodies import BodySet, BodyWriter
 from lagoon_format.series import ProfileSet, ProfileWriter, Table, write_table
 from lagoon_format.zarr3 import Array, Group, ZarrError, codecs_for, node_type
 
@@ -330,6 +332,12 @@ class Output:
         return z
 
 
+def _remove_tree(path: Path) -> None:
+    """Remove a group of the store (a body set written again)."""
+    if node_type(path) == "group":
+        shutil.rmtree(path)
+
+
 def _number(block) -> int:
     return block.number if isinstance(block, Block) else int(block)
 
@@ -377,6 +385,13 @@ class Store:
             for key in info.get("profiles", profiles.members()):
                 if key in profiles:
                     self.profiles[key] = ProfileSet.open(profiles.group(key))
+        #: floating bodies (SPEC 9), by key
+        self.bodies: dict[str, BodySet] = {}
+        if "bodies" in self.root:
+            bodies = self.root.group("bodies")
+            for key in info.get("bodies", bodies.members()):
+                if key in bodies:
+                    self.bodies[key] = BodySet.open(bodies.group(key))
 
     @property
     def run_id(self) -> str | None:
@@ -523,6 +538,7 @@ class StoreWriter:
         self.path = Path(path)
         self.root = Group(self.path)
         self.writers: dict[str, OutputWriter] = {}
+        self.body_writers: list[BodyWriter] = []
 
     @classmethod
     def create(
@@ -670,6 +686,28 @@ class StoreWriter:
         self._list("profiles", key)
         return writer
 
+    def body_writer(
+        self,
+        key: str,
+        bodies: dict | None = None,
+        source: str = "",
+        attributes: dict[str, Any] | None = None,
+    ) -> BodyWriter:
+        """The writer of a body set; ``bodies`` creates it (or replaces it), see
+        :meth:`BodyWriter.create`."""
+        if "bodies" not in self.root:
+            Group.create(self.path / "bodies")
+        parent = self.root.group("bodies")
+        if key in parent and bodies is None:
+            writer = BodyWriter(parent.group(key))
+        else:
+            if key in parent:
+                _remove_tree(parent.path / key)
+            writer = BodyWriter.create(parent, key, bodies or {}, source, attributes)
+        self.body_writers.append(writer)
+        self._list("bodies", key)
+        return writer
+
     def output(self, name: str, shard_time: int = 16, tile: int = 64) -> OutputWriter:
         """The writer of an existing output group (to append to it)."""
         writer = self.writers.get(name)
@@ -680,3 +718,5 @@ class StoreWriter:
     def close(self) -> None:
         for writer in self.writers.values():
             writer.close()
+        for body_writer in self.body_writers:
+            body_writer.close()

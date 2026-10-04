@@ -2,12 +2,14 @@
 
 Version: 0.2 (draft for review)
 Status: σ-grid volumes (FNPF, NHFLOW), Cartesian volumes (CFD), structured
-surfaces (free surface, bed), time series (wave gauges, 6DOF, forces) and wave
-profiles are specified and implemented (`lagoon_format.store`, converter
-`lagoon-convert`). Bodies, particles and rod trees are listed at the end.
+surfaces (free surface, bed), time series (wave gauges, 6DOF, forces), wave
+profiles and floating bodies are specified and implemented (`lagoon_format.store`,
+converter `lagoon-convert`). Particles, rod trees, mooring lines and ice floes
+are listed at the end.
 
-Changes in 0.2: time series tables (section 7) and wave profiles (section 8).
-A 0.1 reader opens 0.2 stores and ignores the new groups.
+Changes in 0.2: time series tables (section 7), wave profiles (section 8) and
+floating bodies (section 9). A 0.1 reader opens 0.2 stores and ignores the new
+groups.
 
 ## Goals
 
@@ -62,6 +64,8 @@ case/
       nhflow_wsf_hg/             one table per file: time/, values/
     profiles/                    wave profiles along lines (section 8)
       nhflow_wsfline/            time/, line_1/x eta theory, ...
+    bodies/                      floating bodies (section 9)
+      nhflow_body/               time/, step/, body_0/vertices triangles translation rotation
 ```
 
 Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
@@ -88,8 +92,8 @@ Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
 - `version`: `major.minor` of this specification. A reader accepts stores of the
   same major version and ignores attributes, groups and arrays it does not know.
 - `outputs`: the output groups in the store (section 2).
-- `series`, `profiles`: the time series tables and wave profile sets (sections 7
-  and 8), optional.
+- `series`, `profiles`, `bodies`: the time series tables, wave profile sets and
+  body sets (sections 7, 8 and 9), optional.
 - `reef3d_run`: the `run` record of the run log (RUN.md), unchanged, when known.
 - `units`: optional, as in RUN.md (`{"length": "m", "time": "s", ...}`); SI if absent.
 
@@ -312,6 +316,10 @@ it is the only codec outside the Zarr v3 core.
   a table whose file has changed since is written again.
 - **Wave profiles** (WSFLINE) become profile sets (section 8); converting again
   appends the profiles written since.
+- **Floating bodies** (6DOF VTP, one file per body and output) become a body set
+  (section 9): the first output's vertices and triangles, then a fitted rigid
+  motion per output. A body whose vertices are once not where the motion puts
+  them is written again, from the first output, with its vertices per output.
 
 ## 7. Time series tables
 
@@ -363,11 +371,48 @@ one file per time) is a group `profiles/<key>` with
 Chunks: 16 times of a line; codecs as for fields (`elementsize` 4). As for
 outputs, `time` is extended last when profiles are appended.
 
-## 9. To be specified
+## 9. Floating bodies
 
-- **Bodies**: triangle mesh once (`vertices`, `triangles`), a pose per output
-  (`position` (nt, 3), `rotation` (nt, 4) quaternion; fitted from the VTP
-  vertices and checked to be rigid, else the vertices per output), surface fields.
+REEF3D writes the whole triangle mesh of every 6DOF body at every output
+(`REEF3D_*_6DOF_VTP/REEF3D-6DOF-<body>-<output>.vtp`, each triangle with its own
+three points). A body moves rigidly, so a store keeps the mesh once and a rigid
+motion per output. The bodies of one output stream are a group
+`bodies/<key>`, the key named as LAGOON names the output (`nhflow_body`):
+
+```json
+{"lagoon": {"kind": "bodies", "bodies": [0, 1], "dataset": "nhflow_body",
+            "source": "REEF3D_NHFLOW_6DOF_VTP"}}
+```
+
+| array    | shape | dtype   | content |
+|----------|-------|---------|---------|
+| `time`   | (nt,) | float64 | time of each output [s]; counts the outputs, extended last |
+| `step`   | (nt,) | int64   | REEF3D output number |
+
+and per body a group `body_<n>` with `{"lagoon": {"rigid": true, "vertices": 75696,
+"fields": {}, "max_error": 6.1e-05}}`:
+
+| array         | shape                         | dtype   | content |
+|---------------|-------------------------------|---------|---------|
+| `triangles`   | (ntri, 3)                     | int32   | vertex indices (polygons fan-triangulated) |
+| `vertices`    | rigid: (nv, 3); else (nt, nv, 3) | float32 | the vertices of the first output; not rigid: per output |
+| `translation` | (nt, 3)                       | float64 | rigid only: t [m] |
+| `rotation`    | (nt, 4)                       | float64 | rigid only: unit quaternion (w, x, y, z), w ≥ 0 |
+| `<field>`     | (nt, nv) or (nt, nv, c)       | float32 | optional point arrays per output (`fields`: name → components) |
+
+The vertices of a rigid body at output t are `R(q_t) v + t_t` (computed in
+float64, then rounded to float32), `v` the stored vertices and `R(q)` the
+rotation matrix of the quaternion. The motion is fitted to the written vertices
+(least squares, Kabsch) and accepted when no vertex is further than 4 float32
+steps of the largest coordinate from where it was written; `max_error` is the
+largest distance of any accepted output [m]. Otherwise the body is not rigid
+(`"rigid": false`) and keeps its vertices per output.
+
+Chunks: 4096 outputs of the motion arrays, one output of vertices and fields;
+codecs as for fields (`elementsize` 4 or 8).
+
+## 10. To be specified
+
 - **Particles** (DEM, Lagrangian): ragged arrays per output (`count` (nt,),
   `offset` (nt,), `position` (n, 3), fields (n, ...)).
 - **Rod trees, mooring lines, ice floes**: as particles with connectivity.

@@ -953,7 +953,7 @@ def _prefer_stores(datasets: list[Dataset], stored: list[Dataset]) -> list[Datas
         return datasets
     kept = list(datasets)
     for store in stored:
-        recorded = getattr(store, "output", None) and store.output.info.get("dataset")
+        recorded = getattr(store, "recorded", None)
         if recorded:  # the store says which output it was converted from
             same = [d for d in datasets if d.key == recorded]
         else:
@@ -966,7 +966,8 @@ def _prefer_stores(datasets: list[Dataset], stored: list[Dataset]) -> list[Datas
                 and (not d.run_id or not store.run_id or d.run_id == store.run_id)
             ]
         if any(d.last_step > store.last_step for d in same):
-            log.info("%s: the VTK output is newer than %s", store.key, store.folder.parent.name)
+            where = getattr(getattr(store, "store", None), "path", store.folder.parent)
+            log.info("%s: the VTK output is newer than %s", store.key, Path(where).name)
             continue
         kept = [d for d in kept if d not in same]
         kept.append(store)

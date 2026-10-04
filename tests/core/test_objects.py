@@ -76,3 +76,20 @@ def test_legacy_reader_errors(tmp_path):
     )
     with pytest.raises(VTKFormatError):
         read_legacy(bad)
+
+
+def test_a_converted_case_shows_its_bodies_from_the_store(run):
+    from lagoonviz.core.convert import convert
+    from lagoonviz.core.data.lagoon import StoreBodyDataset
+
+    convert(run)
+    s = Session()
+    s.open_case(run)
+    assert [i.kind for i in s.scene] == ["case", "bathymetry", "body", "mooring", "free_surface"]
+    dataset = s.data.case("case-1").datasets["nhflow_body"]
+    assert isinstance(dataset, StoreBodyDataset)
+    body = s.data.display("body-1", s.data.load("body-1"))
+    assert body.values is None and body.color == "#8f9aa6"
+    mesh = dataset.read(2)
+    assert mesh.n_triangles == 12
+    np.testing.assert_allclose(mesh.points.min(axis=0), body_offset(2), atol=1e-5)

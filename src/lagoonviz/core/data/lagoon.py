@@ -14,6 +14,7 @@ import threading
 from pathlib import Path
 
 import numpy as np
+from lagoon_format.bodies import BodySet
 from lagoon_format.series import ProfileSet as StoredProfiles
 from lagoon_format.series import Table
 from lagoon_format.store import Output, Store, is_store, sigma_heights
@@ -99,6 +100,11 @@ class StoreDataset(Dataset):
         self.times = output.times.copy()
         self.run_id = store.run_id
         self.run_started = str(store.run.get("started", "")) if store.run else ""
+
+    @property
+    def recorded(self) -> str | None:
+        """The key of the VTK output this was converted from."""
+        return self.output.info.get("dataset")
 
     def _frames(self) -> list[Frame]:
         blocks = self.output.group.path / "blocks"
@@ -380,16 +386,92 @@ class StoreDataset(Dataset):
         return where, np.linalg.norm(values, axis=1)
 
 
-def store_datasets(path: str | Path) -> list[StoreDataset]:
+class StoreBodyDataset(Dataset):
+    """The floating bodies of a store: each body's mesh moved by its stored motion."""
+
+    source = "lagoon"
+
+    def __init__(self, store: Store, bodies: BodySet):
+        self.store = store
+        self.bodies = bodies
+        key = bodies.info.get("dataset") or f"{store.solver.lower()}_body"
+        super().__init__(key, store.solver, "body", self._frames(), bodies.group.path)
+        self.times = np.asarray(bodies.times, np.float64)
+        self.run_id = store.run_id
+        self.run_started = str(store.run.get("started", "")) if store.run else ""
+
+    @property
+    def recorded(self) -> str | None:
+        return self.bodies.info.get("dataset")
+
+    def _frames(self) -> list[Frame]:
+        path = self.bodies.group.path
+        return [
+            Frame(int(step), path, [path / f"t{t}"]) for t, step in enumerate(self.bodies.steps)
+        ]
+
+    def refresh(self) -> bool:
+        """Pick up outputs appended since; True if any."""
+        before = len(self.frames)
+        if len(self.bodies) == before:
+            return False
+        self.frames = self._frames()
+        self.times = np.asarray(self.bodies.times, np.float64)
+        self._step_array = None
+        return True
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        fields: dict[str, int] = {}
+        for body in self.bodies.bodies.values():
+            fields.update(body.fields)
+        return "PolyData", fields
+
+    @property
+    def label(self) -> str:
+        return super().label + " (LAGOON)"
+
+    def written_span(self) -> tuple[float, float]:
+        if self._span is None:
+            try:
+                first = (self.bodies.group.path / "zarr.json").stat().st_mtime
+                last = (self.bodies.group.path / "time" / "zarr.json").stat().st_mtime
+            except OSError:
+                first = last = 0.0
+            self._span = (min(first, last), max(first, last))
+        return self._span
+
+    def read(self, index: int, variables: list[str] | None = None) -> SurfaceMesh:
+        points, triangles = self.bodies.mesh(index)
+        names = self._arrays(variables) if variables is not None else list(self.components)
+        data = {}
+        for name in names or []:
+            parts = [
+                body.field(name, index)
+                for _, body in sorted(self.bodies.bodies.items())
+                if name in body.fields
+            ]
+            if len(parts) == len(self.bodies.bodies):
+                data[name] = np.concatenate(parts)
+        mesh = SurfaceMesh(
+            points=np.ascontiguousarray(points, np.float32),
+            triangles=np.ascontiguousarray(triangles, np.uint32),
+            point_data=data,
+        )
+        return mesh.with_normals()
+
+
+def store_datasets(path: str | Path) -> list[Dataset]:
     """The datasets of a LAGOON store, keyed like REEF3D's (``fnpf_volume``)."""
     store = Store(path)
-    return [
+    datasets: list[Dataset] = [
         StoreDataset(
             store, output, output.info.get("dataset") or f"{store.solver.lower()}_{output.role}"
         )
         for output in store.outputs.values()
         if len(output.times)
     ]
+    datasets += [StoreBodyDataset(store, bodies) for bodies in store.bodies.values() if len(bodies)]
+    return datasets
 
 
 def find_stores(case_dir: Path) -> list[Path]:

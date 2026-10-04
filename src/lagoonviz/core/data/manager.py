@@ -274,6 +274,7 @@ class DataManager:
                         stamps += [
                             (f.parent.parent.name, f.stat().st_mtime)
                             for f in sorted(folder.glob("*/time/zarr.json"))
+                            + sorted(folder.glob("*/*/time/zarr.json"))  # bodies, profiles
                         ]
         except OSError:
             return ()

@@ -288,3 +288,63 @@ def test_a_case_of_only_time_series_converts(tmp_path):
     report = convert(root)
     assert set(report.outputs) == {"series"} and report.store.name == "REEF3D_FNPF.lagoon"
     assert "fnpf_wsf_hg" in Store(report.store).tables
+
+
+def _tumbling_body(root, frames, number=1, rigid=True):
+    """A second body that turns about z and x as it drifts (or, not rigid, swells)."""
+    from reef3d_fixtures import BOX, BOX_FACES, write_piece
+
+    folder = root / "REEF3D_NHFLOW_6DOF_VTP"
+    tris = np.concatenate([BOX_FACES[:, [0, 1, 2]], BOX_FACES[:, [0, 2, 3]]])
+    shape = (BOX - 0.5) * np.array([2.0, 1.0, 0.5], np.float32)
+    for frame in range(frames):
+        a, b = 0.3 * frame, 0.1 * np.sin(frame)
+        rz = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
+        rx = np.array([[1, 0, 0], [0, np.cos(b), -np.sin(b)], [0, np.sin(b), np.cos(b)]])
+        scale = 1.0 if rigid else 1.0 + 0.1 * frame
+        points = (shape * scale) @ (rz @ rx).T + [6.0 + 0.1 * frame, 2.0, 1.4]
+        flat = points.astype(np.float32)[tris.ravel()]
+        write_piece(
+            folder / f"REEF3D-6DOF-{number}-{frame:06d}.vtp",
+            "PolyData",
+            flat,
+            {},
+            np.arange(flat.shape[0]),
+            np.arange(3, flat.shape[0] + 1, 3),
+        )
+
+
+def test_bodies_are_stored_as_mesh_and_motion(tmp_path):
+    from lagoon_format.bodies import rigid_tolerance
+
+    from lagoonviz.core.data.lagoon import StoreBodyDataset
+
+    run = make_run(tmp_path / "run", frames=5, print_interval=0.5, objects=True)
+    _tumbling_body(run, 5)
+    vtk = open_case(run, stores=False).datasets["nhflow_body"]
+    report = convert(run, shard_time=2, limit=3)
+    assert report.outputs["bodies"] == 3
+    assert convert(run).outputs["bodies"] == 2  # appended
+    bodies = Store(report.store).bodies["nhflow_body"]
+    assert sorted(bodies.bodies) == [0, 1] and all(b.rigid for b in bodies.bodies.values())
+    np.testing.assert_allclose(bodies.times, [0, 0.5, 1.0, 1.5, 2.0])
+    case = open_case(run)
+    stored = case.datasets["nhflow_body"]
+    assert isinstance(stored, StoreBodyDataset) and "(LAGOON)" in stored.label
+    assert stored.steps == vtk.steps
+    for index in range(5):
+        a, b = vtk.read(index), stored.read(index)
+        assert np.array_equal(a.triangles, b.triangles)
+        assert np.abs(a.points - b.points).max() <= rigid_tolerance(a.points)
+        np.testing.assert_allclose(a.normals, b.normals, atol=1e-4)
+
+
+def test_a_body_that_is_not_rigid_keeps_its_vertices(tmp_path):
+    run = make_run(tmp_path / "run", frames=4, print_interval=0.5, objects=True)
+    _tumbling_body(run, 4, rigid=False)
+    report = convert(run)
+    bodies = Store(report.store).bodies["nhflow_body"]
+    assert bodies.bodies[0].rigid and not bodies.bodies[1].rigid
+    vtk = open_case(run, stores=False).datasets["nhflow_body"]
+    stored = open_case(run).datasets["nhflow_body"]
+    assert np.abs(vtk.read(3).points - stored.read(3).points).max() < 1e-5

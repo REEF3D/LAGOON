@@ -2,18 +2,21 @@
 # Architect: Hans Bihs
 """REEF3D VTK output to a LAGOON store (lagoon-format SPEC.md, section 6).
 
-The σ-grid volumes of FNPF and NHFLOW and the free surface and bed surfaces of any
-solver are converted; each MPI piece becomes a block of the store. Converting a
-case again appends the outputs written since.
+The σ-grid volumes of FNPF and NHFLOW, CFD's Cartesian volume and the free surface
+and bed surfaces of any solver are converted; each MPI piece becomes a block of the
+store. Floating bodies keep their mesh once and a rigid motion per output; time
+series and wave profiles become tables. Converting a case again appends the
+outputs written since.
 
 Command line::
 
-    lagoon-convert CASE [--out STORE] [--outputs volume,free_surface,bed]
+    lagoon-convert CASE [--out STORE] [--outputs volume,free_surface,bed,bodies,...]
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time as _time
 from collections.abc import Callable
@@ -22,16 +25,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from lagoon_format.bodies import NotRigid
 from lagoon_format.store import Store, StoreError, StoreWriter, is_store
 
 from lagoonviz import __version__
+from lagoonviz.core.data.mesh import triangulate
 from lagoonviz.core.data.reef3d import Case, Dataset, open_case, preferred, run_log
 from lagoonviz.core.data.vtkxml import read_piece, read_time_value
 
 #: roles that are converted, and the grid each becomes
 ROLES = {"volume": "sigma", "free_surface": "surface", "bed": "surface"}
-#: what else is converted: time series tables and wave profiles (format 0.2)
-EXTRAS = ("series", "profiles")
+#: what else is converted (format 0.2): floating bodies (mesh once, a rigid motion
+#: per output), time series tables and wave profiles
+EXTRAS = ("bodies", "series", "profiles")
 SIGMA_SOLVERS = ("FNPF", "NHFLOW")
 #: solvers whose volume is converted: σ-grids, and CFD's Cartesian grid
 VOLUME_SOLVERS = (*SIGMA_SOLVERS, "CFD")
@@ -233,13 +239,20 @@ def convert(
     case = open_case(case_path, stores=False)
     datasets = chosen_datasets(case, tuple(r for r in roles if r in ROLES))
     lead = next(iter(datasets.values()), None)
+    bodies = None
+    if "bodies" in roles:
+        bodies = chosen_datasets(case, ("body",)).get("body")
+        if bodies is not None and lead is not None and bodies.solver != lead.solver:
+            bodies = None
+        if lead is None and bodies is not None:
+            lead = bodies
     solver = lead.solver if lead is not None else _series_solver(case)
     series = {k: f for k, f in case.series.items() if f.solver == solver and "series" in roles}
     profiles = {
         k: f for k, f in case.profiles.items() if f.solver == solver and "profiles" in roles
     }
-    if not datasets and not series and not profiles:
-        raise ConvertError(f"{case.path}: no σ-grid volume, surface or time series to convert")
+    if not datasets and bodies is None and not series and not profiles:
+        raise ConvertError(f"{case.path}: no volume, surface, body or time series to convert")
     path = Path(out) if out is not None else case.path / f"REEF3D_{solver}.lagoon"
     run = _run_record(case, lead) if lead is not None else None
     if is_store(path):
@@ -264,6 +277,10 @@ def convert(
                 case, dataset, role, writer, pool, progress, shard_time, limit
             )
             added[role] = n
+            vtk_bytes += size
+        if bodies is not None:
+            n, size = _convert_bodies(case, bodies, writer, pool, progress, limit)
+            added["bodies"] = n
             vtk_bytes += size
     if series:
         added["series"] = _convert_series(series, writer)
@@ -439,6 +456,94 @@ def _convert_dataset(case, dataset, role, writer, pool, progress, shard_time, li
     return len(todo), size
 
 
+_BODY_FILE = re.compile(r"-(?P<body>\d+)-(?P<step>\d+)$")
+
+
+def _body_number(path: Path, default: int) -> int:
+    match = _BODY_FILE.search(path.stem)
+    return int(match.group("body")) if match else default
+
+
+def _read_bodies(frame) -> dict[int, tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]]:
+    """The bodies of one output: number -> (vertices, triangles, point arrays)."""
+    bodies = {}
+    for k, path in enumerate(frame.pieces):
+        piece = read_piece(path)
+        triangles = triangulate(piece.connectivity, piece.offsets)
+        bodies[_body_number(path, k)] = (piece.points, triangles, dict(piece.point_data))
+    return bodies
+
+
+def _convert_bodies(case, dataset, writer, pool, progress, limit) -> tuple[int, int]:
+    """Floating bodies (SPEC 9): the mesh of each body once and its rigid motion per
+    output; a body that turns out not to move rigidly is written again with its
+    vertices per output."""
+    key = dataset.key
+    times = _frame_times(case, dataset)
+    source = dataset.folder.name
+    stored = Store(writer.path).bodies.get(key)
+    rigid: dict[int, bool] | None = None
+    if stored is not None:
+        if stored.info.get("dataset", key) != key:
+            raise ConvertError(f"bodies: the store holds {stored.info.get('dataset')}")
+        rigid = {n: b.rigid for n, b in stored.bodies.items()}
+    while True:
+        if stored is None:
+            first = _read_bodies(dataset.frames[0])
+            if rigid is None:
+                rigid = dict.fromkeys(first, True)
+            body_writer = writer.body_writer(
+                key,
+                {
+                    n: (
+                        v,
+                        tri,
+                        {name: _components(a) for name, a in data.items()},
+                        rigid.get(n, True),
+                    )
+                    for n, (v, tri, data) in first.items()
+                },
+                source=source,
+                attributes={"dataset": key},
+            )
+            done: set[int] = set()
+        else:
+            body_writer = writer.body_writer(key)
+            done = {int(s) for s in stored.steps}
+        todo = [(k, f) for k, f in enumerate(dataset.frames) if f.step not in done]
+        if limit is not None:
+            todo = todo[:limit]
+        size = 0
+        try:
+            for count, (k, frame, bodies) in enumerate(
+                _prefetched(pool, lambda item: (*item, _read_bodies(item[1])), todo), start=1
+            ):
+                body_writer.append(
+                    times[k], frame.step, {n: (v, data) for n, (v, _t, data) in bodies.items()}
+                )
+                size += sum(p.stat().st_size for p in frame.pieces)
+                if progress is not None:
+                    progress("bodies", count, len(todo))
+        except NotRigid as bent:
+            # write the set again from the first output, this body with its vertices
+            if len(dataset.frames) < len(stored or ()):
+                raise ConvertError(
+                    f"bodies: {bent}; the VTK files converted before are gone"
+                ) from bent
+            body_writer.discard()  # nothing of this set is kept
+            rigid[bent.number] = False
+            stored = None
+            continue
+        except ValueError as error:
+            raise ConvertError(f"bodies: {error}") from error
+        body_writer.flush()
+        return len(todo), size
+
+
+def _components(values: np.ndarray) -> int:
+    return int(values.shape[1]) if values.ndim > 1 else 1
+
+
 def _extent(block, grid: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
     if grid == "cartesian":
         return (*block.start, block.k0), (*block.size, block.nz)
@@ -469,7 +574,7 @@ def main(argv: list[str] | None = None) -> int:
         "--outputs",
         default=",".join((*ROLES, *EXTRAS)),
         help="what to convert, comma separated (default: everything: "
-        "volume,free_surface,bed,series,profiles)",
+        "volume,free_surface,bed,bodies,series,profiles)",
     )
     parser.add_argument("--limit", type=int, help="convert at most this many outputs per stream")
     parser.add_argument("--shard-time", type=int, default=16, help="outputs per shard file")

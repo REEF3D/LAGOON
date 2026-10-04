@@ -23,6 +23,14 @@
   files; one column per quantity, 64k-row chunks) and wave profiles (WSFLINE, one
   array per line). The converter writes them (again when a file changed; profiles
   appended); a case reads them from the store while the text files are unchanged.
+- LAGOON format 0.2: floating bodies (section 9). The mesh of each 6DOF body is
+  kept once and per output only its rigid motion (translation and quaternion),
+  fitted to the written vertices and checked (to 4 float32 steps); a body that
+  does not move rigidly keeps its vertices per output. On the NHFLOW ship run
+  (75,696 vertices, 697 outputs): 1420× smaller than the VTP files, within 0.06 mm.
+- The theme switch repainted every widget of the application, including those of
+  closed windows Qt was deleting, which crashed the test suite now and then; it
+  now repaints only its own window.
 - ParaView reader plugin (`lagoon-format/paraview/lagoon_reader.py`): a store's
   outputs as structured grids per block, with its times.
 - A case with a store opens it instead of the VTU/VTP output it was made from
