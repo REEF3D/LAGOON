@@ -76,7 +76,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("output", help="PNG file to write")
     parser.add_argument("--time", type=float, help="time (or frame) to show")
     parser.add_argument("--size", default="1600x900", help="image size, e.g. 1920x1080")
-    parser.add_argument("--view", choices=["perspective", "top", "front", "right", "2d"])
+    parser.add_argument(
+        "--view", choices=["perspective", "top", "front", "right", "2d", "2d-front", "2d-right"]
+    )
     parser.add_argument("--style", choices=["studio", "ocean"], default="studio")
     movie = parser.add_argument_group("animations (output .mp4 or .mov)")
     movie.add_argument("--fps", type=float, default=25.0, help="frames per second")

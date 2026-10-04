@@ -96,7 +96,7 @@ def _vectors() -> dict[str, PropertySpec]:
 def _exaggeration(tip: str) -> dict[str, PropertySpec]:
     return {
         "exaggeration": PropertySpec(
-            1.0, "Vertical exaggeration", minimum=0.1, maximum=100.0, tip=tip, slider="log"
+            1.0, "Vertical scale", minimum=0.1, maximum=100.0, tip=tip, slider="log"
         )
     }
 
@@ -131,7 +131,7 @@ KINDS: dict[str, KindSpec] = {
             ),
             "exaggeration": PropertySpec(
                 1.0,
-                "Vertical exaggeration",
+                "Vertical scale",
                 minimum=0.1,
                 maximum=100.0,
                 slider="log",
@@ -140,7 +140,7 @@ KINDS: dict[str, KindSpec] = {
             "sync_exaggeration": PropertySpec(
                 True,
                 "Same for all items",
-                tip="Use the case's exaggeration for every item (surface, bed, bodies, "
+                tip="Use the case's vertical scale for every item (surface, bed, bodies, "
                 "slices, gauges); off: each surface and bed has its own",
             ),
         },
@@ -292,6 +292,22 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("DEM"),
             "material": PropertySpec("rock", "Material", choices=MATERIALS),
+            **_colouring("none", "viridis"),
+        },
+    ),
+    "ice": KindSpec(
+        "Ice floes",
+        {
+            **_data_source("ice"),
+            "material": PropertySpec("ice", "Material", choices=MATERIALS),
+            **_colouring("none", "viridis"),
+        },
+    ),
+    "rods": KindSpec(
+        "Rod trees",
+        {
+            **_data_source("rod tree"),
+            "material": PropertySpec("wood", "Material", choices=MATERIALS),
             **_colouring("none", "viridis"),
         },
     ),

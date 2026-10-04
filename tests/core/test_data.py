@@ -786,6 +786,36 @@ def test_plan_view_draws_everything_flat(tmp_path):
     assert np.ptp(s.data.display(bed, s.data.load(bed)).positions[:, 2]) > 0  # 3D again
 
 
+def test_2d_from_the_front_or_side_keeps_the_shapes(tmp_path):
+    """2D from the front or a side is an elevation: shapes as they are (with the
+    vertical scale), not flat; saved with the session and in the script."""
+    from reef3d_fixtures import make_run
+
+    run = make_run(tmp_path / "side", frames=3, print_interval=0.5)
+    s = Session()
+    s.open_case(run)
+    events = []
+    s.scene.subscribe(lambda event, _id: events.append(event))
+    s.set_plan_view(True, "front")
+    assert events == ["view"] and s.scene.flat is False
+    bed = next(i.id for i in s.scene if i.kind == "bathymetry")
+    assert np.ptp(s.data.display(bed, s.data.load(bed)).positions[:, 2]) > 0
+    s.set_plan_view(True, "front")  # no change, no event
+    assert events == ["view"]
+    s.set_plan_view(True, "right")
+    assert events == ["view", "view"]
+    path = tmp_path / "side.lagoon-session"
+    s.save(path)
+    assert Session.open(path).scene.plan_side == "right"
+    assert "session.set_plan_view(True, side='right')" in s.to_script()
+    replayed = Session.from_script(s.to_script())
+    assert (replayed.scene.plan_view, replayed.scene.plan_side) == (True, "right")
+    s.set_plan_view(True, "top")
+    assert s.scene.flat is True
+    with pytest.raises(ValueError):
+        s.set_plan_view(True, "sideways")
+
+
 def test_iso_surface_of_a_volume(reef3d_run):
     """Pressure grows linearly with depth in the test volume: its iso-surface at
     9810 Pa is the plane 1 m below the still water level, connected (shared points)."""
@@ -815,3 +845,54 @@ def test_iso_surface_of_a_volume(reef3d_run):
     assert props["iso_by"] == "velocity" and props["iso_value"] > 0
     assert s.data.load(auto) is not None
     assert "session.add_item('iso_surface'" in s.to_script()
+
+
+def test_ice_floes_and_rod_trees(tmp_path):
+    """FNPF ice floes (prisms, values per floe as cell data) and rod trees (lines with
+    a radius, drawn as tubes) are found, shown and timed by the files' TimeValue."""
+    from reef3d_fixtures import ICE_START, make_run, rod_ends
+
+    run = make_run(tmp_path / "ice", frames=5, print_interval=0.5, ice=0.25, rods=0.5)
+    s = Session()
+    s.open_case(run)
+    ice = next(i.id for i in s.scene if i.kind == "ice")
+    rods = next(i.id for i in s.scene if i.kind == "rods")
+    s.set_time(1.0)
+    assert s.data.frame_index(ice) == 4 and s.data.frame_index(rods) == 2  # own intervals
+    s.set_property(ice, "variable", "contact_force")
+    mesh = s.data.load(ice)
+    assert mesh.triangles.shape == (24, 3)  # two prisms: 2 x (2 + 2 + 8)
+    force = mesh.point_data["contact_force"]
+    first_floe = np.abs(mesh.points[:, 0] - (ICE_START[0][0] + 0.3)) < 0.6
+    assert set(force[first_floe].round(3)) == {10.0} and set(force[~first_floe].round(3)) == {20.0}
+    shown = s.data.display(ice, mesh)
+    assert shown.values is not None and shown.color == "#e3f1fa"  # ice
+
+    s.set_property(rods, "variable", "hydro_force.x")
+    tube = s.data.load(rods)
+    assert tube.triangles.shape == (3 * 16, 3)  # 3 rods, 8 sides, 2 triangles each
+    ends = rod_ends(1.0)
+    stem = tube.points[:16]
+    radius_at_base = np.linalg.norm(stem[:8] - ends[0, 0], axis=1)
+    np.testing.assert_allclose(radius_at_base, 0.05, atol=1e-5)
+    np.testing.assert_allclose(tube.point_data["hydro_force"][:16, 0], 1.0)  # per rod
+    np.testing.assert_allclose(tube.point_data["hydro_force"][16:32, 0], 2.0)
+
+
+def test_probe_time_series(reef3d_run):
+    """The probe gives eta over all frames at the grid point under it, read with a
+    few bytes per frame; it matches the full frames."""
+    from reef3d_fixtures import eta
+
+    s = Session()
+    s.open_case(reef3d_run)
+    s.set_time(1.0)
+    mesh = s.data.load("free_surface-1")
+    probe = s.data.probe("free_surface-1", 5, (1.0, 0.0, 0.0))
+    trace = s.data.probe_trace(probe)
+    assert trace is not None and trace.unit == "m" and "eta" in trace.name
+    assert len(trace.time) == len(trace.values) == 3
+    x, y = mesh.points[mesh.triangles[5, 0], :2]
+    expected = [eta(np.array([x]), np.array([y]), frame)[0] for frame in range(3)]
+    np.testing.assert_allclose(trace.values, expected, atol=1e-5)
+    np.testing.assert_allclose(trace.time, [0.0, 1.0, 2.0])

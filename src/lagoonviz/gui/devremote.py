@@ -147,6 +147,8 @@ class DevRemote(QObject):
         if name == "view":
             if str(value) in ("2d", "3d"):
                 window.viewport.set_2d(str(value) == "2d")
+            elif str(value).startswith("2d-"):  # 2d-top, 2d-front, 2d-right, ...
+                window.viewport.set_2d(True, str(value)[3:])
             else:
                 window.viewport.frame(str(value))
             return f"view {value}"

@@ -8,8 +8,9 @@ Navigation (mouse and trackpad):
 * pan: right drag, or Shift + middle drag (Blender)
 * zoom: wheel or pinch; Ctrl + middle drag
 * views: 1 front, 3 right, 7 top (Ctrl for the opposite side), 5 perspective or
-  orthographic, Home or . to frame everything, 2 the 2D view (everything flat, seen
-  from above, no rotation: any drag pans; the other views wait until 2D is left)
+  orthographic, Home or . to frame everything, 2 the 2D view (orthographic, no
+  rotation: any drag pans; from the top everything is drawn flat, front and side
+  give 2D elevations; 3D leaves it)
 
 Frames are read in background threads; the viewport shows the newest frame that
 has arrived, so scrubbing never blocks the window. Without a usable GPU (or in
@@ -54,6 +55,8 @@ class ViewportPlaceholder(QWidget):
     """Shown when no GPU canvas is available (tests, remote sessions without GPU)."""
 
     statusMessage = Signal(str)
+    #: the probe (orange dot) placed or moved: a Probe, or None when removed
+    probeChanged = Signal(object)
 
     def __init__(self, parent: QWidget | None = None, reason: str = ""):
         super().__init__(parent)
@@ -88,7 +91,7 @@ class ViewportPlaceholder(QWidget):
     def frame(self, view: str = "perspective") -> None:
         pass
 
-    def set_2d(self, on: bool) -> None:
+    def set_2d(self, on: bool, side: str | None = None) -> None:
         self.two_d = on
 
     def reframe(self) -> None:
@@ -195,6 +198,8 @@ class Viewport3D(QWidget):
     """pygfx canvas plus a small view toolbar and the colour bars."""
 
     statusMessage = Signal(str)
+    #: the probe (orange dot) placed or moved: a Probe, or None when removed
+    probeChanged = Signal(object)
     #: (key, mesh, error) from a loader thread, delivered on the GUI thread
     _loaded = Signal(object, object, object)
 
@@ -234,6 +239,7 @@ class Viewport3D(QWidget):
         self.view = SceneRenderer(style)
         self.controller = FreeOrbitController(self.view.camera, register_events=self.renderer)
         self.two_d = False
+        self.two_d_side = "top"
         self._use_controls(BLENDER_CONTROLS)
         self.canvas.request_draw(self._draw)
         self.renderer.add_event_handler(self._on_key, "key_down")
@@ -271,8 +277,8 @@ class Viewport3D(QWidget):
                 self.two_d_button.setCheckable(True)
                 self.two_d_button.setAutoRaise(True)
                 self.two_d_button.setToolTip(
-                    "2D: seen from straight above, orthographic, no rotation; any drag "
-                    "pans, the wheel zooms (2)"
+                    "2D: orthographic, no rotation; any drag pans, the wheel zooms. "
+                    "Top draws everything flat, Front and Side are elevations (2)"
                 )
                 self.two_d_button.toggled.connect(self.set_2d)
                 bar.addWidget(self.two_d_button)
@@ -315,7 +321,7 @@ class Viewport3D(QWidget):
         self._loaded.connect(self._on_loaded)
         bridge.sceneChanged.connect(self._on_scene)
         bridge.timeChanged.connect(lambda _t: self.refresh())
-        self._apply_2d(self.session.scene.plan_view, frame=False)
+        self._apply_2d(*self._plan_state, frame=False)
         if self.session.scene.camera:
             self.view.set_camera_state(self.session.scene.camera)
         self.refresh()
@@ -492,7 +498,7 @@ class Viewport3D(QWidget):
         if item.kind == "free_surface":
             self._reshow_exaggerated_beds()
         if not self.session.scene.camera:
-            self.view.frame_once("top" if self.two_d else "perspective")
+            self.view.frame_once(self._home_view)
 
     def _reshow_exaggerated_beds(self) -> None:
         """A bed without its own still water depth is exaggerated about the free
@@ -516,13 +522,13 @@ class Viewport3D(QWidget):
             self.view.clear()
             self._wanted.clear()
             self._shown_keys.clear()
-            self._apply_2d(self.session.scene.plan_view, frame=False)  # a loaded session's
+            self._apply_2d(*self._plan_state, frame=False)  # a loaded session's
             if self.session.scene.camera:
                 self.view.set_camera_state(self.session.scene.camera)
             self.refresh()
-        elif event == "view":  # 2D or 3D: everything is drawn again
+        elif event == "view":  # 2D or 3D, or the 2D side: everything is drawn again
             self.refresh()
-            self._apply_2d(self.session.scene.plan_view)
+            self._apply_2d(*self._plan_state)
         elif event == "changed" and item_id in self.session.scene:
             item = self.session.scene.get(item_id)
             if item.kind == "case":
@@ -608,16 +614,30 @@ class Viewport3D(QWidget):
         self.session.set_camera(None)
         self.view._framed = False
         if not self.view.is_empty:
-            self.frame("top" if self.two_d else "perspective")
+            self.frame(self._home_view)
+
+    @property
+    def _plan_state(self) -> tuple[bool, str]:
+        scene = self.session.scene
+        return scene.plan_view, scene.plan_side
+
+    @property
+    def _home_view(self) -> str:
+        """The view Frame all goes to: the 2D side, or the 3D view."""
+        return self.two_d_side if self.two_d else "perspective"
 
     def _view_button(self, key: str) -> None:
-        """Frame all keeps the 2D view; the 3D, front and side views leave it."""
+        """Frame all keeps the view; in 2D, Top, Front and Side turn the 2D view to
+        that side and 3D leaves 2D."""
         if key == "frame":
-            self.frame("top" if self.two_d else "perspective")
-            return
-        if self.two_d and key != "top":
-            return  # 2D stays 2D (the buttons are greyed out)
-        self.frame(key)
+            self.frame(self._home_view)
+        elif self.two_d and key == "perspective":
+            self.set_2d(False)
+        elif self.two_d:
+            self.set_2d(True, key)
+            self._mark_2d_side()  # a click on the pressed side would unpress it
+        else:
+            self.frame(key)
 
     def _use_controls(self, controls: dict) -> None:
         self.controller.controls.clear()
@@ -627,36 +647,47 @@ class Viewport3D(QWidget):
             except Exception as error:  # noqa: BLE001 (keep the pygfx default for this one)
                 log.warning("control %s not set: %s", control, error)
 
-    def set_2d(self, on: bool) -> None:
-        """2D: every item drawn flat and seen from straight above, orthographic, no
-        rotation (drags pan); the 3D, front and side views wait until 2D is left. The
-        state is the session's (saved with it, filmed by the export, shared by both
-        views when comparing); leaving goes back to the 3D view."""
+    def set_2d(self, on: bool, side: str | None = None) -> None:
+        """2D: orthographic, no rotation (drags pan), seen from a side: from the top
+        every item is drawn flat; front, back, right and left are elevations of the
+        shapes as they are (with the vertical scale). ``side=None`` keeps the side.
+        The state is the session's (saved with it, filmed by the export, shared by
+        both views when comparing); leaving goes back to the 3D view."""
         on = bool(on)
-        if self.two_d_button.isChecked() != on:
+        if side is None and self.two_d_button.isChecked() != on:
             self.two_d_button.setChecked(on)  # comes back here through toggled
             return
-        self.session.set_plan_view(on)  # every view hears it ("view")
-        self._apply_2d(on)
+        self.session.set_plan_view(on, side)  # every view hears it ("view")
+        self._apply_2d(*self._plan_state)
 
-    def _apply_2d(self, on: bool, frame: bool = True) -> None:
-        """Controls, buttons and projection for 2D or 3D; ``frame=False`` keeps the
-        camera (a session that was saved in 2D brings its own)."""
-        if on == self.two_d:
+    def _apply_2d(self, on: bool, side: str = "top", frame: bool = True) -> None:
+        """Controls, buttons and projection for 2D (from a side) or 3D;
+        ``frame=False`` keeps the camera (a session that was saved in 2D brings its
+        own)."""
+        side = side if on else self.two_d_side
+        if on == self.two_d and side == self.two_d_side:
             return
-        self.two_d = on
+        self.two_d, self.two_d_side = on, side
         self.two_d_button.blockSignals(True)
         self.two_d_button.setChecked(on)
         self.two_d_button.blockSignals(False)
         self.controller.locked = on
         self._use_controls(CONTROLS_2D if on else BLENDER_CONTROLS)
-        for key in ("perspective", "front", "right"):
-            self.view_buttons[key].setEnabled(not on)
         self.ortho_button.setEnabled(not on)
-        self.view.set_plan(on)
+        self.view.set_plan(on and side == "top")
         self.view.set_orthographic(on or self.ortho_button.isChecked())
+        self._mark_2d_side()
         if frame:
-            self.frame("top" if on else "perspective")
+            self.frame(self._home_view)
+
+    def _mark_2d_side(self) -> None:
+        """In 2D the button of the side it looks from is shown pressed."""
+        sides = {"top": "top", "bottom": "top", "front": "front", "back": "front"}
+        pressed = sides.get(self.two_d_side, "right") if self.two_d else None
+        for key in ("top", "front", "right"):
+            button = self.view_buttons[key]
+            button.setCheckable(self.two_d)
+            button.setChecked(key == pressed)
 
     def _set_ortho(self, on: bool) -> None:
         self.view.set_orthographic(on or self.two_d)
@@ -670,16 +701,19 @@ class Viewport3D(QWidget):
             key, modifiers = getattr(event, "key", ""), getattr(event, "modifiers", ())
         if key in KEY_VIEWS:
             view = KEY_VIEWS[key]
-            if self.two_d and view != "top":
-                return  # 2D stays 2D
-            self.frame("top" if self.two_d else OPPOSITE[view] if "Control" in modifiers else view)
+            if "Control" in modifiers and not (self.two_d and view == "top"):
+                view = OPPOSITE[view]  # 2D from the bottom would show only the bed
+            if self.two_d:
+                self.set_2d(True, view)
+            else:
+                self.frame(view)
         elif key == "2":
             self.two_d_button.toggle()
         elif key == "5":
             if not self.two_d:
                 self.ortho_button.toggle()
         elif key in ("Home", "."):
-            self.frame("top" if self.two_d else "perspective")
+            self.frame(self._home_view)
         elif key in KEY_PANS:
             step = 0.33 if "Shift" in modifiers else 0.1
             dx, dy = KEY_PANS[key]
@@ -719,6 +753,7 @@ class Viewport3D(QWidget):
             self.clear_probe()
             return
         self.statusMessage.emit(self.probe.summary())
+        self.probeChanged.emit(self.probe)
         self._update_overlays()
         self.redraw()
 
@@ -747,6 +782,7 @@ class Viewport3D(QWidget):
         self._probe_at = None
         if self.probe is not None:
             self.probe = None
+            self.probeChanged.emit(None)
             self.view.set_marker(None)
             self._update_overlays()
             self.redraw()

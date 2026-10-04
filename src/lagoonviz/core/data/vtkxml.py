@@ -68,6 +68,7 @@ class PieceHeader:
     points: ArrayInfo | None
     point_data: dict[str, ArrayInfo] = field(default_factory=dict)
     cell_data: dict[str, ArrayInfo] = field(default_factory=dict)
+    lines: bool = False  # PolyData of lines rather than polygons
     cells: dict[str, ArrayInfo] = field(default_factory=dict)  # connectivity, offsets, types
     header_dtype: np.dtype = field(default_factory=lambda: np.dtype("<u4"))
     byte_order: str = "<"
@@ -160,6 +161,10 @@ def read_header(path: str | Path) -> PieceHeader:
     else:
         n_cells = int(piece.get("NumberOfPolys", "0"))
         cell_tag = "Polys"
+        if not n_cells and int(piece.get("NumberOfLines", "0")):
+            # line data (rods): read like polygons, returned with kind "Lines"
+            n_cells = int(piece.get("NumberOfLines", "0"))
+            cell_tag = "Lines"
 
     points_el = piece.find("Points/DataArray")
     header = PieceHeader(
@@ -173,6 +178,7 @@ def read_header(path: str | Path) -> PieceHeader:
         compressed=compressed,
         data_start=data_start,
     )
+    header.lines = cell_tag == "Lines"
     appended = root.find("AppendedData")
     if appended is not None:
         header.appended_encoding = appended.get("encoding", "raw")
@@ -323,8 +329,13 @@ def read_piece(
     point_arrays: list[str] | None = None,
     header: PieceHeader | None = None,
     with_cells: bool = True,
+    cell_to_points: bool = False,
 ) -> Piece:
-    """Read a .vtu or .vtp file. ``point_arrays=None`` reads all point data arrays."""
+    """Read a .vtu or .vtp file. ``point_arrays=None`` reads all point data arrays.
+
+    With ``cell_to_points``, cell data (ice floes, rods) is read too and given to the
+    points of each cell (every point belongs to one object there), under its name.
+    """
     header = header or read_header(path)
     if header.points is None:
         points = np.zeros((0, 3), np.float32)
@@ -333,9 +344,15 @@ def read_piece(
         if points.ndim == 1:
             points = points.reshape(-1, 3)
     names = list(header.point_data) if point_arrays is None else point_arrays
+    if cell_to_points and point_arrays is None:
+        names += [n for n in header.cell_data if n not in header.point_data]
     data = {}
+    from_cells = []
     for name in names:
         info = header.point_data.get(name)
+        if info is None and cell_to_points and name in header.cell_data:
+            from_cells.append(name)
+            continue
         if info is None:
             raise KeyError(f"{header.path.name}: no point array {name!r}")
         data[name] = read_array(header, info, header.n_points)
@@ -349,7 +366,15 @@ def read_piece(
         offsets = np.zeros(0, np.int64)
         connectivity = np.zeros(0, np.int64)
         types = np.zeros(0, np.uint8) if header.kind == "UnstructuredGrid" else None
-    return Piece(header.kind, points, connectivity, offsets, types, data)
+    if from_cells and offsets.size:
+        sizes = np.diff(np.concatenate(([0], offsets)))
+        for name in from_cells:
+            values = read_array(header, header.cell_data[name], header.n_cells)
+            spread = np.zeros((header.n_points, *values.shape[1:]), values.dtype)
+            spread[connectivity] = np.repeat(values, sizes, axis=0)
+            data[name] = spread
+    kind = "Lines" if header.lines else header.kind
+    return Piece(kind, points, connectivity, offsets, types, data)
 
 
 _PIECE_NAME = re.compile(r"^(?P<stem>.+?)-(?P<step>\d+)(?:-(?P<rank>\d+))?$")

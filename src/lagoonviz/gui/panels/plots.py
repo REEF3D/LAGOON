@@ -14,11 +14,12 @@ enough for live updates; publication figures will be redrawn with matplotlib.
 from __future__ import annotations
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtWidgets import QComboBox, QSizePolicy, QWidget
 
 from lagoonviz.core.data.manager import Trace
 from lagoonviz.core.data.series import decimate
@@ -32,9 +33,16 @@ RIGHT = 14
 TOP = 22  # room for the row title and legend
 BOTTOM = 24  # room for the time axis labels under the last row
 ROW_GAP = 8
+#: the probe's colour: its row in the plots and the dot in the 3D view
+PROBE_COLOR = "#e07b39"
+#: what the plots show: everything, only the probe, or one series item (its id)
+SHOW_ALL, SHOW_PROBE = "", "probe"
 
 
 class PlotsPanel(QWidget):
+    #: the probe's time series, read in a worker thread: (generation, Trace or None)
+    _probe_ready = Signal(int, object)
+
     def __init__(self, bridge: SessionBridge | None = None, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("plots")
@@ -52,6 +60,16 @@ class PlotsPanel(QWidget):
         # slowed playing down noticeably)
         self._static: QPixmap | None = None
         self._static_key: tuple | None = None
+        # the probe (orange dot): its time series, read in the background
+        self._probe_trace: Trace | None = None
+        self._probe_generation = 0
+        self._probe_pool = ThreadPoolExecutor(1, thread_name_prefix="lagoon-probe")
+        self._probe_ready.connect(self._on_probe_trace)
+        # which plots are shown
+        self.show_box = QComboBox(self)
+        self.show_box.setToolTip("Which plots are shown")
+        self.show_box.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.show_box.activated.connect(lambda _i: self.refresh())
         self._drag: tuple[str, float, tuple[float, float]] | None = None
         self.hover_time: float | None = None
         if bridge is not None:
@@ -64,9 +82,13 @@ class PlotsPanel(QWidget):
 
     # ------------------------------------------------------------- data
     def refresh(self) -> None:
-        """Reload the rows from the scene (items, columns, files)."""
+        """Reload the rows from the scene (items, columns, files) and the probe."""
         self._rows = []
         self._paths.clear()
+        choices = [("All plots", SHOW_ALL)]
+        if self._probe_trace is not None:
+            choices.append(("Probe (orange dot)", SHOW_PROBE))
+        series = []
         if self.session is not None:
             data = self.session.data
             for item_id in data.series_items():
@@ -76,10 +98,69 @@ class PlotsPanel(QWidget):
                 case_item = data.case_item(item_id)
                 if case_item is not None and not case_item.visible:
                     continue
-                self._rows.append((item_id, data.traces(item_id)))
+                series.append(item_id)
+                choices.append((item.name, item_id))
+        shown = self.show_box.currentData() or SHOW_ALL
+        if shown not in [value for _, value in choices]:
+            shown = SHOW_ALL
+        self._fill_show_box(choices, shown)
+        if self._probe_trace is not None and shown in (SHOW_ALL, SHOW_PROBE):
+            self._rows.append((SHOW_PROBE, [self._probe_trace]))
+        if self.session is not None:
+            for item_id in series:
+                if shown in (SHOW_ALL, item_id):
+                    self._rows.append((item_id, self.session.data.traces(item_id)))
         self._ranges = [value_range(t.values for t in traces) for _, traces in self._rows]
         self._static = None
         self.update()
+
+    def _fill_show_box(self, choices: list[tuple[str, str]], shown: str) -> None:
+        box = self.show_box
+        box.blockSignals(True)
+        if [(box.itemText(i), box.itemData(i)) for i in range(box.count())] != choices:
+            box.clear()
+            for label, value in choices:
+                box.addItem(label, value)
+        box.setCurrentIndex(max(box.findData(shown), 0))
+        box.blockSignals(False)
+        box.setVisible(len(choices) > 2)  # only when there is something to choose
+        self._place_show_box()
+
+    def _place_show_box(self) -> None:
+        self.show_box.adjustSize()
+        self.show_box.move(self.width() - RIGHT - self.show_box.width(), 0)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        super().resizeEvent(event)
+        self._place_show_box()
+
+    # ------------------------------------------------------------- probe
+    def set_probe(self, probe) -> None:
+        """Plot the time series under the probe (orange dot); None removes it."""
+        self._probe_generation += 1
+        if probe is None or self.session is None:
+            self._probe_trace = None
+            self.refresh()
+            return
+        generation = self._probe_generation
+        data = self.session.data
+
+        def read() -> None:
+            try:
+                trace = data.probe_trace(probe)
+            except Exception:  # noqa: BLE001 (no plot rather than a broken window)
+                trace = None
+            self._probe_ready.emit(generation, trace)
+
+        self._probe_pool.submit(read)
+
+    def _on_probe_trace(self, generation: int, trace) -> None:
+        if generation != self._probe_generation:
+            return  # the probe moved on meanwhile
+        self._probe_trace = trace
+        if trace is not None and self.show_box.currentData() not in (SHOW_ALL, SHOW_PROBE):
+            self.show_box.setCurrentIndex(0)
+        self.refresh()
 
     @property
     def row_ids(self) -> list[str]:
@@ -263,7 +344,7 @@ class PlotsPanel(QWidget):
             if path is None:
                 path = self._path(trace, rect, low_t, high_t, y_of)
                 self._paths[key] = path
-            color = QColor(SERIES_COLORS[index % len(SERIES_COLORS)])
+            color = _trace_color(item_id, index)
             painter.setPen(QPen(color, 1.4))
             painter.drawPath(path)
         painter.restore()
@@ -273,14 +354,21 @@ class PlotsPanel(QWidget):
 
     def _paint_legend(self, painter, metrics, item_id, traces, rect, cursor) -> None:
         """Title and legend above a row, with each line's value at the cursor."""
-        item = self.session.scene.get(item_id)
         x = rect.left() + 2
+        if item_id == SHOW_PROBE:  # the orange dot of the 3D view, then its title
+            painter.setPen(QColor(PROBE_COLOR))
+            painter.drawText(
+                QRectF(x, rect.top() - TOP + 2, 20, TOP - 4), Qt.AlignVCenter, "\u25cf"
+            )
+            x += metrics.horizontalAdvance("\u25cf") + 4
+            title = "Probe"
+        else:
+            title = self.session.scene.get(item_id).name
         painter.setPen(QColor(COLORS["text"]))
-        title = item.name
         painter.drawText(QRectF(x, rect.top() - TOP + 2, 400, TOP - 4), Qt.AlignVCenter, title)
         x += metrics.horizontalAdvance(title) + 14
         for index, trace in enumerate(traces):
-            color = QColor(SERIES_COLORS[index % len(SERIES_COLORS)])
+            color = _trace_color(item_id, index)
             text = trace.name + (f" [{trace.unit}]" if trace.unit else "")
             if cursor is not None:
                 value = _value_at(trace, cursor)
@@ -361,6 +449,12 @@ class PlotsPanel(QWidget):
         low, high = self.full_range()
         time = min(max(self.time_at(x), low), high)
         self.session.set_time(time)
+
+
+def _trace_color(item_id: str, index: int) -> QColor:
+    if item_id == SHOW_PROBE:
+        return QColor(PROBE_COLOR)
+    return QColor(SERIES_COLORS[index % len(SERIES_COLORS)])
 
 
 def _value_at(trace: Trace, time: float) -> float:

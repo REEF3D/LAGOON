@@ -164,13 +164,13 @@ def _surface_piece(i0: int, i1: int, frame: int, role: str):
     return points, data, tris.ravel(), offsets
 
 
-def _volume_piece(i0: int, i1: int, frame: int, nz: int = 3):
+def _volume_piece(i0: int, i1: int, frame: int, nz: int = 3, cartesian: bool = False):
     xs = np.arange(i0, i1 + 1) * DX
     ys = np.arange(NY) * DX
     sig = np.linspace(0.0, 1.0, nz)
     x, y, s = np.meshgrid(xs, ys, sig, indexing="ij")
     e = eta(x, y, frame)
-    z = s * (DEPTH + e)
+    z = s * (DEPTH + 1.0) if cartesian else s * (DEPTH + e)  # CFD: fixed levels
     points = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=1).astype(np.float32)
     nx = i1 - i0 + 1
 
@@ -215,6 +215,8 @@ def make_run(
     objects: bool = False,
     profiles: bool = False,
     dem: float | None = None,
+    ice: float | None = None,
+    rods: float | None = None,
 ) -> Path:
     """Write a REEF3D-like case folder with free surface, bed and volume output."""
     root.mkdir(parents=True, exist_ok=True)
@@ -237,7 +239,9 @@ def make_run(
                 i0, i1 = cuts[rank], cuts[rank + 1]
                 name = f"{stem}-{frame:08d}-{rank + 1:06d}.{ext}"
                 if role == "volume":
-                    points, data, conn, offs, types = _volume_piece(i0, i1, frame)
+                    points, data, conn, offs, types = _volume_piece(
+                        i0, i1, frame, cartesian=solver == "CFD"
+                    )
                 else:
                     points, data, conn, offs = _surface_piece(i0, i1, frame, role)
                     types = None
@@ -253,6 +257,10 @@ def make_run(
         write_profiles(root, solver, (frames - 1) * (print_interval or 1.0))
     if dem is not None:  # DEM output every ``dem`` seconds over the same span
         write_dem(root, (frames - 1) * (print_interval or 1.0), dem)
+    if ice is not None:
+        write_ice(root, (frames - 1) * (print_interval or 1.0), ice, solver=solver)
+    if rods is not None:
+        write_rodtree(root, (frames - 1) * (print_interval or 1.0), rods)
     return root
 
 
@@ -494,3 +502,122 @@ def write_run_log(root: Path, solver: str, runs: list[dict]) -> Path:
     path = folder / f"REEF3D_{solver}_run.jsonl"
     path.write_text("".join(json.dumps(line) + "\n" for line in lines))
     return path
+
+
+def _xml_array(name: str, values, kind: str = "Float32", components: int = 1) -> list[str]:
+    head = f'<DataArray type="{kind}" Name="{name}"'
+    head += f' NumberOfComponents="{components}"' if components > 1 else ""
+    rows = [" ".join(f"{v:.8g}" for v in np.atleast_1d(row)) for row in values]
+    return [head + ' format="ascii">', *rows, "</DataArray>"]
+
+
+def _time_value(t: float) -> list[str]:
+    return [
+        "<FieldData>",
+        f'<DataArray type="Float64" Name="TimeValue" NumberOfTuples="1">{t:.12g}</DataArray>',
+        "</FieldData>",
+    ]
+
+
+#: ice floes: two square floes of 1 x 1 m, 0.2 m thick, drifting in x
+ICE_START = ((2.0, 1.0), (5.0, 3.0))
+
+
+def write_ice(
+    root: Path, end: float, interval: float, times: bool = True, solver: str = "FNPF"
+) -> None:
+    """FNPF ice floes as REEF3D writes them (fnpf_ice_print.cpp): prisms of a bottom
+    and a top polygon and side quads, values per floe as cell data."""
+    folder = root / f"REEF3D_{solver}_ICE"
+    folder.mkdir(exist_ok=True)
+    (folder / f"REEF3D-{solver}-ICE-floes.dat").write_text("# t id x y z ...\n")  # not a frame
+    corners = np.array([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]])
+    for count, t in enumerate(np.arange(0.0, end + 1e-9, interval)):
+        points, polys, ids = [], [], []
+        for floe, (x0, y0) in enumerate(ICE_START):
+            base = len(points)
+            for z in (DEPTH - 0.1, DEPTH + 0.1):
+                points += [(x0 + 0.3 * t + cx, y0 + cy, z) for cx, cy in corners]
+            polys.append([base + 3, base + 2, base + 1, base])  # bottom, facing down
+            polys.append([base + 4, base + 5, base + 6, base + 7])
+            for q in range(4):
+                q2 = (q + 1) % 4
+                polys.append([base + q, base + q2, base + 4 + q2, base + 4 + q])
+            ids += [floe + 1] * 6
+        offsets = np.cumsum([len(p) for p in polys])
+        lines = [
+            '<?xml version="1.0"?>',
+            '<VTKFile type="PolyData" version="0.1" byte_order="LittleEndian">',
+            "<PolyData>",
+        ]
+        lines += _time_value(t) if times else []
+        lines += [
+            f'<Piece NumberOfPoints="{len(points)}" NumberOfPolys="{len(polys)}">',
+            "<Points>",
+        ]
+        lines += _xml_array("", points, components=3)[0:0]
+        lines += ['<DataArray type="Float32" NumberOfComponents="3" format="ascii">']
+        lines += [f"{x:.8g} {y:.8g} {z:.8g}" for x, y, z in points] + ["</DataArray>", "</Points>"]
+        lines += ['<CellData Scalars="id">']
+        lines += _xml_array("id", ids, "Int32") + _xml_array("type", [0] * len(ids), "Int32")
+        lines += _xml_array("speed", [0.3] * len(ids)) + _xml_array(
+            "contact_force", [10.0 * f for f in ids]
+        )
+        lines += [
+            "</CellData>",
+            "<Polys>",
+            '<DataArray type="Int32" Name="connectivity" format="ascii">',
+        ]
+        lines += [" ".join(map(str, p)) for p in polys] + ["</DataArray>"]
+        lines += _xml_array("offsets", offsets, "Int32") + [
+            "</Polys>",
+            "</Piece>",
+            "</PolyData>",
+            "</VTKFile>",
+        ]
+        (folder / f"REEF3D-{solver}-ICE-{count:08d}.vtp").write_text("\n".join(lines) + "\n")
+
+
+#: rod trees: one colony of three rods (a stem and two branches) that sway in x
+def rod_ends(t: float) -> np.ndarray:
+    sway = 0.1 * np.sin(t)
+    stem = [(4.0, 2.0, 0.4), (4.0 + sway, 2.0, 1.0)]
+    left = [(4.0 + sway, 2.0, 1.0), (3.7 + 2 * sway, 2.0, 1.3)]
+    right = [(4.0 + sway, 2.0, 1.0), (4.3 + 2 * sway, 2.0, 1.3)]
+    return np.array([stem, left, right])  # (rods, 2 ends, 3)
+
+
+def write_rodtree(root: Path, end: float, interval: float, times: bool = True) -> None:
+    """Rod trees as REEF3D writes them (rodtree.cpp write_vtp): every rod a line of
+    two points with a radius at each end, colony and forces as cell data."""
+    folder = root / "REEF3D_RodTree"
+    folder.mkdir(exist_ok=True)
+    for count, t in enumerate(np.arange(0.0, end + 1e-9, interval)):
+        ends = rod_ends(t)
+        n = len(ends)
+        points = ends.reshape(-1, 3)
+        lines = [
+            '<?xml version="1.0"?>',
+            '<VTKFile type="PolyData" version="0.1" byte_order="LittleEndian">',
+            "<PolyData>",
+        ]
+        lines += _time_value(t) if times else []
+        lines += [f'<Piece NumberOfPoints="{2 * n}" NumberOfLines="{n}">', "<Points>"]
+        lines += ['<DataArray type="Float64" NumberOfComponents="3" format="ascii">']
+        lines += [f"{x:.8g} {y:.8g} {z:.8g}" for x, y, z in points] + ["</DataArray>", "</Points>"]
+        lines += ['<PointData Scalars="radius">']
+        lines += _xml_array("radius", [0.05, 0.04, 0.03, 0.02, 0.03, 0.02], "Float64")
+        lines += _xml_array("velocity", [(0.1 * np.cos(t), 0.0, 0.0)] * (2 * n), "Float64", 3)
+        lines += ["</PointData>", "<CellData>"]
+        lines += _xml_array("colony", [0] * n, "Int32")
+        lines += _xml_array("hydro_force", [(1.0 + i, 0.0, 0.0) for i in range(n)], "Float64", 3)
+        lines += _xml_array("submerged", [1.0] * n, "Float64")
+        lines += [
+            "</CellData>",
+            "<Lines>",
+            '<DataArray type="Int32" Name="connectivity" format="ascii">',
+        ]
+        lines += [f"{2 * e} {2 * e + 1}" for e in range(n)] + ["</DataArray>"]
+        lines += _xml_array("offsets", [2 * e + 2 for e in range(n)], "Int32")
+        lines += ["</Lines>", "</Piece>", "</PolyData>", "</VTKFile>"]
+        (folder / f"REEF3D-RodTree-{count:08d}.vtp").write_text("\n".join(lines) + "\n")

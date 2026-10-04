@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
             self.bridge, self.loader, self, str(self.settings.value("view/look", "studio"))
         )
         self.viewport.statusMessage.connect(lambda text: self.statusBar().showMessage(text, 8000))
+        self.viewport.probeChanged.connect(lambda probe: self.plots.set_probe(probe))
         # the 3D views sit in a splitter: one normally, two when comparing cases
         self.viewports = QSplitter(Qt.Horizontal)
         self.viewports.setObjectName("viewports")
@@ -195,6 +196,12 @@ class MainWindow(QMainWindow):
             "F12",
             tip="Save a picture of the LAGOON window, including the 3D view",
         )
+        self.act_convert = self._action(
+            "Convert to LAGOON &format...",
+            self.convert_case,
+            tip="Write the case's VTU/VTP output as a LAGOON store: several times smaller "
+            "and faster to read (again: add the outputs written since)",
+        )
         self.act_export_movie = self._action(
             "Export &animation...",
             self.export_animation,
@@ -240,6 +247,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         for action in (self.act_new, self.act_open, self.act_save, self.act_save_as):
             file_menu.addAction(action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.act_convert)
         file_menu.addSeparator()
         file_menu.addAction(self.act_export_script)
         file_menu.addAction(self.act_export_movie)
@@ -391,6 +400,7 @@ class MainWindow(QMainWindow):
             self.viewport2.statusMessage.connect(
                 lambda text: self.statusBar().showMessage(text, 8000)
             )
+            self.viewport2.probeChanged.connect(lambda probe: self.plots.set_probe(probe))
             self.viewports.addWidget(self.viewport2)
             self.viewport.partner = self.viewport2
             self.viewport2.partner = self.viewport
@@ -670,11 +680,17 @@ class MainWindow(QMainWindow):
                     self.docks[name].show()
 
             restore()
-            QTimer.singleShot(700, restore)
+            QTimer.singleShot(700, self, restore)  # dropped if the window goes first
         self.act_full_screen.setChecked(on)
         self.act_leave_full_screen.setEnabled(on)
 
     # ------------------------------------------------------------- reload
+    def convert_case(self, ask: bool = True):
+        """Convert the selected case to a LAGOON store (in the background)."""
+        from lagoonviz.gui.convert_dialog import convert_case
+
+        return convert_case(self, ask=ask)
+
     def reload_cases(self) -> list[str]:
         """Read the case folders again, keeping items, time and camera. At the last
         frame, it stays at the (new) last frame, so a running simulation can be

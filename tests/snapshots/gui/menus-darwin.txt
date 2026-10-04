@@ -9,6 +9,8 @@ File
   Save session  [Ctrl+S]
   Save session as...  [Ctrl+Shift+S]
   ----
+  Convert to LAGOON format...
+  ----
   Export script...
   Export animation...  [Ctrl+Shift+E]
   Save screenshot...  [F12]
@@ -34,6 +36,8 @@ Add
   Mooring lines
   Structures
   DEM elements
+  Ice floes
+  Rod trees
 View
   [x] Scene
   [x] Properties

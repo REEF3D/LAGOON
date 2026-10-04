@@ -402,6 +402,30 @@ def test_plots_draw_their_lines_once_while_playing(window, series_run):
     assert plots._static is not picture  # a new size draws the lines again
 
 
+def test_probe_time_series_in_the_plots(window, series_run, qtbot):
+    """The orange dot on the free surface plots eta there over the run, and a box
+    chooses which plots are shown."""
+    window.open_case(series_run)
+    session, plots = window.session, window.plots
+    session.data.load("free_surface-1")
+    probe = session.data.probe("free_surface-1", 5, (1.0, 0.0, 0.0))
+    plots.set_probe(probe)
+    qtbot.waitUntil(lambda: "probe" in plots.row_ids, timeout=5000)
+    assert plots.row_ids[0] == "probe" and len(plots.row_ids) > 1  # with the gauges
+    labels = [plots.show_box.itemText(i) for i in range(plots.show_box.count())]
+    assert labels[:2] == ["All plots", "Probe (orange dot)"] and not plots.show_box.isHidden()
+    plots.show_box.setCurrentIndex(1)
+    plots.refresh()
+    assert plots.row_ids == ["probe"]
+    plots.show_box.setCurrentIndex(2)  # the gauges only
+    plots.refresh()
+    assert "probe" not in plots.row_ids
+    plots.set_probe(None)
+    assert "Probe (orange dot)" not in [
+        plots.show_box.itemText(i) for i in range(plots.show_box.count())
+    ]
+
+
 def test_hidden_series_leave_the_plot(window, series_run):
     window.open_case(series_run)
     window.session.set_visible("series-2", False)
@@ -600,3 +624,21 @@ def test_properties_show_the_automatic_range(window, reef3d_run):
     assert low.isEnabled() and window.session.scene.get("free_surface-1").properties[
         "vmax"
     ] == pytest.approx(shown[1], rel=1e-5)
+
+
+def test_convert_to_lagoon_format(window, reef3d_run, qtbot):
+    """File > Convert to LAGOON format writes the store next to the output and the
+    case then reads it."""
+    from lagoonviz.core.data.lagoon import StoreDataset
+
+    window.open_case(reef3d_run)
+    job = window.convert_case(ask=False)
+    qtbot.waitUntil(
+        lambda: job.finished and not window._convert_job.thread.is_alive(), timeout=10000
+    )
+    qtbot.wait(300)  # the poll timer reloads the case
+    assert job.error is None, job.error
+    assert (reef3d_run / "REEF3D_NHFLOW.lagoon" / "zarr.json").is_file()
+    case = window.session.data.case("case-1")
+    assert isinstance(case.datasets["nhflow_free_surface"], StoreDataset)
+    assert "smaller" in window.statusBar().currentMessage()

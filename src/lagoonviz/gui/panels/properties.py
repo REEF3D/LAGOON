@@ -158,7 +158,7 @@ class PropertiesPanel(QWidget):
         button.setText("Sync")
         button.setCheckable(True)
         button.setToolTip(
-            "On: one vertical exaggeration for the whole case (every item follows "
+            "On: one vertical scale for the whole case (every item follows "
             "this slider). Off: each item has its own."
         )
         button.toggled.connect(self._sync_exaggeration)
@@ -293,10 +293,10 @@ class PropertiesPanel(QWidget):
             text = (
                 "Scales heights about the still water level, for every item of the case"
                 if synced
-                else "Sync is off: each item has its own exaggeration"
+                else "Sync is off: each item has its own vertical scale"
             )
         elif synced:
-            text = "Sync is on: this sets the exaggeration of the whole case"
+            text = "Sync is on: this sets the vertical scale of the whole case"
         else:
             text = "Scales heights about the still water level, for this item only"
         editor.slider.setToolTip(text)

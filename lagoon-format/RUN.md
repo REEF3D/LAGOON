@@ -143,6 +143,8 @@ A map from a short stream name (unique within the run) to its description.
 | `net` | a net |
 | `dem` | DEM elements (discrete element bodies) |
 | `cpm_particles` | CPM particles |
+| `ice` | ice floes (FNPF) |
+| `rod_tree` | rod trees: corals or vegetation as rods with a radius |
 | `particles` | other Lagrangian particles |
 | `gauges` | wave gauges (table) |
 | `profiles` | wave profiles along lines (WSFLINE) |

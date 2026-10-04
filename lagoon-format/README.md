@@ -1,14 +1,34 @@
 # lagoon-format
 
-The LAGOON data format: a structured, chunked dataset layout (Zarr) for ocean and
+The LAGOON data format: a structured, chunked dataset layout (Zarr v3) for ocean and
 coastal simulation output, designed for Cartesian and σ-grids, floating bodies,
 particles and gauges.
 
-This package holds the format **specification** (`SPEC.md`), the **run log**
-specification (`RUN.md`: which outputs belong to which REEF3D run, and their times)
-with its reference reader (`python -m lagoon_format.run <case>` checks a case), and
-the reference reader/writer. It is MIT-licensed so that other codes and tools can adopt the
-format freely; the LAGOON application itself is GPLv3.
+This package holds
 
-Status: phase 0. The specification is a stub; the layout is designed in phase 3
-of the LAGOON implementation plan.
+- the format **specification** ([SPEC.md](SPEC.md), version 0.1: σ-grid volumes of
+  FNPF and NHFLOW, structured free surface and bed surfaces);
+- the **reference reader and writer** (`lagoon_format.store`), with a small Zarr v3
+  implementation (`lagoon_format.zarr3`) that needs only NumPy and the standard
+  library; stores also open in zarr-python and xarray;
+- the **run log** specification ([RUN.md](RUN.md): which outputs belong to which
+  REEF3D run, and their times) with its reference reader
+  (`python -m lagoon_format.run <case>` checks a case).
+
+```python
+from lagoon_format.store import Store
+
+store = Store("case/REEF3D_FNPF.lagoon")
+volume = store["volume"]
+u = volume.read("velocity", 10)              # (nz, ny, nx, 3) at output 10
+eta = store["free_surface"].series("eta", i=40, j=12)   # over all outputs
+```
+
+REEF3D output is converted with `lagoon-convert CASE` (LAGOON application);
+REEF3D can also write stores itself during a run (`P 18`, see the REEF3D patch).
+
+**ParaView**: load `paraview/lagoon_reader.py` with *Tools → Manage Plugins → Load
+New*, then open the `zarr.json` at the top of a store and choose "LAGOON store".
+
+It is MIT-licensed so that other codes and tools can adopt the format freely; the
+LAGOON application itself is GPLv3.

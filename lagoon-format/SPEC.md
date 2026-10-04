@@ -1,31 +1,311 @@
 # LAGOON data format specification
 
-Version: 0.0 (draft stub, not yet usable)
+Version: 0.1 (draft for review)
+Status: σ-grid volumes (FNPF, NHFLOW), Cartesian volumes (CFD) and structured
+surfaces (free surface, bed) are specified and implemented (`lagoon_format.store`,
+converter `lagoon-convert`). Bodies, particles, rod trees and time series are
+listed at the end and follow in 0.2.
+
+## Goals
+
+- **Small.** A REEF3D VTU file stores every point's coordinates and every cell's
+  connectivity in every output. A structured grid needs neither: the horizontal
+  grid and the σ-levels are stored once, and each output only adds the fields and
+  the two heights per column (bed and free surface). With byte shuffling and zlib,
+  a σ-grid output is 4 to 9 times smaller than the VTU.
+- **Fast to open and to read in parts.** Opening a store reads a few small JSON
+  files, whatever the number of outputs. A probe, a slice or a free surface reads
+  only the chunks it needs.
+- **Written in parallel.** Every MPI rank writes its own block of the grid, with no
+  communication and no shared files.
+- **Open.** The store is a standard [Zarr v3](https://zarr-specs.readthedocs.io/en/latest/v3/core/index.html)
+  hierarchy (directories, JSON metadata, binary chunk files), readable with
+  zarr-python and xarray as well as with the reference reader, which needs only
+  NumPy and the Python standard library. This specification is MIT-licensed.
 
 ## Run metadata
 
 What a run is, what it writes and the time of every output is specified in
-[RUN.md](RUN.md) (the REEF3D run log). REEF3D can write it today next to its VTK
-output; the LAGOON format stores the same records as the store's metadata (root
-attribute `reef3d_run`, arrays `/outputs/step|time|iteration`).
+[RUN.md](RUN.md) (the REEF3D run log). A store holds the outputs of **one run**;
+the run's id and its run record are kept in the root attributes, the time of
+every output in the `time` array of each output group.
 
-## Scope
+## 1. The store
 
-One dataset per simulation run, stored as a Zarr store. Structured grids are
-stored as coordinate arrays, not as cells:
+A store is a directory named `<name>.lagoon` holding a Zarr v3 hierarchy. The
+converter and the REEF3D writer name it `REEF3D_<SOLVER>.lagoon` and put it in
+the case folder, next to the `REEF3D_*` output folders, e.g.
 
-- Cartesian grids: 1D coordinates x, y, z
-- σ-grids: 1D coordinates x, y, σ, plus bathymetry d(x, y) and free surface
-  η(x, y, t); the vertical position follows from z = σ (η + d) − d
-- Bodies: geometry stored once (triangle mesh), plus a pose per time step
-- Gauges, probes and forces: time series in the same store
-- Metadata: solver, version, case settings (ctrl.txt), units
+```
+case/
+  ctrl.txt
+  REEF3D_Case/REEF3D_FNPF_run.jsonl
+  REEF3D_FNPF.lagoon/
+    zarr.json                    root group
+    volume/                      output group (the VTU output)
+      zarr.json
+      time/ step/                (nt,) per output
+      x/ y/ sigma/               the grid, once
+      blocks/
+        zarr.json
+        b0000/                   block group (MPI rank 0's part)
+          zarr.json
+          z_bed/ z_surface/      (nt, ny, nx) per output
+          velocity/ Fi/ ...      (nt, nz, ny, nx[, c]) per output
+        b0001/ ...
+    free_surface/                output group (the FSF VTP output)
+    bed/                         output group (the BED VTP output)
+```
 
-Chunks map onto the MPI decomposition so that every rank writes its own chunks.
+Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
 
-## To be specified (phase 3)
+### 1.1 Root group
 
-- Group and array names, attribute conventions (CF-style names and units)
-- Chunking rules and compression
-- Body, particle and rod-tree layouts
-- Versioning and compatibility rules
+`zarr.json` of the root is a Zarr group whose attributes hold the key `lagoon`:
+
+```json
+{"zarr_format": 3, "node_type": "group",
+ "attributes": {
+   "lagoon": {
+     "format": "lagoon", "version": "0.1",
+     "solver": "FNPF",
+     "outputs": ["volume", "free_surface", "bed"],
+     "created_by": "lagoon-convert 0.1 (lagoon-format 0.1.0)",
+     "created": "2026-10-04T12:00:00Z",
+     "source": "REEF3D VTK output"
+   },
+   "reef3d_run": {"type": "run", "run": "20261003T154312Z-7f3a", "solver": "FNPF", "...": "..."}
+ }}
+```
+
+- `version`: `major.minor` of this specification. A reader accepts stores of the
+  same major version and ignores attributes, groups and arrays it does not know.
+- `outputs`: the output groups in the store (section 2).
+- `reef3d_run`: the `run` record of the run log (RUN.md), unchanged, when known.
+- `units`: optional, as in RUN.md (`{"length": "m", "time": "s", ...}`); SI if absent.
+
+## 2. Output groups
+
+One group per output stream of the run, named by its role (the same names as
+`role` in RUN.md): `volume` (VTU), `free_surface` (FSF VTP), `bed` (BED VTP).
+Its attributes:
+
+```json
+{"lagoon": {
+   "role": "volume", "grid": "sigma",
+   "shape": {"x": 351, "y": 301, "level": 11},
+   "variables": {"velocity": {"components": 3, "units": "m/s"},
+                 "Fi": {"components": 1, "units": "m2/s"},
+                 "elevation": {"components": 1, "units": "m"}},
+   "blocks": 4,
+   "source": "REEF3D_FNPF_VTU"}}
+```
+
+- `grid`: `sigma` (section 3), `cartesian` (section 3a) or `surface` (section 4).
+- `variables`: the point fields, in the order the writer chose; `components` is 1
+  for scalars and 3 for vectors (x, y, z). `units` is optional.
+- `blocks`: the number of block groups `blocks/b0000` ... (four digits, more if
+  needed, numbered from 0, usually the MPI rank).
+- `source`: optional, where the data came from; `dataset`: optional, the name the
+  converting application gave the source output (LAGOON: `fnpf_volume`, ...).
+
+### 2.1 Time
+
+| array  | shape  | dtype   | content |
+|--------|--------|---------|---------|
+| `time` | (nt,)  | float64 | simulation time of each output [s] |
+| `step` | (nt,)  | int64   | REEF3D's output number (the number in the VTK file names) |
+
+Outputs are in the order they were written, `time` rising. **`time` is the
+authority on how many outputs exist**: a writer writes an output's data first and
+extends `time` and `step` last, so a reader that uses `nt = len(time)` never sees
+an output whose data is incomplete. Data arrays may be longer than `time`.
+
+### 2.2 Grid coordinates
+
+| array   | shape  | dtype   | content |
+|---------|--------|---------|---------|
+| `x`     | (nx,)  | float64 | x of the grid lines, rising |
+| `y`     | (ny,)  | float64 | y of the grid lines, rising |
+| `sigma` | (nz,)  | float64 | σ of the levels, rising from 0 (bed) to 1 (free surface); σ-grids only |
+
+The horizontal grid does not change during a run. A grid with one point in y (a
+2D flume written with one cell) has `ny = 2` as REEF3D writes it.
+
+### 2.3 Blocks
+
+The grid is split into rectangular blocks in x and y, one per MPI rank. A block
+is a group `blocks/bNNNN` with the attributes
+
+```json
+{"lagoon": {"start": [0, 0], "size": [176, 151], "rank": 0}}
+```
+
+- `start`: `[i0, j0]`, the index of the block's first point in `x` and `y`.
+- `size`: `[nx_b, ny_b]`, its number of points in x and y.
+- `rank`: optional, the MPI rank that wrote it.
+
+Blocks may overlap: REEF3D writes the points on the boundary between two ranks in
+both. Readers take a point from the block with the **lowest number** that holds
+it. Points of the global grid in no block have no value (NaN).
+
+All arrays of a block cover the block only (shapes use `nx_b`, `ny_b`) and have
+`dimension_names`, so they open in xarray with named dimensions:
+
+| dimension   | meaning |
+|-------------|---------|
+| `time`      | output (index into the group's `time`) |
+| `level`     | σ-level (index into `sigma`) |
+| `y`, `x`    | grid point within the block |
+| `component` | vector component x, y, z |
+
+Arrays are stored in C order with x fastest, as REEF3D writes its points.
+
+## 3. σ-grids (`grid: "sigma"`): FNPF and NHFLOW volumes
+
+Each column (x_i, y_j) has `nz` points between the bed and the free surface. The
+height of level k is
+
+```
+z = z_bed + sigma[k] * (z_surface - z_bed) + z_offset[k]
+```
+
+Arrays of a block:
+
+| array       | shape                    | dtype   | content |
+|-------------|--------------------------|---------|---------|
+| `z_bed`     | (nt, ny_b, nx_b)         | float32 | z of the lowest level (k = 0) |
+| `z_surface` | (nt, ny_b, nx_b)         | float32 | z of the highest level (k = nz − 1) |
+| `z_offset`  | (nt, nz, ny_b, nx_b)     | float32 | optional: correction of the level heights, see below |
+| *field*     | (nt, nz, ny_b, nx_b)     | float32 | scalar field, one per scalar in `variables` |
+| *field*     | (nt, nz, ny_b, nx_b, 3)  | float32 | vector field |
+
+- `z_bed` is stored per output because the bed may move (sediment transport). It
+  compresses to almost nothing when it does not.
+- A dry column has all levels on the bed: `z_surface = z_bed`. REEF3D also writes
+  columns with `z_surface < z_bed` (near the coast, FNPF): their levels fall, and
+  readers must not assume that levels rise.
+- **`z_offset`** is for solvers whose levels are not exactly at `sigma[k]` in every
+  column (a solver that stretches its levels differently in some columns). It holds
+  `z − (z_bed + sigma[k] (z_surface − z_bed))`, set to exactly 0 where that is
+  below the tolerance of the writer (the converter: two float32 steps of z), so in
+  the usual case it is all zeros. Its `fill_value` is 0, so tiles of zeros are not
+  stored at all and an absent `z_offset` means 0 everywhere.
+- `sigma` is the writer's nominal σ of each level (the converter: the median over
+  the wet columns of the first output).
+
+## 3a. Cartesian grids (`grid: "cartesian"`): CFD volumes
+
+The levels lie at the same heights in every column and do not move, so their
+heights are a coordinate array of the output group, like `x` and `y`:
+
+| array | shape  | dtype   | content |
+|-------|--------|---------|---------|
+| `z`   | (nz,)  | float64 | z of the levels, rising |
+
+A block holds only the fields, `(nt, nz_b, ny_b, nx_b[, 3])`; there are no
+per-output heights. MPI splits CFD grids in z as well, so a block of a Cartesian
+grid may hold a range of levels: its `start` and `size` then have three entries,
+`[i0, j0, k0]` and `[nx_b, ny_b, nz_b]` (two entries: all levels). Overlapping
+blocks are resolved as in 2.3 (the lowest numbered wins). Points inside solid bodies keep the values the solver writes (REEF3D's
+VTU output gives them values too).
+
+## 4. Structured surfaces (`grid: "surface"`): free surface and bed
+
+One point per grid column (no `sigma`, no `level` dimension):
+
+| array   | shape                   | dtype   | content |
+|---------|-------------------------|---------|---------|
+| `z`     | (nt, ny_b, nx_b)        | float32 | z of the surface point (the VTP point's z) |
+| *field* | (nt, ny_b, nx_b[, 3])   | float32 | as in the VTP, e.g. `eta`, `depth`, `velocity` |
+
+The surface is drawn as the quadrilaterals between neighbouring grid points that
+all have a value.
+
+## 5. Chunks, shards and codecs
+
+Every data array of a block uses one chunk layout:
+
+- **Shard** (Zarr's `chunk_grid`, one file): `T` outputs of the whole block, shape
+  `(T, nz, NY, NX[, 3])`, where `NY`, `NX` are `ny_b`, `nx_b` rounded up to a
+  multiple of the inner chunk. The converter uses `T = 16`; a writer that writes one
+  output at a time may use `T = 1`.
+- **Inner chunk** (inside the shard, Zarr's `sharding_indexed` codec): one output,
+  a few levels and a tile of the block, shape `(1, cz, cy, cx[, 3])` (`(1, cy, cx[, 3])`
+  for surfaces). The writers' rule: `cy` at most 64 and `cx` at most 64 (more when the
+  block is narrow in y, up to 4096 / `cy`), both chosen so the tiles split the block
+  evenly; `cz` = 1 when a tile holds at least 2048 points, else as many levels as make
+  it hold 2048. A probe, a slice or the faces of a volume decompress only the levels
+  and tiles they touch. Readers take the chunk shapes from the metadata.
+- **Inner codecs**: `bytes` (little endian), `numcodecs.shuffle` (`elementsize` 4:
+  the first bytes of all values, then the second bytes, ...), `gzip` (level 1).
+  Shuffling makes the slowly varying exponents and leading mantissa bytes of a
+  smooth field compress well; level 1 is nearly as small as level 9 and much faster.
+- **Index**: at the end of the shard, codecs `bytes` (little endian) only.
+- `fill_value`: `NaN` for float arrays (`0` for `z_offset`), `0` for integers. A chunk that is not
+  written (e.g. a tile with no points) reads as fill values.
+- Coordinate and time arrays (`x`, `y`, `sigma`, `time`, `step`) are single
+  uncompressed chunks (`time` and `step` may use chunks of 4096 outputs).
+- Chunk keys use the default encoding, e.g. `velocity/c/0/0/0/0/0`.
+
+Example `zarr.json` of a block array:
+
+```json
+{"zarr_format": 3, "node_type": "array",
+ "shape": [5024, 11, 151, 176, 3], "data_type": "float32",
+ "chunk_grid": {"name": "regular", "configuration": {"chunk_shape": [16, 11, 153, 177, 3]}},
+ "chunk_key_encoding": {"name": "default", "configuration": {"separator": "/"}},
+ "fill_value": "NaN",
+ "codecs": [{"name": "sharding_indexed", "configuration": {
+     "chunk_shape": [1, 1, 51, 59, 3],
+     "codecs": [{"name": "bytes", "configuration": {"endian": "little"}},
+                {"name": "numcodecs.shuffle", "configuration": {"elementsize": 4}},
+                {"name": "gzip", "configuration": {"level": 1}}],
+     "index_codecs": [{"name": "bytes", "configuration": {"endian": "little"}}],
+     "index_location": "end"}}],
+ "dimension_names": ["time", "level", "y", "x", "component"],
+ "attributes": {"units": "m/s"}}
+```
+
+`numcodecs.shuffle` is the name zarr-python (with numcodecs) uses for this codec;
+it is the only codec outside the Zarr v3 core.
+
+### 5.1 Writing while the run goes on
+
+- Each rank writes its block's shard files. A shard of `T` outputs is written
+  once at the end of its `T` outputs, or grows: the new inner chunk is written
+  where the old index began and the index (with the new entry) after it.
+  Entries of chunks not yet written are `2^64 − 1` (offset and size), as Zarr
+  specifies for empty chunks.
+- A block's array `zarr.json` files are rewritten with the new `shape[0]` by the
+  rank that owns the block (write to a temporary file, then rename).
+- Rank 0 extends `time` and `step` (and their `shape`) last.
+
+## 6. Converting REEF3D VTK output
+
+`lagoon-convert <case>` (LAGOON application) writes `REEF3D_<SOLVER>.lagoon`:
+
+- **Volume (VTU)**: the grid lines are the distinct x and y of the points (to the
+  millimetre, as float32 coordinates of different ranks differ in the last
+  digits); each VTU piece becomes a block. A column's points, in the order of the
+  file (REEF3D writes the levels from the bed up), are its levels; `z_bed` and
+  `z_surface` are the first and the last; `sigma` and `z_offset` follow
+  (section 3). (Not sorted by height: near the coast FNPF writes columns whose
+  levels do not rise.)
+- **Surfaces (VTP)**: each point becomes the grid point of its column.
+- The time of every output comes from the run log, else from the `TimeValue`
+  field data, else from `P 30` (output interval) times the output number.
+- The fields are stored as they are in the VTK files; `z` of the points is kept
+  through `z_bed`, `z_surface`, `z_offset` (volume) or `z` (surfaces).
+- Converting again appends the outputs written since (a running simulation); a
+  store of another run is not appended to.
+
+## 7. To be specified (0.2)
+
+- **Bodies**: triangle mesh once (`vertices`, `triangles`), a pose per output
+  (`position` (nt, 3), `rotation` (nt, 4) quaternion), surface fields.
+- **Particles** (DEM, Lagrangian): ragged arrays per output (`count` (nt,),
+  `offset` (nt,), `position` (n, 3), fields (n, ...)).
+- **Rod trees, mooring lines, ice floes**: as particles with connectivity.
+- **Time series** (wave gauges, forces, motions): one group per file, `time` and
+  one array per column.

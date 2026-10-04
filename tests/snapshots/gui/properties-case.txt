@@ -4,8 +4,8 @@ QWidget
   Visible: checkbox '' on
   Path: text '<case>'
   Output interval [s]: number 0 in [0, 1e+09] decimals 3
-  Vertical exaggeration: _LogSlider
+  Vertical scale: _LogSlider
       slider in [0, 1000]
       number 1 in [0.1, 100] decimals 3
-      button 'Sync' [x] tip='On: one vertical exaggeration for the whole case (every item follows this slider). Off: each item has its own.'
+      button 'Sync' [x] tip='On: one vertical scale for the whole case (every item follows this slider). Off: each item has its own.'
   label 'NHFLOW bed: 3 frames / NHFLOW free surface: 3 frames / NHFLOW volume: 3 frames' (disabled)

@@ -76,7 +76,7 @@ def test_full_screen_keys(window):
 
 def test_defaults_of_a_new_case(window, reef3d_run):
     """Free surface in the REEF3D colours by eta with dry land hidden; plain sand bed
-    with wet land shown; one vertical exaggeration for the whole case."""
+    with wet land shown; one vertical scale for the whole case."""
     window.open_case(reef3d_run)
     scene = window.session.scene
     surface = scene.get("free_surface-1").properties

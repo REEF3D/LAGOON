@@ -15,6 +15,7 @@ files, merged across MPI ranks into one surface.
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ from lagoonviz.core.data.mesh import (
     plan_level,
     scalar_values,
     triangulate,
+    tubes,
     variable_names,
 )
 from lagoonviz.core.data.profiles import ProfileSet, find_profiles
@@ -47,6 +49,8 @@ from lagoonviz.core.data.vtkxml import (
     split_name,
 )
 
+log = logging.getLogger(__name__)
+
 SOLVERS = ("CFD", "NHFLOW", "FNPF", "SFLOW", "POTENTIAL")
 
 #: dataset roles and the scene item kind that shows them
@@ -58,6 +62,8 @@ ROLES = {
     "mooring": "mooring",
     "structure": "structure",
     "dem": "dem",
+    "ice": "ice",
+    "rods": "rods",
 }
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
@@ -66,7 +72,7 @@ _SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp", ".vtk")
 #: structures, DEM elements (REEF3D_DEM_VTP, written by the DEM for any solver)
 _OBJECT_FOLDER = re.compile(
     r"^REEF3D_(?:(?P<solver>[A-Z0-9]+)_)?"
-    r"(?P<what>6DOF_VTP|6DOF_Mooring|VRANS_VTP|FORCING_VTP|DEM_VTP)$"
+    r"(?P<what>6DOF_VTP|6DOF_Mooring|VRANS_VTP|FORCING_VTP|DEM_VTP|ICE|RodTree)$"
 )
 _OBJECT_ROLES = {
     "6DOF_VTP": "body",
@@ -74,11 +80,17 @@ _OBJECT_ROLES = {
     "VRANS_VTP": "structure",
     "FORCING_VTP": "structure",
     "DEM_VTP": "dem",
+    "ICE": "ice",  # FNPF ice floes
+    "RodTree": "rods",  # rod trees (corals, vegetation): lines with a radius
 }
 #: roles whose files are drawn as they are (no merging of MPI pieces)
-PLAIN_ROLES = ("body", "mooring", "structure", "dem")
+PLAIN_ROLES = ("body", "mooring", "structure", "dem", "ice", "rods")
 #: roles whose outputs have their own interval: their times come from the files
-OWN_TIME_ROLES = ("dem",)
+OWN_TIME_ROLES = ("dem", "ice", "rods")
+#: roles whose cell data (one value per floe or rod) is shown on their points
+CELL_DATA_ROLES = ("ice", "rods")
+#: folders whose files are numbered one per output (not one per object)
+_NUMBERED_FOLDERS = ("DEM_VTP", "_ICE", "RodTree")
 _PIECE_STEP = re.compile(r"^(?P<stem>.+?)-(?P<piece>\d+)-(?P<step>\d+)$")
 _SERIAL_STEP = re.compile(r"^(?P<stem>.+?)-(?P<step>\d+)$")
 
@@ -101,6 +113,8 @@ ROLE_LABELS = {
     "mooring": "mooring lines",
     "structure": "structures",
     "dem": "DEM elements",
+    "ice": "ice floes",
+    "rods": "rod trees",
 }
 
 
@@ -124,14 +138,7 @@ class Dataset:
         self.role = role
         self.frames = frames
         self.folder = folder
-        first = frames[0]
-        if first.pieces[0].suffix == ".vtk":
-            self.kind = "Lines"
-            self.components = legacy_point_arrays(first.pieces[0])
-        else:
-            header = read_header(first.pieces[0])
-            self.kind = header.kind
-            self.components = {name: info.components for name, info in header.point_data.items()}
+        self.kind, self.components = self._describe(frames[0])
         self._merger = PieceMerger("xy" if self.surface_like else "xyz")
         self._triangles = np.zeros((0, 3), np.uint32)
         self._volume_plan: VolumePlan | None = None
@@ -150,6 +157,18 @@ class Dataset:
         self._span: tuple[float, float] | None = None
 
     # ------------------------------------------------------------- description
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        """The kind of grid and the point arrays (name: components), from the first file."""
+        if first.pieces[0].suffix == ".vtk":
+            return "Lines", legacy_point_arrays(first.pieces[0])
+        header = read_header(first.pieces[0])
+        kind = "Lines" if header.lines else header.kind
+        components = {name: info.components for name, info in header.point_data.items()}
+        if self.role in CELL_DATA_ROLES:
+            for name, info in header.cell_data.items():
+                components.setdefault(name, info.components)
+        return kind, components
+
     @property
     def label(self) -> str:
         label = f"{self.solver} {ROLE_LABELS.get(self.role, self.role)}"
@@ -180,7 +199,7 @@ class Dataset:
             "bed": (),  # plain sand; elevation and sediment fields stay one click away
             "volume": ("velocity", "pressure", "elevation"),
         }.get(self.role, ())
-        if self.role in ("bed", "body", "structure", "dem"):
+        if self.role in ("bed", "body", "structure", "dem", "ice", "rods"):
             return "none"  # drawn in their material colour, like sand or steel
         for name in preferred:
             if name in self.components:
@@ -206,7 +225,9 @@ class Dataset:
         a0, a1 = self.written_span()
         b0, b1 = other.written_span()
         # DEM output belongs to whichever solver it is coupled to
-        solvers = self.solver == other.solver or "DEM" in (self.solver, other.solver)
+        solvers = self.solver == other.solver or bool(
+            {self.solver, other.solver} & {"DEM", "REEF3D"}
+        )
         return solvers and a0 <= b1 + margin and b0 <= a1 + margin
 
     @property
@@ -248,14 +269,19 @@ class Dataset:
             if self.role == "free_surface" and "eta" in self.components and "eta" not in arrays:
                 arrays.append("eta")  # needed for vertical exaggeration
         if self.role in PLAIN_ROLES:
-            return self._read_plain(frame, arrays)
+            if self.role == "rods" and arrays is not None and "radius" in self.components:
+                arrays = sorted({*arrays, "radius"})
+            mesh = self._read_plain(frame, arrays, self.role in CELL_DATA_ROLES)
+            if self.role == "rods" and mesh.segments is not None and "radius" in mesh.point_data:
+                return tubes(mesh.points, mesh.segments, mesh.point_data["radius"], mesh.point_data)
+            return mesh
         # reading runs in parallel; only making a new plan is serialised
-        light = [read_piece(path, point_arrays=arrays, with_cells=False) for path in frame.pieces]
+        light = [self._piece(path, point_arrays=arrays, with_cells=False) for path in frame.pieces]
         if self.kind == "UnstructuredGrid":
             with self._lock:
                 plan = self._volume_plan
                 if plan is None or not plan.accepts(light):
-                    full = [read_piece(path, point_arrays=[]) for path in frame.pieces]
+                    full = [self._piece(path, point_arrays=[]) for path in frame.pieces]
                     plan = self._volume_plan = VolumePlan.build(full)
                     del full
             points, data = plan.apply(light)
@@ -263,7 +289,7 @@ class Dataset:
         else:
             with self._lock:
                 if not self._merger.accepts(light):
-                    full = [read_piece(path, point_arrays=[]) for path in frame.pieces]
+                    full = [self._piece(path, point_arrays=[]) for path in frame.pieces]
                     merged = self._merger.make_plan(full).apply(full)
                     self._triangles = np.ascontiguousarray(
                         triangulate(merged.connectivity, merged.offsets), dtype=np.uint32
@@ -280,7 +306,7 @@ class Dataset:
         return mesh.with_normals()  # here, so it runs in the loader thread
 
     @staticmethod
-    def _read_plain(frame: Frame, arrays: list[str] | None) -> SurfaceMesh:
+    def _read_plain(frame: Frame, arrays: list[str] | None, cell_data: bool = False) -> SurfaceMesh:
         """Bodies, mooring lines, structures: the pieces side by side, not merged."""
         points, triangles, segments, data_parts = [], [], [], []
         offset = 0
@@ -288,7 +314,7 @@ class Dataset:
             if path.suffix == ".vtk":
                 piece = read_legacy(path, arrays)
             else:
-                piece = read_piece(path, point_arrays=arrays)
+                piece = read_piece(path, point_arrays=arrays, cell_to_points=cell_data)
             points.append(piece.points)
             if piece.kind == "Lines":
                 segments.append(piece.connectivity.reshape(-1, 2) + offset)
@@ -321,7 +347,7 @@ class Dataset:
         arrays = self._arrays(variables)
         parts = []
         for number, path in enumerate(frame.pieces):
-            piece = read_piece(path, point_arrays=arrays, with_cells=False)
+            piece = self._piece(path, point_arrays=arrays, with_cells=False)
             _, connectivity, offsets, types = self._piece_cells(number, path, piece)
             # σ-grids move only vertically: an x or y plane cuts the same edges in every frame
             key = (number, axis, float(position), piece.points.shape[0])
@@ -334,6 +360,64 @@ class Dataset:
                     self._cuts[key] = plan
             parts.append(plan.apply(piece.points, piece.point_data))
         return _joined(parts)
+
+    def point_series(self, variable: str, x: float, y: float) -> tuple[tuple, np.ndarray]:
+        """A variable over all frames at the grid point nearest to (x, y), e.g. eta
+        under the probe: ((x, y, z) of that point, values per frame).
+
+        REEF3D writes the same layout into every frame of an MPI piece, so the place
+        of the value in the file is found once and every frame reads only its few
+        bytes (thousands of frames in a second); a frame with another layout is read
+        normally.
+        """
+        name, _, component = variable.partition(".")
+        if name not in self.components:
+            raise KeyError(f"no variable {name!r} in {self.label}")
+        best = None
+        for number, path in enumerate(self.frames[0].pieces):
+            piece = read_piece(path, point_arrays=[], with_cells=False)
+            if not len(piece.points):
+                continue
+            distance = (piece.points[:, 0] - x) ** 2 + (piece.points[:, 1] - y) ** 2
+            index = int(np.argmin(distance))
+            if best is None or distance[index] < best[0]:
+                best = (
+                    float(distance[index]),
+                    number,
+                    index,
+                    tuple(map(float, piece.points[index])),
+                )
+        if best is None:
+            raise ValueError(f"{self.label}: no points")
+        _, number, index, where = best
+        header = read_header(self.frames[0].pieces[number])
+        info = header.point_data[name]
+        width = info.components * info.dtype.itemsize
+        fast = info.format == "appended" and not header.compressed and header.data_start is not None
+        if fast:
+            start = header.data_start + info.offset + header.header_dtype.itemsize + index * width
+            size = self.frames[0].pieces[number].stat().st_size
+        values = []
+        for frame in self.frames:
+            path = frame.pieces[number] if number < len(frame.pieces) else None
+            raw = None
+            if fast and path is not None and path.stat().st_size == size:
+                with open(path, "rb") as handle:
+                    handle.seek(start)
+                    raw = np.frombuffer(handle.read(width), info.dtype)
+            if raw is None or raw.size != info.components:
+                if path is None:
+                    values.append(np.full(info.components, np.nan))
+                    continue
+                raw = read_piece(path, point_arrays=[name], with_cells=False).point_data[name]
+                raw = np.asarray(raw).reshape(-1, info.components)[index]
+            values.append(np.asarray(raw, dtype=np.float64).ravel())
+        values = np.array(values)
+        if info.components == 1:
+            return where, values[:, 0]
+        if component:
+            return where, values[:, "xyz".index(component)]
+        return where, np.linalg.norm(values, axis=1)
 
     def read_iso(
         self, index: int, variable: str, value: float, variables: list[str] | None = None
@@ -350,7 +434,7 @@ class Dataset:
         arrays = self._arrays([*(variables or []), variable]) or []
         parts = []
         for number, path in enumerate(frame.pieces):
-            piece = read_piece(path, point_arrays=arrays, with_cells=False)
+            piece = self._piece(path, point_arrays=arrays, with_cells=False)
             _, connectivity, offsets, types = self._piece_cells(number, path, piece)
             field = scalar_values(piece.point_data, variable)
             if field is None:
@@ -396,7 +480,7 @@ class Dataset:
         if self.kind != "UnstructuredGrid":
             raise ValueError(f"{self.label}: streamlines need a volume")
         pieces = [
-            read_piece(p, point_arrays=arrays, with_cells=False) for p in self.frames[index].pieces
+            self._piece(p, point_arrays=arrays, with_cells=False) for p in self.frames[index].pieces
         ]
         names = set.intersection(*(set(p.point_data) for p in pieces)) if pieces else set()
         sizes = tuple(len(p.points) for p in pieces)
@@ -427,7 +511,7 @@ class Dataset:
         with self._lock:
             cells = self._cells.get(number)
             if cells is None or cells[0] != piece.points.shape[0]:
-                full = read_piece(path, point_arrays=[])
+                full = self._piece(path, point_arrays=[])
                 cells = (
                     full.points.shape[0],
                     full.connectivity.astype(np.int32),
@@ -437,10 +521,15 @@ class Dataset:
                 self._cells[number] = cells
         return cells
 
+    def _piece(self, path: Path, point_arrays: list[str] | None = None, with_cells: bool = True):
+        """One piece of a frame (a VTK file here; a block of a LAGOON store in
+        :class:`~lagoonviz.core.data.lagoon.StoreDataset`)."""
+        return read_piece(path, point_arrays=point_arrays, with_cells=with_cells)
+
     def bounds(self, index: int = 0) -> tuple[np.ndarray, np.ndarray]:
         """Lower and upper corner of a frame's points."""
         pieces = [
-            read_piece(p, point_arrays=[], with_cells=False) for p in self.frames[index].pieces
+            self._piece(p, point_arrays=[], with_cells=False) for p in self.frames[index].pieces
         ]
         points = np.concatenate([p.points for p in pieces])
         return points.min(axis=0), points.max(axis=0)
@@ -546,12 +635,12 @@ class Case:
             if options:
                 chosen[role] = max(options, key=len)
         # objects of the same run: bodies, mooring lines, structures
-        for role in ("body", "mooring", "structure", "dem"):
+        for role in ("body", "mooring", "structure", "dem", "ice", "rods"):
             options = [d for d in self.datasets.values() if d.role == role and d.same_run_as(lead)]
             if options:
                 chosen[role] = max(options, key=len)
         # beds are drawn first, so a transparent free surface shows them
-        order = ("bed", "structure", "body", "dem", "mooring", "free_surface")
+        order = ("bed", "structure", "body", "dem", "ice", "rods", "mooring", "free_surface")
         return {role: chosen[role] for role in order if role in chosen}
 
     def describe(self) -> str:
@@ -574,7 +663,7 @@ def _frames_by_piece(folder: Path) -> dict[str, list[Frame]]:
     """
     steps: dict[str, dict[int, dict[int, Path]]] = {}
     # DEM output numbers its files; structure files may number structures instead
-    numbered = folder.name.endswith("DEM_VTP")
+    numbered = folder.name.endswith(_NUMBERED_FOLDERS)
     for path in folder.iterdir():
         if path.suffix not in _SUFFIXES or path.name.startswith("."):
             continue
@@ -739,7 +828,10 @@ def _dataset_from_folder(folder: Path) -> list[Dataset]:
     datasets = []
     for stem, frames in _frames_in(folder).items():
         if objects:
-            solver = objects.group("solver") or "DEM"
+            # DEM and rod tree output belong to whichever solver they are coupled to
+            solver = objects.group("solver") or (
+                "DEM" if objects.group("what") == "DEM_VTP" else "REEF3D"
+            )
             role = _OBJECT_ROLES[objects.group("what")]
             key = f"{solver.lower()}_{role}"
             datasets += _datasets_by_run(key, solver, role, frames, folder, owners)
@@ -853,13 +945,49 @@ def read_print_interval(case_dir: Path) -> float | None:
     return None
 
 
-def open_case(path: str | Path) -> Case:
-    """Open a REEF3D case folder, one output folder, or one output file."""
+def _prefer_stores(datasets: list[Dataset], stored: list[Dataset]) -> list[Dataset]:
+    """A LAGOON store's output replaces the VTK output it was converted from, unless
+    the VTK output has outputs the store does not have yet (a run still going on,
+    not converted again): then the VTK output is shown and the store is left out."""
+    if not stored:
+        return datasets
+    kept = list(datasets)
+    for store in stored:
+        recorded = getattr(store, "output", None) and store.output.info.get("dataset")
+        if recorded:  # the store says which output it was converted from
+            same = [d for d in datasets if d.key == recorded]
+        else:
+            same = [
+                d
+                for d in datasets
+                if d.role == store.role
+                and d.solver == store.solver
+                and not d.earlier_run
+                and (not d.run_id or not store.run_id or d.run_id == store.run_id)
+            ]
+        if any(d.last_step > store.last_step for d in same):
+            log.info("%s: the VTK output is newer than %s", store.key, store.folder.parent.name)
+            continue
+        kept = [d for d in kept if d not in same]
+        kept.append(store)
+    return kept
+
+
+def open_case(path: str | Path, stores: bool = True) -> Case:
+    """Open a REEF3D case folder, one output folder, one output file or a LAGOON
+    store. ``stores=False`` leaves LAGOON stores in the case folder out (the
+    converter reads the VTK output)."""
+    from lagoonviz.core.data.lagoon import find_stores, store_datasets
+
     path = Path(path).expanduser()
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
     datasets: list[Dataset] = []
-    if path.is_file() and path.suffix == ".dat":
+    stored: list[Dataset] = []
+    if path.is_dir() and path in find_stores(path.parent):  # a LAGOON store
+        case_dir = path.parent
+        stored = store_datasets(path)
+    elif path.is_file() and path.suffix == ".dat":
         # a gauge or force table: its case is the folder above REEF3D_*
         case_dir = path.parent.parent if path.parent.name.startswith("REEF3D_") else path.parent
     elif path.is_file():
@@ -882,9 +1010,12 @@ def open_case(path: str | Path) -> Case:
                 _FOLDER.match(folder.name) or _OBJECT_FOLDER.match(folder.name)
             ):
                 datasets += _dataset_from_folder(folder)
-        if not datasets:
+        for store in find_stores(path) if stores else []:
+            stored += store_datasets(store)
+        if not datasets and not stored:
             # a plain folder with VTU/VTP files
             datasets = _dataset_from_folder(path)
+    datasets = _prefer_stores(datasets, stored)
     series = find_series(case_dir)
     profiles = find_profiles(case_dir)
     if not datasets and not series and not profiles:

@@ -1,12 +1,14 @@
-"""LAGOON data format: specification constants and (later) the reference reader/writer.
+"""LAGOON data format: the reference reader and writer (``lagoon_format.store``), a
+small Zarr v3 implementation (``lagoon_format.zarr3``) and the REEF3D run log
+(``lagoon_format.run``).
 
 MIT-licensed, independent of the LAGOON application.
 """
 
-__version__ = "0.0.1.dev0"
+__version__ = "0.1.0.dev0"
 
 #: Version of the format specification implemented by this package.
-SPEC_VERSION = "0.0"
+SPEC_VERSION = "0.1"
 
 #: Version of the REEF3D run log specification (RUN.md) read by ``lagoon_format.run``.
 RUN_LOG_VERSION = 1

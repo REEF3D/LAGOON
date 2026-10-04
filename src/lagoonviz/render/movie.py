@@ -66,8 +66,9 @@ class OffscreenView:
         from lagoonviz.render.scene3d import SceneRenderer
 
         self.session = session
-        if view == "2d":
-            session.set_plan_view(True)  # everything flat, as the 2D view shows it
+        if view and view.startswith("2d"):  # "2d" (the session's 2D side), "2d-front", ...
+            side = view.partition("-")[2] or None
+            session.set_plan_view(True, side)  # as the 2D view shows it
         self.size = (int(size[0]), int(size[1]))
         self.canvas = _offscreen_canvas(self.size)
         self.renderer = gfx.WgpuRenderer(self.canvas)
@@ -103,14 +104,14 @@ class OffscreenView:
             else:
                 self.scene.update_gauges(marks)
         if not self._camera_set:
-            if self.session.scene.plan_view:
+            plan = session.scene
+            if plan.flat:
                 self.scene.set_plan(True)
-            if self.view == "2d" or (
-                self.session.scene.plan_view and not self.view and not session.scene.camera
-            ):
-                # from straight above, orthographic, as the 2D view
+            two_d = (self.view or "").startswith("2d")
+            if two_d or (plan.plan_view and not self.view and not plan.camera):
+                # orthographic from the 2D view's side, as the 2D view
                 self.scene.set_orthographic(True)
-                self.scene.frame("top")
+                self.scene.frame(plan.plan_side)
             elif self.view:
                 self.scene.frame(self.view)
             elif session.scene.camera:

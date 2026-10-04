@@ -126,6 +126,8 @@ PLAIN_COLORS = {
     "body": "#8f9aa6",
     "structure": "#a7a39b",
     "dem": "#6f6a64",  # rock
+    "ice": "#e3f1fa",
+    "rods": "#9c7a4f",
     "iso_surface": "#8fb3d1",
     "streamlines": "#2b4c7e",
 }

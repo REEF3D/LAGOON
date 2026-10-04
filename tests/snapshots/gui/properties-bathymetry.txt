@@ -12,10 +12,10 @@ QWidget
   Opacity: number 1 in [0, 1] decimals 3
   Contour lines of: choice 'none' of ['none', 'elevation', 'depth']
   Contour lines: number 10 in [2, 100] decimals 0
-  Vertical exaggeration: _LogSlider
+  Vertical scale: _LogSlider
       slider in [0, 1000]
       number 1 in [0.1, 100] decimals 3
-      button 'Sync' [x] tip='On: one vertical exaggeration for the whole case (every item follows this slider). Off: each item has its own.'
+      button 'Sync' [x] tip='On: one vertical scale for the whole case (every item follows this slider). Off: each item has its own.'
   Hide wet land: checkbox '' off
   button 'Fit range to this frame' tip='Fix the colour range to the values of the current frame' (disabled)
   label 'NHFLOW bed · 3 frames · REEF3D_NHFLOW_VTP_BED' (disabled)

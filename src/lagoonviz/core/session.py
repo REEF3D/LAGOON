@@ -249,10 +249,12 @@ class Session:
         """Move the current time. View state: not an undo step."""
         self.scene.set_time(time)
 
-    def set_plan_view(self, on: bool) -> None:
-        """2D: every item drawn flat and seen from straight above (the free surface as
-        a plane coloured by its values over the bed). View state: not an undo step."""
-        self.scene.set_plan_view(on)
+    def set_plan_view(self, on: bool, side: str | None = None) -> None:
+        """2D: orthographic, no rotation. From the top (``side="top"``) every item is
+        drawn flat (the free surface as a plane coloured by its values over the bed);
+        from the "front", "back", "right" or "left" it is an elevation of the shapes.
+        ``side=None`` keeps the side. View state: not an undo step."""
+        self.scene.set_plan_view(on, side)
 
     def set_camera(self, state: dict[str, Any] | None) -> None:
         """Remember the 3D view (saved with the session). View state: not an undo step."""
@@ -306,8 +308,10 @@ class Session:
         # view state last, so the script shows the same frame and view
         if self.scene.time:
             lines.append(f"session.set_time({self.scene.time!r})")
-        if self.scene.plan_view:
+        if self.scene.plan_view and self.scene.plan_side == "top":
             lines.append("session.set_plan_view(True)")
+        elif self.scene.plan_view:
+            lines.append(f"session.set_plan_view(True, side={self.scene.plan_side!r})")
         if self.scene.camera:
             lines.append(f"session.set_camera({self.scene.camera!r})")
         return "\n".join(lines) + "\n"

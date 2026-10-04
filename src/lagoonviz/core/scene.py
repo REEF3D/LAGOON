@@ -24,6 +24,10 @@ SESSION_FORMAT = 1
 Observer = Callable[[str, str | None], None]
 
 
+#: the sides a 2D view can look from
+PLAN_SIDES = ("top", "front", "back", "right", "left")
+
+
 @dataclass
 class SceneItem:
     """One entry in the scene tree: a case, a surface, a slice, a gauge, ..."""
@@ -68,8 +72,11 @@ class Scene:
         self.time: float = 0.0
         #: saved 3D view (camera state from the renderer); view state, not undoable
         self.camera: dict[str, Any] | None = None
-        #: 2D: everything drawn flat, seen from above (view state, not undoable)
+        #: 2D: orthographic, no rotation (view state, not undoable)
         self.plan_view: bool = False
+        #: the side the 2D view looks from: "top" (everything drawn flat), or "front",
+        #: "back", "right", "left" (an elevation of the shapes as they are)
+        self.plan_side: str = "top"
 
     # ------------------------------------------------------------- observers
     def subscribe(self, callback: Observer) -> None:
@@ -164,10 +171,20 @@ class Scene:
         self.time = float(time)
         self._notify("time", None)
 
-    def set_plan_view(self, on: bool) -> None:
-        """2D or 3D; observers draw everything again ("view")."""
-        if bool(on) != self.plan_view:
+    @property
+    def flat(self) -> bool:
+        """True when items are drawn flat: the 2D view from the top."""
+        return self.plan_view and self.plan_side == "top"
+
+    def set_plan_view(self, on: bool, side: str | None = None) -> None:
+        """2D or 3D, and the side 2D looks from (None keeps it); observers draw
+        everything again ("view")."""
+        side = self.plan_side if side is None else str(side)
+        if side not in PLAN_SIDES:
+            raise ValueError(f"unknown 2D side {side!r}")
+        if bool(on) != self.plan_view or side != self.plan_side:
             self.plan_view = bool(on)
+            self.plan_side = side
             self._notify("view", None)
 
     def data_changed(self) -> None:
@@ -182,6 +199,7 @@ class Scene:
             "time": self.time,
             "camera": copy.deepcopy(self.camera),
             "plan_view": self.plan_view,
+            "plan_side": self.plan_side,
             "counters": dict(self._counters),
             "items": [item.to_dict() for item in self._items.values()],
         }
@@ -203,6 +221,8 @@ class Scene:
         camera = data.get("camera")
         self.camera = copy.deepcopy(camera) if isinstance(camera, dict) else None
         self.plan_view = bool(data.get("plan_view", False))
+        side = str(data.get("plan_side", "top"))
+        self.plan_side = side if side in PLAN_SIDES else "top"
         self._notify("reset", None)
 
     def save(self, path: str | Path) -> None:

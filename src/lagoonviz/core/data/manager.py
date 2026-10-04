@@ -45,6 +45,8 @@ PLAN_LAYERS = {
     "structure": 1.0,
     "body": 1.5,
     "dem": 1.5,
+    "ice": 1.5,
+    "rods": 1.5,
     "mooring": 2.0,
     "free_surface": 3.0,
 }
@@ -268,6 +270,11 @@ class DataManager:
                     stamps.append((folder.name, folder.stat().st_mtime))
                     if folder.name == "REEF3D_Case":
                         stamps += [(f.name, f.stat().st_size) for f in folder.glob("*.jsonl")]
+                    if folder.suffix == ".lagoon":  # a store grows its outputs' time arrays
+                        stamps += [
+                            (f.parent.parent.name, f.stat().st_mtime)
+                            for f in sorted(folder.glob("*/time/zarr.json"))
+                        ]
         except OSError:
             return ()
         return tuple(stamps)
@@ -671,7 +678,7 @@ class DataManager:
         length = 0.9 * spacing * float(props.get("vector_scale", 1.0)) / max(high, 1e-12)
         direction = np.array(vectors[picked], dtype=np.float64)
         base = np.array(shown.positions[picked], dtype=np.float64)
-        if self.scene.plan_view:
+        if self.scene.flat:
             direction[:, 2] = 0.0
             base[:, 2] = PLAN_MARKS - 0.5
         else:
@@ -702,7 +709,7 @@ class DataManager:
         segments = contour_segments(shown.positions, shown.triangles, values, levels)
         if segments.size:
             span = np.ptp(shown.positions, axis=0)
-            lift = 0.05 if self.scene.plan_view else 2e-3 * float(max(span.max(), 1e-9))
+            lift = 0.05 if self.scene.flat else 2e-3 * float(max(span.max(), 1e-9))
             segments[..., 2] += lift
         return ContourLines(item_id, segments, levels, shown.visible)
 
@@ -796,7 +803,7 @@ class DataManager:
             positions = positions.copy()
             positions[:, 2] = level + exaggeration * (positions[:, 2] - level)
             normals = exaggerate_normals(normals, exaggeration)
-        if self.scene.plan_view:
+        if self.scene.flat:
             # 2D: flat, stacked by kind so the free surface lies over the bed
             positions = np.array(positions, dtype=np.float32, copy=True)
             positions[:, 2] = PLAN_LAYERS.get(item.kind, 1.0)
@@ -875,7 +882,7 @@ class DataManager:
         return self._planned(self._profile_marks(item_id, palette))
 
     def _planned(self, marks: GaugeMarks | None) -> GaugeMarks | None:
-        if marks is None or not self.scene.plan_view:
+        if marks is None or not self.scene.flat:
             return marks
         staffs = np.array(marks.staffs, dtype=np.float32, copy=True)
         dots = np.array(marks.dots, dtype=np.float32, copy=True)
@@ -1113,6 +1120,29 @@ class DataManager:
             return None
         low, high = dataset.bounds(0)
         return tuple(float(v) for v in (low + high) / 2)  # type: ignore[return-value]
+
+    def probe_trace(self, probe: Probe) -> Trace | None:
+        """The probe's time series: eta under the orange dot on a free surface (the
+        coloured variable on other surfaces) over all frames, at the nearest grid
+        point. Times as on the timeline. None when the item has nothing to plot."""
+        item = self.scene.get(probe.item_id)
+        dataset = self.dataset(probe.item_id)
+        if dataset is None or item.kind in ("slice", "iso_surface", "streamlines"):
+            return None
+        variable = (
+            "eta" if item.kind == "free_surface" and "eta" in dataset.components else probe.variable
+        )
+        if not variable or variable == "none":
+            return None
+        where, values = dataset.point_series(variable, probe.point[0], probe.point[1])
+        if dataset.times is not None:
+            times = np.asarray(dataset.times, dtype=np.float64)
+        else:
+            dt = self.print_interval() or 1.0
+            times = np.array([frame.step * dt for frame in dataset.frames], dtype=np.float64)
+        unit = "m" if variable in ("eta", "elevation", "depth", "WL") else ""
+        name = f"{item.name} {variable} at x {where[0]:.1f}, y {where[1]:.1f}"
+        return Trace("probe", name, unit, times, np.asarray(values, dtype=np.float64))
 
     def probe(
         self, item_id: str, triangle: int, weights: tuple[float, float, float]

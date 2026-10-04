@@ -48,6 +48,7 @@ LOOKS = {
     "ocean-perspective": ({}, "perspective", "ocean", ()),
     "studio-2d": ({}, "2d", "studio", ()),
     "studio-front": ({}, "front", "studio", ()),
+    "studio-2d-front": ({"case__exaggeration": 5.0}, "2d-front", "studio", ()),
     "rainbow-free-surface": ({"fs__colormap": "rainbow"}, "perspective", "studio", ()),
     "case-exaggeration-5": ({"case__exaggeration": 5.0}, "perspective", "studio", ()),
     "bed-white-by-depth": (
@@ -99,3 +100,15 @@ def test_agreed_look_of_streamlines(reef3d_run, snapshots):
     session.add_streamlines("y", seeds=30)
     image = render_session(session, SIZE, time=1.0, view="perspective", style="studio")
     snapshots.check_image("streamlines", image)
+
+
+def test_agreed_look_of_ice_floes_and_rod_trees(tmp_path, snapshots):
+    """Two ice floes on the water and a rod tree on the bed, in their materials."""
+    from reef3d_fixtures import make_run
+
+    run = make_run(tmp_path / "ice", frames=5, print_interval=0.5, ice=0.25, rods=0.5)
+    session = Session()
+    session.open_case(run)
+    session.set_property("free_surface-1", "opacity", 0.5)
+    image = render_session(session, SIZE, time=1.0, view="perspective", style="studio")
+    snapshots.check_image("ice-and-rods", image)

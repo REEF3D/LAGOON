@@ -559,3 +559,59 @@ def cut_cells(
     """The section of a volume mesh with a plane (see :func:`plan_cut`)."""
     plan = plan_cut(points, connectivity, offsets, types, axis, position)
     return plan.apply(points, point_data)
+
+
+def tubes(
+    points: np.ndarray,
+    segments: np.ndarray,
+    radius: np.ndarray,
+    point_data: dict[str, np.ndarray],
+    sides: int = 8,
+) -> SurfaceMesh:
+    """Line segments as round tubes (rod trees, cylinders): a ring of ``sides``
+    points at each end, of the radius given at that end; the end points' values
+    carried to their rings."""
+    segments = np.asarray(segments, dtype=np.int64).reshape(-1, 2)
+    if not len(segments):
+        return SurfaceMesh(np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32), {})
+    p = np.asarray(points, dtype=np.float64)
+    a, b = p[segments[:, 0]], p[segments[:, 1]]
+    axis = b - a
+    length = np.linalg.norm(axis, axis=1)
+    axis = axis / np.where(length > 0, length, 1.0)[:, None]
+    # two directions across each segment
+    helper = np.where(np.abs(axis[:, 2:3]) < 0.9, [[0.0, 0.0, 1.0]], [[1.0, 0.0, 0.0]])
+    u = np.cross(axis, helper)
+    u /= np.maximum(np.linalg.norm(u, axis=1), 1e-12)[:, None]
+    v = np.cross(axis, u)
+    angle = np.linspace(0.0, 2 * np.pi, sides, endpoint=False)
+    ring = (
+        np.cos(angle)[None, :, None] * u[:, None, :] + np.sin(angle)[None, :, None] * v[:, None, :]
+    )
+    r = np.asarray(radius, dtype=np.float64)
+    ends = []
+    for end, centre in ((0, a), (1, b)):
+        ends.append(centre[:, None, :] + r[segments[:, end]][:, None, None] * ring)
+    vertices = np.concatenate([ends[0], ends[1]], axis=1).reshape(-1, 3)  # (n * 2 sides, 3)
+    n = len(segments)
+    base = (np.arange(n) * 2 * sides)[:, None]
+    k = np.arange(sides)[None, :]
+    k2 = (k + 1) % sides
+    a0, a1 = base + k, base + k2
+    b0, b1 = base + sides + k, base + sides + k2
+    triangles = np.concatenate(
+        [
+            np.stack([a0, a1, b1], axis=-1).reshape(-1, 3),
+            np.stack([a0, b1, b0], axis=-1).reshape(-1, 3),
+        ]
+    )
+    data = {}
+    for name, values in point_data.items():
+        values = np.asarray(values)
+        at_end = [
+            np.repeat(values[segments[:, end]], sides, axis=0).reshape(n, sides, *values.shape[1:])
+            for end in (0, 1)
+        ]
+        data[name] = np.concatenate(at_end, axis=1).reshape(n * 2 * sides, *values.shape[1:])
+    mesh = SurfaceMesh(vertices.astype(np.float32), triangles.astype(np.uint32), data)
+    return mesh.with_normals()

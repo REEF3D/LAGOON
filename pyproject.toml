@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Hydrology",
 ]
 dependencies = [
-    "lagoon-format>=0.0.1.dev0",
+    "lagoon-format>=0.1.0.dev0",
     "numpy>=1.24",
     "PySide6-Essentials>=6.7",
     "pygfx>=0.9",
@@ -36,11 +36,13 @@ dev = [
     "pytest-qt>=4.4",
     "ruff>=0.6",
     "import-linter>=2.1",
+    "zarr>=3",  # tests: LAGOON stores open in zarr-python
 ]
 
 [project.scripts]
 lagoon = "lagoonviz.gui.app:main"
 lagoon-render = "lagoonviz.render.offscreen:main"
+lagoon-convert = "lagoonviz.core.convert:main"
 
 [project.urls]
 Homepage = "https://github.com/REEF3D/LAGOON"

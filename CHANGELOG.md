@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.0.dev0 (phase 3, LAGOON format; in progress)
+
+- LAGOON format 0.1 (`lagoon-format/SPEC.md`): one Zarr v3 store per run, one
+  group per output (volume, free surface, bed), one block per MPI rank. σ-grids
+  keep x, y and σ once and per output only the fields and two heights per column
+  (`z_bed`, `z_surface`; `z_offset` for levels off their σ, empty for FNPF and NHFLOW).
+  Chunks: shards of 16 outputs per block, inner chunks of one output, a few levels
+  and a 64 × 64 tile; byte shuffle + gzip level 1. Readable with zarr-python and
+  xarray.
+- `lagoon_format.store` (reader and writer) and `lagoon_format.zarr3` (a small
+  Zarr v3 implementation, NumPy and the standard library only; parallel chunk
+  decoding).
+- `lagoon-convert CASE` and *File → Convert to LAGOON format*: the case's VTU/VTP
+  output to `REEF3D_<SOLVER>.lagoon` in the case folder; again: appends the outputs
+  written since. Fields are kept bit for bit, heights to float32 precision. On the
+  FNPF and NHFLOW reference outputs: 5.0× and 5.6× smaller than the VTU/VTP files.
+- CFD volumes (format 0.1, section 3a): Cartesian grids keep the heights of their
+  levels once (`z`); MPI blocks may split the levels too (`start` i0, j0, k0).
+  The converter, the app and the REEF3D writer handle them.
+- ParaView reader plugin (`lagoon-format/paraview/lagoon_reader.py`): a store's
+  outputs as structured grids per block, with its times.
+- A case with a store opens it instead of the VTU/VTP output it was made from
+  (unless the VTU/VTP output is newer); a store also opens on its own. Volume
+  faces, vertical slices and probes read only the levels and tiles they need.
+
 ## 0.2.0.dev0 (phase 2, domain tools; in progress)
 
 - Time series: REEF3D wave gauges (`REEF3D_*_WSF`), 6DOF forces, motions, velocities
@@ -14,6 +39,23 @@
 - Slices through volume output (x, y or z plane), coloured by any variable, cut with
   marching tetrahedra in NumPy; vertical slices of σ-grids reuse their cut plan, so
   playing a slice costs only interpolation. *Add → Slice* cuts the middle of the volume.
+- 2D from the front and the side: in 2D, *Top*, *Front* and *Side* (keys 7, 1, 3; Ctrl
+  for the opposite side) turn the 2D view to that side; from the top everything is
+  drawn flat as before, from the front or side it is an orthographic elevation of the
+  shapes (with the vertical scale), still without rotation. *3D* leaves 2D. The side
+  is saved with the session and filmed by the export (`lagoon-render --view 2d-front`).
+- Probe time series: placing the orange dot on the free surface plots eta there over
+  the whole run (at the nearest grid point; the coloured variable on other surfaces),
+  as an orange "Probe" row in the plots, read in the background with a few bytes per
+  frame. A box above the plots chooses what is shown: all plots, the probe, or one
+  time series item.
+- "Vertical exaggeration" is called "Vertical scale".
+- Ice floes (`REEF3D_FNPF_ICE`, prisms of each floe) and rod trees (`REEF3D_RodTree`,
+  corals or vegetation as rods with a radius, drawn as round tubes) are shown in 3D and
+  move with the timeline, in ice and wood colour; their values per floe or rod (speed,
+  contact force, colony, hydrodynamic force, ...) can colour them. Both write at their
+  own interval: their times come from the files' `TimeValue`. The VTK reader reads
+  line data and gives cell data to the points of each cell.
 - DEM elements (`REEF3D_DEM_VTP`, one ASCII file per output with every element's
   triangles, velocity, id and whether it is resolved) are shown in 3D and move with the
   timeline; opening a case adds them, in rock colour. The DEM writes at its own
