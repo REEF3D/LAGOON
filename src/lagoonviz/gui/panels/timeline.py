@@ -35,6 +35,8 @@ from lagoonviz.gui.theme import COLORS
 #: slider resolution without data (time in seconds up to "End")
 STEPS = 1000
 DEFAULT_FPS = 12
+#: the fastest playback offered (ProMotion screens draw 120 frames per second)
+MAX_FPS = 240
 
 
 class ClickSlider(QSlider):
@@ -146,7 +148,7 @@ class TimelinePanel(QWidget):
         self.label.setMinimumWidth(150)
 
         self.fps = QSpinBox()
-        self.fps.setRange(1, 60)
+        self.fps.setRange(1, MAX_FPS)
         self.fps.setValue(DEFAULT_FPS)
         self.fps.setSuffix(" fps")
         self.fps.setToolTip("Playback speed in frames per second")
@@ -180,6 +182,7 @@ class TimelinePanel(QWidget):
         # data is there instead of a whole frame interval later.
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
+        self.timer.setTimerType(Qt.PreciseTimer)  # a few ms matter at 120 fps
         self.timer.timeout.connect(self._tick)
         self._last_step = 0.0
         bridge.timeChanged.connect(self._show_time)
@@ -334,7 +337,7 @@ class TimelinePanel(QWidget):
                 self.loader.prefetch(
                     self.session.data.data_items(),
                     self.session.scene.time,
-                    frames_ahead=8,
+                    frames_ahead=max(8, self.fps.value() // 4),  # a quarter second
                     times=self.times,
                 )
             return

@@ -31,6 +31,13 @@
 - Particles: CFD's CPM particles (`REEF3D_CFD_CPM_Particle`, a file per MPI rank)
   and NHFLOW's particles open as a *Particles* item, drawn as points coloured by
   a variable (velocity by default), with their own output times (TimeValue).
+- 4K films: from 2560 px wide the Mac's video hardware (VideoToolbox) encodes
+  when it is there, else libx264 "veryfast"; frames go to ffmpeg as RGBA without a
+  copy; the status bar reports frames per second, the encoder and where the time
+  went.
+- Vertical scale: the Sync button sits under the slider (the slider has the whole
+  width); the slider goes where it is clicked, as the timeline. Playback up to
+  240 fps (a precise timer, reading a quarter second ahead).
 - Particle trails: *Trail [outputs]* on Particles and DEM elements draws the path
   of each particle (DEM: each element's centre) over that many outputs before,
   joined by its `id`, in the item's colour; from the store or the VTK files.

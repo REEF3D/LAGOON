@@ -32,7 +32,7 @@ button '' tip='Next frame' (disabled)
 button '' tip='Last frame' (disabled)
 slider in [0, 1000]
 label 't = 0.00 s'
-integer 12 in [1, 60]
+integer 12 in [1, 240]
 label 'End'
 number 60 in [0.1, 1e+07] decimals 2
 button 'Exit full screen' tip='Back to the window (Esc)' (hidden)

@@ -294,5 +294,9 @@ def export_animation(window) -> str | None:
     finally:
         session.set_time(keep_time)
     progress.close()
-    window.statusBar().showMessage(f"Animation saved to {written}", 15000)
+    from lagoonviz.render.movie import film_summary
+
+    summary = film_summary()
+    log.info("animation saved to %s: %s", written, summary)
+    window.statusBar().showMessage(f"Animation saved to {written}: {summary}", 30000)
     return str(written)

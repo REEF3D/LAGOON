@@ -13,6 +13,9 @@ path without ``.mp4``/``.mov``, numbered PNGs are written instead.
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
+import tempfile
 import time as time_module
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -33,6 +36,15 @@ READ_AHEAD = 6
 READERS = 3
 
 log = logging.getLogger("lagoon.movie")
+
+#: from this width up, films are encoded by the Mac's video hardware when it can
+#: (4K with libx264 took longer than drawing the frames)
+HARDWARE_WIDTH = 2560
+#: bits per pixel and frame for the hardware encoder (about 31 Mbit/s for 4K at 25 fps)
+HARDWARE_BITS = 0.15
+#: how the last film was made: frames, size, seconds, encoder, time spent per stage
+LAST_FILM: dict = {}
+_HARDWARE: dict[str, bool] = {}
 
 
 def frame_times(
@@ -148,7 +160,9 @@ def write_movie(
         raise ValueError("nothing to film: no frames in the session")
     size = (int(size[0]) // 2 * 2, int(size[1]) // 2 * 2)  # H.264 needs even sizes
     view_ = OffscreenView(session, size, style, view)
-    sink = _movie_sink(path, size, fps) if path.suffix.lower() in MOVIE_SUFFIXES else None
+    sink, encoder = (
+        _movie_sink(path, size, fps) if path.suffix.lower() in MOVIE_SUFFIXES else (None, "PNG")
+    )
     folder = None
     if sink is None:
         folder = path.with_suffix("") if path.suffix else path
@@ -167,7 +181,8 @@ def write_movie(
 
     def write(number: int, image: np.ndarray) -> None:
         if sink is not None:
-            sink.send(np.ascontiguousarray(image[..., :3]).tobytes())
+            # RGBA as drawn, without a copy (ffmpeg drops the alpha)
+            sink.send(memoryview(np.ascontiguousarray(image).reshape(-1)))
         else:
             from lagoonviz.render.offscreen import write_png
 
@@ -215,42 +230,123 @@ def write_movie(
             sink.close()  # ffmpeg finishes encoding
             spent["encoding"] += time_module.perf_counter() - clock
     total = time_module.perf_counter() - started
+    LAST_FILM.clear()
+    LAST_FILM.update(frames=done, size=size, seconds=total, encoder=encoder, spent=dict(spent))
     log.info(
-        "film: %d frames %dx%d in %.1f s (%.1f frames/s); %s",
+        "film: %d frames %dx%d in %.1f s (%.1f frames/s, %s); %s",
         done,
         size[0],
         size[1],
         total,
         done / max(total, 1e-9),
+        encoder,
         ", ".join(f"{name} {seconds:.1f} s" for name, seconds in spent.items()),
     )
     return path if sink is not None else folder
 
 
+def film_summary() -> str:
+    """How the last film went, for the status bar: frames per second and where the
+    time went."""
+    if not LAST_FILM:
+        return ""
+    total = max(LAST_FILM["seconds"], 1e-9)
+    width, height = LAST_FILM["size"]
+    stages = ", ".join(
+        f"{name} {100 * seconds / total:.0f} %"
+        for name, seconds in LAST_FILM["spent"].items()
+        if seconds / total >= 0.05
+    )
+    return (
+        f"{LAST_FILM['frames']} frames {width}×{height} in {total:.0f} s "
+        f"({LAST_FILM['frames'] / total:.1f} frames/s, {LAST_FILM['encoder']}; {stages})"
+    )
+
+
+def hardware_encoder() -> bool:
+    """True if ffmpeg can encode H.264 with the Mac's video hardware (VideoToolbox):
+    tried once with a tiny film."""
+    if "h264_videotoolbox" in _HARDWARE:
+        return _HARDWARE["h264_videotoolbox"]
+    works = False
+    if sys.platform == "darwin":
+        try:
+            import imageio_ffmpeg
+
+            with tempfile.TemporaryDirectory() as folder:
+                result = subprocess.run(
+                    [
+                        imageio_ffmpeg.get_ffmpeg_exe(),
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "color=c=blue:s=256x144:d=0.2",
+                        "-c:v",
+                        "h264_videotoolbox",
+                        "-b:v",
+                        "1M",
+                        str(Path(folder) / "probe.mp4"),
+                    ],
+                    capture_output=True,
+                    timeout=20,
+                )
+                works = result.returncode == 0 and (Path(folder) / "probe.mp4").stat().st_size > 0
+        except Exception:  # noqa: BLE001 (no ffmpeg, no encoder: the software one is used)
+            works = False
+    _HARDWARE["h264_videotoolbox"] = works
+    return works
+
+
+def encoder_settings(size: tuple[int, int], fps: float, hardware: bool) -> tuple[str, list[str]]:
+    """The codec and its settings: the Mac's video hardware for large films when it
+    is there (several times faster than libx264 at 4K), else libx264."""
+    common = ["-movflags", "+faststart"]
+    if hardware and size[0] >= HARDWARE_WIDTH:
+        rate = int(HARDWARE_BITS * size[0] * size[1] * fps)
+        return "h264_videotoolbox", [
+            "-b:v",
+            str(rate),
+            "-maxrate",
+            str(int(1.5 * rate)),
+            "-bufsize",
+            str(2 * rate),
+            "-profile:v",
+            "high",
+            *common,
+        ]
+    # visually lossless, plays everywhere (QuickTime, PowerPoint, browsers); "fast"
+    # encodes about twice as fast as "medium", "veryfast" (large films) again faster
+    preset = "veryfast" if size[0] >= HARDWARE_WIDTH else "fast"
+    return "libx264", ["-crf", "17", "-preset", preset, *common]
+
+
 def _movie_sink(path: Path, size: tuple[int, int], fps: float):
-    """An ffmpeg pipe taking RGB frames, or None when imageio-ffmpeg is missing."""
+    """An ffmpeg pipe taking RGBA frames and the encoder's name, or (None, "PNG")
+    when imageio-ffmpeg is missing."""
     try:
         import imageio_ffmpeg
     except ImportError:
-        return None
+        return None, "PNG"
     path.parent.mkdir(parents=True, exist_ok=True)
+    hardware = size[0] >= HARDWARE_WIDTH and hardware_encoder()
+    codec, settings = encoder_settings(size, fps, hardware)
     writer = imageio_ffmpeg.write_frames(
         str(path),
         size,
         fps=fps,
-        codec="libx264",
-        pix_fmt_in="rgb24",
+        codec=codec,
+        pix_fmt_in="rgba",
         pix_fmt_out="yuv420p",
         quality=None,
         macro_block_size=2,
         ffmpeg_log_level="error",
-        # visually lossless, plays everywhere (QuickTime, PowerPoint, browsers)
-        # "fast" encodes about twice as fast as "medium" at the same quality setting
-        # (files a little larger)
-        output_params=["-crf", "17", "-preset", "fast", "-movflags", "+faststart"],
+        output_params=settings,
     )
     writer.send(None)  # start ffmpeg
-    return writer
+    return writer, {"h264_videotoolbox": "VideoToolbox"}.get(codec, codec)
 
 
 def movie_available() -> bool:

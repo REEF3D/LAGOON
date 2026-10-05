@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
-    QSlider,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from lagoonviz.core.kinds import PropertySpec, kind_spec
 from lagoonviz.gui.bridge import SessionBridge
+from lagoonviz.gui.panels.timeline import ClickSlider
 
 
 class PropertiesPanel(QWidget):
@@ -139,7 +139,7 @@ class PropertiesPanel(QWidget):
                 if key == "exaggeration":
                     both.valueChanged.connect(self._set_exaggeration)
                     self.sync_button = self._sync_button()
-                    both.layout().addWidget(self.sync_button)
+                    both.add_below(self.sync_button)  # the slider keeps the whole width
                 else:
                     both.valueChanged.connect(lambda v: self._set(key, v, merge=True))
                 both.released.connect(self.session.stack.end_merge)
@@ -391,18 +391,31 @@ class _LogSlider(QWidget):
         super().__init__()
         self.spin = spin
         self._low, self._high = math.log10(minimum), math.log10(maximum)
-        self.slider = QSlider(Qt.Horizontal)
+        # goes where it is clicked and follows the mouse, like the timeline
+        self.slider = ClickSlider(Qt.Horizontal)
         self.slider.setRange(0, self.STEPS)
         self.slider.setFocusPolicy(Qt.StrongFocus)
-        layout = QHBoxLayout(self)
+        self._rows = QVBoxLayout(self)
+        self._rows.setContentsMargins(0, 0, 0, 0)
+        self._rows.setSpacing(2)
+        layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.slider, 1)
         layout.addWidget(spin)
+        self._rows.addLayout(layout)
         spin.setMaximumWidth(80)
         self._place(spin.value())
         self.slider.valueChanged.connect(self._slid)
         self.slider.sliderReleased.connect(self.released)
         spin.valueChanged.connect(self._typed)
+
+    def add_below(self, widget: QWidget) -> None:
+        """A widget (the Sync button) on a row under the slider."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(widget)
+        row.addStretch(1)
+        self._rows.addLayout(row)
 
     def to_value(self, position: int) -> float:
         value = 10 ** (self._low + position / self.STEPS * (self._high - self._low))
