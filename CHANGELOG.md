@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0.dev0 (phase 5, cinematic rendering; in progress)
+
+- Cinematic looks (*View → Viewport look*, `lagoon-render --style`): **Open
+  ocean** (a sky with a low sun, reflected by the water), **Wave flume** (a lab
+  hall with rows of ceiling lights) and **Underwater** (blue depth fog, Snell's
+  window overhead). Physically based materials (metallic-roughness): smooth water
+  that reflects its surroundings, sand and rock with a fine grain (tiled normal
+  maps), concrete, steel, ice, wood (the material property of bodies, structures
+  and DEM elements). The surroundings are generated (`lagoonviz.render.cinematic`,
+  cube maps from the direction of each texel), nothing to download. The
+  engineering looks (studio, ocean) are unchanged.
+
 ## 0.4.0.dev0 (phase 4, figure studio)
 
 - Paper figures in the figure editor (phase 4 complete): wave profile panels (η

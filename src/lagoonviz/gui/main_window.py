@@ -294,7 +294,15 @@ class MainWindow(QMainWindow):
         look_menu = view_menu.addMenu("&Viewport look")
         current_look = str(self.settings.value("view/look", "studio"))
         self.look_actions = {}
-        for name, label in (("studio", "&Studio (light)"), ("ocean", "&Ocean (dark blue)")):
+        from lagoonviz.render.cinematic import PRESETS
+
+        looks = [("studio", "&Studio (light)"), ("ocean", "&Ocean (dark blue)"), None]
+        looks += [(name, f"{preset.label} (cinematic)") for name, preset in PRESETS.items()]
+        for entry in looks:
+            if entry is None:  # the engineering looks, then the cinematic ones
+                look_menu.addSeparator()
+                continue
+            name, label = entry
             action = look_menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(name == current_look)

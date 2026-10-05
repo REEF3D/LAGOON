@@ -21,6 +21,7 @@ from lagoonviz.core.data.manager import (
     Trails,
     VectorArrows,
 )
+from lagoonviz.render.cinematic import PRESETS, grain_coords, surface_of
 
 #: The lights and gloss of every look: a soft sun from above for the shadows, most of
 #: the light from a headlamp that moves with the camera, so slopes keep their shading
@@ -47,6 +48,19 @@ STYLES = {
     "studio": {"background": ("#e6eaef", "#ffffff"), "contours": "#1e2833", **LIGHTING},
     "ocean": {"background": ("#1c3354", "#3b5f8f"), "contours": "#e8eef5", **LIGHTING},
 }
+#: the cinematic looks (``lagoonviz.render.cinematic``): physically based materials in
+#: surroundings they reflect; the engineering looks above stay as they are
+for _name, _preset in PRESETS.items():
+    STYLES[_name] = {
+        **LIGHTING,
+        "background": _preset.background or (_preset.ground, _preset.zenith),
+        "contours": _preset.contours,
+        "ambient": _preset.ambient,
+        "sun": _preset.sun,
+        "headlamp": _preset.headlamp,
+        "shadows": _preset.shadows,
+        "cinematic": _name,
+    }
 DEFAULT_STYLE = "studio"
 
 #: where the sun stands, seen from the scene: about 31 degrees above the horizon and
@@ -87,6 +101,25 @@ def _background(colors: tuple[str, str]) -> gfx.Background:
     if hasattr(gfx.Background, "from_color"):
         return gfx.Background.from_color(*colors)
     return gfx.Background(None, gfx.BackgroundMaterial(*colors))
+
+
+def _look_background(look: dict) -> gfx.Background:
+    """A look's background: its colour gradient, or a cinematic look's surroundings."""
+    name = look.get("cinematic")
+    preset = PRESETS.get(name) if name else None
+    if preset is not None and preset.background is None:
+        from lagoonviz.render.cinematic import environment_texture
+
+        return gfx.Background(None, gfx.BackgroundSkyboxMaterial(map=environment_texture(name)))
+    return _background(look["background"])
+
+
+def _sun_direction(look: dict) -> np.ndarray:
+    preset = PRESETS.get(look.get("cinematic") or "")
+    if preset is None:
+        return SUN_DIRECTION
+    direction = np.asarray(preset.sun_direction, float)
+    return direction / np.linalg.norm(direction)
 
 
 def _rgba(color: str) -> tuple[float, float, float, float]:
@@ -136,6 +169,8 @@ class _Shown:
     #: corners of the vertex positions, kept with each update (bounds without a scan)
     low: np.ndarray | None = None
     high: np.ndarray | None = None
+    #: the display data last shown (to make the material again for another look)
+    display: DisplaySurface | None = None
 
 
 class SceneRenderer:
@@ -145,13 +180,16 @@ class SceneRenderer:
         self.style_name = style if style in STYLES else DEFAULT_STYLE
         look = STYLES[self.style_name]
         self.scene = gfx.Scene()
-        self.background = _background(look["background"])
+        self.background = _look_background(look)
         self.scene.add(self.background)
         self.ambient = gfx.AmbientLight(intensity=look["ambient"])
         self.scene.add(self.ambient)
         # a sun from above, fixed in the scene: wave crests read the same from any side
         self.sun = gfx.DirectionalLight(intensity=look["sun"])
-        self.sun.local.position = tuple(SUN_DIRECTION)
+        self.sun_direction = _sun_direction(look)
+        self._sun_colour(look)
+        self.sun.local.position = tuple(self.sun_direction)
+        self._fog = None
         self.sun.cast_shadow = bool(look.get("shadows", False))
         self.plan = False
         self.scene.add(self.sun)
@@ -192,9 +230,27 @@ class SceneRenderer:
             self._textures[colormap] = texture
         return self._textures[colormap]
 
+    @property
+    def preset(self):
+        """The cinematic preset of the look, or None for an engineering look."""
+        return PRESETS.get(STYLES[self.style_name].get("cinematic") or "")
+
+    def _sun_colour(self, look: dict) -> None:
+        preset = PRESETS.get(look.get("cinematic") or "")
+        try:
+            self.sun.color = preset.sun_color if preset is not None else "#ffffff"
+        except (AttributeError, ValueError):
+            pass
+
     def _material(self, kind: str, shown: DisplaySurface) -> gfx.Material:
-        material = gfx.MeshPhongMaterial(side="both")
-        self._gloss(material, kind)
+        preset = self.preset
+        if preset is not None:
+            from lagoonviz.render.cinematic import pbr_material
+
+            material = pbr_material(surface_of(kind, shown.material), preset)
+        else:
+            material = gfx.MeshPhongMaterial(side="both")
+            self._gloss(material, kind)
         try:
             material.pick_write = True  # clicks report which triangle was hit
         except AttributeError:
@@ -220,7 +276,9 @@ class SceneRenderer:
         else:
             material.color_mode = "uniform"
             material.map = None
-            material.color = shown.color
+            preset = self.preset
+            water = preset is not None and surface_of(kind, shown.material) == "water"
+            material.color = preset.water_color if water else shown.color
         material.opacity = shown.opacity
         # transparent surfaces must not hide what lies behind them
         if hasattr(material, "alpha_mode"):
@@ -267,6 +325,8 @@ class SceneRenderer:
                     or _update_buffer(geometry, "indices", indices)
                 )
             )
+            if same_sizes:
+                self._grain(current.mesh, shown.positions, kind, shown.material)
         if not same_sizes:
             if current is not None:
                 self.content.remove(current.mesh)
@@ -279,6 +339,7 @@ class SceneRenderer:
                 texcoords=np.array(texcoords, np.float32),
             )
             mesh = gfx.Mesh(geometry, self._material(kind, shown))
+            self._grain(mesh, shown.positions, kind, shown.material)
             mesh.cast_shadow = True
             mesh.receive_shadow = True
             self.content.add(mesh)
@@ -291,7 +352,18 @@ class SceneRenderer:
         current.mesh.visible = shown.visible
         current.colormap = shown.colormap
         current.has_values = shown.values is not None
+        current.display = shown
         self._fit_shadow()
+
+    def _grain(self, mesh: gfx.Mesh, positions: np.ndarray, kind: str, material: str) -> None:
+        """Texture coordinates of a material's grain (its normal map), from the positions."""
+        if getattr(mesh.material, "normal_map", None) is None:
+            return
+        from lagoonviz.render.cinematic import SURFACES
+
+        uv = grain_coords(positions, SURFACES[surface_of(kind, material)].tile)
+        if not _update_buffer(mesh.geometry, "texcoords1", uv):
+            mesh.geometry.texcoords1 = gfx.Buffer(uv)
 
     def _fit_shadow(self) -> None:
         """Aim the sun's shadow map at what is shown: it covers the scene's bounding
@@ -309,7 +381,7 @@ class SceneRenderer:
             return
         self._shadow_fit = fit
         self.sun.target.local.position = tuple(centre)
-        self.sun.local.position = tuple(centre + SUN_DIRECTION * 2 * radius)
+        self.sun.local.position = tuple(centre + self.sun_direction * 2 * radius)
         shadow = getattr(self.sun, "shadow", None)
         if shadow is None:
             return
@@ -407,10 +479,12 @@ class SceneRenderer:
         self.style_name = style if style in STYLES else DEFAULT_STYLE
         look = STYLES[self.style_name]
         self.scene.remove(self.background)
-        self.background = _background(look["background"])
+        self.background = _look_background(look)
         self.scene.add(self.background)
         self.ambient.intensity = look["ambient"]
         self.sun.intensity = look["sun"]
+        self.sun_direction = _sun_direction(look)
+        self._sun_colour(look)
         self.sun.cast_shadow = bool(look.get("shadows", False)) and not self.plan
         self._shadow_fit = None
         self._fit_shadow()
@@ -418,9 +492,22 @@ class SceneRenderer:
         for key, line in self._contours.items():
             if not key.endswith("#trails"):  # trails keep their item's colour
                 line.material.color = look.get("contours", "#1e2833")
+        cinematic = self.preset is not None
         for shown in self._shown.values():
             material = shown.mesh.material
-            if hasattr(material, "shininess"):
+            if not isinstance(shown.mesh, gfx.Mesh):
+                continue
+            physical = isinstance(material, gfx.MeshStandardMaterial)
+            if shown.display is not None and (physical or cinematic):
+                # another family of material (or other surroundings): made again
+                shown.mesh.material = self._material(shown.kind, shown.display)
+                self._grain(
+                    shown.mesh,
+                    shown.mesh.geometry.positions.data,
+                    shown.kind,
+                    shown.display.material,
+                )
+            elif hasattr(material, "shininess"):
                 self._gloss(material, shown.kind)
 
     def item_at(self, world_object) -> str | None:
@@ -762,4 +849,26 @@ class SceneRenderer:
             self.frame()
 
     def render(self, renderer: gfx.WgpuRenderer) -> None:
+        self.apply_effects(renderer)
         renderer.render(self.scene, self.camera)
+
+    def apply_effects(self, renderer) -> None:
+        """The look's post effects on a renderer: the depth fog of the underwater look,
+        before the renderer's anti-aliasing; nothing for the other looks."""
+        passes = getattr(renderer, "effect_passes", None)
+        if passes is None:
+            return
+        fog = self.preset.fog if self.preset is not None else None
+        kept = tuple(p for p in passes if p is not self._fog)
+        if fog is None:
+            if len(kept) != len(passes):
+                renderer.effect_passes = kept
+            return
+        if self._fog is None:
+            try:
+                self._fog = gfx.renderers.wgpu.FogPass(color=fog[0], power=fog[1])
+            except AttributeError:  # an older pygfx: no fog
+                return
+        self._fog.color, self._fog.power = fog
+        if passes[:1] != (self._fog,):
+            renderer.effect_passes = (self._fog, *kept)

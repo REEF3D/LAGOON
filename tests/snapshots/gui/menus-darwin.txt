@@ -55,6 +55,10 @@ View
   Viewport look >
     [x] Studio (light)
     [ ] Ocean (dark blue)
+    ----
+    [ ] Open ocean (cinematic)
+    [ ] Wave flume (cinematic)
+    [ ] Underwater (cinematic)
   ----
   [ ] Compare side by side  [Ctrl+Shift+2]
   [ ] Full screen viewer  [Ctrl+Shift+F]

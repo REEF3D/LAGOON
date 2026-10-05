@@ -400,3 +400,57 @@ def test_render_amr_surface(tmp_path):
     assert f"{item.id}#outlines" in view._contours
     view.remove(item.id)
     assert f"{item.id}#outlines" not in view._contours
+
+
+@pytest.mark.parametrize("look", ["open_ocean", "wave_flume", "underwater"])
+def test_cinematic_looks(tmp_path, look):
+    """Each cinematic look renders: water, sand and a steel body in their surroundings."""
+    from reef3d_fixtures import make_run, write_objects
+
+    run = make_run(tmp_path / "run", frames=3, print_interval=0.5, objects=True)
+    write_objects(run, "NHFLOW", 3)
+    session = Session()
+    session.open_case(run)
+    for item in session.scene:
+        if item.kind == "free_surface":
+            session.set_property(item.id, "variable", "none")  # the water's own colour
+    session.set_property("case-1", "exaggeration", 3.0)
+    image = render_session(session, (640, 360), time=1.0, view="perspective", style=look)
+    _keep(f"render_{look}.png", image)
+    assert _colours(image) > 200  # sky, reflections, grain: many shades
+
+
+def test_switching_looks_swaps_materials(reef3d_run):
+    import pygfx as gfx
+
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    for item in session.scene:
+        mesh = session.data.load(item.id)
+        if mesh is not None and item.kind in ("free_surface", "bathymetry"):
+            view.update(item.kind, session.data.display(item.id, mesh))
+    bed = next(s for s in view._shown.values() if s.kind == "bathymetry")
+    water = next(s for s in view._shown.values() if s.kind == "free_surface")
+    assert isinstance(water.mesh.material, gfx.MeshPhongMaterial)
+    view.set_style("open_ocean")
+    assert isinstance(water.mesh.material, gfx.MeshPhysicalMaterial)
+    assert water.mesh.material.env_map is not None
+    assert bed.mesh.material.normal_map is not None  # sand grain
+    assert bed.mesh.geometry.texcoords1.data.shape == (bed.mesh.geometry.positions.data.shape[0], 2)
+    assert isinstance(view.background.material, gfx.BackgroundSkyboxMaterial)
+
+    class Renderer:  # what the looks need of a renderer
+        effect_passes = ()
+
+    renderer = Renderer()
+    view.set_style("underwater")
+    view.apply_effects(renderer)
+    assert len(renderer.effect_passes) == 1  # the depth fog
+    view.set_style("studio")
+    view.apply_effects(renderer)
+    assert renderer.effect_passes == ()
+    assert isinstance(water.mesh.material, gfx.MeshPhongMaterial)
+    assert not isinstance(view.background.material, gfx.BackgroundSkyboxMaterial)

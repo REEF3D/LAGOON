@@ -82,6 +82,8 @@ class DisplaySurface:
     line_width: float = 3.0
     #: point items (particles): drawn as points of this size [px], not triangles
     point_size: float | None = None
+    #: the item's material (bodies, structures, DEM elements), for the cinematic looks
+    material: str = ""
 
 
 @dataclass
@@ -955,6 +957,7 @@ class DataManager:
             segments=mesh.segments,
             line_width=float(props.get("line_width", 3.0)),
             point_size=float(props.get("point_size", 4.0)) if item.kind == "particles" else None,
+            material=str(props.get("material", "") or ""),
         )
 
     # ------------------------------------------------------------- time series

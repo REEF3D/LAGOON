@@ -79,7 +79,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--view", choices=["perspective", "top", "front", "right", "2d", "2d-front", "2d-right"]
     )
-    parser.add_argument("--style", choices=["studio", "ocean"], default="studio")
+    from lagoonviz.render.scene3d import STYLES
+
+    parser.add_argument(
+        "--style",
+        choices=list(STYLES),
+        default="studio",
+        help="look: studio, ocean, or a cinematic one (open_ocean, wave_flume, underwater)",
+    )
     movie = parser.add_argument_group("animations (output .mp4 or .mov)")
     movie.add_argument("--fps", type=float, default=25.0, help="frames per second")
     movie.add_argument("--start", type=int, help="first output (default: first with data)")
