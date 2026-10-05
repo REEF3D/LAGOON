@@ -6,7 +6,7 @@ refinement, floating bodies, particles and gauges.
 
 This package holds
 
-- the format **specification** ([SPEC.md](SPEC.md), version 0.3: σ-grid volumes of
+- the format **specification** ([SPEC.md](https://github.com/REEF3D/LAGOON/blob/main/lagoon-format/SPEC.md), version 0.3: σ-grid volumes of
   FNPF and NHFLOW, Cartesian volumes of CFD, structured free surface and bed
   surfaces, time series tables, wave profiles, floating bodies, particles and
   objects such as DEM elements and mooring lines, and the refined surfaces of
@@ -14,7 +14,7 @@ This package holds
 - the **reference reader and writer** (`lagoon_format.store`), with a small Zarr v3
   implementation (`lagoon_format.zarr3`) that needs only NumPy and the standard
   library; stores also open in zarr-python and xarray;
-- the **run log** specification ([RUN.md](RUN.md): which outputs belong to which
+- the **run log** specification ([RUN.md](https://github.com/REEF3D/LAGOON/blob/main/lagoon-format/RUN.md): which outputs belong to which
   REEF3D run, and their times) with its reference reader
   (`python -m lagoon_format.run <case>` checks a case).
 
@@ -32,7 +32,7 @@ xyz = store.particles["cfd_particles"].positions(10)  # particles at output 10
 grids = store.amr["nhflow_amr"].grids(10)  # AMR: level 0 and the patches at output 10
 ```
 
-How to make, open and read stores: [GUIDE.md](GUIDE.md).
+How to make, open and read stores: [GUIDE.md](https://github.com/REEF3D/LAGOON/blob/main/lagoon-format/GUIDE.md).
 
 REEF3D output is converted with `lagoon-convert CASE` (LAGOON application);
 REEF3D can also write stores itself during a run: `P 18 1` instead of the VTU/VTP

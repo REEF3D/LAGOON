@@ -1,6 +1,31 @@
 # Changelog
 
-## 0.5.0.dev0 (phase 5, cinematic rendering; in progress)
+## 1.0.0rc1 (first release candidate)
+
+The first public release of LAGOON, the post-processor of REEF3D, as a candidate
+for 1.0: everything of phases 0 to 5 below.
+
+- **Open** REEF3D runs: NHFLOW, FNPF, SFLOW and CFD output (VTU/VTP, parallel
+  pieces), AMR surfaces, wave gauges, wave profiles, 6DOF, forces, moorings,
+  particles, DEM and ice; follow a running simulation; the run log.
+- **Show** free surfaces, beds, volumes, slices, iso-surfaces, streamlines,
+  vectors and contours in a GPU viewport with Blender-like navigation, linked to
+  time series and spectra; compare two runs side by side; a full screen viewer.
+- **Store** runs in the LAGOON format (`lagoon-format` 0.3, Zarr v3): several
+  times smaller and faster to read, written by `lagoon-convert` or by REEF3D
+  itself, read by LAGOON and by the ParaView plugin.
+- **Publish**: paper figures in a journal's style from templates (time series,
+  spectra, wave profiles, 3D views, panel letters and notes); films with camera
+  keyframes and orbits; cinematic looks, and path-traced stills and films with
+  Blender's Cycles.
+- **Script**: every action goes through `Session`; *Export script* writes a
+  runnable Python script, and `lagoon-render` renders sessions, scripts and
+  cases without a screen.
+
+Install with `pip install lagoon-viz` (Python 3.11 to 3.13; macOS, Linux,
+Windows).
+
+## 0.5.0.dev0 (phase 5, cinematic rendering)
 
 - Cinematic looks (*View → Viewport look*, `lagoon-render --style`): **Open
   ocean** (a sky with a low sun, reflected by the water), **Wave flume** (a lab
@@ -103,7 +128,7 @@
   and colour-bar overlay (drawn with Qt). `lagoonviz.render.script` writes the
   code; `Session.record_output` keeps it.
 
-## 0.3.0.dev0 (phase 3, LAGOON format; in progress)
+## 0.3.0.dev0 (phase 3, LAGOON format)
 
 - LAGOON format 0.2 complete: `lagoon-format` 0.2.0 (SPEC.md 0.2, no longer a
   draft) and a user guide, `lagoon-format/GUIDE.md`: making stores (REEF3D's
@@ -166,7 +191,7 @@
   (unless the VTU/VTP output is newer); a store also opens on its own. Volume
   faces, vertical slices and probes read only the levels and tiles they need.
 
-## 0.2.0.dev0 (phase 2, domain tools; in progress)
+## 0.2.0.dev0 (phase 2, domain tools)
 
 - Time series: REEF3D wave gauges (`REEF3D_*_WSF`), 6DOF forces, motions, velocities
   and mooring lines (`REEF3D_*_6DOF`) and force files are found in a case and read on
@@ -401,7 +426,7 @@
   (Fusion style on every platform), icons drawn in code, toolbar with icons and labels,
   larger player buttons, Space to play and pause.
 
-## 0.1.0.dev0 (phase 1, viewer; in progress)
+## 0.1.0.dev0 (phase 1, viewer)
 
 - REEF3D readers (`lagoonviz.core.data`), NumPy only: VTK XML `.vtu`/`.vtp` and the
   parallel `.pvtu`/`.pvtp`; raw appended, base64, zlib and ASCII data; arrays read on

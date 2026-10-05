@@ -1,0 +1,79 @@
+# conda-forge recipe (v1 format, rattler-build) for lagoon-viz, the LAGOON
+# application. Needs lagoon-format on conda-forge first. To publish: once the
+# version is on PyPI, put the sha256 of its sdist below (RELEASING.md) and open a
+# pull request with this folder at github.com/conda-forge/staged-recipes
+# (recipes/lagoon-viz/recipe.yaml); later versions go to the feedstock.
+schema_version: 1
+
+context:
+  name: lagoon-viz
+  version: "1.0.0rc1"
+  python_min: "3.11"
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+source:
+  url: https://pypi.org/packages/source/l/lagoon-viz/lagoon_viz-${{ version }}.tar.gz
+  sha256: REPLACE_WITH_THE_SHA256_OF_THE_SDIST
+
+build:
+  number: 0
+  noarch: python
+  script: ${{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  python:
+    entry_points:
+      - lagoon = lagoonviz.gui.app:main
+      - lagoon-render = lagoonviz.render.offscreen:main
+      - lagoon-convert = lagoonviz.core.convert:main
+
+requirements:
+  host:
+    - python ${{ python_min }}.*
+    - hatchling >=1.27
+    - pip
+  run:
+    - python >=${{ python_min }}
+    - lagoon-format >=0.3.0,<0.4
+    - numpy >=1.24
+    # conda-forge's pyside6 is the whole of PySide6; PyPI's lighter
+    # PySide6-Essentials that pyproject.toml names is the same Qt for LAGOON
+    - pyside6 >=6.7
+    - pygfx >=0.9
+    - rendercanvas >=1.0
+    - imageio-ffmpeg >=0.5
+    - matplotlib-base >=3.8
+
+tests:
+  - python:
+      imports:
+        - lagoonviz
+        - lagoonviz.core
+        - lagoonviz.render.pathtrace
+      # pip check would miss PySide6-Essentials, which conda's pyside6 provides
+      # under the name PySide6
+      pip_check: false
+      python_version: ${{ python_min }}.*
+  - requirements:
+      run:
+        - python ${{ python_min }}.*
+    script:
+      - lagoon-render --help
+      - lagoon-convert --help
+
+about:
+  homepage: https://github.com/REEF3D/LAGOON
+  repository: https://github.com/REEF3D/LAGOON
+  summary: "LAGOON: Lightweight Animation and Graphics for Open Ocean Numerics"
+  description: |
+    The post-processor of REEF3D: a desktop application for exploring, plotting
+    and rendering ocean and coastal simulations (free surfaces, volumes, wave
+    gauges, floating bodies), with paper figures, films, path tracing through
+    Blender, and a Python scripting interface that runs without a screen.
+  license: GPL-3.0-or-later
+  license_file: LICENSE
+
+extra:
+  recipe-maintainers:
+    - REPLACE_WITH_GITHUB_HANDLE

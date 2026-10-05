@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "lagoon-format"
-version = "0.3.0"
+dynamic = ["version"]  # from src/lagoon_format/__init__.py
 description = "The LAGOON data format for ocean and coastal simulation output (specification and reference reader/writer)"
 readme = "README.md"
 license = "MIT"
@@ -13,8 +13,36 @@ authors = [{ name = "Hans Bihs" }]
 requires-python = ">=3.11"
 dependencies = []
 
+keywords = ["zarr", "ocean", "coastal", "simulation", "REEF3D", "data format"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Hydrology",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
 [project.urls]
 Homepage = "https://github.com/REEF3D/LAGOON"
+Specification = "https://github.com/REEF3D/LAGOON/blob/main/lagoon-format/SPEC.md"
+
+[tool.hatch.version]
+path = "src/lagoon_format/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lagoon_format"]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src",
+    "paraview",
+    "examples",
+    "README.md",
+    "SPEC.md",
+    "GUIDE.md",
+    "RUN.md",
+    "LICENSE",
+    "pyproject.toml",
+]

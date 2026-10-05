@@ -1,0 +1,56 @@
+# conda-forge recipe (v1 format, rattler-build) for lagoon-format. To publish: once
+# the version is on PyPI, put the sha256 of its sdist below (RELEASING.md) and open
+# a pull request with this folder at github.com/conda-forge/staged-recipes
+# (recipes/lagoon-format/recipe.yaml); later versions go to the feedstock.
+schema_version: 1
+
+context:
+  name: lagoon-format
+  version: "0.3.0"
+  python_min: "3.11"
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+source:
+  url: https://pypi.org/packages/source/l/lagoon-format/lagoon_format-${{ version }}.tar.gz
+  sha256: REPLACE_WITH_THE_SHA256_OF_THE_SDIST
+
+build:
+  number: 0
+  noarch: python
+  script: ${{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+
+requirements:
+  host:
+    - python ${{ python_min }}.*
+    - hatchling >=1.27
+    - pip
+  run:
+    - python >=${{ python_min }}
+
+tests:
+  - python:
+      imports:
+        - lagoon_format
+        - lagoon_format.store
+        - lagoon_format.amr
+      pip_check: true
+      python_version: ${{ python_min }}.*
+
+about:
+  homepage: https://github.com/REEF3D/LAGOON
+  repository: https://github.com/REEF3D/LAGOON
+  documentation: https://github.com/REEF3D/LAGOON/blob/main/lagoon-format/GUIDE.md
+  summary: The LAGOON data format for ocean and coastal simulation output
+  description: |
+    The LAGOON data format (Zarr v3) for the output of ocean and coastal
+    simulations such as REEF3D: the specification and the reference reader and
+    writer, with no dependencies.
+  license: MIT
+  license_file: LICENSE
+
+extra:
+  recipe-maintainers:
+    - REPLACE_WITH_GITHUB_HANDLE

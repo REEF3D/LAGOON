@@ -1,28 +1,37 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "lagoon-viz"
-version = "0.2.0.dev0"
+dynamic = ["version"]  # from src/lagoonviz/__init__.py
 description = "LAGOON: Lightweight Animation and Graphics for Open Ocean Numerics"
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "Hans Bihs" }]
 requires-python = ">=3.11"
+keywords = ["REEF3D", "CFD", "ocean", "coastal", "visualization", "post-processing", "waves"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
     "Intended Audience :: Science/Research",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Topic :: Scientific/Engineering :: Visualization",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Hydrology",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
-    "lagoon-format>=0.3.0",
+    "lagoon-format>=0.3.0,<0.4",
     "numpy>=1.24",
     "PySide6-Essentials>=6.7",
     "pygfx>=0.9",
@@ -48,9 +57,29 @@ lagoon-convert = "lagoonviz.core.convert:main"
 [project.urls]
 Homepage = "https://github.com/REEF3D/LAGOON"
 Issues = "https://github.com/REEF3D/LAGOON/issues"
+Changelog = "https://github.com/REEF3D/LAGOON/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "src/lagoonviz/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lagoonviz"]
+
+# the source package: the application, its tests and the docs that describe it; the
+# format library is its own package (lagoon-format/), the logo drafts and the
+# planning documents stay in the repository
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src",
+    "tests",
+    "docs/architecture.md",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "AUTHORS.md",
+    "LICENSE",
+    "pyproject.toml",
+]
 
 # ---------------------------------------------------------------- tests
 [tool.pytest.ini_options]
@@ -61,7 +90,9 @@ qt_api = "pyside6"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["lagoon-format/build"]
+# logo: the drawing script of the logo; Markdown: its code examples keep their
+# aligned comments (newer ruff versions format code blocks in Markdown too)
+extend-exclude = ["lagoon-format/build", "logo", "*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]

@@ -1,19 +1,47 @@
-<p align="center"><img src="docs/logo.png" alt="LAGOON" width="520"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/REEF3D/LAGOON/main/docs/logo.png" alt="LAGOON" width="520"></p>
 
 **LAGOON: Lightweight Animation and Graphics for Open Ocean Numerics.**
 An open-source desktop application for exploring, plotting and rendering ocean and
 coastal simulations, in the spirit of ParaView and Blender but built for
 hydrodynamics. Part of the [REEF3D](https://github.com/REEF3D) family.
 
-> Status: **phase 2, domain tools (started).** LAGOON opens REEF3D runs (NHFLOW, FNPF,
-> CFD VTU/PVTU output), shows the free surface, bed and volume in a GPU viewport, plays
-> them over time, and plots wave gauges, 6DOF forces and motions linked to the 3D view. See `docs/LAGOON implementation plan.pdf` for what comes next.
+LAGOON opens REEF3D runs (NHFLOW, FNPF, SFLOW and CFD output, AMR surfaces, the
+LAGOON format), shows free surfaces, beds, volumes, slices, iso-surfaces,
+streamlines, floating bodies, moorings, particles and ice in a GPU viewport, plays
+them over time, and plots wave gauges, wave profiles, 6DOF forces and motions
+linked to the 3D view. It makes paper figures in a journal's style, films with
+camera paths, and path-traced showcase images and animations with Blender's
+Cycles. Everything it does can be written out as a Python script and replayed
+without a screen.
 
-<p align="center"><img src="docs/phase1_viewport.png" alt="LAGOON showing an NHFLOW free surface" width="720"></p>
+> Status: **1.0 release candidate.** See `CHANGELOG.md` for what is in it.
 
-## Run it
+<p align="center"><img src="https://raw.githubusercontent.com/REEF3D/LAGOON/main/docs/phase1_viewport.png" alt="LAGOON showing an NHFLOW free surface" width="720"></p>
 
-With [pixi](https://pixi.sh) (recommended, identical environment on every machine):
+## Install
+
+With pip, in any Python 3.11 to 3.13 environment (macOS, Linux, Windows):
+
+```bash
+pip install lagoon-viz
+lagoon                 # or: python -m lagoonviz
+```
+
+With conda or pixi, from conda-forge (from the 1.0 release on):
+
+```bash
+conda install -c conda-forge lagoon-viz
+pixi add lagoon-viz
+```
+
+The 3D view needs a GPU with Metal (macOS), Vulkan (Linux) or Direct3D 12
+(Windows); headless Linux machines can use Mesa's software Vulkan driver. The
+LAGOON data format is a separate MIT-licensed package, `pip install lagoon-format`
+(no dependencies), for codes that read or write it.
+
+## Develop
+
+With [pixi](https://pixi.sh) (identical environment on every machine):
 
 ```bash
 pixi run lagoon        # start the application
@@ -21,13 +49,15 @@ pixi run test          # run the tests
 pixi run lint          # ruff + layer rules
 ```
 
-With pip in any Python 3.11+ environment:
+With pip, from a clone:
 
 ```bash
 pip install -e ./lagoon-format -e ".[dev]"
-lagoon                 # or: python -m lagoonviz
 pytest
 ```
+
+On a Mac, `setup_lagoon.command` sets up everything (uv, Python, LAGOON, the
+tests) and builds a `LAGOON.app`. How a release is made: `RELEASING.md`.
 
 ## Open a REEF3D run
 

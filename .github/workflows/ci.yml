@@ -55,3 +55,23 @@ jobs:
           name: renders-${{ matrix.os }}-py${{ matrix.python }}
           path: test-output
           if-no-files-found: ignore
+
+  package:
+    name: Packages build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and check sdists and wheels
+        run: |
+          python -m pip install --upgrade build "twine>=6.1"
+          python -m build --outdir dist .
+          python -m build --outdir dist lagoon-format
+          python -m twine check --strict dist/*
+          python -m pip install dist/lagoon_format-*.whl dist/lagoon_viz-*.whl
+          python -m pip check
+          lagoon-render --help > /dev/null
