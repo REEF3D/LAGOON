@@ -38,6 +38,8 @@ class SurfaceMesh:
     normals: np.ndarray | None = None
     #: (k, 2) uint32 line segments (mooring lines, rods); drawn as lines
     segments: np.ndarray | None = None
+    #: (k, 2) uint32 point pairs of lines drawn over the surface (AMR patch borders)
+    outlines: np.ndarray | None = None
 
     def with_normals(self) -> SurfaceMesh:
         if self.normals is None:

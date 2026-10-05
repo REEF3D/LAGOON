@@ -65,6 +65,7 @@ ROLES = {
     "ice": "ice",
     "rods": "rods",
     "particles": "particles",
+    "amr": "amr",
 }
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
@@ -123,6 +124,7 @@ ROLE_LABELS = {
     "ice": "ice floes",
     "rods": "rod trees",
     "particles": "particles",
+    "amr": "AMR surface",
 }
 
 
@@ -627,9 +629,13 @@ class Case:
         writes again), e.g. an FNPF run next to an older NHFLOW run, or a bed from an
         earlier run. The free surface (or bed) written last picks the run; outputs
         written during that run join it; a bed of the same solver joins in any case.
-        Without surfaces, the volume is shown.
+        Without surfaces, the volume is shown. An AMR surface of the run is shown in
+        place of its free surface (its level 0 is that surface).
         """
         surfaces = [d for d in self.datasets.values() if d.role in ("free_surface", "bed")]
+        refined = [d for d in self.datasets.values() if d.role == "amr"]
+        if not surfaces and refined:
+            return {"amr": preferred(refined)}
         if not surfaces:
             volumes = [d for d in self.datasets.values() if d.role == "volume"]
             if not volumes:
@@ -653,6 +659,10 @@ class Case:
             options = [d for d in self.datasets.values() if d.role == role and d.same_run_as(lead)]
             if options:
                 chosen[role] = max(options, key=len)
+        options = [d for d in refined if d.same_run_as(lead)]
+        if options:
+            chosen["amr"] = preferred(options)
+            chosen.pop("free_surface", None)
         # beds are drawn first, so a transparent free surface shows them
         order = (
             "bed",
@@ -664,6 +674,7 @@ class Case:
             "particles",
             "mooring",
             "free_surface",
+            "amr",
         )
         return {role: chosen[role] for role in order if role in chosen}
 
@@ -1003,9 +1014,12 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     """Open a REEF3D case folder, one output folder, one output file or a LAGOON
     store. ``stores=False`` leaves LAGOON stores in the case folder out (the
     converter reads the VTK output)."""
+    from lagoonviz.core.data.amr import AMR_FOLDER, amr_datasets
     from lagoonviz.core.data.lagoon import find_stores, store_datasets, stored_series
 
     path = Path(path).expanduser()
+    if path.is_file() and path.suffix == ".vtm" and AMR_FOLDER.match(path.parent.name):
+        path = path.parent  # an AMR index: its folder (all outputs)
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
     datasets: list[Dataset] = []
@@ -1026,6 +1040,9 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
         found = [d for d in _dataset_from_folder(folder) if d.frames[0].path.name.startswith(stem)]
         datasets = found
         case_dir = folder.parent if _FOLDER.match(folder.name) else folder
+    elif AMR_FOLDER.match(path.name):
+        datasets = amr_datasets(path)
+        case_dir = path.parent
     elif _FOLDER.match(path.name) or _OBJECT_FOLDER.match(path.name):
         datasets = _dataset_from_folder(path)
         case_dir = path.parent
@@ -1038,6 +1055,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
                 _FOLDER.match(folder.name) or _OBJECT_FOLDER.match(folder.name)
             ):
                 datasets += _dataset_from_folder(folder)
+            elif folder.is_dir() and AMR_FOLDER.match(folder.name):
+                datasets += amr_datasets(folder)
         store_paths = find_stores(path) if stores else []
         for store in store_paths:
             stored += store_datasets(store)

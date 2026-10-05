@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Hydrology",
 ]
 dependencies = [
-    "lagoon-format>=0.2.0",
+    "lagoon-format>=0.3.0",
     "numpy>=1.24",
     "PySide6-Essentials>=6.7",
     "pygfx>=0.9",

@@ -568,7 +568,7 @@ class MainWindow(QMainWindow):
         """The item to show in the properties after opening a case: its free surface,
         else its bed, else the case itself (not the last item added, a gauge plot)."""
         data = self.session.data
-        for kind in ("free_surface", "bathymetry"):
+        for kind in ("amr", "free_surface", "bathymetry"):
             for item in self.session.scene:
                 if item.kind == kind and getattr(data.case_item(item.id), "id", None) == case_id:
                     return item.id

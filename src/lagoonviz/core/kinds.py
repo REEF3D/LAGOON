@@ -158,6 +158,25 @@ KINDS: dict[str, KindSpec] = {
             ),
         },
     ),
+    "amr": KindSpec(
+        "AMR surface",
+        {
+            **_data_source("AMR surface"),
+            **_colouring("eta", "reef3d"),
+            **_contours(),
+            **_exaggeration("Scales the surface elevation about the still water level"),
+            "outlines": PropertySpec(
+                "dark",
+                "Patch outlines",
+                choices=("dark", "white", "off"),
+                tip="Draw the borders of the refined patches (colour by 'level' to see "
+                "the refinement levels)",
+            ),
+            "hide_dry": PropertySpec(
+                True, "Hide dry land", tip="Leave out the surface where the depth is zero"
+            ),
+        },
+    ),
     "bathymetry": KindSpec(
         "Bed",
         {

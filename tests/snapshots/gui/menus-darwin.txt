@@ -26,6 +26,7 @@ Edit
 Add
   Case
   Free surface
+  AMR surface
   Bed
   Volume
   Time series

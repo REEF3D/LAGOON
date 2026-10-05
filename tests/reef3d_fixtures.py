@@ -743,3 +743,168 @@ def write_nhflow_particles(root: Path, end: float, interval: float) -> None:
         ]
         path = folder / f"REEF3D-NHFLOW-Particles-{count:08d}.vtp"
         _particle_vtp(path, float(t), arrays, points, True)
+
+
+# ======================================================================== AMR
+#: AMR fields per solver, in REEF3D's order (fnpf_amr_print.cpp, nhflow_amr_print.cpp,
+#: sflow_amr.cpp)
+AMR_FIELDS = {
+    "FNPF": ("eta", "elevation", "Fifsf", "Fz", "bed"),
+    "NHFLOW": ("eta", "elevation", "bed", "u_top", "v_top", "wet", "WL"),
+    "SFLOW": ("eta", "elevation", "WL", "u", "v", "bed", "press", "w", "wetdry"),
+}
+#: fields REEF3D writes as Int32 (the others as Float64)
+AMR_INTEGER = ("wetdry",)
+AMR_DEPTH = 0.5  # still water depth (wd)
+
+
+def amr_eta(x: np.ndarray, y: np.ndarray, t: float) -> np.ndarray:
+    return 0.05 * np.sin(2.0 * x - 1.5 * t) * np.cos(0.5 * y)
+
+
+def amr_patches(frame: int) -> list[tuple[int, int, float, float, float, float]]:
+    """(rank, level, x0, x1, y0, y1) of the refined patches of an output: a level-1
+    patch that moves along x (regridding) and a level-2 patch inside it; on the
+    second rank a second level-1 patch from the second output on."""
+    shift = 0.5 * frame
+    patches = [
+        (1, 1, 1.0 + shift, 3.0 + shift, 0.5, 2.5),
+        (1, 2, 1.5 + shift, 2.5 + shift, 1.0, 2.0),
+    ]
+    if frame >= 1:
+        patches.append((2, 1, 6.0, 7.5, 0.0, 1.5))
+    return patches
+
+
+def _amr_fields(solver: str, x: np.ndarray, y: np.ndarray, t: float) -> dict[str, np.ndarray]:
+    """Cell values (ny, nx) of the solver's AMR fields at cell centres x, y."""
+    xx, yy = np.meshgrid(x, y)
+    eta = amr_eta(xx, yy, t)
+    values = {
+        "eta": eta,
+        "elevation": eta + AMR_DEPTH,
+        "bed": np.zeros_like(eta),
+        "Fifsf": 0.1 * eta,
+        "Fz": 0.2 * eta,
+        "u_top": np.cos(2.0 * xx - 1.5 * t),
+        "v_top": 0.1 * np.sin(yy),
+        "wet": np.ones_like(eta),
+        "WL": eta + AMR_DEPTH,
+        "u": np.cos(2.0 * xx - 1.5 * t),
+        "v": 0.1 * np.sin(yy),
+        "press": np.zeros_like(eta),
+        "w": 0.01 * eta,
+        "wetdry": np.ones_like(eta, dtype=np.int32),
+    }
+    return {name: values[name] for name in AMR_FIELDS[solver]}
+
+
+def write_amr_grid(
+    path: Path, x: np.ndarray, y: np.ndarray, fields: dict[str, np.ndarray], level: int, t: float
+) -> None:
+    """A grid as REEF3D's AMR output writes it: ASCII rectilinear grid, cell data, rows
+    of x values per y, TimeValue and level in the field data."""
+    nx, ny = x.size - 1, y.size - 1
+    out = ['<?xml version="1.0"?>\n']
+    out.append('<VTKFile type="RectilinearGrid" version="0.1" byte_order="LittleEndian">\n')
+    out.append(f'<RectilinearGrid WholeExtent="0 {nx} 0 {ny} 0 0">\n')
+    out.append(
+        f'<FieldData><DataArray type="Float64" Name="TimeValue" NumberOfTuples="1">{float(t)!r}'
+        "</DataArray>"
+    )
+    out.append(
+        f'<DataArray type="Int32" Name="level" NumberOfTuples="1">{level}</DataArray></FieldData>\n'
+    )
+    out.append(f'<Piece Extent="0 {nx} 0 {ny} 0 0">\n<CellData Scalars="eta">\n')
+    for name, values in fields.items():
+        integer = name in AMR_INTEGER
+        kind = "Int32" if integer else "Float64"
+        out.append(f'<DataArray type="{kind}" Name="{name}" format="ascii">\n')
+        for row in values:
+            if integer:
+                out.append("".join(f"{int(v)} " for v in row) + "\n")
+            else:
+                out.append("".join(f"{float(v)!r} " for v in row) + "\n")
+        out.append("</DataArray>\n")
+    out.append("</CellData>\n<Coordinates>\n")
+    out.append('<DataArray type="Float64" Name="x" format="ascii">')
+    out.append("".join(f"{float(v)!r} " for v in x))
+    out.append('</DataArray>\n<DataArray type="Float64" Name="y" format="ascii">')
+    out.append("".join(f"{float(v)!r} " for v in y))
+    out.append('</DataArray>\n<DataArray type="Float64" Name="z" format="ascii">0</DataArray>\n')
+    out.append("</Coordinates>\n</Piece>\n</RectilinearGrid>\n</VTKFile>\n")
+    path.write_text("".join(out))
+
+
+def make_amr(
+    root: Path,
+    solver: str = "NHFLOW",
+    frames: int = 3,
+    ranks: int = 2,
+    interval: float = 0.5,
+    nx: int = 16,
+    ny: int = 6,
+    length: float = 8.0,
+    width: float = 3.0,
+) -> Path:
+    """REEF3D_<SOLVER>_AMR in ``root``: level 0 split along x over the ranks, the
+    patches of :func:`amr_patches` refined by 2 per level. Returns the folder."""
+    folder = root / f"REEF3D_{solver}_AMR"
+    folder.mkdir(parents=True, exist_ok=True)
+    dx0 = length / nx
+    x0 = np.linspace(0.0, length, nx + 1)
+    y0 = np.linspace(0.0, width, ny + 1)
+    bounds = np.linspace(0, nx, ranks + 1).round().astype(int)
+    for frame in range(frames):
+        t = frame * interval
+        stamp = f"{frame:08d}"
+        for rank in range(ranks):
+            x = x0[bounds[rank] : bounds[rank + 1] + 1]
+            centres = 0.5 * (x[:-1] + x[1:]), 0.5 * (y0[:-1] + y0[1:])
+            write_amr_grid(
+                folder / f"REEF3D-{solver}-AMR-L0-{stamp}-{rank + 1:04d}.vtr",
+                x,
+                y0,
+                _amr_fields(solver, *centres, t),
+                0,
+                t,
+            )
+        per_rank: dict[int, int] = {}
+        for rank, level, px0, px1, py0, py1 in amr_patches(frame):
+            if rank > ranks:
+                continue
+            per_rank[rank] = per_rank.get(rank, 0) + 1
+            step = dx0 / 2**level
+            x = np.arange(px0, px1 + 0.5 * step, step)
+            y = np.arange(py0, py1 + 0.5 * step, step)
+            centres = 0.5 * (x[:-1] + x[1:]), 0.5 * (y[:-1] + y[1:])
+            write_amr_grid(
+                folder / f"REEF3D-{solver}-AMR-{stamp}-{rank:04d}-{per_rank[rank]:04d}.vtr",
+                x,
+                y,
+                _amr_fields(solver, *centres, t),
+                level,
+                t,
+            )
+        out = [
+            '<?xml version="1.0"?>\n<VTKFile type="vtkMultiBlockDataSet" version="1.0">\n'
+            "<vtkMultiBlockDataSet>\n"
+        ]
+        out.append('<Block index="0" name="level 0">\n')
+        for rank in range(ranks):
+            out.append(
+                f'<DataSet index="{rank}" '
+                f'file="REEF3D-{solver}-AMR-L0-{stamp}-{rank + 1:04d}.vtr"/>\n'
+            )
+        out.append('</Block>\n<Block index="1" name="patches">\n')
+        index = 0
+        for rank in range(1, ranks + 1):
+            for patch in range(1, per_rank.get(rank, 0) + 1):
+                out.append(
+                    f'<DataSet index="{index}" '
+                    f'file="REEF3D-{solver}-AMR-{stamp}-{rank:04d}-{patch:04d}.vtr"/>\n'
+                )
+                index += 1
+        out.append("</Block>\n</vtkMultiBlockDataSet>\n</VTKFile>\n")
+        (folder / f"REEF3D-{solver}-AMR-{stamp}.vtm").write_text("".join(out))
+    return folder

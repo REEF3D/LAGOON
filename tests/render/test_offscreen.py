@@ -375,3 +375,28 @@ def test_render_wave_profiles(tmp_path):
     _keep("render_profiles.png", image)
     blue = np.array([0x2B, 0x4C, 0x7E])  # first plot colour: line 1
     assert (np.abs(image[..., :3].astype(int) - blue).sum(axis=-1) < 40).sum() > 5
+
+
+def test_render_amr_surface(tmp_path):
+    from reef3d_fixtures import make_amr
+
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    make_amr(tmp_path, "NHFLOW", frames=3)
+    session = Session()
+    session.open_case(tmp_path)
+    item = next(i for i in session.scene if i.kind == "amr")
+    session.set_property(item.id, "variable", "level")
+    session.set_property(item.id, "colormap", "rainbow")
+    image = render_session(session, (320, 180), time=1, view="top")
+    _keep("render_amr.png", image)
+    assert _colours(image) > 20
+    # the patch borders are drawn over the surface, and go with the item
+    view = SceneRenderer()
+    mesh = session.data.load(item.id)
+    shown = session.data.display(item.id, mesh)
+    view.update("amr", shown)
+    view.update_outlines(item.id, session.data.patch_outlines(item.id, mesh, shown))
+    assert f"{item.id}#outlines" in view._contours
+    view.remove(item.id)
+    assert f"{item.id}#outlines" not in view._contours

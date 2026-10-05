@@ -14,6 +14,7 @@ import threading
 from pathlib import Path
 
 import numpy as np
+from lagoon_format.amr import AmrSet
 from lagoon_format.bodies import BodySet
 from lagoon_format.particles import ParticleSet
 from lagoon_format.series import ProfileSet as StoredProfiles
@@ -541,6 +542,88 @@ class StoreParticleDataset(Dataset):
         return Piece(kind, points, connectivity, offsets, None, data)
 
 
+class StoreAmrDataset(Dataset):
+    """An AMR surface of a store (SPEC 11): the leaf surface of each output's grids."""
+
+    source = "lagoon"
+
+    def __init__(self, store: Store, amr: AmrSet):
+        self.store = store
+        self.amr = amr
+        key = amr.info.get("dataset") or f"{store.solver.lower()}_amr"
+        super().__init__(key, store.solver, "amr", self._frames(), amr.group.path)
+        self.times = np.asarray(amr.times, np.float64)
+        self.run_id = store.run_id
+        self.run_started = str(store.run.get("started", "")) if store.run else ""
+
+    @property
+    def recorded(self) -> str | None:
+        return self.amr.info.get("dataset")
+
+    def _frames(self) -> list[Frame]:
+        path = self.amr.group.path
+        return [Frame(int(step), path, [path / f"t{t}"]) for t, step in enumerate(self.amr.steps)]
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        components = {n: c for n, (c, _d) in self.amr.fields.items()}
+        components["level"] = 1
+        return "RectilinearGrid", components
+
+    @property
+    def label(self) -> str:
+        return f"{self.solver} AMR surface (LAGOON)"
+
+    def default_variable(self) -> str:
+        for name in ("eta", "elevation"):
+            if name in self.components:
+                return name
+        return next(iter(self.components), "none")
+
+    def written_span(self) -> tuple[float, float]:
+        if self._span is None:
+            try:
+                first = (self.amr.group.path / "zarr.json").stat().st_mtime
+                last = (self.amr.group.path / "time" / "zarr.json").stat().st_mtime
+            except OSError:
+                first = last = 0.0
+            self._span = (min(first, last), max(first, last))
+        return self._span
+
+    def _grids(self, index: int, names: list[str] | None):
+        from lagoonviz.core.data.amr import AmrGrid
+
+        return [
+            AmrGrid(level=g.level, x=g.x, y=g.y, cell_data=g.fields, name=f"rank {g.rank}")
+            for g in self.amr.grids(index, names)
+        ]
+
+    def read(self, index: int, variables: list[str] | None = None) -> SurfaceMesh:
+        from lagoonviz.core.data.amr import SURFACE_ARRAYS, leaf_mesh
+
+        names = None
+        if variables is not None:
+            wanted = {v.partition(".")[0] for v in variables if v and v != "none"}
+            wanted.update(SURFACE_ARRAYS)
+            names = sorted(n for n in wanted if n in self.amr.fields)
+        return leaf_mesh(self._grids(index, names))
+
+    def read_slice(self, index, axis, position, variables=None) -> SurfaceMesh:
+        raise ValueError(f"{self.label}: a surface cannot be sliced")
+
+    def point_series(self, variable: str, x: float, y: float) -> tuple[tuple, np.ndarray]:
+        from lagoonviz.core.data.amr import value_at
+
+        name = variable.partition(".")[0]
+        if name not in self.amr.fields:
+            raise KeyError(f"no variable {name!r} in {self.label}")
+        values = np.full(len(self.frames), np.nan)
+        for index in range(len(self.frames)):
+            found = value_at(self._grids(index, [name]), name, x, y)
+            if found is not None:
+                values[index] = found[0]
+        return (float(x), float(y), 0.0), values
+
+
 def store_datasets(path: str | Path) -> list[Dataset]:
     """The datasets of a LAGOON store, keyed like REEF3D's (``fnpf_volume``)."""
     store = Store(path)
@@ -553,6 +636,7 @@ def store_datasets(path: str | Path) -> list[Dataset]:
     ]
     datasets += [StoreBodyDataset(store, bodies) for bodies in store.bodies.values() if len(bodies)]
     datasets += [StoreParticleDataset(store, p) for p in store.particles.values() if len(p)]
+    datasets += [StoreAmrDataset(store, a) for a in store.amr.values() if len(a)]
     return datasets
 
 

@@ -58,7 +58,12 @@ class ConvertJob:
             self.error = f"{type(error).__name__}: {error}"
 
 
-ROLE_NAMES = {"volume": "volume", "free_surface": "free surface", "bed": "bed"}
+ROLE_NAMES = {
+    "volume": "volume",
+    "free_surface": "free surface",
+    "bed": "bed",
+    "amr": "AMR surface",
+}
 
 
 def case_folder(window) -> Path | None:

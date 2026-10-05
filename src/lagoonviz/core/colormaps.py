@@ -119,6 +119,7 @@ def colors(values: np.ndarray, name: str, vmin: float, vmax: float) -> np.ndarra
 #: colours of items shown without a variable
 PLAIN_COLORS = {
     "free_surface": "#4f8fcf",
+    "amr": "#4f8fcf",
     "bathymetry": "#c4ae86",  # sand
     "volume": "#9aa7b4",
     "slice": "#9aa7b4",

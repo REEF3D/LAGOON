@@ -2,6 +2,21 @@
 
 ## 0.4.0.dev0 (phase 4, figure studio; in progress)
 
+- AMR output of REEF3D (FNPF, NHFLOW and SFLOW with `A 270`): `REEF3D_<SOLVER>_AMR`
+  (a `.vtm` per output, a `.vtr` per rank and patch) opens with the case as an
+  *AMR surface* item: the leaf surface (each grid on its node lattice, without
+  the cells a finer patch covers), coloured by any field or by `level`, the
+  borders of the refined patches drawn over it (dark, white or off), vertical
+  scale, dry land hidden, contour lines, the probe from the finest grid. It
+  takes the place of the run's free surface, whose level 0 it is.
+  `lagoonviz.core.data.amr` reads the files.
+- LAGOON format 0.3 (`lagoon-format` 0.3.0): AMR surfaces (SPEC.md section 11),
+  the grids of every output one after another (a grid table, node coordinates,
+  cell fields), written by `lagoon-convert` (`--outputs amr`) and by REEF3D with
+  `P 18` (patch 0013); read by LAGOON, by `Store.amr` and by the ParaView plugin
+  (rectilinear grids, covered cells hidden). On a synthetic 4-rank case the
+  store is 13 times smaller than the ASCII `.vtr` files.
+
 - *File → Export figure* (Ctrl+Shift+P): the plots, the wave profiles or the 3D
   view as a paper figure, drawn again with matplotlib: journal widths (90, 140,
   190 mm or any), fonts in points, PDF/SVG/EPS (editable text) or PNG/TIFF at a

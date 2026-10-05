@@ -46,7 +46,7 @@ ROLES = {"volume": "sigma", "free_surface": "surface", "bed": "surface"}
 OBJECT_ROLES = ("particles", "dem", "ice", "rods", "mooring")
 #: what else is converted (format 0.2): floating bodies (mesh once, a rigid motion
 #: per output), particles and objects, time series tables and wave profiles
-EXTRAS = ("bodies", *OBJECT_ROLES, "series", "profiles")
+EXTRAS = ("bodies", *OBJECT_ROLES, "amr", "series", "profiles")
 SIGMA_SOLVERS = ("FNPF", "NHFLOW")
 #: solvers whose volume is converted: σ-grids, and CFD's Cartesian grid
 VOLUME_SOLVERS = (*SIGMA_SOLVERS, "CFD")
@@ -273,14 +273,19 @@ def convert(
     elif objects:  # only particles or objects: their solver names the store
         lead = next((d for d in objects.values() if d.solver not in ("DEM", "REEF3D")), None)
         lead = lead or next(iter(objects.values()))
+    refined = chosen_datasets(case, ("amr",)).get("amr") if "amr" in roles else None
+    if refined is not None and lead is not None and refined.solver != lead.solver:
+        refined = None
+    if lead is None and refined is not None:
+        lead = refined
     solver = lead.solver if lead is not None else _series_solver(case)
     series = {k: f for k, f in case.series.items() if f.solver == solver and "series" in roles}
     profiles = {
         k: f for k, f in case.profiles.items() if f.solver == solver and "profiles" in roles
     }
-    if not datasets and bodies is None and not objects and not series and not profiles:
+    if not (datasets or bodies or objects or refined or series or profiles):
         raise ConvertError(
-            f"{case.path}: no volume, surface, body, particles or time series to convert"
+            f"{case.path}: no volume, surface, body, particles, AMR or time series to convert"
         )
     path = Path(out) if out is not None else case.path / f"REEF3D_{solver}.lagoon"
     run = _run_record(case, lead) if lead is not None else None
@@ -319,6 +324,10 @@ def convert(
         for role, dataset in objects.items():
             n, size = _convert_objects(case, dataset, role, writer, pool, progress, limit)
             added[role] = n
+            vtk_bytes += size
+        if refined is not None:
+            n, size = _convert_amr(case, refined, writer, pool, progress, limit)
+            added["amr"] = n
             vtk_bytes += size
     if series:
         added["series"] = _convert_series(series, writer)
@@ -698,6 +707,74 @@ def _convert_objects(case, dataset, role, writer, pool, progress, limit) -> tupl
             size += frame.path.stat().st_size  # the .pvtp
         if progress is not None:
             progress(role, count, len(todo))
+    set_writer.flush()
+    return len(todo), size
+
+
+_AMR_RANK = re.compile(r"-AMR-(?:L0-\d+-(?P<rank0>\d+)|\d+-(?P<rank>\d+)-\d+)$")
+
+
+def read_amr(dataset, index: int) -> list:
+    """The grids of an AMR output (REEF3D's .vtm and .vtr files) for the store: the
+    cell fields as float32 (integer ones as int32), the MPI rank from the file name."""
+    from lagoon_format.amr import AmrGrid
+
+    from lagoonviz.core.data.amr import read_grid
+
+    grids = []
+    for path in dataset.grid_files(index):
+        grid = read_grid(path)
+        found = _AMR_RANK.search(path.stem)
+        rank = int(found.group("rank0") or found.group("rank")) - 1 if found else -1
+        fields = {
+            name: np.asarray(v, np.int32 if np.asarray(v).dtype.kind in "iu" else np.float32)
+            for name, v in grid.cell_data.items()
+        }
+        grids.append(AmrGrid(grid.level, grid.x, grid.y, fields, rank))
+    return grids
+
+
+def _convert_amr(case, dataset, writer, pool, progress, limit) -> tuple[int, int]:
+    """An AMR surface (SPEC 11): the grids of every output one after another."""
+    key = dataset.key
+    times = _frame_times(case, dataset)
+    stored = Store(writer.path).amr.get(key)
+    if stored is not None:
+        if stored.info.get("dataset", key) != key:
+            raise ConvertError(f"amr: the store holds {stored.info.get('dataset')}")
+        set_writer = writer.amr_writer(key)
+        done = {int(s) for s in stored.steps}
+    else:
+        first = read_amr(dataset, 0)
+        fields = {
+            name: (_components(values.reshape(-1, *values.shape[2:])), values.dtype.name)
+            for name, values in first[0].fields.items()
+        }
+        set_writer = writer.amr_writer(
+            key,
+            {
+                "fields": fields,
+                "source": dataset.folder.name,
+                "attributes": {"dataset": key, "role": "amr", "refinement": 2},
+            },
+        )
+        done = set()
+    todo = [(k, f) for k, f in enumerate(dataset.frames) if f.step not in done]
+    if limit is not None:
+        todo = todo[:limit]
+    size = 0
+    for count, (k, frame, grids) in enumerate(
+        _prefetched(pool, lambda item: (*item, read_amr(dataset, item[0])), todo), start=1
+    ):
+        try:
+            set_writer.append(times[k], frame.step, grids)
+        except ValueError as error:
+            raise ConvertError(f"amr: {error}") from error
+        size += frame.path.stat().st_size + sum(
+            p.stat().st_size for p in dataset.grid_files(k) if p.exists()
+        )
+        if progress is not None:
+            progress("amr", count, len(todo))
     set_writer.flush()
     return len(todo), size
 

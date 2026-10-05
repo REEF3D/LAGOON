@@ -50,7 +50,10 @@ PLAN_LAYERS = {
     "particles": 2.2,
     "mooring": 2.0,
     "free_surface": 3.0,
+    "amr": 3.0,
 }
+#: kinds drawn as the free surface: the still water level, dry land, the probe
+WATER_KINDS = ("free_surface", "amr")
 #: 2D: gauges and wave profiles on top of everything
 PLAN_MARKS = 4.0
 AXES = {"x": 0, "y": 1, "z": 2}
@@ -569,7 +572,7 @@ class DataManager:
             variable = str(item.properties.get(key, "none"))
             if variable and variable != "none":
                 arrays.add(variable.partition(".")[0])
-        if item.kind == "free_surface":
+        if item.kind in WATER_KINDS:
             arrays.update(("eta", "depth"))  # depth: dry land is hidden (FNPF writes it)
         if item.kind == "bathymetry":
             arrays.add("depth")  # still water depth: the level for vertical exaggeration
@@ -705,6 +708,24 @@ class DataManager:
         segments = arrow_segments(base, direction, length)
         return VectorArrows(item_id, segments, shown.visible)
 
+    def patch_outlines(
+        self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
+    ) -> Trails | None:
+        """The borders of an AMR surface's refined patches on the surface as shown,
+        lifted like contour lines; None when the item draws none."""
+        item = self.scene.get(item_id)
+        colour = str(item.properties.get("outlines", "dark"))
+        if item.kind != "amr" or colour == "off" or mesh.outlines is None:
+            return None
+        if not len(mesh.outlines) or shown.positions.shape[0] != mesh.n_points:
+            return None
+        segments = np.array(shown.positions[mesh.outlines.astype(np.int64)], np.float32)
+        span = np.ptp(shown.positions, axis=0)
+        segments[..., 2] += 0.06 if self.scene.flat else 2.5e-3 * float(max(span.max(), 1e-9))
+        return Trails(
+            item_id, segments, shown.visible, "#ffffff" if colour == "white" else "#1e2833"
+        )
+
     def contour_lines(
         self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
     ) -> ContourLines | None:
@@ -791,7 +812,7 @@ class DataManager:
             level = float(np.median(z + depth))
         else:
             item = self.scene.get(item_id)
-            if item.kind != "free_surface" and self._has_free_surface(item_id):
+            if item.kind not in WATER_KINDS and self._has_free_surface(item_id):
                 return self._water_reference(item_id)[0]  # not cached: may not be known yet
             level = float(np.median(z))
         self._still_water[key] = level
@@ -800,7 +821,7 @@ class DataManager:
     def _has_free_surface(self, item_id: str) -> bool:
         case_item = self.case_item(item_id)
         return any(
-            other.kind == "free_surface" and self.case_item(other.id) is case_item
+            other.kind in WATER_KINDS and self.case_item(other.id) is case_item
             for other in self.scene
         )
 
@@ -888,10 +909,10 @@ class DataManager:
         positions = mesh.points
         normals = mesh.with_normals().normals
         exaggeration = self.exaggeration(item_id)
-        if item.kind == "free_surface":
+        if item.kind in WATER_KINDS:
             self.still_water_level(item_id, mesh)  # once per dataset; gauges use it
         if exaggeration != 1.0:
-            if item.kind in ("free_surface", "bathymetry"):
+            if item.kind in (*WATER_KINDS, "bathymetry"):
                 level = self.still_water_level(item_id, mesh)
             else:  # bodies, mooring lines, volumes, slices: about the case's water level
                 level = self.case_water_level(item_id)
@@ -912,7 +933,7 @@ class DataManager:
         index = self.frame_index(item_id)
         case_item = self.case_item(item_id)
         triangles = mesh.triangles
-        if item.kind == "free_surface" and props.get("hide_dry", True):
+        if item.kind in WATER_KINDS and props.get("hide_dry", True):
             triangles = self._wet_triangles(item_id, mesh)
         elif item.kind == "bathymetry" and props.get("hide_wet", False):
             level = self.still_water_level(item_id, mesh)
@@ -1080,7 +1101,7 @@ class DataManager:
         case = self.case(item_id)
         if case is None:
             return 0.0
-        for role in ("free_surface", "bed"):
+        for role in ("free_surface", "amr", "bed"):
             dataset = case.by_role(role)
             if dataset is None:
                 continue
@@ -1226,7 +1247,7 @@ class DataManager:
         if dataset is None or item.kind in ("slice", "iso_surface", "streamlines"):
             return None
         variable = (
-            "eta" if item.kind == "free_surface" and "eta" in dataset.components else probe.variable
+            "eta" if item.kind in WATER_KINDS and "eta" in dataset.components else probe.variable
         )
         if not variable or variable == "none":
             return None

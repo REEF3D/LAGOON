@@ -205,7 +205,7 @@ class SceneRenderer:
     def _gloss(self, material: gfx.Material, kind: str) -> None:
         """Shininess and specular colour of the look; water is glossier."""
         look = STYLES[self.style_name]
-        water = kind == "free_surface"
+        water = kind in ("free_surface", "amr")
         material.shininess = look["water_shininess" if water else "shininess"]
         try:
             material.specular = look["water_specular" if water else "specular"]
@@ -521,6 +521,7 @@ class SceneRenderer:
         self.update_contours(item_id, None)
         self.update_vectors(item_id, None)
         self.update_trails(item_id, None)
+        self.update_outlines(item_id, None)
 
     def update_contours(self, item_id: str, lines: ContourLines | None) -> None:
         """Contour lines of an item (None or no segments: none), thin and dark."""
@@ -534,6 +535,12 @@ class SceneRenderer:
         """Paths of an item's particles (None or no segments: none), thin, in its colour."""
         self._update_overlay_lines(
             f"{item_id}#trails", trails, 1.0, trails.color if trails is not None else None
+        )
+
+    def update_outlines(self, item_id: str, outlines) -> None:
+        """Borders of an AMR surface's refined patches (None: none), in their colour."""
+        self._update_overlay_lines(
+            f"{item_id}#outlines", outlines, 1.3, outlines.color if outlines is not None else None
         )
 
     def _update_overlay_lines(

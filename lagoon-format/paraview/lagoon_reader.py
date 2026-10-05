@@ -7,7 +7,9 @@ the ``zarr.json`` at the top of a store (``REEF3D_FNPF.lagoon/zarr.json``) and p
 "LAGOON store". Each output (volume, free surface, bed) becomes a group of
 structured grids, one per block; floating bodies become polygon meshes, particles
 points (with vertex cells) and objects (DEM elements, ice floes, rods, mooring
-lines) polygons or lines; the store's times are on the time bar.
+lines) polygons or lines; an AMR surface a group of rectilinear grids (level 0 and
+the patches) whose covered cells are hidden (``vtkGhostType``), so only the leaf
+cells show; the store's times are on the time bar.
 
 The plugin needs NumPy (ParaView brings it) and the ``lagoon_format`` package: it
 is found next to this file (``../src``) or wherever Python finds it.
@@ -23,7 +25,11 @@ if (_HERE.parent / "src" / "lagoon_format").is_dir():
     sys.path.insert(0, str(_HERE.parent / "src"))
 
 import numpy as np  # noqa: E402
+from lagoon_format.amr import covered  # noqa: E402
 from lagoon_format.store import Store  # noqa: E402
+
+#: vtkDataSetAttributes::HIDDENCELL: cells ParaView does not draw
+HIDDEN_CELL = 32
 
 
 def frame_index(times: np.ndarray, t: float) -> int | None:
@@ -87,11 +93,27 @@ def particle_cells(particles, t: int) -> tuple[str, np.ndarray, np.ndarray, dict
     return particles.cells, connectivity, offsets, points, cells
 
 
+def amr_grids(amr, t: int) -> list[tuple[object, dict, np.ndarray]]:
+    """The grids of an AMR set's output t: (grid, cell arrays with ``level``, ghost
+    flags hiding the cells a finer grid covers), level 0 first."""
+    grids = amr.grids(t)
+    found = []
+    for grid in grids:
+        cells = {
+            name: values.reshape(grid.nx * grid.ny, *values.shape[2:])
+            for name, values in grid.fields.items()
+        }
+        cells["level"] = np.full(grid.nx * grid.ny, grid.level, np.int32)
+        ghosts = np.where(covered(grid, grids).ravel(), HIDDEN_CELL, 0).astype(np.uint8)
+        found.append((grid, cells, ghosts))
+    return found
+
+
 def all_times(store: Store) -> list[float]:
     times = set()
     for output in store.outputs.values():
         times.update(float(t) for t in output.times)
-    for group in (*store.bodies.values(), *store.particles.values()):
+    for group in (*store.bodies.values(), *store.particles.values(), *store.amr.values()):
         times.update(float(t) for t in group.times)
     return sorted(times)
 
@@ -114,6 +136,7 @@ if smproxy is not None:
         vtkCellArray,
         vtkMultiBlockDataSet,
         vtkPolyData,
+        vtkRectilinearGrid,
         vtkStructuredGrid,
     )
     from vtkmodules.vtkCommonExecutionModel import vtkStreamingDemandDrivenPipeline as _sddp
@@ -175,7 +198,9 @@ if smproxy is not None:
             if t is None:
                 t = times[0] if times else 0.0
             result = vtkMultiBlockDataSet.GetData(outInfoVec, 0)
-            result.SetNumberOfBlocks(len(store.outputs) + len(store.bodies) + len(store.particles))
+            result.SetNumberOfBlocks(
+                len(store.outputs) + len(store.bodies) + len(store.particles) + len(store.amr)
+            )
             number = -1
             for number, (name, output) in enumerate(store.outputs.items()):
                 group = vtkMultiBlockDataSet()
@@ -204,6 +229,21 @@ if smproxy is not None:
                     )
                     result.SetBlock(number, poly)
                 result.GetMetaData(number).Set(vtkMultiBlockDataSet.NAME(), key)
+            for key, amr in store.amr.items():
+                number += 1
+                group = vtkMultiBlockDataSet()
+                index = frame_index(amr.times, t)
+                if index is not None:
+                    grids = amr_grids(amr, index)
+                    group.SetNumberOfBlocks(len(grids))
+                    for g, (grid, cells, ghosts) in enumerate(grids):
+                        group.SetBlock(g, _rectilinear(grid, cells, ghosts))
+                        name = f"level {grid.level}" + (
+                            f" rank {grid.rank}" if grid.rank >= 0 else ""
+                        )
+                        group.GetMetaData(g).Set(vtkMultiBlockDataSet.NAME(), name)
+                result.SetBlock(number, group)
+                result.GetMetaData(number).Set(vtkMultiBlockDataSet.NAME(), key)
             return 1
 
     def _vtk_array(name, values):
@@ -231,6 +271,19 @@ if smproxy is not None:
         for name, values in (cells or {}).items():
             poly.GetCellData().AddArray(_vtk_array(name, values))
         return poly
+
+    def _rectilinear(grid, cells, ghosts) -> vtkRectilinearGrid:
+        out = vtkRectilinearGrid()
+        out.SetDimensions(grid.nx + 1, grid.ny + 1, 1)
+        out.SetXCoordinates(numpy_to_vtk(np.ascontiguousarray(grid.x, np.float64), deep=True))
+        out.SetYCoordinates(numpy_to_vtk(np.ascontiguousarray(grid.y, np.float64), deep=True))
+        out.SetZCoordinates(numpy_to_vtk(np.zeros(1, np.float64), deep=True))
+        for name, values in cells.items():
+            out.GetCellData().AddArray(_vtk_array(name, values))
+        ghost = numpy_to_vtk(ghosts, deep=True)
+        ghost.SetName("vtkGhostType")
+        out.GetCellData().AddArray(ghost)
+        return out
 
     def _grid(dims, points, arrays) -> vtkStructuredGrid:
         grid = vtkStructuredGrid()

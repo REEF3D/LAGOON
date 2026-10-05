@@ -35,13 +35,14 @@ from typing import Any
 
 import numpy as np
 
+from lagoon_format.amr import AmrSet, AmrWriter
 from lagoon_format.bodies import BodySet, BodyWriter
 from lagoon_format.particles import ParticleSet, ParticleWriter
 from lagoon_format.series import ProfileSet, ProfileWriter, Table, write_table
 from lagoon_format.zarr3 import Array, Group, ZarrError, codecs_for, node_type
 
 FORMAT = "lagoon"
-VERSION = "0.2"
+VERSION = "0.3"
 GRIDS = ("sigma", "cartesian", "surface")
 #: per-output arrays of the grid itself, not variables
 GRID_ARRAYS = {"sigma": ("z_bed", "z_surface", "z_offset"), "cartesian": (), "surface": ("z",)}
@@ -400,6 +401,13 @@ class Store:
             for key in info.get("particles", particles.members()):
                 if key in particles:
                     self.particles[key] = ParticleSet.open(particles.group(key))
+        #: adaptive mesh refinement surfaces (SPEC 11), by key
+        self.amr: dict[str, AmrSet] = {}
+        if "amr" in self.root:
+            amr = self.root.group("amr")
+            for key in info.get("amr", amr.members()):
+                if key in amr:
+                    self.amr[key] = AmrSet.open(amr.group(key))
 
     @property
     def run_id(self) -> str | None:
@@ -548,6 +556,7 @@ class StoreWriter:
         self.writers: dict[str, OutputWriter] = {}
         self.body_writers: list[BodyWriter] = []
         self.particle_writers: list[ParticleWriter] = []
+        self.amr_writers: list[AmrWriter] = []
 
     @classmethod
     def create(
@@ -733,6 +742,22 @@ class StoreWriter:
         self._list("particles", key)
         return writer
 
+    def amr_writer(self, key: str, create: dict[str, Any] | None = None) -> AmrWriter:
+        """The writer of an AMR set; ``create`` (the arguments of
+        :meth:`AmrWriter.create` after the key) makes it new (or replaces it)."""
+        if "amr" not in self.root:
+            Group.create(self.path / "amr")
+        parent = self.root.group("amr")
+        if key in parent and create is None:
+            writer = AmrWriter(parent.group(key))
+        else:
+            if key in parent:
+                _remove_tree(parent.path / key)
+            writer = AmrWriter.create(parent, key, **(create or {"fields": {}}))
+        self.amr_writers.append(writer)
+        self._list("amr", key)
+        return writer
+
     def output(self, name: str, shard_time: int = 16, tile: int = 64) -> OutputWriter:
         """The writer of an existing output group (to append to it)."""
         writer = self.writers.get(name)
@@ -747,3 +772,5 @@ class StoreWriter:
             body_writer.close()
         for particle_writer in self.particle_writers:
             particle_writer.close()
+        for amr_writer in self.amr_writers:
+            amr_writer.close()

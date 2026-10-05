@@ -1,14 +1,17 @@
 # LAGOON data format specification
 
-Version: 0.2 (5 October 2026)
+Version: 0.3 (5 October 2026)
 Status: σ-grid volumes (FNPF, NHFLOW), Cartesian volumes (CFD), structured
 surfaces (free surface, bed), time series (wave gauges, 6DOF, forces), wave
-profiles, floating bodies, particles (CPM, NHFLOW) and objects (DEM elements, ice
-floes, rod trees, mooring lines) are specified and implemented: the reference
-reader and writer `lagoon_format` 0.2.0, the converter `lagoon-convert`, and
-REEF3D's own store output (`P 18`) for volumes, surfaces, bodies, NHFLOW
-particles, DEM elements and ice floes. How to make and read stores:
-[GUIDE.md](GUIDE.md).
+profiles, floating bodies, particles (CPM, NHFLOW), objects (DEM elements, ice
+floes, rod trees, mooring lines) and adaptive mesh refinement surfaces (FNPF,
+NHFLOW, SFLOW) are specified and implemented: the reference reader and writer
+`lagoon_format` 0.3.0, the converter `lagoon-convert`, and REEF3D's own store
+output (`P 18`) for volumes, surfaces, bodies, NHFLOW particles, DEM elements,
+ice floes and AMR surfaces. How to make and read stores: [GUIDE.md](GUIDE.md).
+
+Changes in 0.3: adaptive mesh refinement surfaces (section 11). A 0.2 reader
+opens 0.3 stores and ignores the new group.
 
 Changes in 0.2: time series tables (section 7), wave profiles (section 8),
 floating bodies (section 9), particles and objects (section 10). A 0.1 reader
@@ -71,6 +74,8 @@ case/
       nhflow_body/               time/, step/, body_0/vertices triangles translation rotation
     particles/                   particles and objects (section 10)
       cfd_particles/             time/, step/, point_end/, position/, point_data/velocity ...
+    amr/                         adaptive mesh refinement surfaces (section 11)
+      fnpf_amr/                  time/, step/, grid_end/, grids/, x/, y/, cell_data/eta ...
 ```
 
 Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
@@ -83,7 +88,7 @@ Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
 {"zarr_format": 3, "node_type": "group",
  "attributes": {
    "lagoon": {
-     "format": "lagoon", "version": "0.2",
+     "format": "lagoon", "version": "0.3",
      "solver": "FNPF",
      "outputs": ["volume", "free_surface", "bed"],
      "created_by": "lagoon-convert 0.2.0 (lagoon-format 0.2.0)",
@@ -97,8 +102,8 @@ Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
 - `version`: `major.minor` of this specification. A reader accepts stores of the
   same major version and ignores attributes, groups and arrays it does not know.
 - `outputs`: the output groups in the store (section 2).
-- `series`, `profiles`, `bodies`, `particles`: the time series tables, wave
-  profile sets, body sets and particle sets (sections 7 to 10), optional.
+- `series`, `profiles`, `bodies`, `particles`, `amr`: the time series tables, wave
+  profile sets, body sets, particle sets and AMR sets (sections 7 to 11), optional.
 - `reef3d_run`: the `run` record of the run log (RUN.md), unchanged, when known.
 - `units`: optional, as in RUN.md (`{"length": "m", "time": "s", ...}`); SI if absent.
 
@@ -482,6 +487,58 @@ floes (`fnpf_ice`). It writes every output at once, the inner chunk being filled
 again with each output, so a store can be read during a run; `P 18 1` leaves out
 their VTP files.
 
-## 11. To be specified
+## 11. Adaptive mesh refinement surfaces
+
+REEF3D's AMR solvers (FNPF, NHFLOW and SFLOW with `A 270`) compute the free
+surface on a level-0 grid and on refined patches, each finer by a factor of 2 per
+level. The patches change as the solution is regridded. Every output is a set of
+2D rectilinear grids: level 0 (one grid per MPI rank) and the patches, each with
+cell values. An *AMR set* `amr/<key>` keeps the grids of all outputs one after
+another:
+
+```json
+{"lagoon": {"kind": "amr", "dataset": "nhflow_amr", "role": "amr",
+            "source": "REEF3D_NHFLOW_AMR", "refinement": 2,
+            "fields": {"eta": {"components": 1, "data_type": "float32", "array": "eta"},
+                       "elevation": {"components": 1, "data_type": "float32",
+                                     "array": "elevation"}}}}
+```
+
+- `fields`: the cell fields, as for particle sets (section 10): components, data
+  type, and the array that holds them.
+- `refinement`: optional, the factor between the cell sizes of two levels.
+
+| array                 | shape     | dtype   | content |
+|-----------------------|-----------|---------|---------|
+| `time`                | (nt,)     | float64 | time of each output [s]; counts the outputs, extended last |
+| `step`                | (nt,)     | int64   | output number |
+| `grid_end`            | (nt,)     | int64   | end of each output's grids: output t has grids `grid_end[t-1]` … `grid_end[t]-1` |
+| `grids/level`         | (ng,)     | int32   | refinement level, 0 the coarsest |
+| `grids/rank`          | (ng,)     | int32   | MPI rank that wrote the grid; −1 if not known |
+| `grids/size`          | (ng, 2)   | int32   | `[nx, ny]`, cells in x and y |
+| `grids/x_end`, `grids/y_end` | (ng,) | int64 | end of each grid's node coordinates in `x`, `y` |
+| `grids/cell_end`      | (ng,)     | int64   | end of each grid's cells in the cell fields |
+| `x`, `y`              | (nn,)     | float64 | node coordinates of each grid, rising (`nx + 1`, `ny + 1` per grid) [m] |
+| `cell_data/<array>`   | (nc[, c]) | as written | cell values of each grid, `nx · ny` per grid, x fastest |
+
+A grid's cells are the rectangles between its nodes; cell `(i, j)` lies between
+`x[i]`, `x[i+1]` and `y[j]`, `y[j+1]`. An output lists level 0 first, then the
+patches, as REEF3D writes them. Where grids of different levels overlap, the
+finest one holds the solution: a cell whose centre lies inside a grid of a higher
+level is covered. The surface is drawn as the cells that are not covered (the leaf
+cells), at the height of `elevation` (`eta` plus the still water depth) where the
+set has it.
+
+The growing arrays are sharded as particle sets are (shards of 1,048,576 rows,
+inner chunks of 65,536 rows, codecs as for fields); writers keep rows and write
+them in large pieces, `time` last.
+
+`lagoon-convert` writes the AMR output of `REEF3D_<SOLVER>_AMR` (an index
+`REEF3D-<SOLVER>-AMR-<output>.vtm` per output and a VTK rectilinear grid per grid)
+as the set `<solver>_amr`, the fields as float32 (integer fields such as SFLOW's `wetdry` as int32). REEF3D writes the set itself
+with `P 18` (rank 0 gathers the patches of all ranks, `lagoon_amr`); `P 18 1`
+leaves out the `.vtm` and `.vtr` files.
+
+## 12. To be specified
 
 - Particle tracks by particle id (from `id` fields) for path lines.
