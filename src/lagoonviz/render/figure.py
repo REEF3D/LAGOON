@@ -31,6 +31,35 @@ WIDTHS = {"single column": 90.0, "1.5 columns": 140.0, "double column": 190.0}
 FORMATS = (".pdf", ".svg", ".eps", ".png", ".tif", ".tiff", ".jpg")
 PROBE_COLOR = "#e07b39"
 
+#: house styles: fonts, line widths and line colours of a kind of figure
+REEF3D_LINES = ["#2a5aa0", "#de5a45", "#3a9a5b", "#c9a227", "#8e5bb0", "#4f8fcf", "#6b6b6b"]
+STYLES: dict[str, dict] = {
+    # the group's papers: REEF3D blue and red first, sans serif, thin lines
+    "REEF3D": {
+        "font_family": "sans-serif",
+        "font_size": 8.0,
+        "line_width": 1.0,
+        "palette": REEF3D_LINES,
+        "grid": False,
+    },
+    # journals that set text in a serif face: black first, then the REEF3D colours
+    "Journal (serif)": {
+        "font_family": "serif",
+        "font_size": 8.0,
+        "line_width": 0.8,
+        "palette": ["#000000", "#c4302b", "#2a5aa0", "#3a9a5b", "#8e5bb0", "#808080"],
+        "grid": False,
+    },
+    # slides: large text, thick lines, a light grid
+    "Presentation": {
+        "font_family": "sans-serif",
+        "font_size": 14.0,
+        "line_width": 2.0,
+        "palette": REEF3D_LINES,
+        "grid": True,
+    },
+}
+
 
 @dataclass
 class FigureSpec:
@@ -45,6 +74,17 @@ class FigureSpec:
     title: str = ""
     time_cursor: bool = True  # a line at the scene's time in time-series figures
     palette: list[str] = field(default_factory=lambda: list(SERIES_PALETTES["light"]))
+    line_width: float = 1.0  # points
+    grid: bool = False
+    style: str = ""
+
+    @classmethod
+    def from_style(cls, name: str, **overrides) -> FigureSpec:
+        """A figure in a house style (``STYLES``), with some settings changed."""
+        values = dict(STYLES.get(name, STYLES["REEF3D"]))
+        values["palette"] = list(values["palette"])
+        values.update({k: v for k, v in overrides.items() if v is not None})
+        return cls(style=name, **values)
 
     def rc(self) -> dict:
         """matplotlib settings for this figure (used in a context, nothing global)."""
@@ -56,8 +96,11 @@ class FigureSpec:
             "xtick.labelsize": self.font_size * 0.9,
             "ytick.labelsize": self.font_size * 0.9,
             "legend.fontsize": self.font_size * 0.9,
-            "axes.linewidth": 0.6,
-            "lines.linewidth": 1.0,
+            "axes.linewidth": 0.6 * max(self.line_width, 1.0),
+            "lines.linewidth": self.line_width,
+            "axes.grid": self.grid,
+            "grid.linewidth": 0.4,
+            "grid.color": "0.85",
             "xtick.major.width": 0.6,
             "ytick.major.width": 0.6,
             "xtick.direction": "in",
@@ -189,6 +232,120 @@ def profile_figure(session: Session, spec: FigureSpec | None = None, time: float
             ax.legend(loc="best")
         when = session.scene.time if time is None else time
         ax.set_title(spec.title or f"t = {when:.2f} s", loc="left")
+    return figure
+
+
+# ======================================================================== spectra
+def spectrum_figure(
+    session: Session,
+    spec: FigureSpec | None = None,
+    rows: list[tuple[str, list[Trace]]] | None = None,
+    start: float | None = None,
+    end: float | None = None,
+):
+    """Variance density spectra of the time series (wave gauges): one panel per
+    item, a line per column with its Hm0 and Tp in the legend."""
+    from lagoonviz.core.analysis import spectrum, wave_parameters
+
+    spec = spec or FigureSpec()
+    rows = series_rows(session) if rows is None else rows
+    if not rows:
+        raise ValueError("no time series to analyse: add a wave gauge file to the scene")
+    with _context(spec):
+        figure = _figure(spec, 34.0 * len(rows) + 14.0)
+        axes = figure.subplots(len(rows), 1, sharex=True, squeeze=False)[:, 0]
+        highest = 0.0
+        for ax, (item_id, traces) in zip(axes, rows, strict=True):
+            units = {t.unit for t in traces}
+            for index, trace in enumerate(traces):
+                try:
+                    f, s = spectrum(trace.time, trace.values, start=start, end=end)
+                except ValueError:
+                    continue
+                waves = wave_parameters(f, s)
+                color = (
+                    PROBE_COLOR if item_id == "probe" else spec.palette[index % len(spec.palette)]
+                )
+                unit = f" {trace.unit}" if trace.unit else ""
+                label = (
+                    f"{trace.name}: $H_{{m0}}$ = {waves.hm0:.3g}{unit}, $T_p$ = {waves.tp:.3g} s"
+                )
+                ax.plot(f, s, color=color, label=label)
+                # up to where the spectrum has fallen to half a percent of its peak
+                above = np.flatnonzero(s > 0.005 * s.max()) if s.size and s.max() > 0 else []
+                if len(above):
+                    highest = max(highest, 1.3 * float(f[above[-1]]))
+            unit = units.pop() if len(units) == 1 else ""
+            ax.set_ylabel(f"S [{unit}$^2$/Hz]" if unit else "S [1/Hz]")
+            top = max((line.get_ydata().max() for line in ax.get_lines()), default=1.0)
+            ax.set_ylim(0, 1.45 * top)  # room for the legend above the peaks
+            ax.legend(loc="upper right")
+            ax.set_title(_row_name(session, item_id), loc="left")
+        if highest > 0:
+            axes[0].set_xlim(0, highest)
+        axes[-1].set_xlabel("f [Hz]")
+        if spec.title:
+            figure.suptitle(spec.title)
+    return figure
+
+
+# ======================================================================== validation
+def validation_figure(
+    trace: Trace,
+    measured_time: np.ndarray,
+    measured: np.ndarray,
+    spec: FigureSpec | None = None,
+    measured_name: str = "measured",
+    start: float | None = None,
+    end: float | None = None,
+):
+    """A computed series against measurements: both over time where they overlap,
+    with RMSE, bias, correlation and Willmott's skill in the corner."""
+    from lagoonviz.core.analysis import compare
+
+    spec = spec or FigureSpec()
+    stats = compare(trace.time, trace.values, measured_time, measured, start, end)
+    with _context(spec):
+        figure = _figure(spec, 55.0)
+        ax = figure.subplots()
+        keep = (measured_time >= stats.start) & (measured_time <= stats.end)
+        model = (trace.time >= stats.start) & (trace.time <= stats.end)
+        ax.plot(
+            measured_time[keep],
+            measured[keep],
+            color="0.15",
+            linestyle="none",
+            marker="o",
+            markersize=max(1.5, spec.line_width * 1.6),
+            markerfacecolor="none",
+            markeredgewidth=0.5 * spec.line_width,
+            label=measured_name,
+        )
+        ax.plot(
+            trace.time[model],
+            trace.values[model],
+            color=spec.palette[0],
+            label=f"{trace.name} (REEF3D)",
+        )
+        unit = f" {trace.unit}" if trace.unit else ""
+        # the legend above the plot, clear of the data; the numbers in a box
+        ax.text(
+            0.01,
+            0.03,
+            f"RMSE = {stats.rmse:.3g}{unit}, bias = {stats.bias:.2g}{unit}, "
+            f"r = {stats.r:.3f}, d = {stats.skill:.3f}",
+            transform=ax.transAxes,
+            fontsize=spec.font_size * 0.85,
+            va="bottom",
+            bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.85, "pad": 1.5},
+        )
+        ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncols=2, borderaxespad=0.2)
+        ax.set_xlabel("t [s]")
+        ax.set_ylabel(_label(trace.name, trace.unit))
+        ax.margins(x=0)
+        if spec.title:
+            figure.suptitle(spec.title)
+    figure.comparison = stats
     return figure
 
 

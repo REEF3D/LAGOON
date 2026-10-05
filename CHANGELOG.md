@@ -12,6 +12,16 @@
   same from Python.
 - Fix: range min and max can be typed while the range is automatic (typing
   fixes the range).
+- House styles for figures: REEF3D (sans serif, REEF3D blue and red first, thin
+  lines), Journal (serif; black first) and Presentation (large text, thick
+  lines, a grid); a style sets fonts, line widths and line colours, the dialog
+  can still change the font.
+- Figure templates: wave spectra of the plotted gauges (Welch, Hann windows; the
+  legend gives Hm0 and Tp; a time window to leave out the start), and a
+  comparison of a plotted line with measurements from a text or CSV file
+  (computed line, measured points, RMSE, bias, correlation r and Willmott's
+  skill d). `lagoonviz.core.analysis` has the numbers (spectrum,
+  wave_parameters, compare, read_measurements).
 
 ## 0.3.0.dev0 (phase 3, LAGOON format; in progress)
 

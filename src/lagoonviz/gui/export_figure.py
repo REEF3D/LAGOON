@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Architect: Hans Bihs
-"""File → Export figure: the plots, the wave profiles or the 3D view as a paper
-figure (PDF, SVG, EPS, PNG, TIFF), drawn again with matplotlib at a journal width."""
+"""File → Export figure: the plots, wave spectra, a comparison with measurements,
+the wave profiles or the 3D view as a paper figure (PDF, SVG, EPS, PNG, TIFF),
+drawn again with matplotlib at a journal width in a house style."""
 
 from __future__ import annotations
 
@@ -37,7 +38,15 @@ from lagoonviz.core import Session
 log = logging.getLogger("lagoon.gui")
 
 #: what can be exported: key, label
-CONTENTS = (("series", "Plots (time series)"), ("profiles", "Wave profiles"), ("view", "3D view"))
+CONTENTS = (
+    ("series", "Plots (time series)"),
+    ("spectra", "Wave spectra of the plots"),
+    ("validation", "Compare with measurements"),
+    ("profiles", "Wave profiles"),
+    ("view", "3D view"),
+)
+#: contents drawn from the plotted time series
+FROM_SERIES = ("series", "spectra", "validation")
 CUSTOM = "Custom"
 
 
@@ -46,7 +55,7 @@ def available_contents(session: Session, has_rows: bool) -> list[tuple[str, str]
     data = session.data
     found = []
     for key, label in CONTENTS:
-        if key == "series" and not has_rows:
+        if key in FROM_SERIES and not has_rows:
             continue
         if key == "profiles" and not any(
             session.scene.get(i).visible and data.profile_lines(i) for i in data.profile_items()
@@ -59,17 +68,69 @@ def available_contents(session: Session, has_rows: bool) -> list[tuple[str, str]
 
 
 class ExportFigureDialog(QDialog):
-    def __init__(self, parent: QWidget, contents: list[tuple[str, str]], folder: str) -> None:
+    def __init__(
+        self,
+        parent: QWidget,
+        contents: list[tuple[str, str]],
+        folder: str,
+        lines: list[tuple[str, int, str]] | None = None,
+    ) -> None:
+        """``lines``: (label, row, column) of the plotted lines, for comparisons."""
         super().__init__(parent)
-        from lagoonviz.render.figure import WIDTHS
+        from lagoonviz.render.figure import STYLES, WIDTHS
 
         self.setWindowTitle("Export figure")
         self._folder = folder
         form = QFormLayout()
+        self.form = form
         self.content = QComboBox()
         for key, label in contents:
             self.content.addItem(label, key)
         form.addRow("Figure of", self.content)
+
+        self.style = QComboBox()
+        for name in STYLES:
+            self.style.addItem(name)
+        self.style.setToolTip("House style: fonts, line widths and line colours")
+        form.addRow("Style", self.style)
+
+        # comparisons: one plotted line against a measured file
+        self.line = QComboBox()
+        for label, row, column in lines or []:
+            self.line.addItem(label, (row, column))
+        self.measured = QLineEdit()
+        self.measured.setPlaceholderText("time and values in columns (text, CSV)")
+        self.measured.editingFinished.connect(self._read_columns)
+        measured_browse = QPushButton("Browse…")
+        measured_browse.clicked.connect(self._browse_measured)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.measured, 1)
+        row.addWidget(measured_browse)
+        self.measured_row = QWidget()
+        self.measured_row.setLayout(row)
+        self.measured_column = QComboBox()
+        form.addRow("Computed", self.line)
+        form.addRow("Measured file", self.measured_row)
+        form.addRow("Measured column", self.measured_column)
+
+        # spectra and comparisons: the part of the run to use
+        self.start = QDoubleSpinBox()
+        self.end = QDoubleSpinBox()
+        for box, text in ((self.start, "from the start"), (self.end, "to the end")):
+            box.setRange(0, 1e7)
+            box.setDecimals(2)
+            box.setSuffix(" s")
+            box.setSpecialValueText(text)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.start)
+        row.addWidget(QLabel("to"))
+        row.addWidget(self.end)
+        self.window_row = QWidget()
+        self.window_row.setLayout(row)
+        form.addRow("Time window", self.window_row)
+        self.content.currentIndexChanged.connect(self._content_chosen)
 
         self.width_choice = QComboBox()
         for name, width in WIDTHS.items():
@@ -126,6 +187,8 @@ class ExportFigureDialog(QDialog):
             else "No LaTeX found; $...$ in labels still works through matplotlib's mathtext"
         )
         form.addRow("", self.usetex)
+        self.style.currentTextChanged.connect(self._style_chosen)
+        self._content_chosen()
 
         self.title = QLineEdit()
         self.title.setPlaceholderText("automatic (time) or none")
@@ -159,6 +222,37 @@ class ExportFigureDialog(QDialog):
         layout.addWidget(self.preview, 1)
         layout.addWidget(buttons)
 
+    def _content_chosen(self) -> None:
+        """Only the settings the chosen figure uses."""
+        content = self.content.currentData()
+        comparing = content == "validation"
+        for widget in (self.line, self.measured_row, self.measured_column):
+            self.form.setRowVisible(widget, comparing)
+        self.form.setRowVisible(self.window_row, content in ("spectra", "validation"))
+
+    def _browse_measured(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Measured time series", self._folder, "Time series (*.dat *.txt *.csv);;All (*)"
+        )
+        if path:
+            self.measured.setText(path)
+            self._read_columns()
+
+    def _read_columns(self) -> None:
+        from lagoonviz.core.analysis import read_measurements
+
+        self.measured_column.clear()
+        text = self.measured.text().strip()
+        if not text:
+            return
+        try:
+            _time, columns = read_measurements(Path(text).expanduser())
+        except (OSError, ValueError) as error:
+            self.measured_column.addItem(f"cannot read: {error}", None)
+            return
+        for name in columns:
+            self.measured_column.addItem(name, name)
+
     def _width_chosen(self) -> None:
         width = self.width_choice.currentData()
         self.width.setEnabled(width is None)
@@ -175,9 +269,25 @@ class ExportFigureDialog(QDialog):
         if path:
             self.path.setText(path)
 
+    def _style_chosen(self, name: str) -> None:
+        """A style sets the font; the boxes can still change it."""
+        from lagoonviz.render.figure import STYLES
+
+        style = STYLES.get(name)
+        if style is None:
+            return
+        self.font_size.setValue(style["font_size"])
+        self.font_family.setCurrentIndex(max(self.font_family.findData(style["font_family"]), 0))
+
     def settings(self) -> dict:
         return {
             "content": self.content.currentData(),
+            "style": self.style.currentText(),
+            "line": self.line.currentData(),
+            "measured": self.measured.text().strip(),
+            "measured_column": self.measured_column.currentData(),
+            "start": self.start.value() or None,
+            "end": self.end.value() or None,
             "width_mm": self.width.value(),
             "height_mm": self.height.value() or None,
             "font_size": self.font_size.value(),
@@ -207,9 +317,18 @@ class ExportFigureDialog(QDialog):
 
 def make_figure(window, settings: dict, dpi: int | None = None):
     """The matplotlib figure for the dialog's settings (``dpi`` overrides, for previews)."""
-    from lagoonviz.render.figure import FigureSpec, profile_figure, series_figure, view_figure
+    from lagoonviz.core.analysis import read_measurements
+    from lagoonviz.render.figure import (
+        FigureSpec,
+        profile_figure,
+        series_figure,
+        spectrum_figure,
+        validation_figure,
+        view_figure,
+    )
 
-    spec = FigureSpec(
+    spec = FigureSpec.from_style(
+        settings.get("style", "REEF3D"),
         width_mm=settings["width_mm"],
         height_mm=settings["height_mm"],
         dpi=dpi or settings["dpi"],
@@ -220,9 +339,28 @@ def make_figure(window, settings: dict, dpi: int | None = None):
     )
     session = window.session
     content = settings["content"]
+    rows = window.plots.shown_rows()
     if content == "series":
-        return series_figure(
-            session, spec, rows=window.plots.shown_rows(), window=window.plots.time_window()
+        return series_figure(session, spec, rows=rows, window=window.plots.time_window()), spec
+    if content == "spectra":
+        return spectrum_figure(
+            session, spec, rows=rows, start=settings.get("start"), end=settings.get("end")
+        ), spec
+    if content == "validation":
+        if not settings.get("measured") or not settings.get("measured_column"):
+            raise ValueError("choose a measured file and its column")
+        row, column = settings["line"]
+        trace = rows[row][1][column]
+        time, columns = read_measurements(Path(settings["measured"]).expanduser())
+        name = f"{Path(settings['measured']).stem} {settings['measured_column']}"
+        return validation_figure(
+            trace,
+            time,
+            columns[settings["measured_column"]],
+            spec,
+            name,
+            settings.get("start"),
+            settings.get("end"),
         ), spec
     if content == "profiles":
         return profile_figure(session, spec), spec
@@ -248,6 +386,12 @@ def _preview_image(window, settings: dict) -> QImage:
     return image
 
 
+def _row_label(session: Session, item_id: str) -> str:
+    if item_id in session.scene:
+        return session.scene.get(item_id).name
+    return item_id
+
+
 def export_figure(window) -> str | None:
     """Ask for the settings, draw the figure and save it. Returns the written path."""
     from lagoonviz.gui.export_movie import movie_folder
@@ -266,7 +410,12 @@ def export_figure(window) -> str | None:
             window, "Export figure", "Open a case first: there is nothing to draw."
         )
         return None
-    dialog = ExportFigureDialog(window, contents, str(movie_folder(session)))
+    lines = [
+        (f"{trace.name} ({_row_label(session, item_id)})", r, c)
+        for r, (item_id, traces) in enumerate(window.plots.shown_rows())
+        for c, trace in enumerate(traces)
+    ]
+    dialog = ExportFigureDialog(window, contents, str(movie_folder(session)), lines)
     dialog.render_preview = lambda settings: _preview_image(window, settings)
     if dialog.exec() != QDialog.Accepted:
         return None

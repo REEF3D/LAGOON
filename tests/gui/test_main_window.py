@@ -676,7 +676,7 @@ def test_export_figure(window, tmp_path, qtbot):
     window.session.set_time(1.0)
     window.plots.refresh()
     keys = [key for key, _ in available_contents(window.session, bool(window.plots.shown_rows()))]
-    assert keys[:2] == ["series", "profiles"]
+    assert keys[:4] == ["series", "spectra", "validation", "profiles"]
     settings = {
         "width_mm": 90.0,
         "height_mm": None,
@@ -686,8 +686,26 @@ def test_export_figure(window, tmp_path, qtbot):
         "usetex": False,
         "title": "",
     }
-    for content in ("series", "profiles"):
+    for content in ("series", "spectra", "profiles"):
         figure, spec = make_figure(window, {**settings, "content": content})
         path = save_figure(figure, tmp_path / f"{content}.pdf", spec)
         assert path.stat().st_size > 1000
+    # a plotted gauge against a "measured" file (here: the same gauge, written out)
+    trace = window.plots.shown_rows()[0][1][0]
+    lab = tmp_path / "lab.txt"
+    lab.write_text(
+        "time WG1\n" + "".join(f"{t} {v}\n" for t, v in zip(trace.time, trace.values, strict=True))
+    )
+    figure, spec = make_figure(
+        window,
+        {
+            **settings,
+            "content": "validation",
+            "style": "Journal (serif)",
+            "line": (0, 0),
+            "measured": str(lab),
+            "measured_column": "WG1",
+        },
+    )
+    assert figure.comparison.rmse < 1e-6 and spec.font_family == "serif"
     assert window.act_export_figure.shortcut().toString() == "Ctrl+Shift+P"

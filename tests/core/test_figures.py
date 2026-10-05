@@ -75,3 +75,48 @@ def test_nothing_to_draw(tmp_path):
     s = Session()
     with pytest.raises(ValueError):
         series_figure(s)
+
+
+def test_house_styles():
+    from lagoonviz.render.figure import STYLES
+
+    journal = FigureSpec.from_style("Journal (serif)", width_mm=140)
+    assert journal.font_family == "serif" and journal.width_mm == 140
+    assert journal.palette[0] == "#000000" and journal.rc()["lines.linewidth"] == 0.8
+    slides = FigureSpec.from_style("Presentation", font_size=None)  # None: the style's
+    assert slides.font_size == 14 and slides.rc()["axes.grid"] is True
+    assert set(STYLES) >= {"REEF3D", "Journal (serif)", "Presentation"}
+    assert FigureSpec.from_style("unknown").font_family == "sans-serif"
+
+
+def test_spectrum_figure(session, tmp_path):
+    from lagoonviz.render.figure import spectrum_figure
+
+    figure = spectrum_figure(session, FigureSpec.from_style("REEF3D"))
+    axes = figure.get_axes()
+    assert axes[-1].get_xlabel() == "f [Hz]"
+    assert "H_{m0}" in axes[0].get_legend().get_texts()[0].get_text()
+    save_figure(figure, tmp_path / "spectra.pdf")
+
+
+def test_validation_figure(session, tmp_path):
+    from lagoonviz.core.analysis import read_measurements
+    from lagoonviz.render.figure import series_rows, validation_figure
+
+    trace = series_rows(session)[0][1][0]  # the first wave gauge
+    lab = tmp_path / "lab.dat"
+    t = np.linspace(0, 1.5, 31)
+    lab.write_text(
+        "t WG\n"
+        + "".join(
+            f"{a} {b}\n"
+            for a, b in zip(t, np.interp(t, trace.time, trace.values) + 0.002, strict=True)
+        )
+    )
+    time, columns = read_measurements(lab)
+    figure = validation_figure(trace, time, columns["WG"], FigureSpec(), "flume")
+    stats = figure.comparison
+    assert stats.bias == pytest.approx(-0.002, abs=1e-4) and stats.r == pytest.approx(1, abs=1e-3)
+    texts = [t.get_text() for t in figure.get_axes()[0].texts]
+    assert any("RMSE" in text and "d =" in text for text in texts)
+    save_figure(figure, tmp_path / "validation.pdf")
