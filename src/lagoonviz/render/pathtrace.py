@@ -760,6 +760,29 @@ def render_folder(
     return [p for p in images if p.exists()]
 
 
+def blender_progress(line: str) -> str | None:
+    """What a line of Blender's output says about how far it is, briefly ("sample
+    40/128, 00:45 left", "compiling GPU kernels", LAGOON's own steps), or None."""
+    import re
+
+    line = line.strip()
+    if line.startswith("LAGOON "):
+        return line[len("LAGOON ") :]
+    sample = re.search(r"Sample (\d+)/(\d+)", line)
+    if sample:
+        left = re.search(r"Remaining:\s*([0-9:.]+)", line)
+        text = f"sample {sample.group(1)}/{sample.group(2)}"
+        return f"{text}, {left.group(1)} left" if left else text
+    lowered = line.lower()
+    if "compil" in lowered and ("kernel" in lowered or "shader" in lowered):
+        return "compiling Cycles' GPU kernels (the first time with new features: minutes)"
+    if "loading render kernels" in lowered:
+        return "loading Cycles' kernels"
+    if "synchroniz" in lowered or ("updating" in lowered and "mesh" in lowered):
+        return "preparing the scene in Cycles"
+    return None
+
+
 def encode_images(images: list[Path], path: Path, fps: float) -> Path:
     """Numbered PNGs into an H.264 film with imageio-ffmpeg's ffmpeg."""
     import imageio_ffmpeg

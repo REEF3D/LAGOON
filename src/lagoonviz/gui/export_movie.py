@@ -393,7 +393,7 @@ def _path_trace(session, path, times, settings, style, progress, blender) -> Pat
     Blender renders in a background thread while the dialog shows the frames done
     and the time left. Stop ends Blender; the frames done are kept, and exporting
     again goes on from them (frames whose data, camera and settings are unchanged)."""
-    from lagoonviz.render.pathtrace import export_scene, finish, work_folder
+    from lagoonviz.render.pathtrace import blender_progress, export_scene, finish, work_folder
 
     work = work_folder(path)
 
@@ -413,7 +413,13 @@ def _path_trace(session, path, times, settings, style, progress, blender) -> Pat
     if progress.wasCanceled():
         return None
     progress.setValue(0)
-    state: dict = {"done": 0, "total": len(times), "result": None, "error": None}
+    state: dict = {"done": 0, "total": len(times), "result": None, "error": None, "now": ""}
+
+    def heard(line: str) -> None:
+        text = blender_progress(line)
+        if text:
+            state["now"] = text
+
     stop = threading.Event()
 
     def report(done: int, total: int) -> bool:
@@ -423,7 +429,14 @@ def _path_trace(session, path, times, settings, style, progress, blender) -> Pat
     def run() -> None:
         try:
             state["result"] = finish(
-                work, path, settings["fps"], blender, report, resume=True, cancel=stop.is_set
+                work,
+                path,
+                settings["fps"],
+                blender,
+                report,
+                resume=True,
+                cancel=stop.is_set,
+                status=heard,
             )
         except Exception as error:  # noqa: BLE001 (reported below)
             log.error("path tracing failed:\n%s", traceback.format_exc())
@@ -438,7 +451,11 @@ def _path_trace(session, path, times, settings, style, progress, blender) -> Pat
         progress.setValue(done)
         elapsed = time_module.monotonic() - started
         left = f", about {_duration(elapsed / done * (total - done))} left" if done else ""
-        progress.setLabelText(f"Blender Cycles: frame {done} of {total} done{left}")
+        now = f"\n{state['now']}" if state["now"] else "\nstarting Blender…"
+        progress.setLabelText(
+            f"Blender Cycles: frame {done} of {total} done{left}{now}\n"
+            f"(Blender's log: {work / 'blender.log'})"
+        )
         QApplication.processEvents()
         if progress.wasCanceled():
             stop.set()

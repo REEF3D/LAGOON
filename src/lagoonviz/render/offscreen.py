@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _path_trace(session: Session, args, size: tuple[int, int]) -> int:
-    from lagoonviz.render.pathtrace import path_trace
+    from lagoonviz.render.pathtrace import blender_progress, path_trace
 
     output = Path(args.output)
     look = args.style if args.style != "studio" else "open_ocean"
@@ -153,8 +153,9 @@ def _path_trace(session: Session, args, size: tuple[int, int]) -> int:
 
     def blender_says(line: str) -> None:
         # Blender's own progress (kernels compiling, samples) and LAGOON's steps
-        if line.startswith("LAGOON ") or "Compiling" in line or "Sample" in line:
-            print(f"\r{line[:110]:<110}", end="", flush=True)
+        text = blender_progress(line)
+        if text:
+            print(f"\r{text[:100]:<100}", end="", flush=True)
 
     written = path_trace(
         session,

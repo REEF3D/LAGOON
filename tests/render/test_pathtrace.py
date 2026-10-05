@@ -364,3 +364,16 @@ def test_real_blender(reef3d_run, tmp_path):
         )
         data = out.read_bytes()
         assert data.startswith(b"\x89PNG") and len(data) > 5000, look
+
+
+def test_blender_progress_lines():
+    from lagoonviz.render.pathtrace import blender_progress
+
+    line = (
+        "Fra:1 Mem:120.5M (Peak 130.1M) | Time:00:03.21 | Remaining:00:12.40 | "
+        "Mem:80M, Peak:90M | Scene, ViewLayer | Sample 40/128"
+    )
+    assert blender_progress(line) == "sample 40/128, 00:12.40 left"
+    assert blender_progress("LAGOON rendering frame 1/3 (200 triangles)").startswith("rendering")
+    assert "compiling" in blender_progress("Compiling render kernels")
+    assert blender_progress("Blender 4.2.3 LTS") is None
