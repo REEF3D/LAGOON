@@ -168,4 +168,4 @@ def test_cycles_still_code(tmp_path):
     )
     compile(code, "<code>", "exec")
     assert "session.set_time(1.5)" in code and "session.set_camera(" in code
-    assert "path_trace(" in code and "look='wave_flume'" in code and "samples=128" in code
+    assert "path_trace(" in code and "look='wave_flume'" in code and "samples=64" in code

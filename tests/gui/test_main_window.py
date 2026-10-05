@@ -592,7 +592,7 @@ def test_export_dialog_path_traced(window, reef3d_run, monkeypatch, tmp_path):
     assert not dialog.cycles_row.isHidden() and not dialog.overlay.isEnabled()
     assert not export.isEnabled() and "not found" in dialog.blender_label.text()
     settings = dialog.settings()
-    assert settings["engine"] == "cycles" and settings["samples"] == 128
+    assert settings["engine"] == "cycles" and settings["samples"] == 64
     assert settings["overlay"] is False  # Cycles films show the scene alone
     blender = tmp_path / "blender"
     blender.write_text("")

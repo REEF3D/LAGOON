@@ -232,7 +232,7 @@ def film_code(
     plan: tuple[bool, str] | None = None,
     overlay: bool = False,
     engine: str = "pygfx",
-    samples: int = 128,
+    samples: int = 64,
 ) -> str:
     """File → Export animation (``engine`` "cycles": path traced by Blender)."""
     imports = ["from lagoonviz.render.movie import frame_times, write_movie"]
@@ -286,7 +286,7 @@ def cycles_still_code(
     size: tuple[int, int],
     time: float = 0.0,
     style: str = "open_ocean",
-    samples: int = 128,
+    samples: int = 64,
     camera: dict | None = None,
     plan: tuple[bool, str] | None = None,
 ) -> str:

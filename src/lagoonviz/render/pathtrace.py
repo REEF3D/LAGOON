@@ -521,7 +521,7 @@ def export_scene(
     times: list[float],
     size: tuple[int, int] = (1920, 1080),
     look: str = "open_ocean",
-    samples: int = 128,
+    samples: int = 64,
     progress: Progress | None = None,
 ) -> Path:
     """Write the session at ``times`` for Blender: ``scene.json``, a ``frame_NNNNN.npz``
@@ -827,7 +827,7 @@ def path_trace(
     times: list[float] | None = None,
     size: tuple[int, int] = (1920, 1080),
     look: str = "open_ocean",
-    samples: int = 128,
+    samples: int = 64,
     fps: float = 25.0,
     blender: str | None = None,
     progress: Progress | None = None,

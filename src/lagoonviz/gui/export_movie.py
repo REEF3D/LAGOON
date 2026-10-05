@@ -133,7 +133,7 @@ class ExportAnimationDialog(QDialog):
         form.addRow("Renderer", self.engine)
         self.samples = QSpinBox()
         self.samples.setRange(4, 4096)
-        self.samples.setValue(128)
+        self.samples.setValue(64)
         self.samples.setToolTip("Samples per pixel: more is less noisy and slower")
         self.blender_label = QLabel(
             f"Blender: {self.blender}"
@@ -381,7 +381,7 @@ def _record_film(session: Session, path: Path, settings: dict, style: str) -> No
                 plan=(session.scene.plan_view, session.scene.plan_side),
                 overlay=bool(settings["overlay"]),
                 engine=settings.get("engine", "pygfx"),
-                samples=settings.get("samples", 128),
+                samples=settings.get("samples", 64),
             )
         )
     except Exception:  # noqa: BLE001 (the film is written; only the script misses it)
@@ -477,7 +477,7 @@ def _duration(seconds: float) -> str:
     return f"{seconds / 3600:.1f} h"
 
 
-def render_still(window, samples: int = 128) -> str | None:
+def render_still(window, samples: int = 64) -> str | None:
     """File → Render still with Cycles: the 3D view as it is now, path traced by
     Blender at the view's shape (Full HD width), in the view's look (open ocean for
     the engineering looks). Returns the written path."""

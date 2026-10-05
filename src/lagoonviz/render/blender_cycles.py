@@ -122,16 +122,24 @@ def setup_render(scene, settings: dict) -> str:
     render.image_settings.color_depth = "8"
     cycles = scene.cycles
     cycles.samples = int(settings["samples"])
+    # fast settings for these scenes: a few large smooth surfaces, one water sheet
+    # (light crosses it once or twice), no glass objects; denoised, so few samples do
     for name, value in (
         ("use_adaptive_sampling", True),
+        ("adaptive_threshold", 0.03),  # stop sampling a pixel once it is this clean
+        ("adaptive_min_samples", 8),
         ("use_denoising", True),
-        ("max_bounces", 12),
-        ("glossy_bounces", 6),
-        ("transmission_bounces", 12),
-        ("transparent_max_bounces", 16),
-        ("volume_bounces", 1),
+        ("denoising_use_gpu", True),
+        ("max_bounces", 6),
+        ("diffuse_bounces", 2),
+        ("glossy_bounces", 3),
+        ("transmission_bounces", 4),
+        ("transparent_max_bounces", 4),
+        ("volume_bounces", 0),
+        ("sample_clamp_indirect", 5.0),  # no fireflies from the bright sky and panels
         ("caustics_reflective", False),
         ("caustics_refractive", False),
+        ("blur_glossy", 1.0),
     ):
         try:
             setattr(cycles, name, value)

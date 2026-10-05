@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         default="pygfx",
         help="pygfx: LAGOON's own renderer (fast); cycles: path traced by Blender",
     )
-    cycles.add_argument("--samples", type=int, default=128, help="Cycles samples per pixel")
+    cycles.add_argument("--samples", type=int, default=64, help="Cycles samples per pixel")
     cycles.add_argument("--blender", help="the Blender executable (default: found)")
     cycles.add_argument(
         "--fresh",
