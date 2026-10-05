@@ -135,6 +135,10 @@ class OffscreenView:
             else:
                 self.scene.frame("perspective")
             self._camera_set = True
+        # the camera path through the keyframes, when it is on: the camera of this time
+        state = session.camera_at()
+        if state is not None:
+            self.scene.set_camera_state(state)
 
     def render(self, time: float | None = None) -> np.ndarray:
         """The (h, w, 4) uint8 RGBA image at a time (default: the session's time)."""

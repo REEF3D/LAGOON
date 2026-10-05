@@ -77,6 +77,10 @@ class Scene:
         #: the side the 2D view looks from: "top" (everything drawn flat), or "front",
         #: "back", "right", "left" (an elevation of the shapes as they are)
         self.plan_side: str = "top"
+        #: camera keyframes: [{"time": t, "state": camera state}], in time order
+        self.camera_keys: list[dict[str, Any]] = []
+        #: the views and films follow the camera path through the keys
+        self.camera_path: bool = False
 
     # ------------------------------------------------------------- observers
     def subscribe(self, callback: Observer) -> None:
@@ -192,6 +196,17 @@ class Scene:
         (a reloaded case). Sent as "reset", like loading a session."""
         self._notify("reset", None)
 
+    def set_camera_keys(self, keys: list[dict[str, Any]], path: bool | None = None) -> None:
+        """The camera keyframes (and whether the views follow them); observers get
+        "camera_keys"."""
+        from lagoonviz.core.camera_path import CameraKey, sorted_keys
+
+        ordered = sorted_keys([CameraKey.from_dict(k) for k in keys])
+        self.camera_keys = [k.to_dict() for k in ordered]
+        if path is not None:
+            self.camera_path = bool(path)
+        self._notify("camera_keys", None)
+
     # ------------------------------------------------------------- files
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -200,6 +215,8 @@ class Scene:
             "camera": copy.deepcopy(self.camera),
             "plan_view": self.plan_view,
             "plan_side": self.plan_side,
+            "camera_keys": copy.deepcopy(self.camera_keys),
+            "camera_path": self.camera_path,
             "counters": dict(self._counters),
             "items": [item.to_dict() for item in self._items.values()],
         }
@@ -223,6 +240,13 @@ class Scene:
         self.plan_view = bool(data.get("plan_view", False))
         side = str(data.get("plan_side", "top"))
         self.plan_side = side if side in PLAN_SIDES else "top"
+        keys = data.get("camera_keys", [])
+        self.camera_keys = [
+            {"time": float(k["time"]), "state": dict(k["state"])}
+            for k in keys
+            if isinstance(k, dict) and "time" in k and isinstance(k.get("state"), dict)
+        ]
+        self.camera_path = bool(data.get("camera_path", False)) and bool(self.camera_keys)
         self._notify("reset", None)
 
     def save(self, path: str | Path) -> None:

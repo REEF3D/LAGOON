@@ -181,6 +181,34 @@ def _camera(p: QPainter) -> None:
     p.drawEllipse(QRectF(22, 26, 20, 20))
 
 
+def _diamond(p: QPainter, x: float, y: float, r: float, fill: bool) -> None:
+    path = QPainterPath(QPointF(x, y - r))
+    path.lineTo(x + r, y)
+    path.lineTo(x, y + r)
+    path.lineTo(x - r, y)
+    path.closeSubpath()
+    if fill:
+        p.fillPath(path, p.pen().color())
+    p.drawPath(path)
+
+
+def _keyframe(p: QPainter) -> None:
+    # a keyframe diamond with a plus: add a camera key here
+    _diamond(p, 28, 34, 18, False)
+    p.drawLine(QPointF(50, 8), QPointF(50, 24))
+    p.drawLine(QPointF(42, 16), QPointF(58, 16))
+
+
+def _camera_path(p: QPainter) -> None:
+    # a smooth path through two keyframes
+    path = QPainterPath(QPointF(8, 50))
+    path.cubicTo(24, 50, 22, 14, 40, 14)
+    path.cubicTo(50, 14, 52, 22, 58, 22)
+    p.drawPath(path)
+    _diamond(p, 14, 48, 7, True)
+    _diamond(p, 40, 14, 7, True)
+
+
 DRAWINGS: dict[str, Draw] = {
     "open_case": _folder,
     "open": _open,
@@ -201,6 +229,8 @@ DRAWINGS: dict[str, Draw] = {
     "frame_all": _frame_all,
     "screenshot": _camera,
     "reload": _reload,
+    "keyframe": _keyframe,
+    "camera_path": _camera_path,
 }
 
 _cache: dict[tuple[str, str], QIcon] = {}

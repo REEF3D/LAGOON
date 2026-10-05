@@ -63,6 +63,12 @@ View
   [ ] Compare side by side  [Ctrl+Shift+2]
   [ ] Full screen viewer  [Ctrl+Shift+F]
   Play / pause  [Space]
+  Camera path >
+    Add camera keyframe  [Ctrl+K]
+    Remove camera keyframe (disabled)
+    [ ] Follow camera path (disabled)
+    ----
+    Clear camera keyframes (disabled)
   Save screenshot...  [F12]
   Reset layout
 Help

@@ -258,6 +258,46 @@ class Session:
         ``side=None`` keeps the side. View state: not an undo step."""
         self.scene.set_plan_view(on, side)
 
+    # ------------------------------------------------------------- camera path
+    def add_camera_key(self, time: float | None = None, state: dict[str, Any] | None = None) -> int:
+        """A camera keyframe: the camera ``state`` (default: the saved view) at ``time``
+        (default: now); a key at the same time is replaced. Turns the camera path on.
+        Returns the number of keys. View state: not an undo step."""
+        state = state if state is not None else self.scene.camera
+        if not state:
+            raise ValueError("no camera to key: show the 3D view first")
+        when = self.scene.time if time is None else float(time)
+        keys = [k for k in self.scene.camera_keys if abs(k["time"] - when) > 1e-9]
+        keys.append({"time": when, "state": dict(state)})
+        self.scene.set_camera_keys(keys, path=True)
+        return len(self.scene.camera_keys)
+
+    def remove_camera_key(self, time: float | None = None) -> bool:
+        """Remove the keyframe at ``time`` (default: now); False if there is none."""
+        when = self.scene.time if time is None else float(time)
+        keys = [k for k in self.scene.camera_keys if abs(k["time"] - when) > 1e-6]
+        if len(keys) == len(self.scene.camera_keys):
+            return False
+        self.scene.set_camera_keys(keys, path=self.scene.camera_path and bool(keys))
+        return True
+
+    def clear_camera_keys(self) -> None:
+        self.scene.set_camera_keys([], path=False)
+
+    def set_camera_path(self, on: bool) -> None:
+        """Follow the camera path through the keyframes (views and films), or not."""
+        self.scene.set_camera_keys(self.scene.camera_keys, path=bool(on))
+
+    def camera_at(self, time: float | None = None) -> dict[str, Any] | None:
+        """The camera on the path at a time (default: now); None when the camera path
+        is off or there are no keys."""
+        if not self.scene.camera_path or not self.scene.camera_keys:
+            return None
+        from lagoonviz.core.camera_path import CameraKey, camera_at
+
+        keys = [CameraKey.from_dict(k) for k in self.scene.camera_keys]
+        return camera_at(keys, self.scene.time if time is None else float(time))
+
     def set_camera(self, state: dict[str, Any] | None) -> None:
         """Remember the 3D view (saved with the session). View state: not an undo step."""
         self.scene.camera = dict(state) if state else None
@@ -356,6 +396,10 @@ class Session:
             lines.append(f"session.set_plan_view(True, side={self.scene.plan_side!r})")
         if self.scene.camera:
             lines.append(f"session.set_camera({self.scene.camera!r})")
+        for key in self.scene.camera_keys:
+            lines.append(f"session.add_camera_key({key['time']!r}, {key['state']!r})")
+        if self.scene.camera_keys and not self.scene.camera_path:
+            lines.append("session.set_camera_path(False)")
         return "\n".join(lines) + "\n"
 
     @staticmethod

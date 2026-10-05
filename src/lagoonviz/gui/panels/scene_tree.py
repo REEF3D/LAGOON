@@ -118,6 +118,8 @@ class SceneTreePanel(QWidget):
         return None
 
     def _on_scene(self, event: str, item_id: str) -> None:
+        if event == "camera_keys":
+            return  # nothing in the tree changes
         if event == "changed":
             # update in place: rebuilding here would delete the entry that is
             # currently emitting itemChanged (e.g. its visibility checkbox)

@@ -4,7 +4,11 @@
 With a case loaded the slider moves frame by frame; the time is shown in seconds
 when the output interval is known (``ctrl.txt`` or the case's property), else as
 the frame number. Playback waits for each frame to be loaded before moving on and
-asks the loader to read the next frames ahead. Keyframes follow in phase 5.
+asks the loader to read the next frames ahead.
+
+Camera keyframes: the key button stores the 3D view at this time, the slider marks
+the keys, and the path button makes the views and films follow the smooth camera
+path through them (``lagoonviz.core.camera_path``).
 """
 
 from __future__ import annotations
@@ -13,7 +17,8 @@ import time
 from collections.abc import Callable
 
 import numpy as np
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
@@ -53,6 +58,48 @@ class ClickSlider(QSlider):
     def __init__(self, *args) -> None:
         super().__init__(*args)
         self._dragging = False
+        #: slider values marked with a small diamond (the camera keyframes)
+        self.markers: list[int] = []
+
+    def set_markers(self, values: list[int]) -> None:
+        self.markers = sorted(set(int(v) for v in values))
+        self.update()
+
+    def _groove(self) -> tuple[float, float, QStyleOptionSlider]:
+        """Where the handle's centre is at the minimum, and how far it can travel."""
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        groove = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderGroove, self)
+        handle = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self)
+        return groove.x() + handle.width() / 2, max(groove.width() - handle.width(), 1), option
+
+    def x_of(self, value: int) -> float:
+        """The horizontal position of a slider value in the widget."""
+        start, span, option = self._groove()
+        return start + QStyle.sliderPositionFromValue(
+            self.minimum(), self.maximum(), int(value), round(span), option.upsideDown
+        )
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        super().paintEvent(event)
+        if not self.markers:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        colour = QColor(COLORS["cursor"])
+        r = 4.5
+        y = self.height() - r - 1  # under the groove, clear of the handle
+        for value in self.markers:
+            if not self.minimum() <= value <= self.maximum():
+                continue
+            x = self.x_of(value)
+            path = QPainterPath(QPointF(x, y - r))
+            path.lineTo(x + r, y)
+            path.lineTo(x, y + r)
+            path.lineTo(x - r, y)
+            path.closeSubpath()
+            painter.fillPath(path, colour)
+        painter.end()
 
     def wheelEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         event.ignore()  # scrolling (two fingers on a trackpad) must not move the time
@@ -83,18 +130,16 @@ class ClickSlider(QSlider):
 
     def value_at(self, x: float) -> int:
         """The slider value under a horizontal position in the widget."""
-        option = QStyleOptionSlider()
-        self.initStyleOption(option)
-        groove = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderGroove, self)
-        handle = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self)
-        start = groove.x() + handle.width() / 2
-        span = max(groove.width() - handle.width(), 1)
+        start, span, option = self._groove()
         return QStyle.sliderValueFromPosition(
             self.minimum(), self.maximum(), round(x - start), round(span), option.upsideDown
         )
 
 
 class TimelinePanel(QWidget):
+    #: the key button: store the 3D view as a camera keyframe at this time
+    keyRequested = Signal()
+
     def __init__(
         self,
         bridge: SessionBridge,
@@ -121,7 +166,8 @@ class TimelinePanel(QWidget):
             button.setMinimumSize(38, 36)
             button.setToolTip(tip)
             button.setAutoRaise(True)
-            button.clicked.connect(slot)
+            if slot is not None:
+                button.clicked.connect(slot)
             return button
 
         self.first_button = tool("first", "First frame", lambda: self.go_to_frame(0))
@@ -137,6 +183,13 @@ class TimelinePanel(QWidget):
         self.play_button.toggled.connect(self._toggle_play)
         self.next_button = tool("next", "Next frame", lambda: self.step(1))
         self.last_button = tool("last", "Last frame", lambda: self.go_to_frame(self.n_frames - 1))
+
+        self.key_button = tool(
+            "keyframe", "Camera keyframe: the 3D view at this time (Ctrl+K)", self.keyRequested.emit
+        )
+        self.path_button = tool("camera_path", "Follow the camera path through the keyframes", None)
+        self.path_button.setCheckable(True)
+        self.path_button.toggled.connect(self._toggle_path)
 
         self.slider = ClickSlider(Qt.Horizontal)
         self.slider.setRange(0, STEPS)
@@ -159,12 +212,14 @@ class TimelinePanel(QWidget):
         self.end.setValue(60.0)
         self.end.setSuffix(" s")
         self.end.setToolTip("End time when no case is loaded")
-        self.end.valueChanged.connect(lambda _: self._show_time(self.session.scene.time))
+        self.end.valueChanged.connect(lambda _: self._on_end())
 
         layout = QHBoxLayout(self)
         for widget in (self.first_button, self.prev_button, self.play_button, self.next_button):
             layout.addWidget(widget)
         layout.addWidget(self.last_button)
+        layout.addWidget(self.key_button)
+        layout.addWidget(self.path_button)
         layout.addWidget(self.slider, 1)
         layout.addWidget(self.label)
         layout.addWidget(self.fps)
@@ -222,6 +277,39 @@ class TimelinePanel(QWidget):
         self.slider.blockSignals(False)
         self._fit_label()
         self._show_time(self.session.scene.time)
+        self.update_keys()
+
+    def update_keys(self) -> None:
+        """Mark the camera keyframes on the slider; the path button follows the scene."""
+        keys = self.session.scene.camera_keys
+        self.slider.set_markers([self.slider_value(k["time"]) for k in keys])
+        self.path_button.blockSignals(True)
+        self.path_button.setChecked(bool(self.session.scene.camera_path and keys))
+        self.path_button.blockSignals(False)
+        self.path_button.setEnabled(bool(keys))
+
+    def _toggle_path(self, on: bool) -> None:
+        self.session.set_camera_path(on)
+
+    def slider_value(self, time: float) -> int:
+        """The slider value of a time: its frame, or its share of the end time."""
+        if self.has_frames:
+            return self.frame_of(time)
+        return round(min(max(time / self.end_time, 0.0), 1.0) * STEPS)
+
+    def key_here(self, time: float | None = None) -> float | None:
+        """The time of the camera keyframe on the same slider step as ``time``
+        (default: now), or None."""
+        time = self.session.scene.time if time is None else time
+        here = self.slider_value(time)
+        for key in self.session.scene.camera_keys:
+            if self.slider_value(key["time"]) == here:
+                return float(key["time"])
+        return None
+
+    def _on_end(self) -> None:
+        self._show_time(self.session.scene.time)
+        self.update_keys()
 
     def _fit_label(self) -> None:
         """A fixed width for the time label, as wide as its longest text. When it took
@@ -289,6 +377,8 @@ class TimelinePanel(QWidget):
             (self.prev_button, "previous"),
             (self.next_button, "next"),
             (self.last_button, "last"),
+            (self.key_button, "keyframe"),
+            (self.path_button, "camera_path"),
         ):
             button.setIcon(icon(name))
         playing = self.play_button.isChecked()

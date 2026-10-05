@@ -11,6 +11,15 @@
   and DEM elements). The surroundings are generated (`lagoonviz.render.cinematic`,
   cube maps from the direction of each texel), nothing to download. The
   engineering looks (studio, ocean) are unchanged.
+- Camera keyframes: the key button on the timeline (or *View → Camera path →
+  Add camera keyframe*, Ctrl+K) keeps the 3D view at the current time; the
+  slider marks the keys. With the camera path on (the button beside it), the 3D
+  view and exported films follow a smooth path through the keys: positions on a
+  Hermite curve with the keys' own spacing, rotations on aligned quaternions,
+  field of view and zoom alike, easing in and out at the first and last key.
+  Keys are saved with the session and written by *Export script*
+  (`session.add_camera_key(time, state)`); `lagoonviz.core.camera_path` does the
+  interpolation.
 
 ## 0.4.0.dev0 (phase 4, figure studio)
 

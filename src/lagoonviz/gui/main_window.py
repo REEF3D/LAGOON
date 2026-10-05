@@ -89,6 +89,7 @@ class MainWindow(QMainWindow):
         self.properties = PropertiesPanel(self.bridge)
         self.timeline = TimelinePanel(self.bridge, loader=self.loader, busy=self._views_busy)
         self.timeline.exit_full_screen.clicked.connect(lambda: self.toggle_full_screen(False))
+        self.timeline.keyRequested.connect(self.add_camera_key)
         self.plots = PlotsPanel(self.bridge)
         self.profiles = ProfilesPanel(self.bridge)
         self.console = ConsolePanel(self.bridge)
@@ -245,6 +246,30 @@ class MainWindow(QMainWindow):
         self.act_play = self._action(
             "&Play / pause", lambda: self.timeline.play_button.toggle(), "Space"
         )
+        self.act_add_key = self._action(
+            "Add camera &keyframe",
+            self.add_camera_key,
+            "Ctrl+K",
+            tip="Keep the 3D view at this time; between keyframes the camera moves smoothly",
+        )
+        self.act_remove_key = self._action(
+            "Remove camera keyframe",
+            self.remove_camera_key,
+            tip="Remove the camera keyframe at this time",
+        )
+        self.act_camera_path = self._action(
+            "Follow camera &path",
+            lambda on: self.session.set_camera_path(on),
+            tip="The 3D view and films follow the camera path through the keyframes",
+        )
+        self.act_camera_path.setCheckable(True)
+        self.act_clear_keys = self._action(
+            "Clear camera keyframes",
+            self.session.clear_camera_keys,
+            tip="Remove all camera keyframes",
+        )
+        self.bridge.sceneChanged.connect(self._on_camera_keys)
+        self._on_camera_keys("reset", "")
         self.act_reset_layout = self._action("&Reset layout", self.reset_layout)
         self.act_about = self._action("&About LAGOON", self.about)
 
@@ -312,6 +337,12 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.act_compare)
         view_menu.addAction(self.act_full_screen)
         view_menu.addAction(self.act_play)
+        camera_menu = view_menu.addMenu("&Camera path")
+        camera_menu.addAction(self.act_add_key)
+        camera_menu.addAction(self.act_remove_key)
+        camera_menu.addAction(self.act_camera_path)
+        camera_menu.addSeparator()
+        camera_menu.addAction(self.act_clear_keys)
         view_menu.addAction(self.act_screenshot)
         view_menu.addAction(self.act_reset_layout)
 
@@ -449,6 +480,44 @@ class MainWindow(QMainWindow):
             8000,
         )
 
+    # ------------------------------------------------------------- camera path
+    def add_camera_key(self) -> int:
+        """A camera keyframe: the 3D view as it is now, at the current time.
+        Returns the number of keys (0 without a 3D view)."""
+        view = getattr(self.viewport, "view", None)
+        if view is not None:
+            self.session.set_camera(view.camera_state())
+        try:
+            count = self.session.add_camera_key()
+        except ValueError:
+            self.statusBar().showMessage("No 3D view to take a camera keyframe from", 5000)
+            return 0
+        self.statusBar().showMessage(
+            f"Camera keyframe at t = {self.session.scene.time:.2f} s ({count} in all)", 5000
+        )
+        return count
+
+    def remove_camera_key(self) -> bool:
+        """Remove the camera keyframe on the current frame (if there is one)."""
+        when = self.timeline.key_here()
+        if when is None:
+            self.statusBar().showMessage("No camera keyframe at this time", 5000)
+            return False
+        return self.session.remove_camera_key(when)
+
+    def _on_camera_keys(self, event: str, _item: str) -> None:
+        if event not in ("camera_keys", "reset"):
+            return
+        keys = bool(self.session.scene.camera_keys)
+        self.act_camera_path.blockSignals(True)
+        self.act_camera_path.setChecked(keys and self.session.scene.camera_path)
+        self.act_camera_path.blockSignals(False)
+        for action in (self.act_remove_key, self.act_camera_path, self.act_clear_keys):
+            action.setEnabled(keys)
+        if event == "camera_keys":  # keyframes are work worth saving (not undo steps)
+            self.dirty = True
+            self._update_title()
+
     def set_viewport_look(self, name: str) -> None:
         """Background and lighting of the 3D view; remembered for the next start."""
         self.settings.setValue("view/look", name)
@@ -523,7 +592,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- files
     def confirm_discard(self) -> bool:
         """Ask before throwing away unsaved changes. Returns True to go ahead."""
-        if not self.ask_before_discard or not self.dirty or not self.session.stack.can_undo:
+        changed = self.session.stack.can_undo or self.session.scene.camera_keys
+        if not self.ask_before_discard or not self.dirty or not changed:
             return True
         answer = QMessageBox.question(
             self,

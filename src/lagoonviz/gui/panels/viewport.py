@@ -320,7 +320,7 @@ class Viewport3D(QWidget):
 
         self._loaded.connect(self._on_loaded)
         bridge.sceneChanged.connect(self._on_scene)
-        bridge.timeChanged.connect(lambda _t: self.refresh())
+        bridge.timeChanged.connect(lambda _t: self._on_time())
         self._apply_2d(*self._plan_state, frame=False)
         if self.session.scene.camera:
             self.view.set_camera_state(self.session.scene.camera)
@@ -517,7 +517,23 @@ class Viewport3D(QWidget):
                     other.id, self.session.data.contour_lines(other.id, mesh, shown)
                 )
 
+    def _on_time(self) -> None:
+        self.follow_path()
+        self.refresh()
+
+    def follow_path(self) -> bool:
+        """With the camera path on, put the camera where the path is at this time."""
+        state = self.session.camera_at()
+        if state is None:
+            return False
+        self.view.set_camera_state(state)
+        self.redraw()
+        return True
+
     def _on_scene(self, event: str, item_id: str) -> None:
+        if event == "camera_keys":
+            self.follow_path()
+            return
         if self.comparing:
             self._fill_cases()
         if event == "reset":

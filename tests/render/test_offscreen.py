@@ -457,3 +457,30 @@ def test_switching_looks_swaps_materials(reef3d_run):
     assert renderer.effect_passes == ()
     assert isinstance(water.mesh.material, gfx.MeshPhongMaterial)
     assert not isinstance(view.background.material, gfx.BackgroundSkyboxMaterial)
+
+
+def test_film_follows_the_camera_path(reef3d_run, tmp_path):
+    from lagoonviz.render.movie import OffscreenView
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = OffscreenView(session, (160, 90))
+    first = view.render(0.0)
+    start = view.scene.camera_state()
+    end = dict(start)
+    end["position"] = (np.asarray(start["position"]) + [0.0, 0.0, 2.0]).tolist()
+    session.add_camera_key(0.0, start)
+    session.add_camera_key(2.0, end)
+    view.render(1.0)
+    middle = np.asarray(view.scene.camera_state()["position"])
+    # two keys, eased at both: halfway in time is halfway along
+    np.testing.assert_allclose(
+        middle, (np.asarray(start["position"]) + end["position"]) / 2, atol=1e-5
+    )
+    last = view.render(2.0)
+    np.testing.assert_allclose(view.scene.camera_state()["position"], end["position"], atol=1e-5)
+    assert np.abs(last.astype(int) - first.astype(int)).sum() > 0
+    session.set_camera_path(False)  # off: the camera stays where it is
+    view.render(0.0)
+    np.testing.assert_allclose(view.scene.camera_state()["position"], end["position"], atol=1e-5)
+    _keep("camera-path-end.png", last)

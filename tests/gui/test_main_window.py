@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PySide6.QtCore import QSettings, Qt
 
@@ -218,6 +219,41 @@ def test_timeline_in_seconds_with_print_interval(window, tmp_path):
     window.timeline.go_to_frame(2)
     assert window.session.scene.time == 1.0
     assert window.timeline.label.text() == "t = 1.00 s  (frame 2 / 2)"
+
+
+def test_camera_keyframes(window, reef3d_run):
+    window.open_case(reef3d_run)
+    session, timeline = window.session, window.timeline
+    if getattr(window.viewport, "view", None) is None:  # no GPU: a saved camera instead
+        session.set_camera({"position": [0.0, 0.0, 10.0], "rotation": [0.0, 0.0, 0.0, 1.0]})
+    assert not timeline.path_button.isEnabled() and not window.act_camera_path.isEnabled()
+    window.dirty = False
+    timeline.go_to_frame(0)
+    timeline.key_button.click()
+    timeline.go_to_frame(2)
+    window.act_add_key.trigger()
+    assert [k["time"] for k in session.scene.camera_keys] == [0.0, 2.0]
+    assert timeline.slider.markers == [0, 2]
+    timeline.slider.grab()  # the markers paint
+    assert timeline.path_button.isChecked() and window.act_camera_path.isChecked()
+    assert window.windowTitle().endswith("* - LAGOON")  # keyframes are worth saving
+    timeline.path_button.click()
+    assert not session.scene.camera_path and not window.act_camera_path.isChecked()
+    window.act_camera_path.trigger()
+    assert session.scene.camera_path and timeline.path_button.isChecked()
+    timeline.go_to_frame(1)
+    view = getattr(window.viewport, "view", None)
+    if view is not None:  # the 3D view is where the path is
+        np.testing.assert_allclose(
+            view.camera_state()["position"], session.camera_at()["position"], atol=1e-5
+        )
+    assert timeline.key_here() is None and not window.remove_camera_key()
+    timeline.go_to_frame(2)
+    assert window.remove_camera_key()
+    assert timeline.slider.markers == [0]
+    window.act_clear_keys.trigger()
+    assert timeline.slider.markers == [] and not timeline.path_button.isEnabled()
+    assert not window.act_remove_key.isEnabled()
 
 
 def test_playback_advances_and_wraps(window, reef3d_run):

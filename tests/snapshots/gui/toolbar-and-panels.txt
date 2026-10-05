@@ -30,6 +30,8 @@ button '' tip='Previous frame' (disabled)
 button 'Play' [ ] tip='Play / pause (Space in the viewport)'
 button '' tip='Next frame' (disabled)
 button '' tip='Last frame' (disabled)
+button '' tip='Camera keyframe: the 3D view at this time (Ctrl+K)'
+button '' [ ] tip='Follow the camera path through the keyframes' (disabled)
 slider in [0, 1000]
 label 't = 0.00 s'
 integer 12 in [1, 240]
