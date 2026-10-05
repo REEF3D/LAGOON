@@ -270,7 +270,7 @@ class MainWindow(QMainWindow):
         self.act_camera_path.setCheckable(True)
         self.act_orbit = self._action(
             "&Orbit around the scene",
-            self.orbit_camera,
+            lambda: self.orbit_camera(),  # not triggered's "checked" as the degrees
             tip="Keyframes that take the 3D view once around the scene over the timeline",
         )
         self.act_clear_keys = self._action(
