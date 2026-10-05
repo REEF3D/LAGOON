@@ -46,3 +46,50 @@ def test_nhflow_particles(tmp_path):
     mesh = particles.read(2, None)
     assert mesh.point_data["id"].dtype == np.int32
     np.testing.assert_allclose(mesh.point_data["age"], 1.0)
+
+
+def test_particle_trails_follow_each_id(tmp_path):
+    from reef3d_fixtures import write_nhflow_particles
+
+    run = make_run(tmp_path / "nh", frames=3, print_interval=0.5)
+    write_nhflow_particles(run, end=1.0, interval=0.25)  # 5 outputs
+    s = Session()
+    s.open_case(run)
+    item = next(i for i in s.scene if i.kind == "particles")
+    s.set_time(1.0)
+    assert s.data.particle_trails(item.id) is None  # off by default
+    s.set_property(item.id, "trail_outputs", 3)
+    mesh = s.data.load(item.id)
+    assert "id" in mesh.point_data  # read for the trails
+    trails = s.data.particle_trails(item.id, mesh)
+    # ids 0 ... n-1 in every output (the cloud grows): each id present in two
+    # consecutive outputs gives one segment, over the 3 outputs before
+    counts = [len(particle_cloud(t, 0, n0=20)) for t in (0.25, 0.5, 0.75, 1.0)]
+    assert trails.segments.shape == (
+        sum(min(a, b) for a, b in zip(counts, counts[1:], strict=False)),
+        2,
+        3,
+    )
+    # segments end where the particles are now, and start where they were
+    newest = trails.segments[: counts[2]]
+    np.testing.assert_allclose(newest[:, 1], particle_cloud(1.0, 0, n0=20)[: counts[2]], atol=1e-6)
+    np.testing.assert_allclose(newest[:, 0], particle_cloud(0.75, 0, n0=20), atol=1e-6)
+    # in 2D they lie on the particles' layer
+    s.set_plan_view(True, "top")
+    flat = s.data.particle_trails(item.id, mesh)
+    assert np.all(flat.segments[..., 2] == flat.segments[0, 0, 2])
+
+
+def test_dem_trails_follow_element_centres(tmp_path):
+    from reef3d_fixtures import dem_centres
+
+    run = make_run(tmp_path / "dem", frames=3, print_interval=0.5, volume=False, dem=0.25)
+    s = Session()
+    s.open_case(run)
+    item = next(i for i in s.scene if i.kind == "dem")
+    s.set_property(item.id, "trail_outputs", 1)
+    s.set_time(0.5)
+    trails = s.data.particle_trails(item.id)
+    assert trails is not None and trails.segments.shape == (2, 2, 3)  # two elements
+    ends = trails.segments[:, 1]
+    np.testing.assert_allclose(np.sort(ends[:, 0]), np.sort(dem_centres(0.5)[:, 0]), atol=1e-4)

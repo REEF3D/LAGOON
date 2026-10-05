@@ -14,7 +14,13 @@ import numpy as np
 import pygfx as gfx
 
 from lagoonviz.core.colormaps import colors, lut, normalize
-from lagoonviz.core.data.manager import ContourLines, DisplaySurface, GaugeMarks, VectorArrows
+from lagoonviz.core.data.manager import (
+    ContourLines,
+    DisplaySurface,
+    GaugeMarks,
+    Trails,
+    VectorArrows,
+)
 
 #: The lights and gloss of every look: a soft sun from above for the shadows, most of
 #: the light from a headlamp that moves with the camera, so slopes keep their shading
@@ -409,8 +415,9 @@ class SceneRenderer:
         self._shadow_fit = None
         self._fit_shadow()
         self.headlamp.intensity = look["headlamp"]
-        for line in self._contours.values():
-            line.material.color = look.get("contours", "#1e2833")
+        for key, line in self._contours.items():
+            if not key.endswith("#trails"):  # trails keep their item's colour
+                line.material.color = look.get("contours", "#1e2833")
         for shown in self._shown.values():
             material = shown.mesh.material
             if hasattr(material, "shininess"):
@@ -513,6 +520,7 @@ class SceneRenderer:
             self.content.remove(shown.mesh)
         self.update_contours(item_id, None)
         self.update_vectors(item_id, None)
+        self.update_trails(item_id, None)
 
     def update_contours(self, item_id: str, lines: ContourLines | None) -> None:
         """Contour lines of an item (None or no segments: none), thin and dark."""
@@ -522,7 +530,15 @@ class SceneRenderer:
         """Arrows of an item (None or no segments: none), in the contour colour."""
         self._update_overlay_lines(f"{item_id}#vectors", arrows, 1.4)
 
-    def _update_overlay_lines(self, key: str, lines, thickness: float) -> None:
+    def update_trails(self, item_id: str, trails: Trails | None) -> None:
+        """Paths of an item's particles (None or no segments: none), thin, in its colour."""
+        self._update_overlay_lines(
+            f"{item_id}#trails", trails, 1.0, trails.color if trails is not None else None
+        )
+
+    def _update_overlay_lines(
+        self, key: str, lines, thickness: float, color: str | None = None
+    ) -> None:
         line = self._contours.get(key)
         if lines is None or not lines.segments.size:
             if line is not None:
@@ -532,12 +548,14 @@ class SceneRenderer:
         positions = np.array(lines.segments.reshape(-1, 3), np.float32)
         if line is not None and _update_buffer(line.geometry, "positions", positions):
             line.visible = lines.visible
+            if color is not None:
+                line.material.color = color
             return
         if line is not None:
             self.scene.remove(line)
         look = STYLES[self.style_name]
         material = gfx.LineSegmentMaterial(
-            thickness=thickness, color=look.get("contours", "#1e2833")
+            thickness=thickness, color=color or look.get("contours", "#1e2833")
         )
         line = gfx.Line(gfx.Geometry(positions=positions), material)
         line.visible = lines.visible

@@ -31,6 +31,9 @@
 - Particles: CFD's CPM particles (`REEF3D_CFD_CPM_Particle`, a file per MPI rank)
   and NHFLOW's particles open as a *Particles* item, drawn as points coloured by
   a variable (velocity by default), with their own output times (TimeValue).
+- Particle trails: *Trail [outputs]* on Particles and DEM elements draws the path
+  of each particle (DEM: each element's centre) over that many outputs before,
+  joined by its `id`, in the item's colour; from the store or the VTK files.
 - LAGOON format 0.2: particles and objects (section 10). CPM and NHFLOW particles,
   DEM elements, ice floes, rod trees and mooring lines are particle sets: the
   points of every output one after another, cells stored again only when they

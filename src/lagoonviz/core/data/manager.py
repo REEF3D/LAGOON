@@ -92,6 +92,16 @@ class ContourLines:
 
 
 @dataclass
+class Trails:
+    """Paths of particles (or element centres) over the outputs before: segments in 3D."""
+
+    item_id: str
+    segments: np.ndarray  # (k, 2, 3) float32
+    visible: bool
+    color: str = "#7f7f7f"
+
+
+@dataclass
 class VectorArrows:
     """Arrows of one item: shafts and head strokes as segments in 3D."""
 
@@ -228,6 +238,8 @@ class DataManager:
         self._errors: dict[str, str] = {}
         self._resolved: dict[str, str] = {}
         self._auto_ranges: dict[tuple, tuple[float, float]] = {}
+        #: particle trails: ids and their centres of each output read for them
+        self._trail_centres: dict[FrameKey, tuple[np.ndarray, np.ndarray]] = {}
         self._still_water: dict[tuple, float] = {}
         self._wet: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # item -> (base, wet)
         self._logged: tuple[tuple, np.ndarray | None] | None = None
@@ -561,6 +573,8 @@ class DataManager:
             arrays.update(("eta", "depth"))  # depth: dry land is hidden (FNPF writes it)
         if item.kind == "bathymetry":
             arrays.add("depth")  # still water depth: the level for vertical exaggeration
+        if int(item.properties.get("trail_outputs", 0) or 0) > 0:
+            arrays.add("id")  # trails follow each particle by its id
         return tuple(sorted(arrays))
 
     def frame_key(self, item_id: str, time: float | None = None) -> FrameKey | None:
@@ -789,6 +803,83 @@ class DataManager:
             other.kind == "free_surface" and self.case_item(other.id) is case_item
             for other in self.scene
         )
+
+    def placed(self, item_id: str, points: np.ndarray) -> np.ndarray:
+        """Points of an object item where the view draws them: exaggerated about the
+        case's water level, or flat on the item's layer in 2D."""
+        item = self.scene.get(item_id)
+        points = np.array(points, dtype=np.float32, copy=True)
+        exaggeration = self.exaggeration(item_id)
+        if exaggeration != 1.0 and len(points):
+            level = self.case_water_level(item_id)
+            points[:, 2] = level + exaggeration * (points[:, 2] - level)
+        if self.scene.flat:
+            points[:, 2] = PLAN_LAYERS.get(item.kind, 1.0)
+        return points
+
+    def particle_trails(self, item_id: str, mesh: SurfaceMesh | None = None) -> Trails | None:
+        """Paths of an item's particles (DEM elements: their centres) over its
+        "trail_outputs" outputs before the one shown, joined by their ``id``; None
+        when the item draws none or the output has no ids."""
+        item = self.scene.get(item_id)
+        count = int(item.properties.get("trail_outputs", 0) or 0)
+        key = self.frame_key(item_id)
+        if count <= 0 or key is None:
+            return None
+        mesh = mesh if mesh is not None else self.load_key(key)
+        if mesh is None or "id" not in mesh.point_data:
+            return None
+        parts = []
+        newer = self._centres(key, mesh)
+        for index in range(key.index - 1, max(key.index - count, 0) - 1, -1):
+            older_key = FrameKey(key.case, key.dataset, index, key.arrays, key.extra)
+            older = self._centres(older_key)
+            if older is None:
+                break
+            _, a, b = np.intersect1d(older[0], newer[0], assume_unique=True, return_indices=True)
+            if a.size:
+                parts.append(np.stack([older[1][a], newer[1][b]], axis=1))
+            newer = older
+        case_item = self.case_item(item_id)
+        visible = item.visible and (case_item is None or case_item.visible)
+        if not parts:
+            return Trails(item_id, np.zeros((0, 2, 3), np.float32), visible)
+        segments = np.concatenate(parts).reshape(-1, 3)
+        segments = self.placed(item_id, segments).reshape(-1, 2, 3)
+        return Trails(item_id, segments, visible, self._plain_color(item))
+
+    def _centres(self, key: FrameKey, mesh: SurfaceMesh | None = None):
+        """(ids, centre of each id's points) of an output, kept for the next frames."""
+        found = self._trail_centres.get(key)
+        if found is not None:
+            return found
+        if mesh is None:
+            try:
+                mesh = self.load_key(key)
+            except (OSError, ValueError, KeyError, IndexError):
+                return None
+        ids = mesh.point_data.get("id")
+        if ids is None or not len(ids):
+            found = (np.zeros(0, np.int64), np.zeros((0, 3), np.float64))
+        else:
+            unique, inverse = np.unique(np.asarray(ids).astype(np.int64), return_inverse=True)
+            counts = np.bincount(inverse, minlength=len(unique)).astype(np.float64)
+            points = np.asarray(mesh.points, np.float64)
+            centres = (
+                np.stack(
+                    [
+                        np.bincount(inverse, weights=points[:, c], minlength=len(unique))
+                        for c in range(3)
+                    ],
+                    axis=1,
+                )
+                / counts[:, None]
+            )
+            found = (unique, centres)
+        if len(self._trail_centres) > 2048:
+            self._trail_centres.clear()
+        self._trail_centres[key] = found
+        return found
 
     def display(self, item_id: str, mesh: SurfaceMesh) -> DisplaySurface:
         """Turn a loaded mesh into arrays for a renderer, following the item's settings."""

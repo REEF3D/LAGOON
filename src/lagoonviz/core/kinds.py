@@ -293,6 +293,13 @@ KINDS: dict[str, KindSpec] = {
             **_data_source("DEM"),
             "material": PropertySpec("rock", "Material", choices=MATERIALS),
             **_colouring("none", "viridis"),
+            "trail_outputs": PropertySpec(
+                0,
+                "Trail [outputs]",
+                minimum=0,
+                maximum=500,
+                tip="Path of each element's centre (by its id) over this many outputs before",
+            ),
         },
     ),
     "ice": KindSpec(
@@ -318,6 +325,13 @@ KINDS: dict[str, KindSpec] = {
             **_colouring("velocity", "viridis"),
             "point_size": PropertySpec(
                 4.0, "Point size [px]", minimum=1.0, maximum=40.0, tip="Size on screen"
+            ),
+            "trail_outputs": PropertySpec(
+                0,
+                "Trail [outputs]",
+                minimum=0,
+                maximum=500,
+                tip="Path of each particle (by its id) over this many outputs before; 0: none",
             ),
         },
     ),

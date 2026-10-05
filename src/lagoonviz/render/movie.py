@@ -93,6 +93,7 @@ class OffscreenView:
                     item_id, session.data.contour_lines(item_id, mesh, shown)
                 )
                 self.scene.update_vectors(item_id, session.data.vector_arrows(item_id, mesh, shown))
+                self.scene.update_trails(item_id, session.data.particle_trails(item_id, mesh))
         profiles = set(session.data.profile_items())
         for item_id in session.data.series_items() + sorted(profiles):
             data = session.data
