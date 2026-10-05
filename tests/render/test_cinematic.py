@@ -112,10 +112,12 @@ def test_grain_tiles(grain):
     seam = np.abs(heights[:, 0] - heights[:, -1]).mean()
     inside = np.abs(np.diff(heights, axis=1)).mean()
     assert seam < 3 * inside
-    normals = grain_normals(128, grain)
+    normals = grain_normals(128, grain, relief=20.0)
     assert normals.shape == (128, 128, 4) and normals.dtype == np.uint8
-    z = normals[..., 2] / 255 * 2 - 1
-    assert (z > 0.2).all()  # facing out
+    n = normals[..., :3] / 255 * 2 - 1
+    assert (n[..., 2] > 0.2).all()  # facing out
+    tilt = np.degrees(np.arctan2(np.hypot(n[..., 0], n[..., 1]), n[..., 2]))
+    assert np.percentile(tilt, 95) == pytest.approx(20.0, abs=1.5)  # the relief asked for
 
 
 def test_materials():
@@ -154,6 +156,15 @@ def test_display_carries_the_material(tmp_path):
     session.set_property(body.id, "material", "rock")
     shown = session.data.display(body.id, session.data.load(body.id))
     assert shown.material == "rock"
+
+
+def test_fog_colour_is_physical():
+    from lagoonviz.render.cinematic import physical
+
+    # effect passes mix in linear light: #0b4a5e (sRGB) is much darker there
+    r, g, b, a = physical((0x0B / 255, 0x4A / 255, 0x5E / 255, 1.0))
+    assert (round(r, 4), round(g, 3), round(b, 3), a) == (0.0033, 0.068, 0.112, 1.0)
+    assert physical((1.0, 1.0, 1.0, 1.0)) == (1.0, 1.0, 1.0, 1.0)
 
 
 def test_fog_starts_at_the_scene():

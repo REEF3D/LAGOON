@@ -125,7 +125,7 @@ class Surface:
     roughness: float
     metalness: float = 0.0
     grain: str = ""  # "sand", "rock", "concrete" or none
-    grain_scale: float = 0.0  # strength of the normal map
+    relief: float = 0.0  # the grain's slope [degrees] that 95 % of the surface stays under
     tile: float = 1.0  # metres per repeat of the normal map
     ior: float = 1.5
     clearcoat: float = 0.0
@@ -133,9 +133,9 @@ class Surface:
 
 SURFACES = {
     "water": Surface(0.06, ior=1.33),
-    "sand": Surface(0.95, grain="sand", grain_scale=0.55, tile=0.6),
-    "rock": Surface(0.85, grain="rock", grain_scale=1.0, tile=2.0),
-    "concrete": Surface(0.8, grain="concrete", grain_scale=0.3, tile=1.0),
+    "sand": Surface(0.95, grain="sand", relief=22.0, tile=0.6),
+    "rock": Surface(0.85, grain="rock", relief=35.0, tile=2.0),
+    "concrete": Surface(0.8, grain="concrete", relief=8.0, tile=1.0),
     "steel": Surface(0.35, metalness=0.9),
     "ice": Surface(0.18, ior=1.31, clearcoat=0.6),
     "wood": Surface(0.7),
@@ -296,13 +296,16 @@ def grain_heights(size: int, grain: str, seed: int = 7) -> np.ndarray:
     return height / max(height.max(), 1e-12)
 
 
-def grain_normals(size: int, grain: str, seed: int = 7) -> np.ndarray:
+def grain_normals(size: int, grain: str, relief: float = 20.0, seed: int = 7) -> np.ndarray:
     """(size, size, 4) uint8 tangent-space normal map of a grain, tiling (encoded as
-    (n + 1) / 2, alpha 255)."""
-    height = grain_heights(size, grain, seed) * 4.0
-    dx = (np.roll(height, -1, 1) - np.roll(height, 1, 1)) * 0.5 * size / 64
-    dy = (np.roll(height, -1, 0) - np.roll(height, 1, 0)) * 0.5 * size / 64
-    normal = np.stack([-dx, -dy, np.ones_like(height)], -1)
+    (n + 1) / 2, alpha 255). ``relief``: the slope [degrees] that 95 % of the surface
+    stays under; the grain's heights are scaled to it."""
+    height = grain_heights(size, grain, seed)
+    dx = (np.roll(height, -1, 1) - np.roll(height, 1, 1)) * 0.5
+    dy = (np.roll(height, -1, 0) - np.roll(height, 1, 0)) * 0.5
+    steep = float(np.percentile(np.hypot(dx, dy), 95))
+    gain = np.tan(np.radians(relief)) / max(steep, 1e-12)
+    normal = np.stack([-gain * dx, -gain * dy, np.ones_like(height)], -1)
     normal /= np.linalg.norm(normal, axis=-1, keepdims=True)
     rgba = np.concatenate([(normal + 1.0) / 2.0, np.ones((size, size, 1))], -1)
     return np.ascontiguousarray(np.round(rgba * 255).astype(np.uint8))
@@ -328,13 +331,13 @@ def environment_texture(name: str, size: int = 256):
 
 
 @lru_cache(maxsize=8)
-def grain_texture(grain: str, size: int = 256):
+def grain_texture(grain: str, relief: float = 20.0, size: int = 256):
     """A grain's normal map as a pygfx texture map on the second texture coordinates,
     repeating."""
     import pygfx as gfx
 
     texture = gfx.Texture(
-        grain_normals(size, grain), dim=2, colorspace="physical", generate_mipmaps=True
+        grain_normals(size, grain, relief), dim=2, colorspace="physical", generate_mipmaps=True
     )
     return gfx.TextureMap(texture, uv_channel=1, filter="linear", wrap="repeat")
 
@@ -355,8 +358,8 @@ def pbr_material(surface: str, preset: Preset):
     material.env_map = environment_texture(preset.name)
     material.env_map_intensity = preset.env_intensity
     if s.grain:
-        material.normal_map = grain_texture(s.grain)
-        material.normal_scale = (s.grain_scale, s.grain_scale)
+        material.normal_map = grain_texture(s.grain, s.relief)
+        material.normal_scale = (1.0, 1.0)
     return material
 
 
@@ -402,13 +405,21 @@ def depth_fog_class():
             self.set(color, 0.1, 1000.0, 0.0, 0.0)
 
         def set(self, color, near, far, start, density) -> None:
-            self._uniform_data["color"] = tuple(gfx.Color(color))
+            # effect passes work on physical (linear) colours; the colour is sRGB
+            self._uniform_data["color"] = physical(tuple(gfx.Color(color)))
             self._uniform_data["near"] = float(near)
             self._uniform_data["far"] = float(far)
             self._uniform_data["start"] = float(start)
             self._uniform_data["density"] = float(density)
 
     return DepthFogPass
+
+
+def physical(rgba) -> tuple[float, float, float, float]:
+    """An sRGB colour (0..1 floats) as physical (linear) light, alpha kept."""
+    c = np.asarray(rgba, float)
+    rgb = np.where(c[:3] <= 0.04045, c[:3] / 12.92, ((c[:3] + 0.055) / 1.055) ** 2.4)
+    return (*map(float, rgb), float(c[3]) if c.size > 3 else 1.0)
 
 
 def fog_settings(half: float, camera_position, low, high) -> tuple[float, float]:
