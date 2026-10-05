@@ -212,49 +212,78 @@ def spheres(centres: np.ndarray, radius) -> tuple[np.ndarray, np.ndarray]:
 
 
 class BedHeights:
-    """The bed's height under any point, from the bed's vertices binned on a grid
-    (each cell the mean of its vertices, empty cells from their nearest filled
-    neighbour): enough to close a body of water on the bed."""
+    """The bed's height under any point, never above the bed: the bed vertex at the
+    same place where there is one (REEF3D writes the free surface and the bed on the
+    same horizontal grid), else the lowest bed vertex near the point (binned on a
+    fine grid, empty cells filled from their neighbours). A body of water closed on
+    these heights stays under the land everywhere, so it never pokes through it."""
 
-    def __init__(self, points: np.ndarray, cells: int = 256) -> None:
+    def __init__(self, points: np.ndarray, cells: int | None = None) -> None:
         p = np.asarray(points, float).reshape(-1, 3)
         p = p[np.isfinite(p).all(axis=1)]
         if not len(p):
             raise ValueError("no bed points")
         self.low = p[:, :2].min(axis=0)
         span = np.maximum(p[:, :2].max(axis=0) - self.low, 1e-9)
-        self.shape = (cells, cells)
-        self.size = span / (cells - 1)
+        # exact: the vertices by their place (several ranks share seams: the lowest)
+        self.quantum = float(span.max()) * 1e-7
+        keys = self._keys(p[:, :2])
+        order = np.lexsort((p[:, 2], keys[:, 1], keys[:, 0]))
+        keys, z = keys[order], p[order, 2]
+        first = np.ones(len(keys), bool)
+        first[1:] = (keys[1:] != keys[:-1]).any(axis=1)
+        self.keys, self.z = keys[first], z[first]  # sorted, lowest z per place
+        # near: the lowest bed vertex of a fine grid's cell and its neighbours, about
+        # one vertex per cell (cells: at most this many along an axis)
+        aspect = float(span[0] / span[1])
+        nx = np.sqrt(len(p) * aspect)
+        top = 2048 if cells is None else int(cells)
+        self.shape = (
+            int(np.clip(nx, 16, top)),
+            int(np.clip(len(p) / max(nx, 1.0), 16, top)),
+        )
+        self.size = span / (np.array(self.shape) - 1)
         ij = self._cells(p[:, :2])
-        flat = ij[:, 0] * cells + ij[:, 1]
-        count = np.bincount(flat, minlength=cells * cells)
-        total = np.bincount(flat, weights=p[:, 2], minlength=cells * cells)
-        grid = np.full(cells * cells, np.nan)
-        filled = count > 0
-        grid[filled] = total[filled] / count[filled]
-        grid = grid.reshape(cells, cells)
-        for _ in range(cells):  # fill empty cells from their neighbours
-            empty = np.isnan(grid)
+        flat = ij[:, 0] * self.shape[1] + ij[:, 1]
+        grid = np.full(self.shape[0] * self.shape[1], np.inf)
+        np.minimum.at(grid, flat, p[:, 2])
+        grid = grid.reshape(self.shape)
+        for _ in range(64):  # fill empty cells from their neighbours
+            empty = ~np.isfinite(grid)
             if not empty.any():
                 break
-            padded = np.pad(grid, 1, constant_values=np.nan)
-            near = np.stack(
-                [padded[:-2, 1:-1], padded[2:, 1:-1], padded[1:-1, :-2], padded[1:-1, 2:]]
-            )
-            known = ~np.isnan(near)
-            total = np.where(known, near, 0.0).sum(axis=0)
-            with np.errstate(all="ignore"):
-                mean = total / known.sum(axis=0)  # NaN where no neighbour is known
-            grid = np.where(empty, mean, grid)
-        self.grid = np.where(np.isnan(grid), np.nanmin(p[:, 2]), grid)
+            grid = np.where(empty, self._lowest_around(grid), grid)
+        grid = np.where(np.isfinite(grid), grid, p[:, 2].min())
+        self.grid = self._lowest_around(grid)
+
+    @staticmethod
+    def _lowest_around(grid: np.ndarray) -> np.ndarray:
+        padded = np.pad(grid, 1, constant_values=np.inf)
+        rows, cols = grid.shape
+        return np.min(
+            [padded[i : i + rows, j : j + cols] for i in range(3) for j in range(3)], axis=0
+        )
+
+    def _keys(self, xy: np.ndarray) -> np.ndarray:
+        return np.round((np.asarray(xy, float) - self.low) / self.quantum).astype(np.int64)
 
     def _cells(self, xy: np.ndarray) -> np.ndarray:
         ij = np.floor((np.asarray(xy, float) - self.low) / self.size + 0.5).astype(int)
         return np.clip(ij, 0, np.array(self.shape) - 1)
 
     def __call__(self, xy: np.ndarray) -> np.ndarray:
-        ij = self._cells(np.asarray(xy, float).reshape(-1, 2))
-        return self.grid[ij[:, 0], ij[:, 1]]
+        xy = np.asarray(xy, float).reshape(-1, 2)
+        ij = self._cells(xy)
+        heights = self.grid[ij[:, 0], ij[:, 1]]
+        # where a bed vertex is at the same place: its height
+        keys = self._keys(xy)
+        combined = self.keys[:, 0] * (1 << 31) + self.keys[:, 1]
+        wanted = keys[:, 0] * (1 << 31) + keys[:, 1]
+        at = np.searchsorted(combined, wanted)
+        at = np.clip(at, 0, len(combined) - 1)
+        exact = combined[at] == wanted
+        heights[exact] = self.z[at[exact]]
+        return heights
 
 
 def water_body(
