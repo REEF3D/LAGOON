@@ -167,15 +167,31 @@ def setup_world(scene, folder: Path, world: dict) -> None:
     output = nodes.new("ShaderNodeOutputWorld")
     light = nodes.new("ShaderNodeBackground")
     light.inputs["Strength"].default_value = float(world.get("strength", 1.0))
+    environment = nodes.new("ShaderNodeTexEnvironment")
+    environment.image = bpy.data.images.load(str(folder / world["environment"]))
+    links.new(environment.outputs["Color"], light.inputs["Color"])
+    shader = light.outputs["Background"]
     sky = physical_sky(nodes, world.get("sky"))
     if sky is not None:
-        light.inputs["Strength"].default_value = float(world["sky"].get("strength", 0.35))
-        links.new(sky.outputs["Color"], light.inputs["Color"])
-    else:
-        environment = nodes.new("ShaderNodeTexEnvironment")
-        environment.image = bpy.data.images.load(str(folder / world["environment"]))
-        links.new(environment.outputs["Color"], light.inputs["Color"])
-    shader = light.outputs["Background"]
+        # the physical sky above the horizon; below it (black in the physical sky) the
+        # sea of LAGOON's own surroundings, blended over a narrow band
+        above = nodes.new("ShaderNodeBackground")
+        above.inputs["Strength"].default_value = float(world["sky"].get("strength", 0.35))
+        links.new(sky.outputs["Color"], above.inputs["Color"])
+        coords = nodes.new("ShaderNodeTexCoord")
+        split = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(coords.outputs["Generated"], split.inputs["Vector"])  # the ray's direction
+        band = nodes.new("ShaderNodeMath")
+        band.operation = "MULTIPLY_ADD"  # 0 a little below the horizon, 1 a little above
+        band.use_clamp = True
+        band.inputs[1].default_value = 40.0
+        band.inputs[2].default_value = 0.5
+        links.new(split.outputs["Z"], band.inputs[0])
+        blend = nodes.new("ShaderNodeMixShader")
+        links.new(band.outputs[0], blend.inputs[0])
+        links.new(shader, blend.inputs[1])
+        links.new(above.outputs["Background"], blend.inputs[2])
+        shader = blend.outputs["Shader"]
     if world.get("background"):
         bottom, top = world["background"]
         coords = nodes.new("ShaderNodeTexCoord")
