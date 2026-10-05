@@ -401,7 +401,7 @@ and per body a group `body_<n>` with `{"lagoon": {"rigid": true, "vertices": 756
 | array         | shape                         | dtype   | content |
 |---------------|-------------------------------|---------|---------|
 | `triangles`   | (ntri, 3)                     | int32   | vertex indices (polygons fan-triangulated) |
-| `vertices`    | rigid: (nv, 3); else (nt, nv, 3) | float32 | the vertices of the first output; not rigid: per output |
+| `vertices`    | rigid: (nv, 3); else (nt, nv, 3) | float32 | rigid: the reference vertices (converter: those of the first output; REEF3D: relative to the centre of gravity at the start); not rigid: per output |
 | `translation` | (nt, 3)                       | float64 | rigid only: t [m] |
 | `rotation`    | (nt, 4)                       | float64 | rigid only: unit quaternion (w, x, y, z), w ≥ 0 |
 | `<field>`     | (nt, nv) or (nt, nv, c)       | float32 | optional point arrays per output (`fields`: name → components) |
@@ -416,6 +416,11 @@ largest distance of any accepted output [m]. Otherwise the body is not rigid
 
 Chunks: 4096 outputs of the motion arrays, one output of vertices and fields;
 codecs as for fields (`elementsize` 4 or 8).
+
+REEF3D writes body sets itself with `P 18` (rank 0, `lagoon_bodies`): the mesh
+relative to the centre of gravity at the start, the centre of gravity as
+translation and its rotation matrix as quaternion, checked against the vertices
+at every output; `P 18 2` leaves out the 6DOF VTP files.
 
 ## 10. Particles and objects
 
@@ -461,7 +466,12 @@ one. The growing arrays are sharded: shards of 1,048,576 rows, inner chunks of
 65,536 rows, codecs as for fields. Writers keep rows and write them in large
 pieces; `time` is extended last.
 
+REEF3D writes particle sets itself with `P 18` (rank 0, `lagoon_particles`):
+NHFLOW's particles (`nhflow_particles`), DEM elements (`dem_dem`) and FNPF's ice
+floes (`fnpf_ice`). It writes every output at once, the inner chunk being filled
+again with each output, so a store can be read during a run; `P 18 2` leaves out
+their VTP files.
+
 ## 11. To be specified
 
 - Particle tracks by particle id (from `id` fields) for path lines.
-- ParaView reader support for bodies and particle sets.

@@ -22,18 +22,21 @@ from lagoon_format.store import Store
 
 store = Store("case/REEF3D_FNPF.lagoon")
 volume = store["volume"]
-u = volume.read("velocity", 10)              # (nz, ny, nx, 3) at output 10
-eta = store["free_surface"].series("eta", i=40, j=12)   # over all outputs
-gauges = store.tables["fnpf_wsf_hg"]; p1 = gauges.column("P1")   # a wave gauge
-vertices, triangles = store.bodies["nhflow_body"].mesh(10)       # bodies at output 10
-xyz = store.particles["cfd_particles"].positions(10)              # particles at output 10
+u = volume.read("velocity", 10)  # (nz, ny, nx, 3) at output 10
+eta = store["free_surface"].series("eta", i=40, j=12)  # over all outputs
+gauges = store.tables["fnpf_wsf_hg"]
+p1 = gauges.column("P1")  # a wave gauge
+vertices, triangles = store.bodies["nhflow_body"].mesh(10)  # bodies at output 10
+xyz = store.particles["cfd_particles"].positions(10)  # particles at output 10
 ```
 
 REEF3D output is converted with `lagoon-convert CASE` (LAGOON application);
 REEF3D can also write stores itself during a run (`P 18`, see the REEF3D patch).
 
 **ParaView**: load `paraview/lagoon_reader.py` with *Tools → Manage Plugins → Load
-New*, then open the `zarr.json` at the top of a store and choose "LAGOON store".
+New*, then open the `zarr.json` at the top of a store and choose "LAGOON store":
+outputs as structured grids, bodies as triangle meshes, particles and objects as
+points, polygons or lines, all on the store's time bar.
 
 It is MIT-licensed so that other codes and tools can adopt the format freely; the
 LAGOON application itself is GPLv3.

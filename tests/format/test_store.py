@@ -275,3 +275,40 @@ def test_paraview_reader_grids(tmp_path):
     np.testing.assert_allclose(
         arrays["velocity"].reshape(4, 6, 5, 3), truth[3][2][:, :, 4:9], atol=1e-6
     )
+
+
+def test_paraview_reader_bodies_and_particles(tmp_path):
+    """Bodies as triangles, particles as vertex cells, objects with their cells."""
+    import importlib.util
+    from pathlib import Path
+
+    from lagoon_format.store import StoreWriter
+
+    plugin = Path(__file__).parents[2] / "lagoon-format" / "paraview" / "lagoon_reader.py"
+    spec = importlib.util.spec_from_file_location("lagoon_reader", plugin)
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    path = tmp_path / "s.lagoon"
+    writer = StoreWriter.create(path, "NHFLOW")
+    box = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], np.float32)
+    tris = np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]])
+    bodies = writer.body_writer("nhflow_body", {0: (box, tris, {}, True)})
+    cloud = writer.particle_writer("p", {"point_fields": {"age": (1, "float32")}})
+    lines = writer.particle_writer(
+        "m", {"point_fields": {}, "cells": "lines", "cell_fields": {"id": (1, "int32")}}
+    )
+    for t in range(3):
+        bodies.append(float(t), t, {0: (box + [t, 0, 0], {})})
+        cloud.append(t + 0.5, t, np.zeros((t + 2, 3)), {"age": np.full(t + 2, t, np.float32)})
+        lines.append(float(t), t, np.zeros((4, 3)), {}, [0, 1, 2, 3], [2, 4], {"id": [7, 8]})
+    writer.close()
+    store = Store(path)
+    assert reader.all_times(store) == [0, 0.5, 1, 1.5, 2, 2.5]
+    points, connectivity, offsets, arrays = reader.body_mesh(store.bodies["nhflow_body"], 2)
+    np.testing.assert_allclose(points.min(axis=0), [2, 0, 0], atol=1e-6)
+    assert np.array_equal(connectivity, tris.ravel()) and list(offsets) == [3, 6, 9, 12]
+    kind, connectivity, offsets, arrays, cells = reader.particle_cells(store.particles["p"], 1)
+    assert kind == "verts" and list(connectivity) == [0, 1, 2] and list(offsets) == [1, 2, 3]
+    assert np.array_equal(arrays["age"], [1, 1, 1])
+    kind, connectivity, offsets, arrays, cells = reader.particle_cells(store.particles["m"], 2)
+    assert kind == "lines" and list(offsets) == [2, 4] and list(cells["id"]) == [7, 8]

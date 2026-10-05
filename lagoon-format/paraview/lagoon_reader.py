@@ -5,7 +5,9 @@
 Load it in ParaView with Tools > Manage Plugins > Load New (this file), then open
 the ``zarr.json`` at the top of a store (``REEF3D_FNPF.lagoon/zarr.json``) and pick
 "LAGOON store". Each output (volume, free surface, bed) becomes a group of
-structured grids, one per block, with the store's times on the time bar.
+structured grids, one per block; floating bodies become polygon meshes, particles
+points (with vertex cells) and objects (DEM elements, ice floes, rods, mooring
+lines) polygons or lines; the store's times are on the time bar.
 
 The plugin needs NumPy (ParaView brings it) and the ``lagoon_format`` package: it
 is found next to this file (``../src``) or wherever Python finds it.
@@ -52,10 +54,45 @@ def structured_block(output, block, t: int) -> tuple[tuple[int, int, int], np.nd
     return (len(x), len(y), nz), points, arrays
 
 
+def body_mesh(bodies, t: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """All bodies of a body set at output ``t``: points, VTK connectivity and offsets
+    of their triangles, and point arrays."""
+    points, triangles = bodies.mesh(t)
+    arrays = {}
+    for name in sorted({n for b in bodies.bodies.values() for n in b.fields}):
+        parts = [b.field(name, t) for _, b in sorted(bodies.bodies.items()) if name in b.fields]
+        if len(parts) == len(bodies.bodies):
+            arrays[name] = np.concatenate(parts)
+    connectivity = np.asarray(triangles, np.int64).ravel()
+    offsets = np.arange(3, len(connectivity) + 1, 3, dtype=np.int64)
+    return points, connectivity, offsets, arrays
+
+
+def particle_cells(particles, t: int) -> tuple[str, np.ndarray, np.ndarray, dict, dict]:
+    """Output ``t`` of a particle set: the kind of cells (``verts`` for points only,
+    one vertex cell per point, so ParaView draws them), connectivity, offsets,
+    point arrays and cell arrays."""
+    n = particles.count(t)
+    points = {name: particles.point_field(name, t) for name in particles.point_fields}
+    if not particles.cells:
+        return (
+            "verts",
+            np.arange(n, dtype=np.int64),
+            np.arange(1, n + 1, dtype=np.int64),
+            points,
+            {},
+        )
+    connectivity, offsets = particles.cell_set(t)
+    cells = {name: particles.cell_field(name, t) for name in particles.cell_fields}
+    return particles.cells, connectivity, offsets, points, cells
+
+
 def all_times(store: Store) -> list[float]:
     times = set()
     for output in store.outputs.values():
         times.update(float(t) for t in output.times)
+    for group in (*store.bodies.values(), *store.particles.values()):
+        times.update(float(t) for t in group.times)
     return sorted(times)
 
 
@@ -71,9 +108,14 @@ except ImportError:  # outside ParaView: only the functions above
     smproxy = None
 
 if smproxy is not None:
-    from vtkmodules.util.numpy_support import numpy_to_vtk
+    from vtkmodules.util.numpy_support import numpy_to_vtk, numpy_to_vtkIdTypeArray
     from vtkmodules.vtkCommonCore import vtkPoints
-    from vtkmodules.vtkCommonDataModel import vtkMultiBlockDataSet, vtkStructuredGrid
+    from vtkmodules.vtkCommonDataModel import (
+        vtkCellArray,
+        vtkMultiBlockDataSet,
+        vtkPolyData,
+        vtkStructuredGrid,
+    )
     from vtkmodules.vtkCommonExecutionModel import vtkStreamingDemandDrivenPipeline as _sddp
 
     @smproxy.reader(
@@ -133,7 +175,8 @@ if smproxy is not None:
             if t is None:
                 t = times[0] if times else 0.0
             result = vtkMultiBlockDataSet.GetData(outInfoVec, 0)
-            result.SetNumberOfBlocks(len(store.outputs))
+            result.SetNumberOfBlocks(len(store.outputs) + len(store.bodies) + len(store.particles))
+            number = -1
             for number, (name, output) in enumerate(store.outputs.items()):
                 group = vtkMultiBlockDataSet()
                 index = frame_index(output.times, t)
@@ -144,7 +187,50 @@ if smproxy is not None:
                         group.GetMetaData(b).Set(vtkMultiBlockDataSet.NAME(), f"block {b}")
                 result.SetBlock(number, group)
                 result.GetMetaData(number).Set(vtkMultiBlockDataSet.NAME(), name)
+            for key, bodies in store.bodies.items():
+                number += 1
+                index = frame_index(bodies.times, t)
+                if index is not None:
+                    points, connectivity, offsets, arrays = body_mesh(bodies, index)
+                    result.SetBlock(number, _poly(points, "polys", connectivity, offsets, arrays))
+                result.GetMetaData(number).Set(vtkMultiBlockDataSet.NAME(), key)
+            for key, particles in store.particles.items():
+                number += 1
+                index = frame_index(particles.times, t)
+                if index is not None:
+                    kind, connectivity, offsets, arrays, cells = particle_cells(particles, index)
+                    poly = _poly(
+                        particles.positions(index), kind, connectivity, offsets, arrays, cells
+                    )
+                    result.SetBlock(number, poly)
+                result.GetMetaData(number).Set(vtkMultiBlockDataSet.NAME(), key)
             return 1
+
+    def _vtk_array(name, values):
+        values = np.ascontiguousarray(values)
+        if values.dtype.kind == "f":
+            values = values.astype(np.float32, copy=False)
+        array = numpy_to_vtk(values, deep=True)
+        array.SetName(name)
+        return array
+
+    def _poly(points, kind, connectivity, offsets, arrays, cells=None) -> vtkPolyData:
+        poly = vtkPolyData()
+        vtk_points = vtkPoints()
+        vtk_points.SetData(numpy_to_vtk(np.ascontiguousarray(points, np.float32), deep=True))
+        poly.SetPoints(vtk_points)
+        cell_array = vtkCellArray()
+        starts = np.concatenate(([0], np.asarray(offsets, np.int64)))
+        cell_array.SetData(  # VTK's offsets start with 0
+            numpy_to_vtkIdTypeArray(starts.astype(np.int64), deep=True),
+            numpy_to_vtkIdTypeArray(np.asarray(connectivity, np.int64), deep=True),
+        )
+        {"polys": poly.SetPolys, "lines": poly.SetLines, "verts": poly.SetVerts}[kind](cell_array)
+        for name, values in arrays.items():
+            poly.GetPointData().AddArray(_vtk_array(name, values))
+        for name, values in (cells or {}).items():
+            poly.GetCellData().AddArray(_vtk_array(name, values))
+        return poly
 
     def _grid(dims, points, arrays) -> vtkStructuredGrid:
         grid = vtkStructuredGrid()

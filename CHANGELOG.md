@@ -41,7 +41,8 @@
   closed windows Qt was deleting, which crashed the test suite now and then; it
   now repaints only its own window.
 - ParaView reader plugin (`lagoon-format/paraview/lagoon_reader.py`): a store's
-  outputs as structured grids per block, with its times.
+  outputs as structured grids per block, bodies as triangle meshes, particles as
+  points (vertex cells) and objects as polygons or lines, with all their times.
 - A case with a store opens it instead of the VTU/VTP output it was made from
   (unless the VTU/VTP output is newer); a store also opens on its own. Volume
   faces, vertical slices and probes read only the levels and tiles they need.
