@@ -150,6 +150,12 @@ def _path_trace(session: Session, args, size: tuple[int, int]) -> int:
         return True
 
     print(f"path tracing with Blender Cycles ({look}, {args.samples} samples)", flush=True)
+
+    def blender_says(line: str) -> None:
+        # Blender's own progress (kernels compiling, samples) and LAGOON's steps
+        if line.startswith("LAGOON ") or "Compiling" in line or "Sample" in line:
+            print(f"\r{line[:110]:<110}", end="", flush=True)
+
     written = path_trace(
         session,
         output,
@@ -161,6 +167,7 @@ def _path_trace(session: Session, args, size: tuple[int, int]) -> int:
         args.blender,
         report,
         resume=not args.fresh,
+        status=blender_says,
     )
     print(f"\nwrote {written} ({size[0]}x{size[1]}, Cycles)")
     return 0

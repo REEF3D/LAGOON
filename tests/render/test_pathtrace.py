@@ -342,14 +342,25 @@ def test_command_line_cycles(reef3d_run, tmp_path, fake_blender, capsys):
 
 @pytest.mark.skipif(find_blender() is None, reason="Blender not installed")
 def test_real_blender(reef3d_run, tmp_path):
-    """Blender itself: one small frame per look (a minute or so on a laptop). With
-    LAGOON_TEST_OUTPUT set, the images are kept there for a look."""
+    """Blender itself: one small frame per look. The first run compiles Cycles'
+    GPU kernels (some minutes); later ones take seconds. With LAGOON_TEST_OUTPUT
+    set, the images are kept there; while one renders, Blender's output is in
+    <image>.cycles/blender.log beside it (kept if it fails)."""
+    import time
+
     session = Session()
     session.open_case(reef3d_run)
     folder = Path(os.environ.get("LAGOON_TEST_OUTPUT") or tmp_path)
     for look in ("open_ocean", "wave_flume", "underwater"):
+        deadline = time.monotonic() + 900
+        target = folder / f"cycles_{look}.png"
         out = path_trace(
-            session, folder / f"cycles_{look}.png", size=(480, 270), look=look, samples=24
+            session,
+            target,
+            size=(480, 270),
+            look=look,
+            samples=24,
+            cancel=lambda deadline=deadline: time.monotonic() > deadline,
         )
         data = out.read_bytes()
         assert data.startswith(b"\x89PNG") and len(data) > 5000, look

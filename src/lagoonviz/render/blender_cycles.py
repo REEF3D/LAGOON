@@ -358,6 +358,7 @@ def set_camera(obj, camera: dict) -> None:
 # ======================================================================== main
 def main(argv: list[str]) -> int:
     folder, resume, selection = parse(argv)
+    print(f"LAGOON reading {folder}", flush=True)
     settings = json.loads((folder / "scene.json").read_text(encoding="utf-8"))
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
@@ -370,6 +371,7 @@ def main(argv: list[str]) -> int:
     if settings["world"].get("fog"):
         add_fog(lights, settings["world"]["fog"])
     materials = {key: make_material(key, spec) for key, spec in settings["materials"].items()}
+    print(f"LAGOON scene set up: {len(materials)} materials", flush=True)
     collection = bpy.data.collections.new(COLLECTION)
     scene.collection.children.link(collection)
     camera = bpy.data.objects.new("LAGOON camera", bpy.data.cameras.new("LAGOON camera"))
@@ -389,11 +391,13 @@ def main(argv: list[str]) -> int:
                 print(f"LAGOON frame {done}/{len(numbers)} (kept)", flush=True)
                 continue
         started = time.perf_counter()
+        print(f"LAGOON building frame {done}/{len(numbers)}", flush=True)
         with np.load(data) as arrays:
             triangles = build_frame(collection, frame, arrays, materials)
         set_camera(camera, frame["camera"])
         scene.render.filepath = str(image)
         stamp.unlink(missing_ok=True)
+        print(f"LAGOON rendering frame {done}/{len(numbers)} ({triangles} triangles)", flush=True)
         bpy.ops.render.render(write_still=True)
         if frame.get("key"):
             stamp.write_text(frame["key"], encoding="utf-8")

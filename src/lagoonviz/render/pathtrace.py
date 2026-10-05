@@ -32,7 +32,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -683,11 +682,14 @@ def render_folder(
     progress: Progress | None = None,
     resume: bool = False,
     cancel: Callable[[], bool] | None = None,
+    status: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """Render an exported folder with Blender (Cycles), frame by frame into PNGs
     beside the data. Returns the images written. ``progress(done, total)`` hears of
     each frame; returning False stops Blender (the frames done are kept), as does
-    ``cancel()`` turning True (asked twice a second, for frames that take long)."""
+    ``cancel()`` turning True (asked twice a second, for frames that take long).
+    Blender's output goes to ``blender.log`` in the folder, line by line, and to
+    ``status(line)``."""
     folder = Path(folder).expanduser()
     blender = blender or find_blender()
     if blender is None:
@@ -709,9 +711,17 @@ def render_folder(
     if resume:
         command.append("--resume")
     log.info("path tracing: %s", " ".join(command))
+    environment = {**os.environ, "PYTHONUNBUFFERED": "1"}
     process = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace"
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        env=environment,
     )
+    log_file = (folder / "blender.log").open("w", encoding="utf-8", buffering=1)
+    log_file.write(" ".join(command) + "\n")
     tail: list[str] = []
     stopped = False
     watching = threading.Event()
@@ -727,6 +737,9 @@ def render_folder(
     assert process.stdout is not None
     for line in process.stdout:
         tail = (tail + [line.rstrip()])[-40:]
+        log_file.write(line)
+        if status is not None:
+            status(line.rstrip())
         if line.startswith("LAGOON frame "):
             done, _, total = line.split()[2].partition("/")
             if progress is not None and not progress(int(done), int(total)):
@@ -736,6 +749,8 @@ def render_folder(
         elif line.startswith("LAGOON "):
             log.info(line.rstrip())
     code = process.wait()
+    log_file.write(f"exit code {code}\n")
+    log_file.close()
     watching.set()
     stopped = stopped or (cancel is not None and cancel())
     if code != 0 and not stopped:
@@ -796,12 +811,15 @@ def path_trace(
     work: str | Path | None = None,
     resume: bool = True,
     cancel: Callable[[], bool] | None = None,
+    status: Callable[[str], None] | None = None,
 ) -> Path:
     """Path trace the session with Blender: a still (``.png``, at ``times[0]`` or the
     session's time), a film (``.mp4``/``.mov``) or numbered PNGs (a folder). The
-    exported scene is kept in ``work`` (default: :func:`work_folder`). With
-    ``resume``, frames rendered before from the same data, camera and settings are
-    kept (a film stopped earlier goes on where it stopped). Returns what was written."""
+    exported scene is kept in ``work`` (default: :func:`work_folder`; for a still it
+    is removed once the image is there, and kept with Blender's log if it fails).
+    With ``resume``, frames rendered before from the same data, camera and settings
+    are kept (a film stopped earlier goes on where it stopped). ``status`` hears
+    each line Blender prints. Returns what was written."""
     from lagoonviz.render.movie import frame_times
 
     output = Path(output).expanduser()
@@ -809,17 +827,13 @@ def path_trace(
     if times is None:
         times = [session.scene.time] if still else frame_times(session)
     times = list(times)[:1] if still else list(times)
-    temporary = None
-    if work is None and still:
-        temporary = tempfile.TemporaryDirectory(prefix="lagoon-cycles-")
-        work = temporary.name
+    keep = work is not None or not still
     work = Path(work) if work is not None else work_folder(output)
-    try:
-        export_scene(session, work, times, size, look, samples)
-        return finish(work, output, fps, blender, progress, resume, cancel)
-    finally:
-        if temporary is not None:
-            temporary.cleanup()
+    export_scene(session, work, times, size, look, samples)
+    written = finish(work, output, fps, blender, progress, resume, cancel, status)
+    if not keep:  # a still keeps no frames (on failure, the folder and its log stay)
+        shutil.rmtree(work, ignore_errors=True)
+    return written
 
 
 def work_folder(output: str | Path) -> Path:
@@ -840,6 +854,7 @@ def finish(
     progress: Progress | None = None,
     resume: bool = True,
     cancel: Callable[[], bool] | None = None,
+    status: Callable[[str], None] | None = None,
 ) -> Path:
     """Render an exported folder with Blender and deliver it: the still copied to
     ``output`` (``.png``), the frames encoded into the film (``.mp4``/``.mov``), or
@@ -848,7 +863,7 @@ def finish(
 
     work, output = Path(work), Path(output).expanduser()
     suffix = output.suffix.lower()
-    images = render_folder(work, blender, progress, resume=resume, cancel=cancel)
+    images = render_folder(work, blender, progress, resume=resume, cancel=cancel, status=status)
     if not images:
         raise RuntimeError("Blender wrote no images")
     if suffix == ".png":
