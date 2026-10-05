@@ -28,6 +28,7 @@ dependencies = [
     "pygfx>=0.9",
     "rendercanvas>=1.0",
     "imageio-ffmpeg>=0.5",  # MP4 export; brings its own ffmpeg
+    "matplotlib>=3.8",  # paper figures (File > Export figure)
 ]
 
 [project.optional-dependencies]

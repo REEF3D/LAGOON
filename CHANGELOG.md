@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0.dev0 (phase 4, figure studio; in progress)
+
+- *File → Export figure* (Ctrl+Shift+P): the plots, the wave profiles or the 3D
+  view as a paper figure, drawn again with matplotlib: journal widths (90, 140,
+  190 mm or any), fonts in points, PDF/SVG/EPS (editable text) or PNG/TIFF at a
+  given resolution, axis labels with units, $LaTeX$ in labels (mathtext, or a
+  LaTeX installation). The 3D view is rendered off screen at the figure's
+  resolution, with a colour bar per coloured item; in the 2D top view with x and
+  y axes in metres. A preview in the dialog. `lagoonviz.render.figure` does the
+  same from Python.
+- Fix: range min and max can be typed while the range is automatic (typing
+  fixes the range).
+
 ## 0.3.0.dev0 (phase 3, LAGOON format; in progress)
 
 - LAGOON format 0.2 complete: `lagoon-format` 0.2.0 (SPEC.md 0.2, no longer a

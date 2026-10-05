@@ -661,3 +661,33 @@ def test_convert_to_lagoon_format(window, reef3d_run, qtbot):
     case = window.session.data.case("case-1")
     assert isinstance(case.datasets["nhflow_free_surface"], StoreDataset)
     assert "smaller" in window.statusBar().currentMessage()
+
+
+def test_export_figure(window, tmp_path, qtbot):
+    """File > Export figure: the plots and the wave profiles as paper figures."""
+    pytest.importorskip("matplotlib")
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.gui.export_figure import available_contents, make_figure
+    from lagoonviz.render.figure import save_figure
+
+    run = make_run(tmp_path / "run", frames=4, print_interval=0.5, series=True, profiles=True)
+    window.open_case(run)
+    window.session.set_time(1.0)
+    window.plots.refresh()
+    keys = [key for key, _ in available_contents(window.session, bool(window.plots.shown_rows()))]
+    assert keys[:2] == ["series", "profiles"]
+    settings = {
+        "width_mm": 90.0,
+        "height_mm": None,
+        "font_size": 8.0,
+        "font_family": "sans-serif",
+        "dpi": 150,
+        "usetex": False,
+        "title": "",
+    }
+    for content in ("series", "profiles"):
+        figure, spec = make_figure(window, {**settings, "content": content})
+        path = save_figure(figure, tmp_path / f"{content}.pdf", spec)
+        assert path.stat().st_size > 1000
+    assert window.act_export_figure.shortcut().toString() == "Ctrl+Shift+P"

@@ -12,6 +12,7 @@ File
   Convert to LAGOON format...
   ----
   Export script...
+  Export figure...  [Ctrl+Shift+P]
   Export animation...  [Ctrl+Shift+E]
   Save screenshot...  [F12]
   ----

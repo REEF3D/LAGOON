@@ -166,6 +166,13 @@ class PlotsPanel(QWidget):
     def row_ids(self) -> list[str]:
         return [item_id for item_id, _ in self._rows]
 
+    def shown_rows(self) -> list[tuple[str, list]]:
+        """(item id, traces) of the rows shown now (the probe as "probe"), for figures."""
+        return [
+            ("probe" if item_id == SHOW_PROBE else item_id, traces)
+            for item_id, traces in self._rows
+        ]
+
     def full_range(self) -> tuple[float, float]:
         starts, ends = [], []
         for _, traces in self._rows:

@@ -208,6 +208,12 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+E",
             tip="Film the 3D view over the timeline into an MP4 video",
         )
+        self.act_export_figure = self._action(
+            "Export &figure...",
+            self.export_figure,
+            "Ctrl+Shift+P",
+            tip="The plots, the wave profiles or the 3D view as a paper figure (PDF, SVG, PNG)",
+        )
         self.act_compare = self._action(
             "&Compare side by side",
             self.toggle_compare,
@@ -251,6 +257,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_convert)
         file_menu.addSeparator()
         file_menu.addAction(self.act_export_script)
+        file_menu.addAction(self.act_export_figure)
         file_menu.addAction(self.act_export_movie)
         file_menu.addAction(self.act_screenshot)
         file_menu.addSeparator()
@@ -618,6 +625,12 @@ class MainWindow(QMainWindow):
     def export_script(self, path: str | Path) -> None:
         Path(path).write_text(self.session.to_script(), encoding="utf-8")
         self.statusBar().showMessage(f"Script written to {path}", 5000)
+
+    def export_figure(self) -> str | None:
+        """File → Export figure: a paper figure of the plots, profiles or 3D view."""
+        from lagoonviz.gui.export_figure import export_figure
+
+        return export_figure(self)
 
     def export_animation(self) -> str | None:
         """File → Export animation: an MP4 of the 3D view over the timeline."""
