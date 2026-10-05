@@ -62,7 +62,9 @@ format specification) at https://reef3d.github.io/LAGOON/, built with MkDocs fro
   to the bed. Frames are kept with a key of their data, camera and settings, so a
   stopped film goes on where it stopped. Needs Blender 4.2 or newer. Tuned for
   speed: 64 samples by default (denoised), adaptive sampling, few light bounces
-  (light crosses the water sheet once or twice), indirect light clamped. *File →
+  (light crosses the water sheet once or twice), indirect light clamped. Clear
+  water goes to Blender as a closed body of water (surface, walls, floor) that
+  refracts, reflects and absorbs light with depth, with fine ripples on it. *File →
   Render still with Cycles* path traces the 3D view as it is.
 
 ## 0.4.0.dev0 (phase 4, figure studio)

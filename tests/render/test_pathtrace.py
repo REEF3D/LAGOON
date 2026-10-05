@@ -385,3 +385,68 @@ def test_blender_progress_lines():
     assert blender_progress("LAGOON rendering frame 1/3 (200 triangles)").startswith("rendering")
     assert "compiling" in blender_progress("Compiling render kernels")
     assert blender_progress("Blender 4.2.3 LTS") is None
+
+
+def _grid(nx=6, ny=4, nan=None):
+    x, y = np.meshgrid(np.linspace(0, 5, nx), np.linspace(0, 3, ny))
+    z = 1.0 + 0.1 * np.sin(x)
+    points = np.stack([x.ravel(), y.ravel(), z.ravel()], 1)
+    if nan is not None:
+        points[nan] = np.nan  # dry land: a hole in the surface
+    quads = [(j * nx + i, j * nx + i + 1, (j + 1) * nx + i + 1, (j + 1) * nx + i)
+             for j in range(ny - 1) for i in range(nx - 1)]  # fmt: skip
+    triangles = np.array([t for a, b, c, d in quads for t in ((a, b, c), (a, c, d))])
+    triangles[::3] = triangles[::3, ::-1]  # some turned over, as meshes come
+    return points, triangles
+
+
+def _closed_and_outward(positions, triangles):
+    # merge corners at the same place; then every edge has exactly two triangles,
+    # met in opposite directions, and the volume enclosed is positive
+    keys = {tuple(np.round(p, 9)) for p in positions}
+    index = {k: i for i, k in enumerate(sorted(keys))}
+    merged = np.array([index[tuple(np.round(p, 9))] for p in positions])[triangles]
+    directed = {}
+    for a, b, c in merged:
+        for e in ((a, b), (b, c), (c, a)):
+            if e[0] != e[1]:
+                directed[e] = directed.get(e, 0) + 1
+    assert all(n == 1 for n in directed.values())  # no edge twice the same way
+    assert all((b, a) in directed for a, b in directed)  # each one met back
+    p = positions.astype(float)
+    t = triangles
+    return float(np.einsum("ij,ij->i", p[t[:, 0]], np.cross(p[t[:, 1]], p[t[:, 2]])).sum() / 6)
+
+
+def test_water_body_is_closed_and_faces_out():
+    from lagoonviz.render.pathtrace import water_body
+
+    points, triangles = _grid()
+    positions, body, smooth = water_body(points, triangles, bottom=0.0)
+    volume = _closed_and_outward(positions, body)
+    assert volume == pytest.approx(5 * 3 * 1.0, rel=0.05)  # about the box under it
+    assert smooth.sum() == len(triangles) and len(smooth) == len(body)
+    assert positions[:, 2].min() == 0.0
+    # a dry patch: still closed, with walls around the hole
+    points, triangles = _grid(nan=[8, 9])
+    positions, body, _ = water_body(points, triangles, bottom=0.0)
+    assert 0 < _closed_and_outward(positions, body) < 15.0
+
+
+def test_clear_water_goes_to_blender_as_a_body(reef3d_run, tmp_path):
+    session = Session()
+    session.open_case(reef3d_run)
+    surface = next(i.id for i in session.scene if i.kind == "free_surface")
+    session.set_property(surface, "variable", "none")
+    path = export_scene(session, tmp_path / "out", [0.0], (64, 36), "underwater", 4)
+    scene = json.loads(path.read_text())
+    frame = scene["frames"][0]
+    index, entry = next((i, o) for i, o in enumerate(frame["objects"]) if o["name"] == surface)
+    water = scene["materials"][entry["material"]]
+    assert water["transmission"] == 1.0 and water["ior"] == pytest.approx(1.333)
+    assert water["volume"]["density"] > 0 and water["volume"]["scatter"] > 0  # under water
+    assert water["ripples"]["scale"] > 0
+    assert scene["world"]["fog"] is None  # the water's own haze instead of the fog box
+    with np.load(tmp_path / "out" / frame["data"]) as arrays:
+        assert arrays[f"smooth_{index}"].dtype == bool
+        _closed_and_outward(arrays[f"positions_{index}"], arrays[f"triangles_{index}"])

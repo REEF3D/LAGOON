@@ -37,6 +37,14 @@ light that bounces: reflections and refraction through the water, soft shadows,
 light through the surface onto the bed. LAGOON runs Blender in the background as
 a separate program; Blender's window never opens.
 
+Clear water (a free surface coloured by nothing) goes to Blender as a body of
+water: the surface, walls along the sides of the domain and the shore, and a
+floor, filled with water that absorbs light on its way through (shallow water is
+clear, deep water takes the look's water colour) and, under water, scatters it.
+Its surface reflects the sky and the sun and carries small wind ripples that break
+the reflections into glitter. Water coloured by a variable stays an opaque,
+coloured surface, so its colours read.
+
 1. Install Blender 4.2 or newer. LAGOON finds it in Applications (macOS), on the
    `PATH`, or where the environment variable `LAGOON_BLENDER` points.
 2. Choose a cinematic look (with Studio or Ocean, Cycles uses Wave flume or Open

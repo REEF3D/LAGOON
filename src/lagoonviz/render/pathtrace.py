@@ -211,6 +211,60 @@ def spheres(centres: np.ndarray, radius) -> tuple[np.ndarray, np.ndarray]:
     )
 
 
+def water_body(
+    positions: np.ndarray, triangles: np.ndarray, bottom: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A closed body of water under a free surface: the surface (facing up), a floor
+    at ``bottom`` (facing down) and walls along the surface's open edges (the sides
+    of the domain and the shore of dry land), all facing out. Returns positions,
+    triangles and which triangles are smooth (the surface; walls and floor flat).
+
+    Path tracing needs the water as a volume: light refracts into it, is absorbed
+    on its way through (the deeper, the bluer) and refracts out again; a surface
+    alone can only tint."""
+    p = np.asarray(positions, np.float64).reshape(-1, 3)
+    t = np.asarray(triangles, np.int64).reshape(-1, 3)
+    finite = np.isfinite(p).all(axis=1)
+    t = t[finite[t].all(axis=1)]
+    if not len(t):
+        return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32), np.zeros(0, bool)
+    a, b, c = p[t[:, 0]], p[t[:, 1]], p[t[:, 2]]
+    up = np.cross(b - a, c - a)[:, 2] >= 0  # the surface faces up
+    t = np.where(up[:, None], t, t[:, ::-1])
+    # open edges: used by one triangle only (directed as in their triangle)
+    edges = np.concatenate([t[:, [0, 1]], t[:, [1, 2]], t[:, [2, 0]]])
+    keys = np.sort(edges, axis=1)
+    _, inverse, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
+    rim = edges[counts[inverse.ravel()] == 1]
+    n = len(p)
+    base = np.where(finite[:, None], p, 0.0)  # corners of dry land: unused
+    floor = base.copy()
+    floor[:, 2] = bottom
+    # walls: their own corners, so the surface's smooth normals stay its own
+    top_a, top_b = p[rim[:, 0]], p[rim[:, 1]]
+    low_a, low_b = top_a.copy(), top_b.copy()
+    low_a[:, 2] = bottom
+    low_b[:, 2] = bottom
+    k = len(rim)
+    wall_points = np.concatenate([top_a, top_b, low_b, low_a])  # 4 k corners
+    i = np.arange(k) + 2 * n
+    wall = np.concatenate(
+        [np.stack([i, i + k, i + 2 * k], 1), np.stack([i, i + 2 * k, i + 3 * k], 1)]
+    )
+    # outward: to the right of the edge seen from above (the surface turns
+    # counter-clockwise, its water on the left)
+    d = top_b - top_a
+    out = np.stack([d[:, 1], -d[:, 0], np.zeros(k)], 1)
+    all_points = np.concatenate([base, floor, wall_points])
+    w0, w1, w2 = all_points[wall[:, 0]], all_points[wall[:, 1]], all_points[wall[:, 2]]
+    facing = (np.cross(w1 - w0, w2 - w0) * np.concatenate([out, out])).sum(axis=1)
+    wall = np.where(facing[:, None] < 0, wall[:, ::-1], wall)
+    floor_triangles = t[:, ::-1] + n  # facing down
+    triangles_out = np.concatenate([t, floor_triangles, wall])
+    smooth = np.concatenate([np.ones(len(t), bool), np.zeros(len(t) + len(wall), bool)])
+    return all_points.astype(np.float32), triangles_out.astype(np.uint32), smooth
+
+
 # ======================================================================== cameras
 def look_rotation(forward, up=(0.0, 0.0, 1.0)) -> list[float]:
     """The quaternion (x, y, z, w) of a camera looking along ``forward`` with ``up``
@@ -323,9 +377,12 @@ def look_preset(look: str | None) -> Preset:
 class _Collector:
     """The objects and materials of a frame, as arrays and plain values."""
 
-    def __init__(self, preset: Preset, pixel: float) -> None:
+    def __init__(self, preset: Preset, pixel: float, bounds=None) -> None:
         self.preset = preset
         self.pixel = pixel
+        #: (low, high) of the frame's data: the floor and the depth of water bodies
+        self.bounds = bounds
+        self.water_bodies = 0
         self.objects: list[dict[str, Any]] = []
         self.arrays: dict[str, np.ndarray] = {}
         self.materials: dict[str, dict[str, Any]] = {}
@@ -338,7 +395,7 @@ class _Collector:
         self.materials[key] = spec
         return key
 
-    def add(self, name: str, positions, triangles, material: dict, rgb=None) -> None:
+    def add(self, name: str, positions, triangles, material: dict, rgb=None, smooth=None) -> None:
         positions = np.asarray(positions, np.float32).reshape(-1, 3)
         triangles = np.asarray(triangles, np.uint32).reshape(-1, 3)
         if not len(triangles):
@@ -352,6 +409,8 @@ class _Collector:
         index = len(self.objects)
         self.arrays[f"positions_{index}"] = positions
         self.arrays[f"triangles_{index}"] = triangles
+        if smooth is not None:
+            self.arrays[f"smooth_{index}"] = np.asarray(smooth, bool)
         if rgb is not None:
             self.arrays[f"colors_{index}"] = np.asarray(rgb, np.float32).reshape(-1, 3)
         self.objects.append(
@@ -407,6 +466,9 @@ class _Collector:
         surface = surface_of(kind, shown.material)
         s = SURFACES.get(surface, SURFACES["plain"])
         water = surface == "water"
+        if water and rgb is None and shown.opacity >= 1.0:
+            self.water(shown)
+            return
         spec = {
             "color": None
             if rgb is not None
@@ -416,10 +478,9 @@ class _Collector:
             else max(0.3, s.roughness if not water else 0.3),
             "metallic": s.metalness,
             "ior": s.ior,
-            # clear water: a sheet that refracts, tinted by its colour; seen at a
-            # slant it turns into the water's own colour (Blender: transmission falls
-            # off with the angle, as the path through real water grows); coloured
-            # by a variable it is opaque, so the colours read
+            # clear water is a body of its own (water()); a see-through sheet here
+            # (opacity < 1) tints what is behind it; coloured by a variable, water is
+            # opaque, so the colours read
             "transmission": 0.3 if water and rgb is None else 0.0,
             "water": bool(water and rgb is None),
             "coat": s.clearcoat,
@@ -436,11 +497,55 @@ class _Collector:
             }
         self.add(shown.item_id, shown.positions, shown.triangles, spec, rgb)
 
+    def water(self, shown) -> None:
+        """Clear water as path tracing sees it: a closed body (surface, walls, floor)
+        of glass-clear water that refracts and reflects at its surface, with small
+        ripples on it, absorbing light on the way through it in the look's water
+        colour (the deeper, the bluer), and under water also scattering it (haze)."""
+        points = np.asarray(shown.positions, float)
+        finite = points[np.isfinite(points).all(axis=1)]
+        if not len(finite):
+            return
+        if self.bounds is not None:
+            low, high = (np.asarray(v, float) for v in self.bounds)
+        else:
+            low, high = finite.min(axis=0), finite.max(axis=0)
+        extent = max(float(np.ptp(finite[:, :2], axis=0).max()), 1e-6)
+        bottom = float(low[2]) - 0.01 * max(float(np.linalg.norm(high - low)), 1e-6)
+        depth = max(float(np.mean(finite[:, 2])) - float(low[2]), 0.02 * extent)
+        positions, triangles, smooth = water_body(shown.positions, shown.triangles, bottom)
+        if not len(triangles):
+            return
+        tint = linear(_hex(self.preset.water_color))
+        tint = 0.3 + 0.7 * tint / max(float(tint.max()), 1e-6)  # what the water lets through
+        under = self.preset.fog is not None
+        spec = {
+            "color": [1.0, 1.0, 1.0],
+            "roughness": 0.02,
+            "metallic": 0.0,
+            "ior": 1.333,
+            "transmission": 1.0,
+            "water": True,
+            "coat": 0.0,
+            "alpha": 1.0,
+            "grain": None,
+            "volume": {
+                "color": [round(float(v), 4) for v in tint],
+                # light keeps about a third over the water's mean depth (Beer-Lambert)
+                "density": round(1.1 / (depth * max(1.0 - float(tint.mean()), 0.05)), 6),
+                "scatter": 0.25 if under else 0.0,
+            },
+            # wind ripples, much smaller than the waves: they break up the reflections
+            "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.12},
+        }
+        self.add(shown.item_id, positions, triangles, spec, None, smooth)
+        self.water_bodies += 1
 
-def _frame_objects(session, preset: Preset, pixel: float) -> _Collector:
+
+def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Collector:
     """The objects of the session's current time, as the 3D view shows them."""
     data = session.data
-    out = _Collector(preset, pixel)
+    out = _Collector(preset, pixel, bounds)
     for item_id in data.data_items():
         item = session.scene.get(item_id)
         if not item.visible:
@@ -539,6 +644,7 @@ def export_scene(
     original_time = session.scene.time
     frames = []
     materials: dict[str, dict[str, Any]] = {}
+    water_bodies = 0
     low = high = None
     try:
         for number, time in enumerate(times):
@@ -549,7 +655,8 @@ def export_scene(
                 high = bounds[1] if high is None else np.maximum(high, bounds[1])
             camera = blender_camera(camera_state_at(session, time, bounds), size)
             centre = (bounds[0] + bounds[1]) / 2 if bounds is not None else np.zeros(3)
-            collector = _frame_objects(session, preset, pixel_size(camera, centre, size[1]))
+            collector = _frame_objects(session, preset, pixel_size(camera, centre, size[1]), bounds)
+            water_bodies += collector.water_bodies
             # one material table for the film: the frame's keys renamed into it
             rename = {}
             for key, spec in collector.materials.items():
@@ -597,7 +704,7 @@ def export_scene(
         "background": [linear_hex(c) for c in preset.background] if preset.background else None,
         "fog": None,
     }
-    if preset.fog is not None:
+    if preset.fog is not None and not water_bodies:  # a water body has its own haze
         color, half = preset.fog
         margin = 0.1 * (high - low) + 0.01 * extent
         world["fog"] = {

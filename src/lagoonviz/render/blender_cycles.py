@@ -135,7 +135,7 @@ def setup_render(scene, settings: dict) -> str:
         ("glossy_bounces", 3),
         ("transmission_bounces", 4),
         ("transparent_max_bounces", 4),
-        ("volume_bounces", 0),
+        ("volume_bounces", 1),  # haze in the water under water
         ("sample_clamp_indirect", 5.0),  # no fireflies from the bright sky and panels
         ("caustics_reflective", False),
         ("caustics_refractive", False),
@@ -260,7 +260,7 @@ def make_material(key: str, spec: dict):
     set_input(bsdf, ("Metallic",), float(spec["metallic"]))
     set_input(bsdf, ("IOR",), float(spec["ior"]))
     set_input(bsdf, ("Transmission Weight", "Transmission"), float(spec["transmission"]))
-    if spec.get("water"):
+    if spec.get("water") and not spec.get("volume"):
         # a water sheet has no depth: looking straight down, much of the bed shows
         # through; at a slant (a longer way through the water) little does and the
         # water's own colour takes over. Transmission = t (1 - facing).
@@ -292,6 +292,37 @@ def make_material(key: str, spec: dict):
         tree.links.new(bsdf.outputs["BSDF"], mix.inputs[1])
         tree.links.new(window.outputs["BSDF"], mix.inputs[2])
         tree.links.new(mix.outputs["Shader"], output.inputs["Surface"])
+    volume = spec.get("volume")
+    if volume:
+        # the water's body: light absorbed on its way through (and scattered, the
+        # haze under water)
+        output = tree.nodes.get("Material Output") or tree.nodes.new("ShaderNodeOutputMaterial")
+        color = rgba(volume["color"])
+        if float(volume.get("scatter", 0.0)) > 0:
+            medium = tree.nodes.new("ShaderNodeVolumePrincipled")
+            set_input(medium, ("Color",), color)
+            set_input(medium, ("Absorption Color",), color)
+            set_input(medium, ("Density",), float(volume["density"]) * float(volume["scatter"]))
+        else:
+            medium = tree.nodes.new("ShaderNodeVolumeAbsorption")
+            set_input(medium, ("Color",), color)
+            set_input(medium, ("Density",), float(volume["density"]))
+        tree.links.new(medium.outputs["Volume"], output.inputs["Volume"])
+    ripples = spec.get("ripples")
+    if ripples:
+        # wind ripples on the water: they break the reflections of the sky and the sun
+        # into glitter, as on real water
+        coords = tree.nodes.new("ShaderNodeTexCoord")
+        noise = tree.nodes.new("ShaderNodeTexNoise")
+        set_input(noise, ("Scale",), float(ripples["scale"]))
+        set_input(noise, ("Detail",), 3.0)
+        set_input(noise, ("Roughness",), 0.5)
+        tree.links.new(coords.outputs["Object"], noise.inputs["Vector"])
+        bump = tree.nodes.new("ShaderNodeBump")
+        set_input(bump, ("Strength",), float(ripples["strength"]))
+        set_input(bump, ("Distance",), 0.2 / max(float(ripples["scale"]), 1e-6))
+        tree.links.new(noise.outputs["Fac"], bump.inputs["Height"])
+        tree.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     grain = spec.get("grain")
     if grain:
         # the grain as bump: noise over the object's own coordinates (metres)
@@ -310,8 +341,9 @@ def make_material(key: str, spec: dict):
 
 
 # ======================================================================== meshes
-def make_mesh(name: str, positions, triangles, colors):
-    """A smooth-shaded triangle mesh, with linear vertex colours if given."""
+def make_mesh(name: str, positions, triangles, colors, smooth=None):
+    """A triangle mesh, smooth shaded (or where ``smooth`` says), with linear vertex
+    colours if given."""
     positions = np.ascontiguousarray(positions, np.float32).reshape(-1, 3)
     triangles = np.ascontiguousarray(triangles, np.int32).reshape(-1, 3)
     n, m = len(positions), len(triangles)
@@ -328,7 +360,11 @@ def make_mesh(name: str, positions, triangles, colors):
         pass
     mesh.update(calc_edges=True)
     mesh.validate(clean_customdata=False)
-    mesh.polygons.foreach_set("use_smooth", np.ones(len(mesh.polygons), dtype=bool))
+    faces = len(mesh.polygons)
+    flags = np.ones(faces, dtype=bool)
+    if smooth is not None and len(smooth) == faces:  # validate() removed no faces
+        flags = np.asarray(smooth, dtype=bool)
+    mesh.polygons.foreach_set("use_smooth", flags)
     if colors is not None:
         values = np.ones((n, 4), np.float32)
         values[:, :3] = np.asarray(colors, np.float32).reshape(-1, 3)
@@ -354,7 +390,8 @@ def build_frame(collection, frame: dict, arrays, materials: dict) -> int:
         positions = arrays[f"positions_{index}"]
         triangles = arrays[f"triangles_{index}"]
         colors = arrays[f"colors_{index}"] if entry.get("colors") else None
-        mesh = make_mesh(entry["name"], positions, triangles, colors)
+        smooth = arrays[f"smooth_{index}"] if f"smooth_{index}" in arrays else None
+        mesh = make_mesh(entry["name"], positions, triangles, colors, smooth)
         mesh.materials.append(materials[entry["material"]])
         obj = bpy.data.objects.new(entry["name"], mesh)
         collection.objects.link(obj)
