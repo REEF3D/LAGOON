@@ -450,3 +450,18 @@ def test_clear_water_goes_to_blender_as_a_body(reef3d_run, tmp_path):
     with np.load(tmp_path / "out" / frame["data"]) as arrays:
         assert arrays[f"smooth_{index}"].dtype == bool
         _closed_and_outward(arrays[f"positions_{index}"], arrays[f"triangles_{index}"])
+
+
+def test_water_body_ends_on_the_bed():
+    from lagoonviz.render.pathtrace import BedHeights, water_body
+
+    x, y = np.meshgrid(np.linspace(0, 5, 26), np.linspace(0, 3, 16))
+    bed = np.stack([x.ravel(), y.ravel(), (0.1 * x).ravel()], 1)  # sloping up to 0.5
+    heights = BedHeights(bed, cells=32)
+    np.testing.assert_allclose(heights(np.array([[0.0, 1.0], [5.0, 2.0]])), [0.0, 0.5], atol=0.02)
+    points, triangles = _grid()
+    positions, body, smooth = water_body(points, triangles, heights)
+    floor = positions[len(points) : 2 * len(points)]
+    np.testing.assert_allclose(floor[:, 2], 0.1 * points[:, 0], atol=0.03)  # on the bed
+    volume = _closed_and_outward(positions, body)
+    assert volume == pytest.approx(5 * 3 * (1.0 - 0.25), rel=0.06)  # water above the bed only

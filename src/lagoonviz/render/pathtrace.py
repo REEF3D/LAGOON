@@ -211,13 +211,61 @@ def spheres(centres: np.ndarray, radius) -> tuple[np.ndarray, np.ndarray]:
     )
 
 
+class BedHeights:
+    """The bed's height under any point, from the bed's vertices binned on a grid
+    (each cell the mean of its vertices, empty cells from their nearest filled
+    neighbour): enough to close a body of water on the bed."""
+
+    def __init__(self, points: np.ndarray, cells: int = 256) -> None:
+        p = np.asarray(points, float).reshape(-1, 3)
+        p = p[np.isfinite(p).all(axis=1)]
+        if not len(p):
+            raise ValueError("no bed points")
+        self.low = p[:, :2].min(axis=0)
+        span = np.maximum(p[:, :2].max(axis=0) - self.low, 1e-9)
+        self.shape = (cells, cells)
+        self.size = span / (cells - 1)
+        ij = self._cells(p[:, :2])
+        flat = ij[:, 0] * cells + ij[:, 1]
+        count = np.bincount(flat, minlength=cells * cells)
+        total = np.bincount(flat, weights=p[:, 2], minlength=cells * cells)
+        grid = np.full(cells * cells, np.nan)
+        filled = count > 0
+        grid[filled] = total[filled] / count[filled]
+        grid = grid.reshape(cells, cells)
+        for _ in range(cells):  # fill empty cells from their neighbours
+            empty = np.isnan(grid)
+            if not empty.any():
+                break
+            padded = np.pad(grid, 1, constant_values=np.nan)
+            near = np.stack(
+                [padded[:-2, 1:-1], padded[2:, 1:-1], padded[1:-1, :-2], padded[1:-1, 2:]]
+            )
+            known = ~np.isnan(near)
+            total = np.where(known, near, 0.0).sum(axis=0)
+            with np.errstate(all="ignore"):
+                mean = total / known.sum(axis=0)  # NaN where no neighbour is known
+            grid = np.where(empty, mean, grid)
+        self.grid = np.where(np.isnan(grid), np.nanmin(p[:, 2]), grid)
+
+    def _cells(self, xy: np.ndarray) -> np.ndarray:
+        ij = np.floor((np.asarray(xy, float) - self.low) / self.size + 0.5).astype(int)
+        return np.clip(ij, 0, np.array(self.shape) - 1)
+
+    def __call__(self, xy: np.ndarray) -> np.ndarray:
+        ij = self._cells(np.asarray(xy, float).reshape(-1, 2))
+        return self.grid[ij[:, 0], ij[:, 1]]
+
+
 def water_body(
-    positions: np.ndarray, triangles: np.ndarray, bottom: float
+    positions: np.ndarray, triangles: np.ndarray, bottom
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """A closed body of water under a free surface: the surface (facing up), a floor
-    at ``bottom`` (facing down) and walls along the surface's open edges (the sides
-    of the domain and the shore of dry land), all facing out. Returns positions,
-    triangles and which triangles are smooth (the surface; walls and floor flat).
+    (facing down) and walls along the surface's open edges (the sides of the domain
+    and the shore of dry land), all facing out. ``bottom`` is the floor's height: a
+    number, or a function of (n, 2) points giving heights (the bed, so the water
+    ends on it). Returns positions, triangles and which triangles are smooth (the
+    surface; walls and floor flat).
 
     Path tracing needs the water as a volume: light refracts into it, is absorbed
     on its way through (the deeper, the bluer) and refracts out again; a surface
@@ -238,13 +286,20 @@ def water_body(
     rim = edges[counts[inverse.ravel()] == 1]
     n = len(p)
     base = np.where(finite[:, None], p, 0.0)  # corners of dry land: unused
+    if callable(bottom):
+        # on the bed, a little under it (the bed hides the floor), never above the water
+        depth = np.ptp(base[finite, 2]) if finite.any() else 1.0
+        heights = bottom(base[:, :2]) - 1e-3 * max(float(depth), 1e-6)
+        heights = np.minimum(heights, base[:, 2] - 1e-4 * max(float(depth), 1e-6))
+    else:
+        heights = np.full(n, float(bottom))
     floor = base.copy()
-    floor[:, 2] = bottom
+    floor[:, 2] = heights
     # walls: their own corners, so the surface's smooth normals stay its own
     top_a, top_b = p[rim[:, 0]], p[rim[:, 1]]
     low_a, low_b = top_a.copy(), top_b.copy()
-    low_a[:, 2] = bottom
-    low_b[:, 2] = bottom
+    low_a[:, 2] = heights[rim[:, 0]]
+    low_b[:, 2] = heights[rim[:, 1]]
     k = len(rim)
     wall_points = np.concatenate([top_a, top_b, low_b, low_a])  # 4 k corners
     i = np.arange(k) + 2 * n
@@ -383,6 +438,8 @@ class _Collector:
         #: (low, high) of the frame's data: the floor and the depth of water bodies
         self.bounds = bounds
         self.water_bodies = 0
+        #: the bed's heights (BedHeights), where water bodies end
+        self.bed: BedHeights | None = None
         self.objects: list[dict[str, Any]] = []
         self.arrays: dict[str, np.ndarray] = {}
         self.materials: dict[str, dict[str, Any]] = {}
@@ -511,8 +568,14 @@ class _Collector:
         else:
             low, high = finite.min(axis=0), finite.max(axis=0)
         extent = max(float(np.ptp(finite[:, :2], axis=0).max()), 1e-6)
-        bottom = float(low[2]) - 0.01 * max(float(np.linalg.norm(high - low)), 1e-6)
-        depth = max(float(np.mean(finite[:, 2])) - float(low[2]), 0.02 * extent)
+        if self.bed is not None:
+            bottom = self.bed
+            floor = self.bed(finite[:, :2])
+            depth = float(np.mean(np.maximum(finite[:, 2] - floor, 0.0)))
+        else:
+            bottom = float(low[2]) - 0.01 * max(float(np.linalg.norm(high - low)), 1e-6)
+            depth = float(np.mean(finite[:, 2])) - float(low[2])
+        depth = max(depth, 0.02 * extent)
         positions, triangles, smooth = water_body(shown.positions, shown.triangles, bottom)
         if not len(triangles):
             return
@@ -531,9 +594,10 @@ class _Collector:
             "grain": None,
             "volume": {
                 "color": [round(float(v), 4) for v in tint],
-                # light keeps about a third over the water's mean depth (Beer-Lambert)
-                "density": round(1.1 / (depth * max(1.0 - float(tint.mean()), 0.05)), 6),
-                "scatter": 0.25 if under else 0.0,
+                # straight through the water's mean depth, light keeps about two
+                # thirds (Beer-Lambert): the bed shows, deep water turns blue
+                "density": round(0.45 / (depth * max(1.0 - float(tint.mean()), 0.05)), 6),
+                "scatter": 0.1 if under else 0.0,
             },
             # wind ripples, much smaller than the waves: they break up the reflections
             "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.12},
@@ -546,6 +610,7 @@ def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Colle
     """The objects of the session's current time, as the 3D view shows them."""
     data = session.data
     out = _Collector(preset, pixel, bounds)
+    shown_items = []
     for item_id in data.data_items():
         item = session.scene.get(item_id)
         if not item.visible:
@@ -553,7 +618,18 @@ def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Colle
         mesh = data.load(item_id)
         if mesh is None:
             continue
-        shown = data.display(item_id, mesh)
+        shown_items.append((item_id, item, mesh, data.display(item_id, mesh)))
+    beds = [
+        shown.positions
+        for _, item, _, shown in shown_items
+        if item.kind == "bathymetry" and len(shown.positions)
+    ]
+    if beds:  # bodies of water end on the bed
+        try:
+            out.bed = BedHeights(np.concatenate([np.asarray(b, float) for b in beds]))
+        except ValueError:
+            out.bed = None
+    for item_id, item, mesh, shown in shown_items:
         out.surface(item.kind, shown)
         if not shown.visible:
             continue
