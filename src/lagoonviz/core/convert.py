@@ -21,7 +21,7 @@ import sys
 import time as _time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -56,6 +56,11 @@ Progress = Callable[[str, int, int], None]
 
 class ConvertError(ValueError):
     """The output cannot be converted (not a structured grid, another run)."""
+
+
+class Unstructured(ConvertError):
+    """A surface whose points are not on grid lines (CFD's free surface is an
+    iso-surface of the level set): left out, the rest is converted."""
 
 
 # ----------------------------------------------------------------- grid plans
@@ -178,9 +183,13 @@ class Report:
     outputs: dict[str, int]  # outputs added per output group
     vtk_bytes: int
     seconds: float
+    #: outputs left out, and why
+    skipped: dict[str, str] = field(default_factory=dict)
 
     def summary(self) -> str:
         added = ", ".join(f"{name} +{n}" for name, n in self.outputs.items()) or "nothing new"
+        if self.skipped:
+            added += "; left out: " + ", ".join(f"{k} ({why})" for k, why in self.skipped.items())
         size = store_size(self.store)
         ratio = f", {self.vtk_bytes / size:.1f}× smaller than the VTK files" if size else ""
         return (
@@ -290,12 +299,17 @@ def convert(
             path, solver, run=run, created_by=f"lagoon-convert {__version__}", source="REEF3D VTK"
         )
     added: dict[str, int] = {}
+    skipped: dict[str, str] = {}
     vtk_bytes = 0
     with ThreadPoolExecutor(8) as pool:
         for role, dataset in datasets.items():
-            n, size = _convert_dataset(
-                case, dataset, role, writer, pool, progress, shard_time, limit
-            )
+            try:
+                n, size = _convert_dataset(
+                    case, dataset, role, writer, pool, progress, shard_time, limit
+                )
+            except Unstructured as reason:
+                skipped[role] = str(reason)
+                continue
             added[role] = n
             vtk_bytes += size
         if bodies is not None:
@@ -311,7 +325,7 @@ def convert(
     if profiles:
         added["profiles"] = _convert_profiles(profiles, writer, progress)
     writer.close()
-    return Report(path, added, vtk_bytes, _time.perf_counter() - began)
+    return Report(path, added, vtk_bytes, _time.perf_counter() - began, skipped)
 
 
 def _series_solver(case: Case) -> str:
@@ -405,6 +419,10 @@ def _convert_dataset(case, dataset, role, writer, pool, progress, shard_time, li
         if len({nz for _, nz in planned}) != 1:
             raise ConvertError("the pieces have different numbers of levels")
     else:
+        total = sum(len(p.points) for p in first)
+        if len(xs) * len(ys) > 4 * max(total, 1):
+            # points off any grid (an iso-surface): its "grid" would be mostly holes
+            raise Unstructured("not on a grid: an iso-surface")
         plans = [plan_surface(p.points, xs, ys) for p in first]
     variables = dict(dataset.components)
     exists = role in writer.root

@@ -237,6 +237,10 @@ One point per grid column (no `sigma`, no `level` dimension):
 The surface is drawn as the quadrilaterals between neighbouring grid points that
 all have a value.
 
+REEF3D writes the free surface and bed itself with `P 18` (FNPF, NHFLOW, and
+CFD's topography as `bed`): each rank's VTP piece becomes its block; `P 18 2`
+leaves out the surface VTP files.
+
 ## 5. Chunks, shards and codecs
 
 Every data array of a block uses one chunk layout:
@@ -307,7 +311,9 @@ it is the only codec outside the Zarr v3 core.
   `z_surface` are the first and the last; `sigma` and `z_offset` follow
   (section 3). (Not sorted by height: near the coast FNPF writes columns whose
   levels do not rise.)
-- **Surfaces (VTP)**: each point becomes the grid point of its column.
+- **Surfaces (VTP)**: each point becomes the grid point of its column. A surface
+  whose points are not on a grid (CFD's free surface, an iso-surface of the level
+  set) is left out.
 - The time of every output comes from the run log, else from the `TimeValue`
   field data, else from `P 30` (output interval) times the output number.
 - The fields are stored as they are in the VTK files; `z` of the points is kept

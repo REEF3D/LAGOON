@@ -31,6 +31,8 @@
 - Particles: CFD's CPM particles (`REEF3D_CFD_CPM_Particle`, a file per MPI rank)
   and NHFLOW's particles open as a *Particles* item, drawn as points coloured by
   a variable (velocity by default), with their own output times (TimeValue).
+- The converter leaves out surfaces that are not on a grid (CFD's free surface is
+  an iso-surface) and says so, instead of building a grid of holes from them.
 - 4K films: from 2560 px wide the Mac's video hardware (VideoToolbox) encodes
   when it is there, else libx264 "veryfast"; frames go to ffmpeg as RGBA without a
   copy; the status bar reports frames per second, the encoder and where the time

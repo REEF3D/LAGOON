@@ -412,3 +412,34 @@ def test_ice_floes_in_the_store(tmp_path):
     assert report.outputs["ice"] > 0
     key = next(k for k, d in vtk.datasets.items() if d.role == "ice")
     _same_meshes(vtk.datasets[key], open_case(run).datasets[key], range(len(vtk.datasets[key])))
+
+
+def test_an_iso_surface_is_left_out(tmp_path):
+    """CFD's free surface is an iso-surface of the level set, not a grid: the store
+    gets the rest."""
+    from reef3d_fixtures import write_parallel, write_piece
+
+    run = make_run(tmp_path / "cfd", solver="CFD", frames=2, print_interval=0.5)
+    folder = run / "REEF3D_CFD_VTP_FSF"
+    rng = np.random.default_rng(3)
+    for frame in range(2):
+        names = []
+        for rank in range(2):
+            points = rng.uniform([0, 0, 1.9], [8, 4, 2.1], (300, 3)).astype(np.float32)
+            name = f"REEF3D-CFD-FSF-{frame:08d}-{rank + 1:06d}.vtp"
+            tris = np.arange(300).reshape(-1, 3)
+            write_piece(
+                folder / name,
+                "PolyData",
+                points,
+                {"elevation": points[:, 2].copy()},
+                tris.ravel(),
+                np.arange(3, 301, 3),
+            )
+            names.append(name)
+        write_parallel(
+            folder / f"REEF3D-CFD-FSF-{frame:08d}.pvtp", "PolyData", names, {"elevation": 1}
+        )
+    report = convert(run)
+    assert "free_surface" in report.skipped and "free_surface" not in report.outputs
+    assert report.outputs["volume"] == 2 and "left out: free_surface" in report.summary()
