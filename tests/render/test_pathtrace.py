@@ -18,17 +18,20 @@ import pytest
 from lagoonviz.core import Session
 from lagoonviz.render.cinematic import OPEN_OCEAN, UNDERWATER, WAVE_FLUME, panorama_directions
 from lagoonviz.render.pathtrace import (
+    SEA,
     blender_camera,
     default_camera,
     environment_panorama,
     export_scene,
     find_blender,
     look_rotation,
+    ocean_ring,
     path_trace,
     pixel_size,
     read_hdr,
     render_folder,
     rotate,
+    skirt,
     spheres,
     tubes,
     work_folder,
@@ -174,15 +177,14 @@ def test_export_scene(reef3d_run, tmp_path):
             if entry["colors"]:
                 assert arrays[f"colors_{index}"].shape == positions.shape
     materials = scene["materials"]
+    items = [o for o in frame["objects"] if "#" not in o["name"] and o["name"] != "LAGOON sea"]
     water = next(
         materials[o["material"]]
-        for o in frame["objects"]
+        for o in items
         if session.scene.get(o["name"]).kind == "free_surface"
     )
     bed = next(
-        materials[o["material"]]
-        for o in frame["objects"]
-        if session.scene.get(o["name"]).kind == "bathymetry"
+        materials[o["material"]] for o in items if session.scene.get(o["name"]).kind == "bathymetry"
     )
     if water["color"] is not None:  # clear water unless coloured by a variable
         assert water["transmission"] > 0.2 and water["ior"] == pytest.approx(1.33)
@@ -480,3 +482,64 @@ def test_water_body_ignores_hidden_triangles():
     _, outer, _ = water_body(points, triangles, bottom=0.0)
     walls = len(outer) - 2 * len(triangles)
     assert walls == 2 * (2 * 5 + 2 * 3)  # two triangles per edge of the outer rim only
+
+
+def test_skirt_hangs_from_the_rim_and_faces_out():
+    positions, triangles = _grid(5, 4)
+    walls, faces = skirt(positions, triangles, -2.0)
+    assert len(faces) == 2 * 2 * (4 + 3)  # two triangles per rim edge
+    assert walls[:, 2].min() == pytest.approx(-2.0)
+    centre = positions[:, :2].mean(axis=0)
+    a, b, c = (walls[faces[:, i]] for i in range(3))
+    normal = np.cross(b - a, c - a)
+    middle = (a + b + c)[:, :2] / 3 - centre
+    assert ((normal[:, :2] * middle).sum(axis=1) > 0).all()
+    assert np.allclose(normal[:, 2], 0, atol=1e-6)
+
+
+def test_ocean_ring_surrounds_the_domain():
+    positions, triangles = ocean_ring((0, 0, -5), (10, 4, 1), 0.5, 1000.0)
+    assert np.allclose(positions[:, 2], 0.5)
+    a, b, c = (positions[triangles[:, i]].astype(float) for i in range(3))
+    area = np.cross(b - a, c - a)[:, 2] / 2
+    assert (area > 0).all()  # facing up
+    assert area.sum() == pytest.approx(2000.0**2 - 40.0)  # all but the domain
+
+
+def test_coast_under_the_open_sky(reef3d_run, tmp_path):
+    """Open ocean, clear water: the bed dressed as land by height and slope, cliffs
+    at its sides, the sea around out to the horizon, the shore thinning out."""
+    session = Session()
+    session.open_case(reef3d_run)
+    surface = next(i.id for i in session.scene if i.kind == "free_surface")
+    bed_id = next(i.id for i in session.scene if i.kind == "bathymetry")
+    session.set_property(surface, "variable", "none")
+    session.set_property(bed_id, "variable", "none")
+    level = session.data.case_water_level(surface)
+    path = export_scene(session, tmp_path / "out", [0.0], (64, 36), "open_ocean", 4)
+    scene = json.loads(path.read_text())
+    frame = scene["frames"][0]
+    by_name = {o["name"]: (i, o) for i, o in enumerate(frame["objects"])}
+    bed = scene["materials"][by_name[bed_id][1]["material"]]
+    assert bed["terrain"]["level"] == pytest.approx(level, abs=1e-5)
+    assert bed["terrain"]["relief"] > 0
+    assert f"{bed_id}#sides" in by_name
+    sea = scene["materials"][by_name[SEA][1]["material"]]
+    assert sea["transmission"] == 0 and sea["swell"]["scale"] > 0
+    assert frame["camera"]["clip_end"] > 100 * frame["camera"]["clip_start"]
+    index, entry = by_name[surface]
+    water = scene["materials"][entry["material"]]
+    assert water["shore"]["fade"] > 0 and water["shore"]["foam"] > water["shore"]["fade"]
+    assert entry["attributes"] == ["lagoon_depth"]
+    with np.load(tmp_path / "out" / frame["data"]) as arrays:
+        depth = arrays[f"attribute_{index}_lagoon_depth"]
+        positions = arrays[f"positions_{index}"]
+        assert depth.shape == (len(positions),)
+        sea_index = by_name[SEA][0]
+        assert np.allclose(arrays[f"positions_{sea_index}"][:, 2], level, atol=1e-4)
+    # in the wave flume: neither land nor sea, and no foam
+    path = export_scene(session, tmp_path / "flume", [0.0], (64, 36), "wave_flume", 4)
+    scene = json.loads(path.read_text())
+    names = [o["name"] for o in scene["frames"][0]["objects"]]
+    assert SEA not in names and f"{bed_id}#sides" not in names
+    assert all("terrain" not in m for m in scene["materials"].values())

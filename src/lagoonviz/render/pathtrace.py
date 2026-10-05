@@ -53,7 +53,7 @@ log = logging.getLogger("lagoon.pathtrace")
 #: the script Blender runs (it is not imported here)
 BLENDER_SCRIPT = Path(__file__).with_name("blender_cycles.py")
 #: the version of the folder layout (scene.json "version")
-VERSION = 1
+VERSION = 2
 #: LAGOON's own looks, path traced in the cinematic look nearest to them
 LOOK_FOR = {"studio": "wave_flume", "ocean": "open_ocean"}
 #: the default view: the direction the camera looks (as LAGOON's "perspective" view)
@@ -67,6 +67,10 @@ TRAIL_WIDTH = 1.0
 OUTLINE_WIDTH = 1.3
 STAFF_WIDTH = 2.5
 DOT_SIZE = 8.0
+#: the sea around the domain reaches this many domain sizes out (to the horizon)
+SEA_REACH = 400.0
+#: the name of the sea's object
+SEA = "LAGOON sea"
 #: ``progress(done, total) -> keep going``
 Progress = Callable[[int, int], bool]
 
@@ -307,14 +311,7 @@ def water_body(
     t = t[(t[:, 0] != t[:, 1]) & (t[:, 1] != t[:, 2]) & (t[:, 0] != t[:, 2])]
     if not len(t):
         return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32), np.zeros(0, bool)
-    a, b, c = p[t[:, 0]], p[t[:, 1]], p[t[:, 2]]
-    up = np.cross(b - a, c - a)[:, 2] >= 0  # the surface faces up
-    t = np.where(up[:, None], t, t[:, ::-1])
-    # open edges: used by one triangle only (directed as in their triangle)
-    edges = np.concatenate([t[:, [0, 1]], t[:, [1, 2]], t[:, [2, 0]]])
-    keys = np.sort(edges, axis=1)
-    _, inverse, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
-    rim = edges[counts[inverse.ravel()] == 1]
+    t, rim = _facing_up_and_rim(p, t)
     n = len(p)
     base = np.where(finite[:, None], p, 0.0)  # corners of dry land: unused
     if callable(bottom):
@@ -349,6 +346,67 @@ def water_body(
     triangles_out = np.concatenate([t, floor_triangles, wall])
     smooth = np.concatenate([np.ones(len(t), bool), np.zeros(len(t) + len(wall), bool)])
     return all_points.astype(np.float32), triangles_out.astype(np.uint32), smooth
+
+
+def _facing_up_and_rim(p: np.ndarray, t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The triangles turned to face up, and their open edges (used by one triangle
+    only, directed as in their triangle: the surface on their left seen from above)."""
+    a, b, c = p[t[:, 0]], p[t[:, 1]], p[t[:, 2]]
+    up = np.cross(b - a, c - a)[:, 2] >= 0
+    t = np.where(up[:, None], t, t[:, ::-1])
+    edges = np.concatenate([t[:, [0, 1]], t[:, [1, 2]], t[:, [2, 0]]])
+    keys = np.sort(edges, axis=1)
+    _, inverse, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
+    return t, edges[counts[inverse.ravel()] == 1]
+
+
+def skirt(positions: np.ndarray, triangles: np.ndarray, bottom: float):
+    """Walls hanging from a surface's open edges down to ``bottom``, facing out: the
+    land of a bed ends in a cliff at the side of the domain, not in a paper edge
+    over nothing. Returns positions and triangles of the walls alone."""
+    p = np.asarray(positions, np.float64).reshape(-1, 3)
+    t = np.asarray(triangles, np.int64).reshape(-1, 3)
+    finite = np.isfinite(p).all(axis=1)
+    t = t[finite[t].all(axis=1)]
+    t = t[(t[:, 0] != t[:, 1]) & (t[:, 1] != t[:, 2]) & (t[:, 0] != t[:, 2])]
+    if not len(t):
+        return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32)
+    _, rim = _facing_up_and_rim(p, t)
+    top_a, top_b = p[rim[:, 0]], p[rim[:, 1]]
+    keep = (top_a[:, 2] > bottom) | (top_b[:, 2] > bottom)
+    top_a, top_b = top_a[keep], top_b[keep]
+    low_a, low_b = top_a.copy(), top_b.copy()
+    low_a[:, 2] = low_b[:, 2] = bottom
+    k = len(top_a)
+    points = np.concatenate([top_a, top_b, low_b, low_a])
+    i = np.arange(k)
+    walls = np.concatenate(
+        [np.stack([i, i + 2 * k, i + k], 1), np.stack([i, i + 3 * k, i + 2 * k], 1)]
+    )
+    # outward: to the right of the edge seen from above
+    d = top_b - top_a
+    out = np.tile(np.stack([d[:, 1], -d[:, 0], np.zeros(k)], 1), (2, 1))
+    w0, w1, w2 = points[walls[:, 0]], points[walls[:, 1]], points[walls[:, 2]]
+    facing = (np.cross(w1 - w0, w2 - w0) * out).sum(axis=1)
+    walls = np.where(facing[:, None] < 0, walls[:, ::-1], walls)
+    return points.astype(np.float32), walls.astype(np.uint32)
+
+
+def ocean_ring(low, high, level: float, reach: float):
+    """The sea around the domain out to the horizon: a flat ring at the still water
+    level from the box ``low``-``high`` (x, y) out to ``reach`` from its centre,
+    facing up. Returns positions and triangles."""
+    (x0, y0), (x1, y1) = np.asarray(low, float)[:2], np.asarray(high, float)[:2]
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    r = max(float(reach), 2 * max(x1 - x0, y1 - y0))
+    inner = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    outer = [(cx - r, cy - r), (cx + r, cy - r), (cx + r, cy + r), (cx - r, cy + r)]
+    positions = np.array([(x, y, level) for x, y in inner + outer], np.float32)
+    triangles = []
+    for j in range(4):  # a band per side: inner j, j+1 and outer j, j+1 (counter-clockwise)
+        a, b = j, (j + 1) % 4
+        triangles += [(a, 4 + a, 4 + b), (a, 4 + b, b)]
+    return positions, np.array(triangles, np.uint32)
 
 
 # ======================================================================== cameras
@@ -471,6 +529,9 @@ class _Collector:
         self.water_bodies = 0
         #: the bed's heights (BedHeights), where water bodies end
         self.bed: BedHeights | None = None
+        #: the still water level (as drawn), where the land begins and the sea around
+        #: the domain lies; None when not known
+        self.level: float | None = None
         self.objects: list[dict[str, Any]] = []
         self.arrays: dict[str, np.ndarray] = {}
         self.materials: dict[str, dict[str, Any]] = {}
@@ -483,7 +544,16 @@ class _Collector:
         self.materials[key] = spec
         return key
 
-    def add(self, name: str, positions, triangles, material: dict, rgb=None, smooth=None) -> None:
+    def add(
+        self,
+        name: str,
+        positions,
+        triangles,
+        material: dict,
+        rgb=None,
+        smooth=None,
+        attributes: dict[str, np.ndarray] | None = None,
+    ) -> None:
         positions = np.asarray(positions, np.float32).reshape(-1, 3)
         triangles = np.asarray(triangles, np.uint32).reshape(-1, 3)
         if not len(triangles):
@@ -501,9 +571,12 @@ class _Collector:
             self.arrays[f"smooth_{index}"] = np.asarray(smooth, bool)
         if rgb is not None:
             self.arrays[f"colors_{index}"] = np.asarray(rgb, np.float32).reshape(-1, 3)
-        self.objects.append(
-            {"name": name, "material": self.material(material), "colors": rgb is not None}
-        )
+        entry = {"name": name, "material": self.material(material), "colors": rgb is not None}
+        if attributes:  # per corner values the material reads (by name)
+            for key, values in attributes.items():
+                self.arrays[f"attribute_{index}_{key}"] = np.asarray(values, np.float32)
+            entry["attributes"] = sorted(attributes)
+        self.objects.append(entry)
 
     @staticmethod
     def plain(color: str | None, roughness: float = 0.5) -> dict[str, Any]:
@@ -575,15 +648,56 @@ class _Collector:
             "alpha": round(float(shown.opacity), 4),
             "grain": None,
         }
+        finite = shown.positions[np.isfinite(shown.positions).all(axis=1)]
+        span = float(np.ptp(finite[:, :2], axis=0).max()) if len(finite) else 0.0
         if s.grain and rgb is None:
-            finite = shown.positions[np.isfinite(shown.positions).all(axis=1)]
-            span = float(np.ptp(finite[:, :2], axis=0).max()) if len(finite) else 0.0
             spec["grain"] = {
                 "kind": s.grain,
                 "tile": round(max(s.tile, span / 3), 6),
                 "relief": s.relief,
             }
+        land = kind == "bathymetry" and rgb is None and self.coast and len(finite)
+        if land:
+            spec["terrain"] = self.terrain(finite, span)
         self.add(shown.item_id, shown.positions, shown.triangles, spec, rgb)
+        if land:
+            # the land ends in cliffs at the sides of the domain, down under the sea
+            zspan = max(float(np.ptp(finite[:, 2])), 1e-6)
+            bottom = min(float(finite[:, 2].min()), float(self.level)) - 0.05 * zspan
+            positions, triangles = skirt(shown.positions, shown.triangles, bottom)
+            self.add(
+                f"{shown.item_id}#sides",
+                positions,
+                triangles,
+                spec,
+                None,
+                np.zeros(len(triangles), bool),
+            )
+
+    @property
+    def coast(self) -> bool:
+        """Land and sea under the open sky: the bed is dressed as land above the still
+        water level, and the sea runs on beyond the domain."""
+        return self.preset.environment == "sky" and self.level is not None
+
+    def terrain(self, points: np.ndarray, span: float) -> dict[str, Any]:
+        """Colours of a coast by the height above the still water level and the slope:
+        wet sand at the water line, dry sand above it, then grass and heath, rock where
+        it is steep (heights as fractions of how high the land rises)."""
+        level = float(self.level)
+        top = float(points[:, 2].max())
+        depth = max(level - float(points[:, 2].min()), 0.0)
+        return {
+            "level": round(level, 6),
+            # at least a tenth of the depth: low land is beach, not hills
+            "relief": round(max(top - level, 0.1 * depth, 1e-6), 6),
+            "scale": round(6.0 / max(span, 1e-6), 6),  # patches of colour, a few per side
+            "wet": linear_hex("#7d6c50"),
+            "sand": linear_hex("#c2ab80"),
+            "grass": linear_hex("#5f6b36"),
+            "heath": linear_hex("#6f6646"),
+            "rock": linear_hex("#6d6964"),
+        }
 
     def water(self, shown, all_triangles=None) -> None:
         """Clear water as path tracing sees it: a closed body (surface, walls, floor)
@@ -632,6 +746,11 @@ class _Collector:
         positions, triangles, smooth = water_body(top, triangles, bottom)
         if not len(triangles):
             return
+        # how deep the water is at each corner of the surface (walls and floor: deep)
+        film = np.full(len(positions), 1e6, np.float32)
+        if self.bed is not None:
+            ok = np.isfinite(top).all(axis=1)
+            film[: len(top)][ok] = top[ok, 2] - self.bed(top[ok, :2])
         tint = linear(_hex(self.preset.water_color))
         tint = 0.3 + 0.7 * tint / max(float(tint.max()), 1e-6)  # what the water lets through
         under = self.preset.fog is not None
@@ -654,9 +773,42 @@ class _Collector:
             },
             # wind ripples, much smaller than the waves: they break up the reflections
             "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.2},
+            # at the shore the water thins out to nothing (no sheet of glass over the
+            # sand); under the open sky a band of foam where it breaks on the beach
+            "shore": {
+                "fade": round(0.03 * depth, 6),
+                "foam": round(0.1 * depth, 6) if self.preset.environment == "sky" else 0.0,
+                "scale": round(40.0 / extent, 6),
+            }
+            if self.bed is not None
+            else None,
         }
-        self.add(shown.item_id, positions, triangles, spec, None, smooth)
+        attributes = {"lagoon_depth": film} if self.bed is not None else None
+        self.add(shown.item_id, positions, triangles, spec, None, smooth, attributes)
         self.water_bodies += 1
+
+    def sea(self) -> None:
+        """The sea beyond the domain, out to the horizon: deep water at the still water
+        level all around (only with a body of water under the open sky)."""
+        if not (self.coast and self.water_bodies and self.bounds is not None):
+            return
+        low, high = (np.asarray(v, float) for v in self.bounds)
+        extent = max(float(np.ptp([low[:2], high[:2]], axis=0).max()), 1e-6)
+        positions, triangles = ocean_ring(low, high, float(self.level), SEA_REACH * extent)
+        deep = linear(_hex(self.preset.water_color)) * 0.35
+        spec = {
+            "color": [round(float(v), 6) for v in deep],
+            "roughness": 0.03,
+            "metallic": 0.0,
+            "ior": 1.333,
+            "transmission": 0.0,
+            "coat": 0.0,
+            "alpha": 1.0,
+            "grain": None,
+            "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.2},
+            "swell": {"scale": round(4.0 / extent, 6), "strength": 0.25},
+        }
+        self.add(SEA, positions, triangles, spec, None, np.zeros(len(triangles), bool))
 
 
 def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Collector:
@@ -677,6 +829,7 @@ def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Colle
         for _, item, _, shown in shown_items
         if item.kind == "bathymetry" and len(shown.positions)
     ]
+    out.level = _still_water(session, shown_items)
     if beds:  # bodies of water end on the bed
         try:
             out.bed = BedHeights(np.concatenate([np.asarray(b, float) for b in beds]))
@@ -697,6 +850,7 @@ def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Colle
                 continue
             color = getattr(lines, own) if own else preset.contours
             out.lines(f"{item_id}#{label}", lines.segments, width, color)
+    out.sea()
     profiles = set(data.profile_items())
     for item_id in data.series_items() + sorted(profiles):
         if not session.scene.get(item_id).visible:
@@ -718,6 +872,29 @@ def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Colle
                 np.repeat(rgb[wet], 12, axis=0),
             )
     return out
+
+
+def _still_water(session, shown_items) -> float | None:
+    """The still water level of the first shown water (or bed) as drawn: its case's,
+    else the middle of its surface; None in the plan view or with neither."""
+    if session.scene.flat:
+        return None
+    data = session.data
+    for kinds in (("free_surface", "amr"), ("bathymetry",)):
+        for item_id, item, _, shown in shown_items:
+            if item.kind not in kinds:
+                continue
+            try:
+                if data.case(item_id) is not None:
+                    return float(data.case_water_level(item_id))
+            except (AttributeError, OSError, ValueError):
+                pass
+            if item.kind in ("free_surface", "amr"):
+                z = np.asarray(shown.positions, float).reshape(-1, 3)[:, 2]
+                z = z[np.isfinite(z)]
+                if len(z):
+                    return float(np.median(z))
+    return None
 
 
 def _bounds(session) -> tuple[np.ndarray, np.ndarray] | None:
@@ -824,6 +1001,10 @@ def export_scene(
         distance = float(np.linalg.norm(np.asarray(frame["camera"]["position"]) - (low + high) / 2))
         frame["camera"]["clip_start"] = max(1e-4 * extent, (distance - extent) * 1e-3, 1e-5)
         frame["camera"]["clip_end"] = (distance + extent) * 4.0
+        if any(o["name"] == SEA for o in frame["objects"]):  # out to the horizon
+            frame["camera"]["clip_end"] = max(
+                frame["camera"]["clip_end"], 3.0 * SEA_REACH * extent + distance
+            )
     write_hdr(folder / "environment.hdr", environment_panorama(preset, 1024))
     own = session.sun_direction()  # the session's sun, else the look's
     sun = np.asarray(own if own is not None else preset.sun_direction, float)
@@ -859,6 +1040,7 @@ def export_scene(
         "size": list(size),
         "samples": int(samples),
         "view_transform": "AgX",
+        "look_contrast": "Medium High Contrast",  # AgX's own is flat
         "exposure": -0.6,  # the sun and the sky together: sand stays sand, not white
         "world": world,
         "sun": {
@@ -874,9 +1056,8 @@ def export_scene(
     }
     # a frame's key: everything its image depends on. Blender keeps an image whose
     # key it wrote beside it (frame_NNNNN.key) when asked to resume.
-    common = {
-        k: scene[k] for k in ("version", "look", "size", "samples", "view_transform", "exposure")
-    }
+    keys = ("version", "look", "size", "samples", "view_transform", "look_contrast", "exposure")
+    common = {k: scene[k] for k in keys}
     common.update(world=world, sun=scene["sun"])
     for frame in frames:
         used = {o["material"]: materials[o["material"]] for o in frame["objects"]}

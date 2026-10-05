@@ -43,7 +43,15 @@ floor, filled with water that absorbs light on its way through (shallow water is
 clear, deep water takes the look's water colour) and, under water, scatters it.
 Its surface reflects the sky and the sun and carries small wind ripples that break
 the reflections into glitter. Water coloured by a variable stays an opaque,
-coloured surface, so its colours read.
+coloured surface, so its colours read. Where the water thins out to nothing at
+the shore it fades away, so the sand shows instead of a sheet of glass.
+
+In the **Open ocean** look a coast looks like one: the bed (coloured by nothing)
+is dressed by its height above the still water level and its slope, with sand
+under water, wet sand at the water line, dry sand, grass and heath higher up, and
+rock where it is steep. The land ends in cliffs at the sides of the domain, the
+sea runs on beyond them to the horizon, and a band of foam lies just off the
+beach. *View → Sun...* sets where the light comes from.
 
 1. Install Blender 4.2 or newer. LAGOON finds it in Applications (macOS), on the
    `PATH`, or where the environment variable `LAGOON_BLENDER` points.

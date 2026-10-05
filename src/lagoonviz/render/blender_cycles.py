@@ -31,6 +31,7 @@ import numpy as np
 
 COLLECTION = "LAGOON frame"
 COLOR_ATTRIBUTE = "lagoon_color"
+DEPTH_ATTRIBUTE = "lagoon_depth"  # how deep the water is, per corner of its surface
 
 
 # ======================================================================== helpers
@@ -79,6 +80,58 @@ def principled(tree):
         output = tree.nodes.get("Material Output") or tree.nodes.new("ShaderNodeOutputMaterial")
         tree.links.new(node.outputs["BSDF"], output.inputs["Surface"])
     return node
+
+
+def connect(tree, value, socket) -> None:
+    """A node socket linked from ``value`` (a socket) or set to it (a number or colour)."""
+    if hasattr(value, "is_output"):
+        tree.links.new(value, socket)
+    else:
+        socket.default_value = value
+
+
+def map_range(tree, value, low, high, to_low=0.0, to_high=1.0):
+    """``value`` from low..high onto to_low..to_high, clamped (low > high turns it round)."""
+    node = tree.nodes.new("ShaderNodeMapRange")
+    node.clamp = True
+    connect(tree, value, node.inputs[0])
+    for index, number in ((1, low), (2, high), (3, to_low), (4, to_high)):
+        node.inputs[index].default_value = float(number)
+    return node.outputs[0]
+
+
+def calc(tree, operation: str, a, b=0.0, c=0.0):
+    node = tree.nodes.new("ShaderNodeMath")
+    node.operation = operation
+    for index, value in enumerate((a, b, c)):
+        if index < len(node.inputs):
+            connect(tree, value, node.inputs[index])
+    return node.outputs[0]
+
+
+def mix_color(tree, factor, a, b):
+    """Colour a, or b as far as ``factor`` says."""
+    try:
+        node = tree.nodes.new("ShaderNodeMix")
+        node.data_type = "RGBA"
+        sockets = node.inputs[0], node.inputs[6], node.inputs[7], node.outputs[2]
+    except (RuntimeError, AttributeError, TypeError):  # older Blender
+        node = tree.nodes.new("ShaderNodeMixRGB")
+        sockets = node.inputs[0], node.inputs[1], node.inputs[2], node.outputs[0]
+    for value, socket in zip((factor, a, b), sockets[:3], strict=True):
+        connect(tree, value, socket)
+    return sockets[3]
+
+
+def noise(tree, scale: float, detail: float = 4.0, roughness: float = 0.5):
+    """Noise (0..1) over the object's own coordinates (the scene's, in metres)."""
+    coords = tree.nodes.new("ShaderNodeTexCoord")
+    node = tree.nodes.new("ShaderNodeTexNoise")
+    set_input(node, ("Scale",), float(scale))
+    set_input(node, ("Detail",), float(detail))
+    set_input(node, ("Roughness",), float(roughness))
+    tree.links.new(coords.outputs["Object"], node.inputs["Vector"])
+    return node.outputs["Fac"]
 
 
 # ======================================================================== render
@@ -151,6 +204,14 @@ def setup_render(scene, settings: dict) -> str:
             break
         except (TypeError, ValueError):
             continue
+    for look in (settings.get("look_contrast") or "Medium High Contrast",):
+        # AgX's own contrast (the plain one is flat): named "AgX - <look>" in Blender 4
+        for name in (f"AgX - {look}", look):
+            try:
+                scene.view_settings.look = name
+                break
+            except (TypeError, ValueError):
+                continue
     try:
         scene.view_settings.exposure = float(settings.get("exposure", 0.0))
     except (AttributeError, TypeError):
@@ -302,6 +363,89 @@ def add_sun(collection, sun: dict) -> None:
 
 
 # ======================================================================== materials
+def terrain(tree, spec: dict):
+    """A coast's colour and roughness from the height above the still water level
+    and the slope: sand under water, wet sand at the water line, dry sand, grass,
+    heath higher up, rock where steep; ragged edges and patches from noise."""
+    land = spec["terrain"]
+    geometry = tree.nodes.new("ShaderNodeNewGeometry")
+    position = tree.nodes.new("ShaderNodeSeparateXYZ")
+    tree.links.new(geometry.outputs["Position"], position.inputs[0])
+    normal = tree.nodes.new("ShaderNodeSeparateXYZ")
+    tree.links.new(geometry.outputs["Normal"], normal.inputs[0])
+    patches = noise(tree, float(land["scale"]), 5.0, 0.55)
+    # the height above the water, as a fraction of the land's rise, a little ragged
+    height = calc(tree, "SUBTRACT", position.outputs["Z"], float(land["level"]))
+    height = calc(tree, "DIVIDE", height, float(land["relief"]))
+    height = calc(tree, "ADD", height, calc(tree, "MULTIPLY_ADD", patches, 0.08, -0.04))
+    ramp = tree.nodes.new("ShaderNodeValToRGB")
+    tree.links.new(map_range(tree, height, -0.05, 1.0), ramp.inputs["Fac"])
+    under = spec.get("color") or land["sand"]
+    stops = (
+        (-0.05, under),
+        (-0.004, land["wet"]),
+        (0.012, land["wet"]),
+        (0.03, land["sand"]),
+        (0.07, land["sand"]),
+        (0.16, land["grass"]),
+        (0.6, land["grass"]),
+        (0.9, land["heath"]),
+    )
+    elements = ramp.color_ramp.elements
+    for _ in range(len(stops) - len(elements)):
+        elements.new(1.0)
+    for element, (h, color) in zip(elements, stops, strict=False):
+        element.position = (h + 0.05) / 1.05
+        element.color = rgba(color)
+    # rock where it is steep (the normal leans more than about 35 degrees)
+    steep = map_range(tree, normal.outputs["Z"], 0.84, 0.66)
+    color = mix_color(tree, steep, ramp.outputs["Color"], rgba(land["rock"]))
+    shade = tree.nodes.new("ShaderNodeHueSaturation")  # lighter and darker patches
+    connect(tree, color, shade.inputs["Color"])
+    connect(tree, map_range(tree, patches, 0.3, 0.7, 0.82, 1.08), shade.inputs["Value"])
+    # wet sand and the bed under water shine a little; dry land is matt
+    rough = map_range(tree, height, 0.004, 0.03, 0.4, 0.95)
+    return shade.outputs["Color"], rough
+
+
+def shore(tree, spec: dict) -> None:
+    """Water thinning out at the shore: see-through where it is only a film (no sheet
+    of glass over the sand) and, under the open sky, patchy foam just off the water
+    line. Needs the surface's depth per corner (``lagoon_depth``)."""
+    band = spec["shore"]
+    output = tree.nodes.get("Material Output")
+    links = output.inputs["Surface"].links
+    if not links:
+        return
+    shader = links[0].from_socket
+    attribute = tree.nodes.new("ShaderNodeAttribute")
+    attribute.attribute_name = DEPTH_ATTRIBUTE
+    depth = attribute.outputs["Fac"]
+    fade, reach = float(band["fade"]), float(band.get("foam") or 0.0)
+    if reach > fade:
+        foam = principled_node(tree, (0.85, 0.88, 0.88), 0.45)
+        patches = map_range(tree, noise(tree, float(band["scale"]), 6.0, 0.6), 0.42, 0.62)
+        amount = calc(tree, "MULTIPLY", map_range(tree, depth, fade, reach, 0.9, 0.0), patches)
+        mix = tree.nodes.new("ShaderNodeMixShader")
+        tree.links.new(amount, mix.inputs[0])
+        tree.links.new(shader, mix.inputs[1])
+        tree.links.new(foam.outputs["BSDF"], mix.inputs[2])
+        shader = mix.outputs["Shader"]
+    clear = tree.nodes.new("ShaderNodeBsdfTransparent")
+    mix = tree.nodes.new("ShaderNodeMixShader")
+    tree.links.new(map_range(tree, depth, 0.0, max(fade, 1e-9)), mix.inputs[0])
+    tree.links.new(clear.outputs["BSDF"], mix.inputs[1])
+    tree.links.new(shader, mix.inputs[2])
+    tree.links.new(mix.outputs["Shader"], output.inputs["Surface"])
+
+
+def principled_node(tree, color, roughness: float):
+    node = tree.nodes.new("ShaderNodeBsdfPrincipled")
+    set_input(node, ("Base Color",), rgba(color))
+    set_input(node, ("Roughness",), float(roughness))
+    return node
+
+
 def make_material(key: str, spec: dict):
     material = bpy.data.materials.new(f"LAGOON {key}")
     use_nodes(material)
@@ -314,6 +458,13 @@ def make_material(key: str, spec: dict):
     else:
         set_input(bsdf, ("Base Color",), rgba(spec["color"]))
     set_input(bsdf, ("Roughness",), float(spec["roughness"]))
+    if spec.get("terrain"):
+        try:
+            color, rough = terrain(tree, spec)
+            tree.links.new(color, bsdf.inputs["Base Color"])
+            tree.links.new(rough, bsdf.inputs["Roughness"])
+        except (AttributeError, KeyError, IndexError, TypeError, RuntimeError) as error:
+            print(f"LAGOON warning: no land colours ({error!r})", flush=True)
     set_input(bsdf, ("Metallic",), float(spec["metallic"]))
     set_input(bsdf, ("IOR",), float(spec["ior"]))
     set_input(bsdf, ("Transmission Weight", "Transmission"), float(spec["transmission"]))
@@ -372,37 +523,51 @@ def make_material(key: str, spec: dict):
         # wind ripples on the water: they break the reflections of the sky and the sun
         # into glitter, as on real water
         coords = tree.nodes.new("ShaderNodeTexCoord")
-        noise = tree.nodes.new("ShaderNodeTexNoise")
-        set_input(noise, ("Scale",), float(ripples["scale"]))
-        set_input(noise, ("Detail",), 3.0)
-        set_input(noise, ("Roughness",), 0.5)
-        tree.links.new(coords.outputs["Object"], noise.inputs["Vector"])
+        wave = tree.nodes.new("ShaderNodeTexNoise")
+        set_input(wave, ("Scale",), float(ripples["scale"]))
+        set_input(wave, ("Detail",), 3.0)
+        set_input(wave, ("Roughness",), 0.5)
+        tree.links.new(coords.outputs["Object"], wave.inputs["Vector"])
         bump = tree.nodes.new("ShaderNodeBump")
         set_input(bump, ("Strength",), float(ripples["strength"]))
         set_input(bump, ("Distance",), 0.2 / max(float(ripples["scale"]), 1e-6))
-        tree.links.new(noise.outputs["Fac"], bump.inputs["Height"])
+        tree.links.new(wave.outputs["Fac"], bump.inputs["Height"])
         tree.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+        swell = spec.get("swell")
+        if swell:
+            # long, low swell under the ripples (the sea beyond the domain)
+            under = tree.nodes.new("ShaderNodeBump")
+            set_input(under, ("Strength",), float(swell["strength"]))
+            set_input(under, ("Distance",), 0.3 / max(float(swell["scale"]), 1e-6))
+            height = noise(tree, float(swell["scale"]), 2.0, 0.4)
+            tree.links.new(height, under.inputs["Height"])
+            tree.links.new(under.outputs["Normal"], bump.inputs["Normal"])
+    if spec.get("shore"):
+        try:
+            shore(tree, spec)
+        except (AttributeError, KeyError, IndexError, TypeError, RuntimeError) as error:
+            print(f"LAGOON warning: no shore ({error!r})", flush=True)
     grain = spec.get("grain")
     if grain:
         # the grain as bump: noise over the object's own coordinates (metres)
         coords = tree.nodes.new("ShaderNodeTexCoord")
-        noise = tree.nodes.new("ShaderNodeTexNoise")
-        set_input(noise, ("Scale",), 4.0 / max(float(grain["tile"]), 1e-6))
-        set_input(noise, ("Detail",), 8.0)
-        set_input(noise, ("Roughness",), 0.6)
-        tree.links.new(coords.outputs["Object"], noise.inputs["Vector"])
+        wave = tree.nodes.new("ShaderNodeTexNoise")
+        set_input(wave, ("Scale",), 4.0 / max(float(grain["tile"]), 1e-6))
+        set_input(wave, ("Detail",), 8.0)
+        set_input(wave, ("Roughness",), 0.6)
+        tree.links.new(coords.outputs["Object"], wave.inputs["Vector"])
         bump = tree.nodes.new("ShaderNodeBump")
         set_input(bump, ("Strength",), min(float(grain["relief"]) / 45.0, 1.0) * 0.6)
         set_input(bump, ("Distance",), 0.02 * float(grain["tile"]))
-        tree.links.new(noise.outputs["Fac"], bump.inputs["Height"])
+        tree.links.new(wave.outputs["Fac"], bump.inputs["Height"])
         tree.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     return material
 
 
 # ======================================================================== meshes
-def make_mesh(name: str, positions, triangles, colors, smooth=None):
+def make_mesh(name: str, positions, triangles, colors, smooth=None, attributes=None):
     """A triangle mesh, smooth shaded (or where ``smooth`` says), with linear vertex
-    colours if given."""
+    colours if given and per corner numbers (``attributes``: name -> values)."""
     positions = np.ascontiguousarray(positions, np.float32).reshape(-1, 3)
     triangles = np.ascontiguousarray(triangles, np.int32).reshape(-1, 3)
     n, m = len(positions), len(triangles)
@@ -429,6 +594,9 @@ def make_mesh(name: str, positions, triangles, colors, smooth=None):
         values[:, :3] = np.asarray(colors, np.float32).reshape(-1, 3)
         attribute = mesh.color_attributes.new(COLOR_ATTRIBUTE, "FLOAT_COLOR", "POINT")
         attribute.data.foreach_set("color", values.ravel())
+    for key, values in (attributes or {}).items():
+        attribute = mesh.attributes.new(key, "FLOAT", "POINT")
+        attribute.data.foreach_set("value", np.asarray(values, np.float32).ravel())
     mesh.update()
     return mesh
 
@@ -450,7 +618,10 @@ def build_frame(collection, frame: dict, arrays, materials: dict) -> int:
         triangles = arrays[f"triangles_{index}"]
         colors = arrays[f"colors_{index}"] if entry.get("colors") else None
         smooth = arrays[f"smooth_{index}"] if f"smooth_{index}" in arrays else None
-        mesh = make_mesh(entry["name"], positions, triangles, colors, smooth)
+        attributes = {
+            key: arrays[f"attribute_{index}_{key}"] for key in entry.get("attributes", ())
+        }
+        mesh = make_mesh(entry["name"], positions, triangles, colors, smooth, attributes)
         mesh.materials.append(materials[entry["material"]])
         obj = bpy.data.objects.new(entry["name"], mesh)
         collection.objects.link(obj)
