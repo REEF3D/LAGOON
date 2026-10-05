@@ -9,7 +9,7 @@ film is smooth whatever the window does. A progress dialog shows how far it is;
 | --- | --- |
 | File | where the `.mp4` goes (by default next to the case) |
 | Size | the 3D view's shape at Full HD, HD or 4K width, or 16:9 sizes up to 4K |
-| Outputs | from, to, and every how many outputs |
+| Frames | from, to, and every how many, numbered as on the timeline |
 | Frames per second | of the film |
 | Show | the time and colour bars on the frames |
 | Renderer | LAGOON's own (fast, as the 3D view draws), or Blender Cycles (path traced, see [below](#path-traced-films)) |

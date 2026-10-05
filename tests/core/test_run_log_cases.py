@@ -96,6 +96,11 @@ def test_a_case_written_by_reef3d():
     times, _, unit = s.data.timeline()
     np.testing.assert_allclose(times, restart.times)
     assert unit == "s"
+    # films take the timeline's frames and times (not frame x P 30)
+    from lagoonviz.render.movie import frame_times
+
+    np.testing.assert_allclose(frame_times(s), times)
+    np.testing.assert_allclose(frame_times(s, 1, 3), times[1:4])
     s.set_time(0.9)
     mesh = s.data.load("free_surface-1")
     assert mesh is not None and s.data.frame_index("free_surface-1") == 3

@@ -69,9 +69,9 @@ class ExportAnimationDialog(QDialog):
     def __init__(self, parent: QWidget, session: Session, folder: str, viewport_size) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export animation")
-        data = session.data
-        n = data.n_frames()
-        first = data.first_output()
+        steps = session.data.timeline()[1]
+        first = int(steps[0]) if len(steps) else 0
+        last = int(steps[-1]) if len(steps) else 0
         form = QFormLayout(self)
 
         self.path = QLineEdit(str(Path(folder) / "lagoon_animation.mp4"))
@@ -97,9 +97,17 @@ class ExportAnimationDialog(QDialog):
         self.start = QSpinBox()
         self.end = QSpinBox()
         for spin in (self.start, self.end):
-            spin.setRange(first, max(n - 1, first))
+            # the frame numbers the timeline shows; a number outside goes to the
+            # nearest frame there is (Qt's default put the old number back)
+            spin.setRange(first, last)
+            spin.setCorrectionMode(QSpinBox.CorrectToNearestValue)
+            spin.setKeyboardTracking(False)
+            spin.setToolTip(f"Frames {first} to {last}, as numbered on the timeline")
         self.start.setValue(first)
-        self.end.setValue(max(n - 1, first))
+        self.end.setValue(last)
+        # the first frame never after the last
+        self.start.valueChanged.connect(lambda v: self.end.setValue(max(self.end.value(), v)))
+        self.end.valueChanged.connect(lambda v: self.start.setValue(min(self.start.value(), v)))
         self.every = QSpinBox()
         self.every.setRange(1, 1000)
         outputs = QHBoxLayout()
@@ -108,7 +116,7 @@ class ExportAnimationDialog(QDialog):
             outputs.addWidget(widget)
         holder = QWidget()
         holder.setLayout(outputs)
-        form.addRow("Outputs", holder)
+        form.addRow("Frames", holder)
 
         self.fps = QDoubleSpinBox()
         self.fps.setRange(1, 120)
