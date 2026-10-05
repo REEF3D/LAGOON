@@ -416,9 +416,12 @@ class _Collector:
             else max(0.3, s.roughness if not water else 0.3),
             "metallic": s.metalness,
             "ior": s.ior,
-            # clear water: a sheet that refracts, tinted by its colour; coloured by a
-            # variable it is opaque, so the colours read
-            "transmission": 0.9 if water and rgb is None else 0.0,
+            # clear water: a sheet that refracts, tinted by its colour; seen at a
+            # slant it turns into the water's own colour (Blender: transmission falls
+            # off with the angle, as the path through real water grows); coloured
+            # by a variable it is opaque, so the colours read
+            "transmission": 0.6 if water and rgb is None else 0.0,
+            "water": bool(water and rgb is None),
             "coat": s.clearcoat,
             "alpha": round(float(shown.opacity), 4),
             "grain": None,

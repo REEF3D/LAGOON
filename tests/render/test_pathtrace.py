@@ -364,6 +364,14 @@ def test_real_blender(reef3d_run, tmp_path):
         )
         data = out.read_bytes()
         assert data.startswith(b"\x89PNG") and len(data) > 5000, look
+    # clear water (coloured by nothing): the water must show, not only the bed
+    surface = next(i.id for i in session.scene if i.kind == "free_surface")
+    session.set_property(surface, "variable", "none")
+    for look in ("open_ocean", "underwater"):
+        out = path_trace(
+            session, folder / f"cycles_clear_{look}.png", size=(480, 270), look=look, samples=24
+        )
+        assert out.read_bytes().startswith(b"\x89PNG"), look
 
 
 def test_blender_progress_lines():

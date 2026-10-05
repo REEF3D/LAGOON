@@ -260,6 +260,20 @@ def make_material(key: str, spec: dict):
     set_input(bsdf, ("Metallic",), float(spec["metallic"]))
     set_input(bsdf, ("IOR",), float(spec["ior"]))
     set_input(bsdf, ("Transmission Weight", "Transmission"), float(spec["transmission"]))
+    if spec.get("water"):
+        # a water sheet has no depth: looking straight down, much of the bed shows
+        # through; at a slant (a longer way through the water) little does and the
+        # water's own colour takes over. Transmission = t (1 - facing).
+        weight = bsdf.inputs.get("Transmission Weight") or bsdf.inputs.get("Transmission")
+        if weight is not None:
+            facing = tree.nodes.new("ShaderNodeLayerWeight")
+            set_input(facing, ("Blend",), 0.5)
+            falloff = tree.nodes.new("ShaderNodeMath")
+            falloff.operation = "MULTIPLY_ADD"
+            falloff.inputs[1].default_value = -float(spec["transmission"])
+            falloff.inputs[2].default_value = float(spec["transmission"])
+            tree.links.new(facing.outputs["Facing"], falloff.inputs[0])
+            tree.links.new(falloff.outputs[0], weight)
     if spec.get("coat"):
         set_input(bsdf, ("Coat Weight", "Clearcoat"), float(spec["coat"]))
         set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.1)
