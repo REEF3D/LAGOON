@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Architect: Hans Bihs
 """The figure editor (File → Figure editor): build a paper figure by dragging time
-series onto panels, change its look live, keep it as a template.
+series and wave profiles onto panels, change its look live, keep it as a template.
 
-Left, what can be drawn: the time-series files of the open cases and their
-columns, and measured files added with "Add measured file". In the middle, the
-figure: its panels and their lines; drag a column onto a panel (or double-click
-it) to add it, onto empty space for a new panel. Under it the settings of what is
-selected. Right, the figure as it will be written, drawn again after each change.
-Templates (``*.lagoonfig``) keep the figure for other runs of the same set-up.
+Left, what can be drawn: the time-series files and wave profiles of the open cases,
+and measured files added with "Add measured file". In the middle, the figure: its
+panels (time series, spectra, wave profiles, 3D views) and their lines; drag a
+column onto a panel (or double-click it) to add it, onto empty space for a new
+panel. Under it the settings of what is selected: of the figure (style, size, a
+grid of columns, panel letters), of a panel (title, columns it spans, notes, its
+moment; a 3D view takes the view as it is when asked), of a line. Right, the
+figure as it will be written, drawn again after each change. Templates
+(``*.lagoonfig``) keep the figure for other runs of the same set-up.
 """
 
 from __future__ import annotations
@@ -32,8 +35,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QTreeWidget,
@@ -49,23 +55,33 @@ from lagoonviz.core.figure_template import (
     FigureTemplate,
     Line,
     Panel,
+    fits,
+    notes_text,
+    parse_notes,
+    profile_columns,
     series_columns,
 )
 
 log = logging.getLogger("lagoon.gui")
 MIME = "application/x-lagoon-line"
 ROLE = Qt.UserRole
-PANEL_LABELS = {"time": "Time series", "spectrum": "Spectrum"}
+PANEL_LABELS = {
+    "time": "Time series",
+    "spectrum": "Spectrum",
+    "profile": "Wave profiles",
+    "view": "3D view",
+}
+
 STYLE_NAMES = {"-": "solid", "--": "dashed", ":": "dotted", "-.": "dash-dot", "none": "no line"}
 
 
 def _encode(line: Line) -> bytes:
-    return "\x1f".join((line.source, line.column, line.file)).encode()
+    return "\x1f".join((line.source, line.column, line.file, line.data, line.linestyle)).encode()
 
 
 def _decode(data: bytes) -> Line:
-    source, column, file = data.decode().split("\x1f")
-    return Line(source, column, file=file)
+    source, column, file, kind, linestyle = data.decode().split("\x1f")
+    return Line(source, column, file=file, data=kind, linestyle=linestyle)
 
 
 class SourceTree(QTreeWidget):
@@ -146,9 +162,13 @@ class FigureEditor(QDialog):
         self.tree = FigureTree(self)
         self.tree.currentItemChanged.connect(lambda *_: self._show_selected())
         buttons = QHBoxLayout()
+        add = QPushButton("Add panel")
+        menu = QMenu(add)
+        for kind, label in PANEL_LABELS.items():
+            menu.addAction(label, lambda kind=kind: self.add_panel(kind))
+        add.setMenu(menu)
+        buttons.addWidget(add)
         for text, slot in (
-            ("+ Time panel", lambda: self.add_panel("time")),
-            ("+ Spectrum panel", lambda: self.add_panel("spectrum")),
             ("Up", lambda: self.move_selected(-1)),
             ("Down", lambda: self.move_selected(1)),
             ("Remove", self.remove_selected),
@@ -218,24 +238,51 @@ class FigureEditor(QDialog):
         self.height_box = _number(0, 1000, " mm", "automatic")
         self.font_box = _number(0, 30, " pt", "style's")
         self.title_box = QLineEdit()
+        self.columns_box = QSpinBox()
+        self.columns_box.setRange(1, 4)
+        self.columns_box.setToolTip("Panels fill a grid of this many columns, row by row")
+        self.letters_box = QCheckBox("(a), (b), ... before the panel titles")
         form.addRow("Style", self.style_box)
         form.addRow("Width", self.width_box)
         form.addRow("Height", self.height_box)
         form.addRow("Font size", self.font_box)
         form.addRow("Title", self.title_box)
+        form.addRow("Columns", self.columns_box)
+        form.addRow("Letters", self.letters_box)
         for box in (self.style_box, self.width_box):
             box.currentIndexChanged.connect(self._figure_changed)
-        for box in (self.height_box, self.font_box):
+        for box in (self.height_box, self.font_box, self.columns_box):
             box.valueChanged.connect(self._figure_changed)
         self.title_box.editingFinished.connect(self._figure_changed)
+        self.letters_box.toggled.connect(self._figure_changed)
         return form_widget
 
     def _panel_form(self) -> QWidget:
         form_widget = QWidget()
-        form = QFormLayout(form_widget)
+        form = self.panel_layout = QFormLayout(form_widget)
         self.kind_box = QComboBox()
         for kind, label in PANEL_LABELS.items():
             self.kind_box.addItem(label, kind)
+        self.panel_title_box = QLineEdit()
+        self.panel_title_box.setPlaceholderText("none (profiles and views: their time)")
+        self.span_box = QSpinBox()
+        self.span_box.setRange(1, 4)
+        self.span_box.setToolTip("Columns of the figure's grid the panel takes")
+        self.moment_box = _number(-1, 1e7, " s", "the scene's time")
+        self.moment_box.setDecimals(3)
+        self.moment_box.setToolTip("The moment a wave profile or 3D view shows")
+        self.notes_box = QPlainTextEdit()
+        self.notes_box.setPlaceholderText(
+            r"one note per line, $LaTeX$ allowed; '0.6, 0.9: text' places it"
+        )
+        self.notes_box.setMaximumHeight(60)
+        self.view_box = QComboBox()
+        self.view_box.addItem("as captured (3D)", "camera")
+        self.view_box.addItem("from the top (2D, axes in m)", "top")
+        self.bars_box = QCheckBox("Colour bars under the image")
+        self.take_view_button = QPushButton("Take the 3D view as it is now")
+        self.take_view_button.setToolTip("The camera, time and look of the 3D view, for this panel")
+        self.take_view_button.clicked.connect(self.take_view)
         self.ylabel_box = QLineEdit()
         self.ylabel_box.setPlaceholderText(r"automatic; $\eta$ [m] for symbols")
         self.ymin_box = QLineEdit()
@@ -247,6 +294,12 @@ class FigureEditor(QDialog):
         self.end_box = _number(0, 1e7, " s", "end")
         self.compare_box = QCheckBox("Statistics: first line against the measured one")
         form.addRow("Panel", self.kind_box)
+        form.addRow("Title", self.panel_title_box)
+        form.addRow("Columns", self.span_box)
+        form.addRow("Moment", self.moment_box)
+        form.addRow("", self.take_view_button)
+        form.addRow("View", self.view_box)
+        form.addRow("", self.bars_box)
         form.addRow("y label", self.ylabel_box)
         form.addRow("y min", self.ymin_box)
         form.addRow("y max", self.ymax_box)
@@ -254,14 +307,39 @@ class FigureEditor(QDialog):
         form.addRow("From", self.start_box)
         form.addRow("To", self.end_box)
         form.addRow("", self.compare_box)
-        self.kind_box.currentIndexChanged.connect(self._panel_changed)
-        for box in (self.ylabel_box, self.ymin_box, self.ymax_box):
+        form.addRow("Notes", self.notes_box)
+        for box in (self.kind_box, self.view_box):
+            box.currentIndexChanged.connect(self._panel_changed)
+        for box in (self.ylabel_box, self.ymin_box, self.ymax_box, self.panel_title_box):
             box.editingFinished.connect(self._panel_changed)
-        for box in (self.logy_box, self.compare_box):
+        for box in (self.logy_box, self.compare_box, self.bars_box):
             box.toggled.connect(self._panel_changed)
-        for box in (self.start_box, self.end_box):
+        for box in (self.start_box, self.end_box, self.moment_box, self.span_box):
             box.valueChanged.connect(self._panel_changed)
+        self.notes_box.textChanged.connect(self._panel_changed)
         return form_widget
+
+    def _panel_rows(self, kind: str) -> None:
+        """Only the settings a kind of panel has."""
+        lines = kind != "view"
+        shown = {
+            self.moment_box: kind in ("profile", "view"),
+            self.take_view_button: kind == "view",
+            self.view_box: kind == "view",
+            self.bars_box: kind == "view",
+            self.ylabel_box: lines,
+            self.ymin_box: lines,
+            self.ymax_box: lines,
+            self.logy_box: lines,
+            self.start_box: lines,
+            self.end_box: lines,
+            self.compare_box: kind == "time",
+        }
+        for widget, visible in shown.items():
+            self.panel_layout.setRowVisible(widget, visible)
+        suffix = " m" if kind == "profile" else " s"
+        for box in (self.start_box, self.end_box):
+            box.setSuffix(suffix)
 
     def _line_form(self) -> QWidget:
         form_widget = QWidget()
@@ -298,6 +376,18 @@ class FigureEditor(QDialog):
             for column in columns:
                 child = QTreeWidgetItem([column])
                 child.setData(0, ROLE, Line(key, column))
+                top.addChild(child)
+            self.sources.addTopLevelItem(top)
+        for key, (name, columns) in profile_columns(self.session).items():
+            top = QTreeWidgetItem([name])
+            top.setToolTip(0, key)
+            top.setFlags(top.flags() & ~Qt.ItemIsDragEnabled)
+            for column, label in columns:
+                child = QTreeWidgetItem([label])
+                theory = column.endswith("theory")
+                child.setData(
+                    0, ROLE, Line(key, column, data="profile", linestyle="--" if theory else "-")
+                )
                 top.addChild(child)
             self.sources.addTopLevelItem(top)
         for path in self._measured:
@@ -353,9 +443,14 @@ class FigureEditor(QDialog):
         return len(self.template.panels) - 1
 
     def add_line(self, line: Line, panel: int | None = None) -> None:
-        """A line onto a panel (None: a new time panel)."""
-        if panel is None or not 0 <= panel < len(self.template.panels):
-            panel = self.add_panel("time")
+        """A line onto a panel; onto a new panel when there is none, or the panel does
+        not take it (a wave profile onto a time panel, anything onto a 3D view)."""
+        if (
+            panel is None
+            or not 0 <= panel < len(self.template.panels)
+            or not fits(line, self.template.panels[panel].kind)
+        ):
+            panel = self.add_panel("profile" if line.data == "profile" else "time")
         self.template.panels[panel].lines.append(line)
         self.rebuild(select=(panel, len(self.template.panels[panel].lines) - 1))
         self.changed()
@@ -403,7 +498,7 @@ class FigureEditor(QDialog):
         self._updating = True
         self.tree.clear()
         for number, panel in enumerate(self.template.panels, start=1):
-            top = QTreeWidgetItem([f"Panel {number}: {PANEL_LABELS.get(panel.kind, panel.kind)}"])
+            top = QTreeWidgetItem([self._panel_label(number, panel)])
             for line in panel.lines:
                 child = QTreeWidgetItem([line.title()])
                 if line.color:
@@ -418,6 +513,14 @@ class FigureEditor(QDialog):
             if top is not None:
                 self.tree.setCurrentItem(top.child(line) if line is not None else top)
         self._show_selected()
+
+    def _panel_label(self, number: int, panel: Panel) -> str:
+        label = f"Panel {number}: {PANEL_LABELS.get(panel.kind, panel.kind)}"
+        if panel.title:
+            label += f" – {panel.title}"
+        elif panel.kind == "view" and panel.time is not None:
+            label += f" (t = {panel.time:g} s)"
+        return label
 
     def _show_selected(self) -> None:
         """The settings of what is selected (nothing: the figure's)."""
@@ -435,6 +538,8 @@ class FigureEditor(QDialog):
             self.height_box.setValue(template.height_mm or 0)
             self.font_box.setValue(template.font_size or 0)
             self.title_box.setText(template.title)
+            self.columns_box.setValue(max(int(template.columns or 1), 1))
+            self.letters_box.setChecked(template.letters)
         elif line is None:
             self.settings_stack.setCurrentWidget(self.panel_form)
             p = template.panels[panel]
@@ -446,7 +551,14 @@ class FigureEditor(QDialog):
             self.start_box.setValue(p.start or 0)
             self.end_box.setValue(p.end or 0)
             self.compare_box.setChecked(p.compare)
-            self.compare_box.setEnabled(p.kind == "time")
+            self.panel_title_box.setText(p.title)
+            self.span_box.setValue(max(int(p.span or 1), 1))
+            self.moment_box.setValue(-1 if p.time is None else p.time)
+            self.view_box.setCurrentIndex(max(self.view_box.findData(p.view), 0))
+            self.bars_box.setChecked(p.colour_bars)
+            if self.notes_box.toPlainText() != notes_text(p.notes):
+                self.notes_box.setPlainText(notes_text(p.notes))
+            self._panel_rows(p.kind)
         else:
             self.settings_stack.setCurrentWidget(self.line_form)
             item = template.panels[panel].lines[line]
@@ -466,6 +578,8 @@ class FigureEditor(QDialog):
         t.height_mm = self.height_box.value() or None
         t.font_size = self.font_box.value() or None
         t.title = self.title_box.text().strip()
+        t.columns = self.columns_box.value()
+        t.letters = self.letters_box.isChecked()
         self.changed()
 
     def _panel_changed(self) -> None:
@@ -480,7 +594,33 @@ class FigureEditor(QDialog):
         p.start = self.start_box.value() or None
         p.end = self.end_box.value() or None
         p.compare = self.compare_box.isChecked() and p.kind == "time"
-        self.tree.topLevelItem(panel).setText(0, f"Panel {panel + 1}: {PANEL_LABELS[p.kind]}")
+        p.title = self.panel_title_box.text().strip()
+        p.span = self.span_box.value()
+        moment = self.moment_box.value()
+        p.time = None if moment < 0 else moment
+        p.view = self.view_box.currentData()
+        p.colour_bars = self.bars_box.isChecked()
+        p.notes = parse_notes(self.notes_box.toPlainText())
+        self._panel_rows(p.kind)
+        self.tree.topLevelItem(panel).setText(0, self._panel_label(panel + 1, p))
+        self.changed()
+
+    def take_view(self) -> None:
+        """The selected 3D view panel shows the view as it is now: the camera, the time,
+        the look, and 2D from the top when the window shows that."""
+        panel, _ = self._selected()
+        if panel is None or self.template.panels[panel].kind != "view":
+            return
+        p = self.template.panels[panel]
+        scene = self.session.scene
+        view = getattr(getattr(self.main_window, "viewport", None), "view", None)
+        camera = view.camera_state() if view is not None else scene.camera
+        p.camera = dict(camera) if camera else None
+        p.time = float(scene.time)
+        p.look = getattr(view, "style_name", "") or ""
+        p.view = "top" if scene.plan_view and scene.plan_side == "top" else "camera"
+        self._show_selected()
+        self.tree.topLevelItem(panel).setText(0, self._panel_label(panel + 1, p))
         self.changed()
 
     def _line_changed(self) -> None:
@@ -520,7 +660,7 @@ class FigureEditor(QDialog):
         return template_figure(self.session, self.template, spec), spec
 
     def draw_preview(self) -> None:
-        if not self.template.panels or not any(p.lines for p in self.template.panels):
+        if not any(p.lines or p.kind == "view" for p in self.template.panels):
             self.preview.setPixmap(QPixmap())
             self.preview.setText("Drag a time series onto the figure")
             self.problems.clear()

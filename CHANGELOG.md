@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.4.0.dev0 (phase 4, figure studio; in progress)
+## 0.4.0.dev0 (phase 4, figure studio)
+
+- Paper figures in the figure editor (phase 4 complete): wave profile panels (η
+  along the WSFLINE lines at a chosen moment, FNPF's wave theory dashed) and 3D
+  view panels (the view taken as it is, with its camera, time and look, or from
+  the top with axes in metres; colour bars under the image) next to time series
+  and spectra; a grid of columns in which a panel may span several; panel letters
+  (a), (b), ...; per panel a title and notes (text or `$LaTeX$`, placed with
+  "x, y: text"). Templates keep all of it; `template_figure` draws it (a view
+  that cannot be rendered is left out and named), `render_view` renders the 3D
+  view at a moment and camera and puts the session's view back.
 
 - AMR output of REEF3D (FNPF, NHFLOW and SFLOW with `A 270`): `REEF3D_<SOLVER>_AMR`
   (a `.vtm` per output, a `.vtr` per rank and patch) opens with the case as an

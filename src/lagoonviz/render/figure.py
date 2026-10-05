@@ -468,133 +468,302 @@ def template_spec(template, dpi: int = 300, **overrides) -> FigureSpec:
     )
 
 
-def template_figure(session: Session, template, spec: FigureSpec | None = None):
-    """A figure from a template (``lagoonviz.core.figure_template``): its panels
-    stacked, time panels over time (measured lines as points), spectrum panels
-    with Hm0 and Tp. A line whose data is missing is left out and named in the
-    figure's ``missing`` list."""
-    from lagoonviz.core.analysis import compare, spectrum, wave_parameters
-    from lagoonviz.core.figure_template import resolve
+#: natural heights of line panels [mm]; views take 9/16 of their width
+PANEL_HEIGHTS = {"time": 30.0, "spectrum": 34.0, "profile": 32.0}
+#: a colour bar under a view panel [mm]: the bar, and with its ticks and label
+BAR_MM = 3.0
+BAR_ROOM_MM = 13.0
+
+
+def template_figure(
+    session: Session, template, spec: FigureSpec | None = None, images: dict | None = None
+):
+    """A figure from a template (``lagoonviz.core.figure_template``): its panels in a
+    grid of ``columns``, row by row. Time panels over time (measured lines as points),
+    spectrum panels with Hm0 and Tp, wave profile panels along x at their moment, 3D
+    view panels rendered off screen at their moment and camera, with colour bars.
+    ``images`` (panel index -> RGBA) skips rendering a view (tests, previews). What
+    could not be drawn is named in the figure's ``missing`` list."""
+    from lagoonviz.core.figure_template import layout
 
     spec = spec or template_spec(template)
     if not template.panels:
         raise ValueError("the figure has no panels: drag a time series onto it")
     missing: list[str] = []
+    rows = layout(template)
+    columns = max(int(template.columns or 1), 1)
+    cell_mm = spec.width_mm / columns
+    bars = colour_bars(session)
+
+    def natural(panel, span: int) -> float:
+        if panel.kind == "view":
+            extra = BAR_ROOM_MM * len(bars) if panel.colour_bars else 0.0
+            return cell_mm * span * 9 / 16 + extra + (14.0 if panel.view == "top" else 6.0)
+        return PANEL_HEIGHTS.get(panel.kind, 30.0)
+
+    heights = [max(natural(template.panels[i], span) for i, _, span in row) for row in rows]
     with _context(spec):
-        figure = _figure(spec, 32.0 * len(template.panels) + 14.0)
-        axes = figure.subplots(len(template.panels), 1, squeeze=False)[:, 0]
-        times = [a for a, p in zip(axes, template.panels, strict=True) if p.kind == "time"]
-        for other in times[1:]:
-            other.sharex(times[0])
-        seconds = session.data.time_in_seconds()
-        for ax, panel in zip(axes, template.panels, strict=True):
-            drawn = []
-            for index, line in enumerate(panel.lines):
+        figure = _figure(spec, sum(heights) + 12.0 + (6.0 if spec.title else 0.0))
+        # room for the titles over images: their axes shrink to the picture's aspect
+        # after the layout, which then misses a title by a few points
+        figure.get_layout_engine().set(h_pad=0.06)
+        grid = figure.add_gridspec(len(rows), columns, height_ratios=heights)
+        panel_axes: dict[int, object] = {}
+        for r, row in enumerate(rows):
+            for index, column, span in row:
+                panel = template.panels[index]
+                cell = grid[r, column : column + span]
                 try:
-                    data = resolve(session, line)
-                except (KeyError, OSError, ValueError) as error:
-                    missing.append(f"{line.title()}: {error}")
-                    continue
-                color = line.color or (
-                    "0.15" if line.measured else spec.palette[index % len(spec.palette)]
-                )
-                style = {
-                    "color": color,
-                    "linestyle": "none" if line.linestyle == "none" else line.linestyle,
-                    "label": data.name,
-                }
-                if line.width:
-                    style["linewidth"] = line.width
-                if line.marker:
-                    style.update(marker=line.marker, markersize=3, markerfacecolor="none")
-                elif line.measured and line.linestyle in ("none", "-"):
-                    style.update(
-                        linestyle="none",
-                        marker="o",
-                        markersize=2.5,
-                        markerfacecolor="none",
-                        markeredgewidth=0.5,
+                    if panel.kind == "view":
+                        ax, default = _view_panel(
+                            figure,
+                            cell,
+                            session,
+                            panel,
+                            spec,
+                            cell_mm * span,
+                            bars if panel.colour_bars else [],
+                            (images or {}).get(index),
+                        )
+                    else:
+                        ax = figure.add_subplot(cell)
+                        default = _lines_panel(ax, session, panel, spec, missing)
+                except Exception as error:  # noqa: BLE001 (named in the figure's list)
+                    missing.append(f"panel {index + 1}: {error}")
+                    ax = figure.add_subplot(cell)
+                    ax.set_axis_off()
+                    default = ""
+                title = panel.title or default
+                if template.letters:
+                    title = f"({_letter(index)}) {title}".strip()
+                if title:
+                    ax.set_title(title, loc="left")
+                for note in panel.notes:
+                    ax.text(
+                        note.x,
+                        note.y,
+                        note.text,
+                        transform=ax.transAxes,
+                        fontsize=note.size or spec.font_size,
+                        va="top",
+                        ha="left",
                     )
-                if panel.kind == "spectrum":
-                    try:
-                        f, s = spectrum(data.time, data.values, start=panel.start, end=panel.end)
-                    except ValueError as error:
-                        missing.append(f"{line.title()}: {error}")
-                        continue
-                    waves = wave_parameters(f, s)
-                    style["label"] = (
-                        f"{data.name}: $H_{{m0}}$ = {waves.hm0:.3g}, $T_p$ = {waves.tp:.3g} s"
-                    )
-                    ax.plot(f, s, **style)
-                else:
-                    keep = np.ones(data.time.size, bool)
-                    if panel.start is not None:
-                        keep &= data.time >= panel.start
-                    if panel.end is not None:
-                        keep &= data.time <= panel.end
-                    ax.plot(data.time[keep], data.values[keep], **style)
-                drawn.append(data)
-            if panel.kind == "spectrum":
-                ax.set_xlabel("f [Hz]")
-                units = {d.unit for d in drawn if d.unit}
-                ax.set_ylabel(
-                    panel.ylabel or (f"S [{units.pop()}$^2$/Hz]" if len(units) == 1 else "S")
-                )
-                ax.set_ylim(bottom=0)
-            else:
-                units = {d.unit for d in drawn if d.unit}
-                default = (
-                    _label(drawn[0].name, drawn[0].unit)
-                    if len(drawn) == 1
-                    else (f"[{units.pop()}]" if len(units) == 1 else "")
-                )
-                ax.set_ylabel(panel.ylabel or default)
-                ax.set_xlabel("t [s]" if seconds else "output")
-                ax.margins(x=0)
-                if panel.compare:
-                    computed = [d for d in drawn if not d.line.measured]
-                    measured = [d for d in drawn if d.line.measured]
-                    if computed and measured:
-                        try:
-                            stats = compare(
-                                computed[0].time,
-                                computed[0].values,
-                                measured[0].time,
-                                measured[0].values,
-                                panel.start,
-                                panel.end,
-                            )
-                            ax.text(
-                                0.01,
-                                0.03,
-                                f"RMSE = {stats.rmse:.3g}, bias = {stats.bias:.2g}, "
-                                f"r = {stats.r:.3f}, d = {stats.skill:.3f}",
-                                transform=ax.transAxes,
-                                fontsize=spec.font_size * 0.85,
-                                va="bottom",
-                                bbox={
-                                    "facecolor": "white",
-                                    "edgecolor": "none",
-                                    "alpha": 0.85,
-                                    "pad": 1.5,
-                                },
-                            )
-                        except ValueError as error:
-                            missing.append(f"comparison: {error}")
-            if panel.logy:
-                ax.set_yscale("log")
-            if panel.ymin is not None or panel.ymax is not None:
-                ax.set_ylim(panel.ymin, panel.ymax)
-            if len(drawn) > 1:
-                ax.legend(loc="best")
-        # inner time panels share the x labels of the lowest one
-        for ax in times[:-1]:
-            if ax is not times[-1]:
+                panel_axes[index] = ax
+        # one column: time panels share their time axis, the x label only under the lowest
+        if columns == 1:
+            times = [panel_axes[i] for i, p in enumerate(template.panels) if p.kind == "time"]
+            for other in times[1:]:
+                other.sharex(times[0])
+            for ax in times[:-1]:
                 ax.set_xlabel("")
         if spec.title:
             figure.suptitle(spec.title)
     figure.missing = missing
     return figure
+
+
+def _letter(index: int) -> str:
+    """a, b, ..., z, aa, ab, ..."""
+    letters = ""
+    index += 1
+    while index:
+        index, rest = divmod(index - 1, 26)
+        letters = chr(97 + rest) + letters
+    return letters
+
+
+def _lines_panel(ax, session: Session, panel, spec: FigureSpec, missing: list[str]) -> str:
+    """The lines of a time, spectrum or wave profile panel; returns its default title."""
+    from lagoonviz.core.analysis import compare, spectrum, wave_parameters
+    from lagoonviz.core.figure_template import resolve
+
+    when = session.scene.time if panel.time is None else float(panel.time)
+    drawn = []
+    for index, line in enumerate(panel.lines):
+        try:
+            data = resolve(session, line, when)
+        except (KeyError, OSError, ValueError) as error:
+            missing.append(f"{line.title()}: {error}")
+            continue
+        theory = getattr(line, "theory", False)
+        color = line.color or (
+            "0.15"
+            if line.measured
+            else "0.35"
+            if theory
+            else spec.palette[index % len(spec.palette)]
+        )
+        linestyle = line.linestyle
+        if theory and linestyle == "-":
+            linestyle = "--"
+        style = {
+            "color": color,
+            "linestyle": "none" if linestyle == "none" else linestyle,
+            "label": data.name,
+        }
+        if line.width:
+            style["linewidth"] = line.width
+        elif theory:
+            style["linewidth"] = 0.8 * spec.line_width
+        if line.marker:
+            style.update(marker=line.marker, markersize=3, markerfacecolor="none")
+        elif line.measured and line.linestyle in ("none", "-"):
+            style.update(
+                linestyle="none",
+                marker="o",
+                markersize=2.5,
+                markerfacecolor="none",
+                markeredgewidth=0.5,
+            )
+        if panel.kind == "spectrum":
+            try:
+                f, s = spectrum(data.time, data.values, start=panel.start, end=panel.end)
+            except ValueError as error:
+                missing.append(f"{line.title()}: {error}")
+                continue
+            waves = wave_parameters(f, s)
+            style["label"] = f"{data.name}: $H_{{m0}}$ = {waves.hm0:.3g}, $T_p$ = {waves.tp:.3g} s"
+            ax.plot(f, s, **style)
+        else:
+            keep = np.ones(data.time.size, bool)
+            if panel.kind == "time":  # profiles: the x range is set on the axis
+                if panel.start is not None:
+                    keep &= data.time >= panel.start
+                if panel.end is not None:
+                    keep &= data.time <= panel.end
+            ax.plot(data.time[keep], data.values[keep], **style)
+        drawn.append(data)
+    title = ""
+    units = {d.unit for d in drawn if d.unit}
+    if panel.kind == "spectrum":
+        ax.set_xlabel("f [Hz]")
+        ax.set_ylabel(panel.ylabel or (f"S [{units.pop()}$^2$/Hz]" if len(units) == 1 else "S"))
+        ax.set_ylim(bottom=0)
+    elif panel.kind == "profile":
+        ax.set_xlabel("x [m]")
+        ax.set_ylabel(panel.ylabel or r"$\eta$ [m]")
+        ax.margins(x=0)
+        if panel.start is not None or panel.end is not None:
+            ax.set_xlim(panel.start, panel.end)
+        seconds = session.data.time_in_seconds()
+        title = f"t = {when:.2f} s" if seconds else f"output {round(when)}"
+    else:
+        default = (
+            _label(drawn[0].name, drawn[0].unit)
+            if len(drawn) == 1
+            else (f"[{units.pop()}]" if len(units) == 1 else "")
+        )
+        ax.set_ylabel(panel.ylabel or default)
+        ax.set_xlabel("t [s]" if session.data.time_in_seconds() else "output")
+        ax.margins(x=0)
+        if panel.compare:
+            computed = [d for d in drawn if not d.line.measured]
+            measured = [d for d in drawn if d.line.measured]
+            if computed and measured:
+                try:
+                    stats = compare(
+                        computed[0].time,
+                        computed[0].values,
+                        measured[0].time,
+                        measured[0].values,
+                        panel.start,
+                        panel.end,
+                    )
+                    ax.text(
+                        0.01,
+                        0.03,
+                        f"RMSE = {stats.rmse:.3g}, bias = {stats.bias:.2g}, "
+                        f"r = {stats.r:.3f}, d = {stats.skill:.3f}",
+                        transform=ax.transAxes,
+                        fontsize=spec.font_size * 0.85,
+                        va="bottom",
+                        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.85, "pad": 1.5},
+                    )
+                except ValueError as error:
+                    missing.append(f"comparison: {error}")
+    if panel.logy:
+        ax.set_yscale("log")
+    if panel.ymin is not None or panel.ymax is not None:
+        ax.set_ylim(panel.ymin, panel.ymax)
+    if len(drawn) > 1:
+        ax.legend(loc="best")
+    return title
+
+
+def _view_panel(figure, cell, session: Session, panel, spec, width_mm, bars, image):
+    """A 3D view panel: the image (rendered off screen at the panel's moment and
+    camera, unless given), its colour bars under it. Returns (axes, default title)."""
+    image_mm = width_mm * 9 / 16
+    if bars:
+        sub = cell.subgridspec(1 + len(bars), 1, height_ratios=[image_mm] + [BAR_MM] * len(bars))
+        ax = figure.add_subplot(sub[0])
+        bar_axes = [figure.add_subplot(sub[k + 1]) for k in range(len(bars))]
+    else:
+        ax = figure.add_subplot(cell)
+        bar_axes = []
+    when = session.scene.time if panel.time is None else float(panel.time)
+    extent = None
+    if image is None:
+        image, extent = render_view(
+            session,
+            (round(width_mm * MM * spec.dpi), round(image_mm * MM * spec.dpi)),
+            time=when,
+            camera=panel.camera,
+            top=panel.view == "top",
+            look=panel.look or "studio",
+        )
+    if extent is not None:
+        ax.imshow(image, extent=extent, origin="upper", interpolation="lanczos")
+        ax.set_xlabel("x [m]")
+        ax.set_ylabel("y [m]")
+        ax.set_aspect("equal")
+    else:
+        ax.imshow(image, interpolation="lanczos")
+        ax.set_axis_off()
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    for room, bar in zip(bar_axes, bars, strict=True):
+        room.set_axis_off()  # the bar sits centred in its row, narrower than the image
+        cax = room.inset_axes([0.15, 0.0, 0.7, 1.0])
+        mappable = ScalarMappable(Normalize(bar.vmin, bar.vmax), colormap(bar.colormap))
+        colourbar = figure.colorbar(mappable, cax=cax, orientation="horizontal")
+        colourbar.set_label(bar.label)
+        colourbar.outline.set_linewidth(0.5)
+    seconds = session.data.time_in_seconds()
+    return ax, (f"t = {when:.2f} s" if seconds else f"output {round(when)}")
+
+
+def render_view(
+    session: Session,
+    pixels: tuple[int, int],
+    time: float | None = None,
+    camera: dict | None = None,
+    top: bool = False,
+    look: str = "studio",
+):
+    """The 3D view rendered off screen at a moment and camera (or from the top, with
+    the extent in metres for axes); the session's time, camera and view are put back.
+    Returns (RGBA image, extent or None)."""
+    from lagoonviz.render.movie import OffscreenView
+
+    scene = session.scene
+    kept = (scene.time, scene.camera, scene.plan_view, scene.plan_side)
+    try:
+        if time is not None:
+            session.set_time(float(time))
+        if camera:
+            session.set_camera(camera)
+        if top:
+            session.set_plan_view(True, "top")
+        offscreen = OffscreenView(session, pixels, look, None)
+        image = offscreen.render(session.scene.time)
+        extent = view_extent(offscreen.scene.camera, pixels) if session.scene.plan_view else None
+        return image, extent
+    finally:
+        session.set_time(kept[0])
+        session.set_camera(kept[1])
+        session.set_plan_view(kept[2], kept[3])
 
 
 # ======================================================================== saving

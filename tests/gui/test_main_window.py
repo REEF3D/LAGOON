@@ -787,3 +787,64 @@ def test_figure_editor(window, tmp_path, qtbot):
     written = editor.export(str(tmp_path / "gauge.pdf"))
     assert Path(written).stat().st_size > 1000
     assert "File > Figure editor: export" in window.session.to_script()
+
+
+def test_figure_editor_paper_figure(window, tmp_path, qtbot):
+    """The figure editor: wave profiles and a 3D view next to a gauge, in two columns,
+    lettered, with a note."""
+    pytest.importorskip("matplotlib")
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.core.figure_template import FigureTemplate, Line
+
+    run = make_run(
+        tmp_path / "fnpf", solver="FNPF", frames=4, print_interval=0.5, series=True, profiles=True
+    )
+    window.open_case(run)
+    window.session.set_time(1.0)
+    editor = window.open_figure_editor()
+    qtbot.addWidget(editor)
+    # the wave profiles are in the list, with FNPF's wave theory
+    names = [
+        editor.sources.topLevelItem(i).text(0) for i in range(editor.sources.topLevelItemCount())
+    ]
+    assert "Wave profiles" in names
+    profiles = editor.sources.topLevelItem(names.index("Wave profiles"))
+    first = profiles.child(0).data(0, Qt.UserRole)
+    theory = profiles.child(1).data(0, Qt.UserRole)
+    assert first.data == "profile" and theory.theory and theory.linestyle == "--"
+    # a gauge, then a profile line onto it: the profile gets a panel of its own
+    gauges = editor.sources.topLevelItem(0).child(0).data(0, Qt.UserRole)
+    editor.add_line(Line(gauges.source, gauges.column))
+    editor.add_line(Line(first.source, first.column, data="profile"), 0)
+    editor.add_line(Line(theory.source, theory.column, data="profile", linestyle="--"), 1)
+    assert [p.kind for p in editor.template.panels] == ["time", "profile"]
+    assert len(editor.template.panels[1].lines) == 2
+    # a 3D view panel, taking the view as it is now; only its settings show
+    index = editor.add_panel("view")
+    editor.tree.setCurrentItem(editor.tree.topLevelItem(index))
+    assert editor.panel_layout.isRowVisible(editor.take_view_button)
+    assert not editor.panel_layout.isRowVisible(editor.ymin_box)
+    window.session.set_time(1.5)
+    editor.take_view()
+    view = editor.template.panels[index]
+    assert view.time == 1.5 and view.view == "camera"
+    window.session.set_time(1.0)
+    # the view over both columns, a note on the profile, letters
+    editor.span_box.setValue(2)
+    assert view.span == 2
+    editor.tree.setCurrentItem(editor.tree.topLevelItem(1))
+    assert editor.panel_layout.isRowVisible(editor.moment_box)
+    assert editor.start_box.suffix() == " m"
+    editor.notes_box.setPlainText("0.5, 0.9: $\\lambda$ = 4 m")
+    assert editor.template.panels[1].notes[0].x == 0.5
+    editor.tree.setCurrentItem(None)
+    editor.columns_box.setValue(2)
+    editor.letters_box.setChecked(True)
+    assert editor.template.columns == 2 and editor.template.letters
+    editor.draw_preview()
+    assert not editor.preview.pixmap().isNull()
+    written = editor.export(str(tmp_path / "paper.pdf"))
+    assert Path(written).stat().st_size > 2000
+    saved = editor.save_template(str(tmp_path / "paper"))
+    assert FigureTemplate.load(saved).panels[2].kind == "view"
