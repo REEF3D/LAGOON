@@ -600,7 +600,7 @@ class _Collector:
                 "scatter": 0.1 if under else 0.0,
             },
             # wind ripples, much smaller than the waves: they break up the reflections
-            "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.12},
+            "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.2},
         }
         self.add(shown.item_id, positions, triangles, spec, None, smooth)
         self.water_bodies += 1
@@ -779,6 +779,16 @@ def export_scene(
         "strength": preset.env_intensity,
         "background": [linear_hex(c) for c in preset.background] if preset.background else None,
         "fog": None,
+        # under the open sky: Blender's physical sky (Nishita) when it has one; the
+        # sun itself is the sun lamp, so the sky's own sun disc stays off
+        "sky": {
+            "elevation": math.asin(float(np.clip(sun[2], -1.0, 1.0))),
+            # Cycles puts the sky's sun at azimuth rotation + 90 degrees from +x
+            "rotation": math.atan2(-float(sun[0]), float(sun[1])),
+            "strength": 0.35,
+        }
+        if preset.environment == "sky"
+        else None,
     }
     if preset.fog is not None and not water_bodies:  # a water body has its own haze
         color, half = preset.fog

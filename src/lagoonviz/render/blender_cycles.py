@@ -165,11 +165,16 @@ def setup_world(scene, folder: Path, world: dict) -> None:
     nodes, links = tree.nodes, tree.links
     nodes.clear()
     output = nodes.new("ShaderNodeOutputWorld")
-    environment = nodes.new("ShaderNodeTexEnvironment")
-    environment.image = bpy.data.images.load(str(folder / world["environment"]))
     light = nodes.new("ShaderNodeBackground")
     light.inputs["Strength"].default_value = float(world.get("strength", 1.0))
-    links.new(environment.outputs["Color"], light.inputs["Color"])
+    sky = physical_sky(nodes, world.get("sky"))
+    if sky is not None:
+        light.inputs["Strength"].default_value = float(world["sky"].get("strength", 0.35))
+        links.new(sky.outputs["Color"], light.inputs["Color"])
+    else:
+        environment = nodes.new("ShaderNodeTexEnvironment")
+        environment.image = bpy.data.images.load(str(folder / world["environment"]))
+        links.new(environment.outputs["Color"], light.inputs["Color"])
     shader = light.outputs["Background"]
     if world.get("background"):
         bottom, top = world["background"]
@@ -196,6 +201,38 @@ def setup_world(scene, folder: Path, world: dict) -> None:
         links.new(plain.outputs["Background"], mix.inputs[2])
         shader = mix.outputs["Shader"]
     links.new(shader, output.inputs["Surface"])
+
+
+def physical_sky(nodes, sky: dict | None):
+    """Blender's physical sky (Nishita; "multiple scattering" in newer versions) with
+    the sun where LAGOON's sun is, its disc off (the sun lamp is the sun); None when
+    not wanted or this Blender has none."""
+    if not sky:
+        return None
+    node = nodes.new("ShaderNodeTexSky")
+    for kind in ("NISHITA", "MULTIPLE_SCATTERING", "SINGLE_SCATTERING"):
+        try:
+            node.sky_type = kind
+            break
+        except (TypeError, ValueError):
+            continue
+    else:
+        nodes.remove(node)
+        return None
+    for name, value in (
+        ("sun_disc", False),
+        ("sun_elevation", float(sky["elevation"])),
+        ("sun_rotation", float(sky["rotation"])),
+        ("altitude", 0.0),
+        ("air_density", 1.0),
+        ("dust_density", 1.5),  # a little haze over the sea
+        ("ozone_density", 1.0),
+    ):
+        try:
+            setattr(node, name, value)
+        except (AttributeError, TypeError):
+            pass
+    return node
 
 
 def add_fog(collection, fog: dict) -> None:
@@ -299,10 +336,12 @@ def make_material(key: str, spec: dict):
         output = tree.nodes.get("Material Output") or tree.nodes.new("ShaderNodeOutputMaterial")
         color = rgba(volume["color"])
         if float(volume.get("scatter", 0.0)) > 0:
+            # mostly absorbing; a little scattering (dark), so the haze stays blue
             medium = tree.nodes.new("ShaderNodeVolumePrincipled")
-            set_input(medium, ("Color",), color)
+            dim = float(volume["scatter"])
+            set_input(medium, ("Color",), rgba([c * dim for c in volume["color"]]))
             set_input(medium, ("Absorption Color",), color)
-            set_input(medium, ("Density",), float(volume["density"]) * float(volume["scatter"]))
+            set_input(medium, ("Density",), float(volume["density"]))
         else:
             medium = tree.nodes.new("ShaderNodeVolumeAbsorption")
             set_input(medium, ("Color",), color)
