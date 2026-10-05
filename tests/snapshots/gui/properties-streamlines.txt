@@ -12,8 +12,8 @@ QWidget
   Colour by: choice 'velocity' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
   Colour map: choice 'ocean' of ['reef3d', 'ocean', 'tension', 'lagoon_blue', 'balance', 'viridis', 'rainbow', 'sand', 'greys', 'white']
   Automatic range: checkbox '' on
-  Range min: number 0.032 in [-1e+09, 1e+09] decimals 3 (disabled)
-  Range max: number 2.072 in [-1e+09, 1e+09] decimals 3 (disabled)
+  Range min: number 0.032 in [-1e+09, 1e+09] decimals 3
+  Range max: number 2.072 in [-1e+09, 1e+09] decimals 3
   Opacity: number 1 in [0, 1] decimals 3
   Line width [px]: number 2 in [0.5, 20] decimals 3
   button 'Fit range to this frame' tip='Fix the colour range to the values of the current frame'

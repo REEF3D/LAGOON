@@ -617,13 +617,32 @@ def test_properties_show_the_automatic_range(window, reef3d_run):
     window.open_case(reef3d_run)
     window.scene_tree.select("free_surface-1")
     low, high = window.properties.editors["vmin"], window.properties.editors["vmax"]
-    assert not low.isEnabled() and not high.isEnabled()
+    assert low.isEnabled() and high.isEnabled()  # editable: typing fixes the range
     shown = window.session.data.automatic_range("free_surface-1")
     assert (low.value(), high.value()) == pytest.approx(shown, abs=1e-3)
     window.properties.editors["auto_range"].setChecked(False)
     assert low.isEnabled() and window.session.scene.get("free_surface-1").properties[
         "vmax"
     ] == pytest.approx(shown[1], rel=1e-5)
+
+
+def test_typing_a_range_bound_fixes_the_range(window, reef3d_run):
+    """Bug: range min and max could not be changed while the range was automatic."""
+    window.open_case(reef3d_run)
+    window.scene_tree.select("free_surface-1")
+    shown = window.session.data.automatic_range("free_surface-1")
+    window.properties.editors["vmin"].setValue(-0.5)  # as typed and Return
+    props = window.session.scene.get("free_surface-1").properties
+    assert props["auto_range"] is False and props["vmin"] == -0.5
+    assert props["vmax"] == pytest.approx(shown[1], abs=1e-3)  # the other bound stays
+    assert not window.properties.editors["auto_range"].isChecked()
+    window.properties.editors["vmax"].setValue(0.75)
+    props = window.session.scene.get("free_surface-1").properties
+    assert (props["vmin"], props["vmax"]) == (-0.5, 0.75)
+    shown_now = window.session.data.display(
+        "free_surface-1", window.session.data.load("free_surface-1")
+    )
+    assert (shown_now.vmin, shown_now.vmax) == (-0.5, 0.75)
 
 
 def test_convert_to_lagoon_format(window, reef3d_run, qtbot):

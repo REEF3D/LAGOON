@@ -145,6 +145,12 @@ class PropertiesPanel(QWidget):
                 both.released.connect(self.session.stack.end_merge)
                 spin.editingFinished.connect(self.session.stack.end_merge)
                 return both
+            if key in ("vmin", "vmax"):
+                # typing a bound fixes the range (automatic range off), the other
+                # bound stays where the colours are now
+                spin.valueChanged.connect(lambda v: self._set_bound(key, v))
+                spin.editingFinished.connect(self.session.stack.end_merge)
+                return spin
             # dragging or stepping folds into one undo step until editing finishes
             spin.valueChanged.connect(lambda v: self._set(key, v, merge=True))
             spin.editingFinished.connect(self.session.stack.end_merge)
@@ -181,6 +187,19 @@ class PropertiesPanel(QWidget):
         if self.session.scene.get(self.item_id).properties[key] == value:
             return
         self.session.set_property(self.item_id, key, value, merge=merge)
+
+    def _set_bound(self, key: str, value: float) -> None:
+        """Range min or max typed: with the automatic range on, it is switched off and
+        the other bound keeps the value shown (the automatic one)."""
+        if not self.item_id:
+            return
+        props = self.session.scene.get(self.item_id).properties
+        if not props.get("auto_range", True):
+            self._set(key, value, merge=True)
+            return
+        other = "vmax" if key == "vmin" else "vmin"
+        shown = float(self.editors[other].value())
+        self.session.set_properties(self.item_id, auto_range=False, **{key: value, other: shown})
 
     def _fit_range(self) -> None:
         if not self.item_id:
@@ -256,6 +275,8 @@ class PropertiesPanel(QWidget):
                     self._fill(editor, self._choices(prop, value), value)
             elif isinstance(editor, QCheckBox):
                 editor.setChecked(bool(value))
+            elif isinstance(editor, QDoubleSpinBox) and editor.hasFocus():
+                pass  # being typed in: an update elsewhere must not overwrite it
             elif isinstance(editor, QDoubleSpinBox | _LogSlider):
                 editor.setValue(float(value))
             elif isinstance(editor, QLineEdit) and not editor.hasFocus():
@@ -303,8 +324,9 @@ class PropertiesPanel(QWidget):
         editor.spin.setToolTip(text)
 
     def _show_range(self) -> None:
-        """With an automatic range, the min and max boxes show it and are read-only.
-        Coloured by nothing (a plain colour), the colour map and range are greyed out."""
+        """With an automatic range, the min and max boxes show it; typing in them fixes
+        the range. Coloured by nothing (a plain colour), the colour map and range are
+        greyed out."""
         low_box, high_box = self.editors.get("vmin"), self.editors.get("vmax")
         if low_box is None or high_box is None or self.item_id not in self.session.scene:
             return
@@ -333,7 +355,15 @@ class PropertiesPanel(QWidget):
             self.fit_button.setEnabled(coloured)
         auto = bool(props.get("auto_range", True))
         for box in (low_box, high_box):
-            box.setEnabled(coloured and not auto)
+            # always editable while coloured: typing a bound fixes the range
+            box.setEnabled(coloured)
+            box.setToolTip(
+                hint
+                if not coloured
+                else "Automatic now: type a value to fix the range"
+                if auto
+                else ""
+            )
         if not auto or not coloured:
             return
         try:

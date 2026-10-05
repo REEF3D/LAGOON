@@ -9,8 +9,8 @@ QWidget
   Colour by: choice 'velocity' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
   Colour map: choice 'ocean' of ['reef3d', 'ocean', 'tension', 'lagoon_blue', 'balance', 'viridis', 'rainbow', 'sand', 'greys', 'white']
   Automatic range: checkbox '' on
-  Range min: number 0.284 in [-1e+09, 1e+09] decimals 3 (disabled)
-  Range max: number 2.244 in [-1e+09, 1e+09] decimals 3 (disabled)
+  Range min: number 0.284 in [-1e+09, 1e+09] decimals 3
+  Range max: number 2.244 in [-1e+09, 1e+09] decimals 3
   Opacity: number 1 in [0, 1] decimals 3
   Contour lines of: choice 'none' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
   Contour lines: number 10 in [2, 100] decimals 0
