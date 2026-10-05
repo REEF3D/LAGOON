@@ -589,8 +589,17 @@ class _Collector:
             ok = np.isfinite(top).all(axis=1)
             bed = np.full(len(top), np.nan)
             bed[ok] = self.bed(top[ok, :2])
-            dry = ok & (top[:, 2] - bed < 1e-3 * span)
-            top[dry, 2] = bed[dry] - 5e-4 * span
+            # dry: no wet triangle of the 3D view uses the corner, or a film of water
+            # thinner than the bed and the surface meshes agree on (they are different
+            # grids: a thin film pokes through the land in a comb of specks)
+            shown_t = np.asarray(shown.triangles, np.int64).reshape(-1, 3)
+            shown_t = shown_t[(shown_t[:, 0] != shown_t[:, 1]) & (shown_t[:, 1] != shown_t[:, 2])]
+            wet = np.zeros(len(top), bool)
+            wet[shown_t.ravel()] = True
+            dry = ok & (~wet | (top[:, 2] - bed < 5e-3 * span))
+            # well under the land: the surface dives under it within one cell, so the
+            # shore is a clean line where water meets land
+            top[dry, 2] = bed[dry] - 0.02 * span
         positions, triangles, smooth = water_body(top, triangles, bottom)
         if not len(triangles):
             return
