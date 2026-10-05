@@ -237,8 +237,9 @@ One point per grid column (no `sigma`, no `level` dimension):
 The surface is drawn as the quadrilaterals between neighbouring grid points that
 all have a value.
 
-REEF3D writes the free surface and bed itself with `P 18` (FNPF, NHFLOW, and
-CFD's topography as `bed`): each rank's VTP piece becomes its block; `P 18 2`
+REEF3D writes the store itself with `P 18` (1: instead of the VTU/VTP files of
+what it holds, 2: as well as them). It writes the free surface and bed (FNPF, NHFLOW, and
+CFD's topography as `bed`): each rank's VTP piece becomes its block; `P 18 1`
 leaves out the surface VTP files.
 
 ## 5. Chunks, shards and codecs
@@ -426,7 +427,7 @@ codecs as for fields (`elementsize` 4 or 8).
 REEF3D writes body sets itself with `P 18` (rank 0, `lagoon_bodies`): the mesh
 relative to the centre of gravity at the start, the centre of gravity as
 translation and its rotation matrix as quaternion, checked against the vertices
-at every output; `P 18 2` leaves out the 6DOF VTP files.
+at every output; `P 18 1` leaves out the 6DOF VTP files.
 
 ## 10. Particles and objects
 
@@ -475,7 +476,7 @@ pieces; `time` is extended last.
 REEF3D writes particle sets itself with `P 18` (rank 0, `lagoon_particles`):
 NHFLOW's particles (`nhflow_particles`), DEM elements (`dem_dem`) and FNPF's ice
 floes (`fnpf_ice`). It writes every output at once, the inner chunk being filled
-again with each output, so a store can be read during a run; `P 18 2` leaves out
+again with each output, so a store can be read during a run; `P 18 1` leaves out
 their VTP files.
 
 ## 11. To be specified

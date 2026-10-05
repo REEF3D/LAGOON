@@ -31,7 +31,8 @@ xyz = store.particles["cfd_particles"].positions(10)  # particles at output 10
 ```
 
 REEF3D output is converted with `lagoon-convert CASE` (LAGOON application);
-REEF3D can also write stores itself during a run (`P 18`, see the REEF3D patch).
+REEF3D can also write stores itself during a run: `P 18 1` instead of the VTU/VTP
+files, `P 18 2` as well as them (see the REEF3D patches).
 
 **ParaView**: load `paraview/lagoon_reader.py` with *Tools → Manage Plugins → Load
 New*, then open the `zarr.json` at the top of a store and choose "LAGOON store":
