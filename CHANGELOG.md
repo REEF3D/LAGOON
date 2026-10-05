@@ -23,7 +23,10 @@ for 1.0: everything of phases 0 to 5 below.
   cases without a screen.
 
 Install with `pip install lagoon-viz` (Python 3.11 to 3.13; macOS, Linux,
-Windows).
+Windows). Documentation (user guide, scripting, command line, the Session API, the
+format specification) at https://reef3d.github.io/LAGOON/, built with MkDocs from
+`docs/` (`pixi run docs`), its pictures made from an example run by
+`tools/docs_images.py`.
 
 ## 0.5.0.dev0 (phase 5, cinematic rendering)
 

@@ -10,7 +10,7 @@ python = ">=3.11,<3.14"
 
 [pypi-dependencies]
 lagoon-format = { path = "lagoon-format", editable = true }
-lagoon-viz = { path = ".", editable = true, extras = ["dev"] }
+lagoon-viz = { path = ".", editable = true, extras = ["dev", "docs"] }
 
 [tasks]
 lagoon = "python -m lagoonviz"
@@ -21,3 +21,8 @@ lint = { depends-on = ["ruff", "layers"] }
 ruff = "ruff check . && ruff format --check ."
 layers = "lint-imports"
 format = "ruff format ."
+# the documentation: its pictures made from the example run, then served at
+# http://127.0.0.1:8000 (docs-build: the site into site/, as CI publishes it)
+docs-images = "python tools/docs_images.py"
+docs = { cmd = "mkdocs serve", depends-on = ["docs-images"] }
+docs-build = { cmd = "mkdocs build --strict", depends-on = ["docs-images"] }

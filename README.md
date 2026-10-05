@@ -14,7 +14,8 @@ camera paths, and path-traced showcase images and animations with Blender's
 Cycles. Everything it does can be written out as a Python script and replayed
 without a screen.
 
-> Status: **1.0 release candidate.** See `CHANGELOG.md` for what is in it.
+> Status: **1.0 release candidate.** Documentation:
+> [reef3d.github.io/LAGOON](https://reef3d.github.io/LAGOON/); what is new: `CHANGELOG.md`.
 
 <p align="center"><img src="https://raw.githubusercontent.com/REEF3D/LAGOON/main/docs/phase1_viewport.png" alt="LAGOON showing an NHFLOW free surface" width="720"></p>
 

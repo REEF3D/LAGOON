@@ -48,3 +48,8 @@ lagoon.log
 .test_output/
 .dev_remote/
 LAGOON.app/
+
+# documentation: the site, and the pictures tools/docs_images.py makes
+site/
+docs/images/*.png
+!docs/images/icon.png

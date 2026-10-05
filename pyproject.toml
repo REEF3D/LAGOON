@@ -48,6 +48,10 @@ dev = [
     "import-linter>=2.1",
     "zarr>=3",  # tests: LAGOON stores open in zarr-python
 ]
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
+]
 
 [project.scripts]
 lagoon = "lagoonviz.gui.app:main"
@@ -56,6 +60,7 @@ lagoon-convert = "lagoonviz.core.convert:main"
 
 [project.urls]
 Homepage = "https://github.com/REEF3D/LAGOON"
+Documentation = "https://reef3d.github.io/LAGOON/"
 Issues = "https://github.com/REEF3D/LAGOON/issues"
 Changelog = "https://github.com/REEF3D/LAGOON/blob/main/CHANGELOG.md"
 

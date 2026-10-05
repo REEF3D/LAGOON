@@ -17,7 +17,10 @@ release with the changelog's section as its notes.
    stored anywhere; GitHub proves to PyPI that the upload comes from that workflow.
 2. **GitHub**: Settings → Environments → New environment `pypi`. Add yourself as a
    required reviewer if every upload should wait for your click.
-3. Remove the stray `0001-Phase-0-foundations-of-the-LAGOON-application.patch` at
+3. **Documentation**: Settings → Pages → Source: *GitHub Actions*. The workflow
+   `docs.yml` then publishes the site at https://reef3d.github.io/LAGOON/ from every
+   push to `main`.
+4. Remove the stray `0001-Phase-0-foundations-of-the-LAGOON-application.patch` at
    the top of the repository (`git rm`); it is not part of the packages.
 
 ## Each release

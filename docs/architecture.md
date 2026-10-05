@@ -1,14 +1,23 @@
-# LAGOON architecture (phase 1)
+# Architecture
 
 ```
 lagoonviz.gui      PySide6 windows and panels      -> may import render, core
-lagoonviz.render   pygfx scene, offscreen images   -> may import core, never Qt
+lagoonviz.render   pygfx scene, offscreen images,  -> may import core, never Qt
+                   films, figures (matplotlib),
+                   cinematic looks, path tracing
 lagoonviz.core     scene, kinds, commands, session -> no Qt, no GPU, no plotting
+                   camera paths, figure templates,
+                   analysis, the converter
   core.data        VTK XML reader, REEF3D cases,
-                   merging, cache, loader         -> NumPy only
+                   AMR, LAGOON stores, merging,
+                   cache, loader                   -> NumPy only
 lagoonviz.plugins  readers for other codes (later) -> may import core, render
 lagoon_format      data format, MIT                -> never imports lagoonviz
 ```
+
+Blender is never imported: `render.pathtrace` writes the scene to a folder and
+runs Blender as a separate process on `render/blender_cycles.py`, a script that
+uses only Blender's own Python.
 
 ## Data flow
 
@@ -20,7 +29,7 @@ lagoon_format      data format, MIT                -> never imports lagoonviz
 5. The stack's history is the recorded script (`Session.to_script()`), shown live in
    the Python console.
 
-## From files to pixels (phase 1)
+## From files to pixels
 
 1. `Session.open_case(path)` runs one `OpenCase` command: a `case` item (the path)
    and items for the latest run's free surface and bed. Only descriptions go into
@@ -38,6 +47,9 @@ lagoon_format      data format, MIT                -> never imports lagoonviz
 6. `render.scene3d.SceneRenderer` puts those arrays into pygfx buffers (updated in
    place while the topology stays the same). The GUI viewport and
    `render.offscreen` use the same renderer, so screen and headless images match.
+   Films (`render.movie`) and the 3D panels of figures (`render.figure`) render
+   off screen the same way; path tracing (`render.pathtrace`) hands the same
+   arrays to Blender.
 
 ## Key rules
 

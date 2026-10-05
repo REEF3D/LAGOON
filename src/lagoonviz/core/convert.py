@@ -813,7 +813,7 @@ def main(argv: list[str] | None = None) -> int:
         "--outputs",
         default=",".join((*ROLES, *EXTRAS)),
         help="what to convert, comma separated (default: everything: "
-        "volume,free_surface,bed,bodies,particles,dem,ice,rods,mooring,series,profiles)",
+        f"{','.join((*ROLES, *EXTRAS))})",
     )
     parser.add_argument("--limit", type=int, help="convert at most this many outputs per stream")
     parser.add_argument("--shard-time", type=int, default=16, help="outputs per shard file")

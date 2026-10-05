@@ -71,10 +71,11 @@ def _session_for(path: Path) -> Session:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="lagoon-render", description="Render a LAGOON session or REEF3D case to PNG"
+        prog="lagoon-render",
+        description="Render a LAGOON session, script or REEF3D case to an image or a film",
     )
     parser.add_argument("source", help="case folder, output file, .lagoon-session or .py script")
-    parser.add_argument("output", help="PNG file to write")
+    parser.add_argument("output", help="image (.png) or film (.mp4, .mov) to write")
     parser.add_argument("--time", type=float, help="time (or frame) to show")
     parser.add_argument("--size", default="1600x900", help="image size, e.g. 1920x1080")
     parser.add_argument(

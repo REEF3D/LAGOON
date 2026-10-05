@@ -1,0 +1,104 @@
+# The LAGOON documentation: `pixi run docs` (or `mkdocs serve`) to read it locally,
+# published to GitHub Pages by .github/workflows/docs.yml. The pictures are made by
+# tools/docs_images.py (offscreen, from small example runs) before the build.
+site_name: LAGOON
+site_description: Lightweight Animation and Graphics for Open Ocean Numerics, the post-processor of REEF3D
+site_url: https://reef3d.github.io/LAGOON/
+repo_url: https://github.com/REEF3D/LAGOON
+repo_name: REEF3D/LAGOON
+edit_uri: edit/main/docs/
+copyright: LAGOON is GPL-3.0-or-later; the LAGOON format library is MIT.
+
+docs_dir: docs
+exclude_docs: |
+  *.pdf
+  phase*_screenshot.png
+
+theme:
+  name: material
+  logo: images/icon.png
+  favicon: images/icon.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Dark
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Light
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.keys
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src, lagoon-format/src]
+          options:
+            show_source: false
+            show_root_heading: true
+            members_order: source
+            docstring_style: null
+            separate_signature: true
+            show_signature_annotations: true
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - User guide:
+      - First steps: guide/first-steps.md
+      - Opening runs: guide/runs.md
+      - Scene items: guide/scene.md
+      - The 3D view: guide/viewport.md
+      - Timeline and camera paths: guide/timeline.md
+      - Plots and wave profiles: guide/plots.md
+      - Paper figures: guide/figures.md
+      - Films: guide/films.md
+      - Cinematic looks and path tracing: guide/cinematic.md
+      - The LAGOON format: guide/format.md
+  - Scripting: scripting.md
+  - Reference:
+      - Command line: reference/cli.md
+      - Session API: reference/api.md
+      - Format specification: format/SPEC.md
+      - Format guide: format/GUIDE.md
+      - Run log: format/RUN.md
+  - Develop:
+      - Contributing: develop/contributing.md
+      - Architecture: architecture.md
+      - Releasing: develop/releasing.md
+  - Changelog: changelog.md

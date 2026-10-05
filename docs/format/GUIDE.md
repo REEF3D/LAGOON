@@ -1,0 +1,1 @@
+--8<-- "lagoon-format/GUIDE.md"
