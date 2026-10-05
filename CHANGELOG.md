@@ -32,7 +32,8 @@
   fog around the scene under water); `blender_cycles.py` builds and renders it
   (GPU when there is one, denoised, AgX). Water refracts and lets the sun through
   to the bed. Frames are kept with a key of their data, camera and settings, so a
-  stopped film goes on where it stopped. Needs Blender 4.2 or newer.
+  stopped film goes on where it stopped. Needs Blender 4.2 or newer. *File →
+  Render still with Cycles* path traces the 3D view as it is.
 
 ## 0.4.0.dev0 (phase 4, figure studio)
 

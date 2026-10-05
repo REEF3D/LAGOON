@@ -15,6 +15,7 @@ File
   Export figure...  [Ctrl+Shift+P]
   Figure editor...
   Export animation...  [Ctrl+Shift+E]
+  Render still with Cycles...
   Save screenshot...  [F12]
   ----
   Quit

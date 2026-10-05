@@ -458,3 +458,72 @@ def _duration(seconds: float) -> str:
     if seconds < 5400:
         return f"{round(seconds / 60)} min"
     return f"{seconds / 3600:.1f} h"
+
+
+def render_still(window, samples: int = 128) -> str | None:
+    """File → Render still with Cycles: the 3D view as it is now, path traced by
+    Blender at the view's shape (Full HD width), in the view's look (open ocean for
+    the engineering looks). Returns the written path."""
+    from PySide6.QtWidgets import QFileDialog
+
+    from lagoonviz.render.pathtrace import find_blender
+
+    session = window.session
+    blender = find_blender()
+    if blender is None:
+        QMessageBox.information(
+            window,
+            "Render still with Cycles",
+            "Path tracing needs Blender 4.2 or newer: install it from blender.org "
+            "(LAGOON finds it in Applications), or set LAGOON_BLENDER to its executable.",
+        )
+        return None
+    path, _ = QFileDialog.getSaveFileName(
+        window,
+        "Render still with Cycles",
+        str(movie_folder(session) / "lagoon_cycles.png"),
+        "PNG image (*.png)",
+    )
+    if not path:
+        return None
+    path = Path(path).with_suffix(".png")
+    viewport = window.viewport
+    if hasattr(viewport, "view"):
+        session.set_camera(viewport.view.camera_state())
+    style = getattr(getattr(viewport, "view", None), "style_name", "studio")
+    canvas = getattr(viewport, "canvas", viewport)
+    size = view_sizes((canvas.width(), canvas.height()))[0][1]
+    settings = {"size": size, "samples": samples, "fps": 25.0}
+    progress = QProgressDialog("Handing the scene to Blender…", "Stop", 0, 1, window)
+    progress.setWindowTitle("Render still with Cycles")
+    progress.setWindowModality(Qt.WindowModal)
+    progress.setMinimumDuration(0)
+    keep_time = session.scene.time
+    written = _path_trace(session, path, [keep_time], settings, style, progress, blender)
+    session.set_time(keep_time)
+    progress.close()
+    if written is None:
+        return None
+    import shutil
+
+    from lagoonviz.render.pathtrace import work_folder
+
+    shutil.rmtree(work_folder(path), ignore_errors=True)  # a still keeps no frames
+    try:
+        from lagoonviz.render.script import cycles_still_code
+
+        session.record_output(
+            cycles_still_code(
+                path,
+                size=size,
+                time=keep_time,
+                style=style,
+                samples=samples,
+                camera=session.scene.camera,
+                plan=(session.scene.plan_view, session.scene.plan_side),
+            )
+        )
+    except Exception:  # noqa: BLE001 (the image is written; only the script misses it)
+        log.warning("still not recorded for the script:\n%s", traceback.format_exc())
+    window.statusBar().showMessage(f"Path traced still saved to {written}", 30000)
+    return str(written)

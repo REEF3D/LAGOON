@@ -280,6 +280,34 @@ def film_code(
     return _block("File > Export animation", imports, body)
 
 
+def cycles_still_code(
+    path: str | Path,
+    *,
+    size: tuple[int, int],
+    time: float = 0.0,
+    style: str = "open_ocean",
+    samples: int = 128,
+    camera: dict | None = None,
+    plan: tuple[bool, str] | None = None,
+) -> str:
+    """File → Render still with Cycles: the 3D view path traced by Blender."""
+    imports = ["from lagoonviz.render.pathtrace import path_trace"]
+    body = _view(time, camera, plan)
+    body.append(
+        _raw_call(
+            "path_trace",
+            [
+                "session",
+                repr(_path(path)),
+                f"size={tuple(int(v) for v in size)!r}",
+                f"look={style!r}",
+                f"samples={int(samples)!r}",
+            ],
+        )
+    )
+    return _block("File > Render still with Cycles (path traced with Blender)", imports, body)
+
+
 def screenshot_code(
     path: str | Path,
     *,

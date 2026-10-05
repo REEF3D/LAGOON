@@ -31,6 +31,7 @@ from lagoonviz.render.pathtrace import (
     rotate,
     spheres,
     tubes,
+    work_folder,
     write_hdr,
 )
 
@@ -323,6 +324,8 @@ def test_path_trace_still_and_film(reef3d_run, tmp_path, fake_blender):
     if movie_available():
         assert out == tmp_path / "film.mp4" and out.stat().st_size > 500
     assert len(list((tmp_path / "film.cycles").glob("frame_*.png"))) == 3
+    assert work_folder(tmp_path / "a.png") == tmp_path / "a.cycles"
+    assert work_folder(tmp_path / "frames") == tmp_path / "frames"
 
 
 def test_command_line_cycles(reef3d_run, tmp_path, fake_blender, capsys):

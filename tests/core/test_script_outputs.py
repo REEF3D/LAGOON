@@ -8,6 +8,7 @@ pytest.importorskip("matplotlib")
 from lagoonviz.core import Session  # noqa: E402
 from lagoonviz.core.figure_template import FigureTemplate, Line, Panel  # noqa: E402
 from lagoonviz.render.script import (  # noqa: E402
+    cycles_still_code,
     figure_code,
     film_code,
     screenshot_code,
@@ -158,3 +159,13 @@ def test_path_traced_film_code(session, tmp_path):
     compile(film, "<code>", "exec")
     assert "path_trace(" in film and "'underwater'" in film and "256" in film
     assert "write_movie" not in film and "with Blender" in film
+
+
+def test_cycles_still_code(tmp_path):
+    camera = {"position": [1.0, 2.0, 3.0], "rotation": [0.0, 0.0, 0.0, 1.0], "fov": 50.0}
+    code = cycles_still_code(
+        tmp_path / "still.png", size=(1920, 1080), time=1.5, style="wave_flume", camera=camera
+    )
+    compile(code, "<code>", "exec")
+    assert "session.set_time(1.5)" in code and "session.set_camera(" in code
+    assert "path_trace(" in code and "look='wave_flume'" in code and "samples=128" in code

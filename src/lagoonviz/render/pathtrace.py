@@ -824,11 +824,12 @@ def path_trace(
 
 def work_folder(output: str | Path) -> Path:
     """Where the exported scene and the rendered frames of an output are kept: beside
-    a film, ``<name>.cycles``; for a folder of PNGs, the folder."""
+    a film or a still, ``<name>.cycles``; for a folder of PNGs, the folder."""
     from lagoonviz.render.movie import MOVIE_SUFFIXES
 
     output = Path(output).expanduser()
-    return output.with_suffix(".cycles") if output.suffix.lower() in MOVIE_SUFFIXES else output
+    suffix = output.suffix.lower()
+    return output.with_suffix(".cycles") if suffix in (*MOVIE_SUFFIXES, ".png") else output
 
 
 def finish(
