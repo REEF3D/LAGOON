@@ -420,7 +420,7 @@ class _Collector:
             # slant it turns into the water's own colour (Blender: transmission falls
             # off with the angle, as the path through real water grows); coloured
             # by a variable it is opaque, so the colours read
-            "transmission": 0.6 if water and rgb is None else 0.0,
+            "transmission": 0.3 if water and rgb is None else 0.0,
             "water": bool(water and rgb is None),
             "coat": s.clearcoat,
             "alpha": round(float(shown.opacity), 4),

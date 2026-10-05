@@ -185,7 +185,7 @@ def test_export_scene(reef3d_run, tmp_path):
         if session.scene.get(o["name"]).kind == "bathymetry"
     )
     if water["color"] is not None:  # clear water unless coloured by a variable
-        assert water["transmission"] > 0.5 and water["ior"] == pytest.approx(1.33)
+        assert water["transmission"] > 0.2 and water["ior"] == pytest.approx(1.33)
     assert bed["grain"] is None or bed["grain"]["kind"] == "sand"
     cam = frame["camera"]
     assert cam["type"] == "PERSP" and 0 < cam["clip_start"] < cam["clip_end"]
