@@ -1,10 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""File → Export animation: film the current view, off screen, into an MP4."""
+"""File → Export animation: film the current view, off screen, into an MP4.
+
+Two renderers: LAGOON's own (fast, the frames as the 3D view draws them) and
+Blender's Cycles (path traced, minutes per frame; ``lagoonviz.render.pathtrace``),
+which runs in the background while the dialog shows how far it is.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
+import threading
+import time as time_module
 import traceback
 from pathlib import Path
 
@@ -113,6 +120,38 @@ class ExportAnimationDialog(QDialog):
         self.overlay.setChecked(True)
         form.addRow("Show", self.overlay)
 
+        from lagoonviz.render.pathtrace import find_blender
+
+        self.blender = find_blender()
+        self.engine = QComboBox()
+        self.engine.addItem("LAGOON (fast, as the 3D view draws it)", "pygfx")
+        self.engine.addItem("Blender Cycles (path traced, slow)", "cycles")
+        self.engine.setToolTip(
+            "Cycles traces the light: reflections, refraction through the water, soft "
+            "shadows. In the look of the 3D view if it is a cinematic one, else open ocean."
+        )
+        form.addRow("Renderer", self.engine)
+        self.samples = QSpinBox()
+        self.samples.setRange(4, 4096)
+        self.samples.setValue(128)
+        self.samples.setToolTip("Samples per pixel: more is less noisy and slower")
+        self.blender_label = QLabel(
+            f"Blender: {self.blender}"
+            if self.blender
+            else "Blender not found: install it from blender.org (4.2 or newer), "
+            "or set LAGOON_BLENDER"
+        )
+        self.blender_label.setWordWrap(True)
+        cycles = QHBoxLayout()
+        cycles.addWidget(QLabel("samples"))
+        cycles.addWidget(self.samples)
+        cycles.addWidget(self.blender_label, 1)
+        self.cycles_row = QWidget()
+        self.cycles_row.setLayout(cycles)
+        form.addRow("", self.cycles_row)
+        self.engine.currentIndexChanged.connect(lambda _: self._on_engine())
+        self._on_engine()
+
         self.summary = QLabel()
         form.addRow("", self.summary)
         for spin in (self.start, self.end, self.every):
@@ -125,6 +164,15 @@ class ExportAnimationDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+        self._on_engine()
+
+    def _on_engine(self) -> None:
+        cycles = self.engine.currentData() == "cycles"
+        self.cycles_row.setVisible(cycles)
+        self.overlay.setEnabled(not cycles)  # Cycles films show the scene alone
+        buttons = self.findChild(QDialogButtonBox)
+        if buttons is not None:
+            buttons.button(QDialogButtonBox.Ok).setEnabled(not cycles or bool(self.blender))
 
     def _browse(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -146,7 +194,9 @@ class ExportAnimationDialog(QDialog):
             "end": self.end.value(),
             "every": self.every.value(),
             "fps": self.fps.value(),
-            "overlay": self.overlay.isChecked(),
+            "overlay": self.overlay.isChecked() and self.overlay.isEnabled(),
+            "engine": self.engine.currentData(),
+            "samples": self.samples.value(),
         }
 
 
@@ -275,6 +325,16 @@ def export_animation(window) -> str | None:
         return not progress.wasCanceled()
 
     window.timeline.play_button.setChecked(False)
+    if settings["engine"] == "cycles":
+        progress.setLabelText("Handing the scene to Blender…")
+        written = _path_trace(session, path, times, settings, style, progress, dialog.blender)
+        session.set_time(keep_time)
+        progress.close()
+        if written is None:
+            return None
+        _record_film(session, path, settings, style)
+        window.statusBar().showMessage(f"Path traced animation saved to {written}", 30000)
+        return str(written)
     try:
         written = write_movie(
             session,
@@ -294,6 +354,17 @@ def export_animation(window) -> str | None:
     finally:
         session.set_time(keep_time)
     progress.close()
+    _record_film(session, path, settings, style)
+    from lagoonviz.render.movie import film_summary
+
+    summary = film_summary()
+    log.info("animation saved to %s: %s", written, summary)
+    window.statusBar().showMessage(f"Animation saved to {written}: {summary}", 30000)
+    return str(written)
+
+
+def _record_film(session: Session, path: Path, settings: dict, style: str) -> None:
+    """The film in the session's script."""
     try:
         from lagoonviz.render.script import film_code
 
@@ -309,13 +380,81 @@ def export_animation(window) -> str | None:
                 camera=session.scene.camera,
                 plan=(session.scene.plan_view, session.scene.plan_side),
                 overlay=bool(settings["overlay"]),
+                engine=settings.get("engine", "pygfx"),
+                samples=settings.get("samples", 128),
             )
         )
     except Exception:  # noqa: BLE001 (the film is written; only the script misses it)
         log.warning("film not recorded for the script:\n%s", traceback.format_exc())
-    from lagoonviz.render.movie import film_summary
 
-    summary = film_summary()
-    log.info("animation saved to %s: %s", written, summary)
-    window.statusBar().showMessage(f"Animation saved to {written}: {summary}", 30000)
-    return str(written)
+
+def _path_trace(session, path, times, settings, style, progress, blender) -> Path | None:
+    """Path trace with Blender: the scene is written here (it reads the session),
+    Blender renders in a background thread while the dialog shows the frames done
+    and the time left. Stop ends Blender; the frames done are kept, and exporting
+    again goes on from them (frames whose data, camera and settings are unchanged)."""
+    from lagoonviz.render.pathtrace import export_scene, finish, work_folder
+
+    work = work_folder(path)
+
+    def prepared(done: int, total: int) -> bool:
+        progress.setMaximum(max(total, 1))
+        progress.setValue(done)
+        progress.setLabelText(f"Handing the scene to Blender: frame {done} of {total}…")
+        QApplication.processEvents()
+        return not progress.wasCanceled()
+
+    try:
+        export_scene(session, work, times, settings["size"], style, settings["samples"], prepared)
+    except Exception as error:  # noqa: BLE001 (report, keep the window)
+        log.error("path tracing export failed:\n%s", traceback.format_exc())
+        QMessageBox.warning(progress.parentWidget(), "Export animation", f"Failed:\n{error}")
+        return None
+    if progress.wasCanceled():
+        return None
+    progress.setValue(0)
+    state: dict = {"done": 0, "total": len(times), "result": None, "error": None}
+    stop = threading.Event()
+
+    def report(done: int, total: int) -> bool:
+        state["done"], state["total"] = done, total
+        return not stop.is_set()
+
+    def run() -> None:
+        try:
+            state["result"] = finish(
+                work, path, settings["fps"], blender, report, resume=True, cancel=stop.is_set
+            )
+        except Exception as error:  # noqa: BLE001 (reported below)
+            log.error("path tracing failed:\n%s", traceback.format_exc())
+            state["error"] = error
+
+    worker = threading.Thread(target=run, daemon=True, name="lagoon-path-trace")
+    started = time_module.monotonic()
+    worker.start()
+    while worker.is_alive():
+        done, total = state["done"], state["total"]
+        progress.setMaximum(max(total, 1))
+        progress.setValue(done)
+        elapsed = time_module.monotonic() - started
+        left = f", about {_duration(elapsed / done * (total - done))} left" if done else ""
+        progress.setLabelText(f"Blender Cycles: frame {done} of {total} done{left}")
+        QApplication.processEvents()
+        if progress.wasCanceled():
+            stop.set()
+        worker.join(0.1)
+    if state["error"] is not None and not stop.is_set():
+        QMessageBox.warning(
+            progress.parentWidget(), "Export animation", f"Path tracing failed:\n{state['error']}"
+        )
+        return None
+    return state["result"]
+
+
+def _duration(seconds: float) -> str:
+    seconds = max(int(seconds), 0)
+    if seconds < 90:
+        return f"{seconds} s"
+    if seconds < 5400:
+        return f"{round(seconds / 60)} min"
+    return f"{seconds / 3600:.1f} h"

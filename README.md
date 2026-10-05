@@ -62,12 +62,27 @@ lagoon-render ~/runs/seamount frame.png --time 120 --size 1920x1080
 lagoon-render figure.lagoon-session figure.png
 ```
 
+For showcase images and films, Blender's Cycles path tracer renders the same scene
+(reflections, refraction through the water, soft shadows) in one of the cinematic
+looks. Install [Blender](https://www.blender.org) 4.2 or newer; LAGOON finds it in
+`/Applications` or on the `PATH` (or set `LAGOON_BLENDER`) and runs it in the
+background, without opening it. In the GUI: *File → Export animation → Renderer:
+Blender Cycles*.
+
+```bash
+lagoon-render showcase.lagoon-session still.png --engine cycles --style open_ocean
+lagoon-render showcase.lagoon-session film.mp4 --engine cycles --samples 256 --size 3840x2160
+```
+
+A stopped film goes on where it stopped when made again: frames whose data, camera
+and settings are unchanged are kept (`film.cycles/` beside the film).
+
 ## Layout
 
 | Path | What | License |
 | --- | --- | --- |
 | `src/lagoonviz/core` | Scene, commands, sessions, REEF3D readers. No Qt, no GPU. | GPLv3 |
-| `src/lagoonviz/render` | pygfx 3D scene and offscreen rendering (matplotlib later) | GPLv3 |
+| `src/lagoonviz/render` | pygfx 3D scene, offscreen rendering, figures, path tracing via Blender | GPLv3 |
 | `src/lagoonviz/gui` | PySide6 application | GPLv3 |
 | `src/lagoonviz/plugins` | Readers and tools for other codes (later) | GPLv3 |
 | `lagoon-format/` | LAGOON data format: specification and reference reader/writer | MIT |

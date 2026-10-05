@@ -142,3 +142,19 @@ def test_film_and_screenshot_code(tmp_path):
         assert "session.set_camera(" in code
     assert "write_movie(" in film and "(3840, 2160)" in film and "added by the GUI only" in film
     assert "render_session(" in shot and "write_png(" in shot
+
+
+def test_path_traced_film_code(session, tmp_path):
+    film = film_code(
+        tmp_path / "showcase.mp4",
+        start=0,
+        end=3,
+        size=(1920, 1080),
+        fps=25.0,
+        style="underwater",
+        engine="cycles",
+        samples=256,
+    )
+    compile(film, "<code>", "exec")
+    assert "path_trace(" in film and "'underwater'" in film and "256" in film
+    assert "write_movie" not in film and "with Blender" in film

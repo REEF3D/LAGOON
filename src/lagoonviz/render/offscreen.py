@@ -5,6 +5,7 @@
     lagoon-render figure.lagoon-session view.png    # a saved session: its view and time
     lagoon-render run/ frame.png --time 120 --size 1920x1080
     lagoon-render run/ waves.mp4 --fps 25 --start 110 --end 400   # an animation
+    lagoon-render run/ still.png --engine cycles --style open_ocean  # path traced (Blender)
 
 This is the design test of LAGOON's architecture: whatever the GUI shows can be
 rebuilt from a saved session by code that never touches Qt.
@@ -79,13 +80,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--view", choices=["perspective", "top", "front", "right", "2d", "2d-front", "2d-right"]
     )
-    from lagoonviz.render.scene3d import STYLES
+    from lagoonviz.render.cinematic import PRESETS
 
     parser.add_argument(
         "--style",
-        choices=list(STYLES),
+        choices=["studio", "ocean", *PRESETS],
         default="studio",
         help="look: studio, ocean, or a cinematic one (open_ocean, wave_flume, underwater)",
+    )
+    cycles = parser.add_argument_group("path tracing (Blender Cycles, a cinematic look)")
+    cycles.add_argument(
+        "--engine",
+        choices=["pygfx", "cycles"],
+        default="pygfx",
+        help="pygfx: LAGOON's own renderer (fast); cycles: path traced by Blender",
+    )
+    cycles.add_argument("--samples", type=int, default=128, help="Cycles samples per pixel")
+    cycles.add_argument("--blender", help="the Blender executable (default: found)")
+    cycles.add_argument(
+        "--fresh",
+        action="store_true",
+        help="render every frame again (default: keep frames rendered before from the "
+        "same data, camera and settings, so a stopped film goes on)",
     )
     movie = parser.add_argument_group("animations (output .mp4 or .mov)")
     movie.add_argument("--fps", type=float, default=25.0, help="frames per second")
@@ -96,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     width, _, height = args.size.lower().partition("x")
     size = (int(width), int(height))
     session = _session_for(Path(args.source).expanduser())
+    if args.engine == "cycles":
+        return _path_trace(session, args, size)
     if Path(args.output).suffix.lower() in MOVIE_SUFFIXES:
         times = frame_times(session, args.start, args.end, args.every)
 
@@ -112,6 +130,39 @@ def main(argv: list[str] | None = None) -> int:
     write_png(args.output, image)
     shown = [i.name for i in session.scene if i.kind in KINDS and i.visible and i.kind != "case"]
     print(f"wrote {args.output} ({width}x{height}): {', '.join(shown) or 'nothing to show'}")
+    return 0
+
+
+def _path_trace(session: Session, args, size: tuple[int, int]) -> int:
+    from lagoonviz.render.pathtrace import path_trace
+
+    output = Path(args.output)
+    look = args.style if args.style != "studio" else "open_ocean"
+    if output.suffix.lower() == ".png":
+        if args.time is not None:
+            session.set_time(args.time)
+        times = None
+    else:
+        times = frame_times(session, args.start, args.end, args.every)
+
+    def report(done: int, total: int) -> bool:
+        print(f"\rframe {done} / {total}", end="", flush=True)
+        return True
+
+    print(f"path tracing with Blender Cycles ({look}, {args.samples} samples)", flush=True)
+    written = path_trace(
+        session,
+        output,
+        times,
+        size,
+        look,
+        args.samples,
+        args.fps,
+        args.blender,
+        report,
+        resume=not args.fresh,
+    )
+    print(f"\nwrote {written} ({size[0]}x{size[1]}, Cycles)")
     return 0
 
 

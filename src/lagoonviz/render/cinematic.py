@@ -195,10 +195,10 @@ def _to_uint8(rgb: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(np.round(rgba * 255).astype(np.uint8))
 
 
-def sky_faces(size: int, preset: Preset) -> np.ndarray:
-    """A sky over the sea: overhead ``zenith`` to a hazy ``horizon``, a sun glow, and
-    below the horizon the far sea (``ground``) brightening towards the horizon."""
-    d = cube_directions(size)
+def sky_colours(d: np.ndarray, preset: Preset, light: float = 1.0) -> np.ndarray:
+    """A sky over the sea seen in directions ``d`` (..., 3), as sRGB values: overhead
+    ``zenith`` to a hazy ``horizon``, a sun glow (``light`` times as bright), and below
+    the horizon the far sea (``ground``) brightening towards the horizon."""
     z = d[..., 2:3]
     zenith, horizon, ground = _rgb(preset.zenith), _rgb(preset.horizon), _rgb(preset.ground)
     up = np.clip(z, 0.0, 1.0) ** 0.45  # a broad hazy band over the horizon
@@ -210,13 +210,17 @@ def sky_faces(size: int, preset: Preset) -> np.ndarray:
     sun /= np.linalg.norm(sun)
     facing = np.clip((d @ sun)[..., None], 0.0, 1.0)
     glow = 0.35 * facing**12 + 0.9 * facing**600  # haze around it, the disc itself
-    rgb = rgb + glow * _rgb(preset.sun_color) * (z >= -0.02)
-    return _to_uint8(rgb)
+    return rgb + light * glow * _rgb(preset.sun_color) * (z >= -0.02)
 
 
-def hall_faces(size: int, preset: Preset, rows: int = 6) -> np.ndarray:
-    """A lab hall: a light ceiling with rows of light panels, walls, a darker floor."""
-    d = cube_directions(size)
+def sky_faces(size: int, preset: Preset) -> np.ndarray:
+    """The sky (:func:`sky_colours`) as cube map faces."""
+    return _to_uint8(sky_colours(cube_directions(size), preset))
+
+
+def hall_colours(d: np.ndarray, preset: Preset, light: float = 1.0, rows: int = 6) -> np.ndarray:
+    """A lab hall seen in directions ``d``: a light ceiling with rows of light panels
+    (``light``: their brightness), walls, a darker floor."""
     z = d[..., 2]
     ceiling, walls, floor = _rgb(preset.zenith), _rgb(preset.horizon), _rgb(preset.ground)
     rgb = np.empty(d.shape)
@@ -230,33 +234,70 @@ def hall_faces(size: int, preset: Preset, rows: int = 6) -> np.ndarray:
         px = d[..., 0] / z
         py = d[..., 1] / z
     strips = (np.abs((py * rows / 2.0) % 1.0 - 0.5) < 0.12) & (np.abs(px) < 3.0) & up
-    rgb[strips] = 1.0
+    rgb[strips] = light
     # walls darker towards the floor
     band = (~up) & (~down)
     rgb[band] = walls * (0.75 + 0.25 * (z[band] + 0.45) / 0.9)[..., None]
-    return _to_uint8(rgb)
+    return rgb
 
 
-def deep_faces(size: int, preset: Preset) -> np.ndarray:
-    """Under water: the bright window of the sky overhead, blue all around, dark below."""
-    d = cube_directions(size)
+def hall_faces(size: int, preset: Preset, rows: int = 6) -> np.ndarray:
+    """The hall (:func:`hall_colours`) as cube map faces."""
+    return _to_uint8(hall_colours(cube_directions(size), preset, rows=rows))
+
+
+def deep_colours(d: np.ndarray, preset: Preset, light: float = 1.0) -> np.ndarray:
+    """Under water, seen in directions ``d``: the bright window of the sky overhead
+    (``light`` times as bright), blue all around, dark below."""
     z = d[..., 2:3]
     window, side, deep = _rgb(preset.zenith), _rgb(preset.horizon), _rgb(preset.ground)
     above = np.clip(z, 0.0, 1.0)
     # Snell's window: the sky squeezed into a cone of about 48.6 degrees from overhead
     cone = np.clip((z - np.cos(np.radians(48.6))) / 0.12, 0.0, 1.0)
-    rgb = side + (window - side) * cone + (side * 0.3) * above
+    rgb = side + (light * window - side) * cone + (side * 0.3) * above
     below = np.clip(-z, 0.0, 1.0) ** 0.6
-    rgb = np.where(z >= 0.0, rgb, side + (deep - side) * below)
-    return _to_uint8(rgb)
+    return np.where(z >= 0.0, rgb, side + (deep - side) * below)
 
 
-ENVIRONMENTS = {"sky": sky_faces, "hall": hall_faces, "deep": deep_faces}
+def deep_faces(size: int, preset: Preset) -> np.ndarray:
+    """Under water (:func:`deep_colours`) as cube map faces."""
+    return _to_uint8(deep_colours(cube_directions(size), preset))
+
+
+#: the surroundings: colours (sRGB values, the lights may exceed 1) in directions
+ENVIRONMENTS = {"sky": sky_colours, "hall": hall_colours, "deep": deep_colours}
 
 
 def environment_faces(preset: Preset, size: int = 256) -> np.ndarray:
     """The cube map faces of a preset's surroundings."""
-    return ENVIRONMENTS[preset.environment](size, preset)
+    return _to_uint8(ENVIRONMENTS[preset.environment](cube_directions(size), preset))
+
+
+def panorama_directions(width: int) -> np.ndarray:
+    """(width / 2, width, 3) world directions (unit, z up) of an equirectangular
+    panorama as Blender maps one (rows top to bottom): the middle column looks along
+    +x, longitude grows to the left (u = 0.5 - atan2(y, x) / 2 pi), the top row
+    looks up."""
+    height = width // 2
+    u = (np.arange(width) + 0.5) / width
+    v = (np.arange(height) + 0.5) / height
+    lon = np.pi * (1.0 - 2.0 * u)
+    lat = np.pi * (0.5 - v)
+    lon, lat = np.meshgrid(lon, lat)
+    return np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)], -1)
+
+
+def environment_panorama(preset: Preset, width: int = 1024, light: float = 4.0) -> np.ndarray:
+    """A preset's surroundings as an equirectangular panorama of physical (linear)
+    light, (width / 2, width, 3) float32, for path tracing: the lights (sun glow,
+    ceiling panels, Snell's window) ``light`` times as bright as in the cube map."""
+    colours = ENVIRONMENTS[preset.environment]
+    d = panorama_directions(width)
+    rgb = np.clip(colours(d, preset), 0.0, 1.0)
+    linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    # the lights' extra brightness on top, as light (sRGB stops at white)
+    brighter = np.maximum(colours(d, preset, light=light) - colours(d, preset), 0.0)
+    return (linear + brighter).astype(np.float32)
 
 
 # ======================================================================== grain

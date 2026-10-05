@@ -231,11 +231,33 @@ def film_code(
     camera: dict | None = None,
     plan: tuple[bool, str] | None = None,
     overlay: bool = False,
+    engine: str = "pygfx",
+    samples: int = 128,
 ) -> str:
-    """File → Export animation."""
+    """File → Export animation (``engine`` "cycles": path traced by Blender)."""
     imports = ["from lagoonviz.render.movie import frame_times, write_movie"]
     body = [line for line in _view(0.0, camera, plan) if not line.startswith("session.set_time")]
     body.append(f"times = frame_times(session, {start!r}, {end!r}, {int(every)!r})")
+    if engine == "cycles":
+        imports = [
+            "from lagoonviz.render.movie import frame_times",
+            "from lagoonviz.render.pathtrace import path_trace",
+        ]
+        body.append(
+            _raw_call(
+                "path_trace",
+                [
+                    "session",
+                    repr(_path(path)),
+                    "times",
+                    repr(tuple(int(v) for v in size)),
+                    repr(style),
+                    repr(int(samples)),
+                    repr(float(fps)),
+                ],
+            )
+        )
+        return _block("File > Export animation (path traced with Blender)", imports, body)
     body.append(
         "write_movie("
         + f"session, {_path(path)!r}, times, {tuple(int(v) for v in size)!r}, {float(fps)!r}, "

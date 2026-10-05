@@ -20,6 +20,17 @@
   Keys are saved with the session and written by *Export script*
   (`session.add_camera_key(time, state)`); `lagoonviz.core.camera_path` does the
   interpolation.
+- Path tracing with Blender's Cycles (*File → Export animation → Renderer*,
+  `lagoon-render --engine cycles`, `lagoonviz.render.pathtrace.path_trace`):
+  stills and films of the 3D view in a cinematic look, rendered by headless
+  Blender as a separate process; Blender is never opened, and LAGOON never imports
+  it. LAGOON writes the scene (triangles per frame with the colours mapped, lines
+  as thin tubes, particles as small spheres, the camera of each frame from the
+  camera path, materials, the look's surroundings as an HDR panorama, the sun,
+  fog around the scene under water); `blender_cycles.py` builds and renders it
+  (GPU when there is one, denoised, AgX). Water refracts and lets the sun through
+  to the bed. Frames are kept with a key of their data, camera and settings, so a
+  stopped film goes on where it stopped. Needs Blender 4.2 or newer.
 
 ## 0.4.0.dev0 (phase 4, figure studio)
 

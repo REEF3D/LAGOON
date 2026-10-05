@@ -573,6 +573,33 @@ def test_export_dialog_and_overlay(window, reef3d_run):
     assert drawn.shape == image.shape and (drawn != 255).any()  # time and colour bar
 
 
+def test_export_dialog_path_traced(window, reef3d_run, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    from lagoonviz.gui.export_movie import ExportAnimationDialog
+    from lagoonviz.render import pathtrace
+
+    window.open_case(reef3d_run)
+    monkeypatch.setattr(pathtrace, "find_blender", lambda: None)
+    dialog = ExportAnimationDialog(window, window.session, str(reef3d_run), (640, 360))
+    export = dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.Ok)
+    assert dialog.settings()["engine"] == "pygfx" and dialog.cycles_row.isHidden()
+    dialog.engine.setCurrentIndex(1)
+    assert not dialog.cycles_row.isHidden() and not dialog.overlay.isEnabled()
+    assert not export.isEnabled() and "not found" in dialog.blender_label.text()
+    settings = dialog.settings()
+    assert settings["engine"] == "cycles" and settings["samples"] == 128
+    assert settings["overlay"] is False  # Cycles films show the scene alone
+    blender = tmp_path / "blender"
+    blender.write_text("")
+    monkeypatch.setattr(pathtrace, "find_blender", lambda: str(blender))
+    found = ExportAnimationDialog(window, window.session, str(reef3d_run), (640, 360))
+    found.engine.setCurrentIndex(1)
+    assert found.findChild(QDialogButtonBox).button(QDialogButtonBox.Ok).isEnabled()
+    found.engine.setCurrentIndex(0)
+    assert found.overlay.isEnabled()
+
+
 def test_profiles_panel_shows_wave_profiles(window, tmp_path):
     from reef3d_fixtures import make_run
 
