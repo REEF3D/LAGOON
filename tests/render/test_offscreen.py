@@ -418,6 +418,9 @@ def test_cinematic_looks(tmp_path, look):
     image = render_session(session, (640, 360), time=1.0, view="perspective", style=look)
     _keep(f"render_{look}.png", image)
     assert _colours(image) > 200  # sky, reflections, grain: many shades
+    # level with the scene: the horizon, the background, the fog across the domain
+    front = render_session(session, (640, 360), time=1.0, view="front", style=look)
+    _keep(f"render_{look}_front.png", front)
 
 
 def test_switching_looks_swaps_materials(reef3d_run):

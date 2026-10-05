@@ -52,7 +52,9 @@ class Preset:
     env_intensity: float = 1.0  # how strongly materials reflect the surroundings
     water_color: str = "#0f4c5c"  # the water's own colour, when coloured by nothing
     water_roughness: float = 0.06
-    fog: tuple[str, float] | None = None  # colour and power of the depth fog
+    #: depth fog: its colour, and where it is half thick, in sizes of the scene (the
+    #: diagonal of what is shown) from the camera
+    fog: tuple[str, float] | None = None
     background: tuple[str, str] | None = None  # a gradient instead of the cube (bottom, top)
     contours: str = "#1e2833"
     shadows: bool = True
@@ -88,6 +90,9 @@ WAVE_FLUME = Preset(
     env_intensity=0.9,
     water_color="#5f8f9a",  # clear tap water over a grey floor
     water_roughness=0.04,
+    # the hall is reflected; behind the model a plain light gradient (a hall at
+    # infinity would show its floor's edge as a curved horizon)
+    background=("#a7a49f", "#ecebe8"),
 )
 UNDERWATER = Preset(
     "underwater",
@@ -104,7 +109,7 @@ UNDERWATER = Preset(
     env_intensity=0.7,
     water_color="#2a8aa0",
     water_roughness=0.1,
-    fog=("#0b4a5e", 60.0),
+    fog=("#0b4a5e", 1.6),
     background=("#03202b", "#1d6f86"),
     contours="#e8eef5",
     shadows=False,
