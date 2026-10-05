@@ -274,6 +274,8 @@ def water_body(
     t = np.asarray(triangles, np.int64).reshape(-1, 3)
     finite = np.isfinite(p).all(axis=1)
     t = t[finite[t].all(axis=1)]
+    # hidden triangles stay in LAGOON's lists as degenerate ones (all corners 0)
+    t = t[(t[:, 0] != t[:, 1]) & (t[:, 1] != t[:, 2]) & (t[:, 0] != t[:, 2])]
     if not len(t):
         return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32), np.zeros(0, bool)
     a, b, c = p[t[:, 0]], p[t[:, 1]], p[t[:, 2]]
@@ -499,7 +501,7 @@ class _Collector:
         material = self.plain(None if rgb is not None else color)
         self.add(name, positions, triangles, material, rgb)
 
-    def surface(self, kind: str, shown) -> None:
+    def surface(self, kind: str, shown, all_triangles=None) -> None:
         if not shown.visible or shown.opacity <= 0:
             return
         values = shown.values
@@ -524,7 +526,7 @@ class _Collector:
         s = SURFACES.get(surface, SURFACES["plain"])
         water = surface == "water"
         if water and rgb is None and shown.opacity >= 1.0:
-            self.water(shown)
+            self.water(shown, all_triangles)
             return
         spec = {
             "color": None
@@ -554,7 +556,7 @@ class _Collector:
             }
         self.add(shown.item_id, shown.positions, shown.triangles, spec, rgb)
 
-    def water(self, shown) -> None:
+    def water(self, shown, all_triangles=None) -> None:
         """Clear water as path tracing sees it: a closed body (surface, walls, floor)
         of glass-clear water that refracts and reflects at its surface, with small
         ripples on it, absorbing light on the way through it in the look's water
@@ -576,7 +578,20 @@ class _Collector:
             bottom = float(low[2]) - 0.01 * max(float(np.linalg.norm(high - low)), 1e-6)
             depth = float(np.mean(finite[:, 2])) - float(low[2])
         depth = max(depth, 0.02 * extent)
-        positions, triangles, smooth = water_body(shown.positions, shown.triangles, bottom)
+        top = np.asarray(shown.positions, float).copy()
+        triangles = shown.triangles
+        if self.bed is not None and all_triangles is not None:
+            # the whole surface, dry land too, but there pushed just under the bed: the
+            # land hides it, and the shore is where water and land meet, not a wall
+            # along the edge of the wet cells
+            triangles = all_triangles
+            span = max(float(np.ptp(finite[:, 2])), 1e-6)
+            ok = np.isfinite(top).all(axis=1)
+            bed = np.full(len(top), np.nan)
+            bed[ok] = self.bed(top[ok, :2])
+            dry = ok & (top[:, 2] - bed < 1e-3 * span)
+            top[dry, 2] = bed[dry] - 5e-4 * span
+        positions, triangles, smooth = water_body(top, triangles, bottom)
         if not len(triangles):
             return
         tint = linear(_hex(self.preset.water_color))
@@ -630,7 +645,7 @@ def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Colle
         except ValueError:
             out.bed = None
     for item_id, item, mesh, shown in shown_items:
-        out.surface(item.kind, shown)
+        out.surface(item.kind, shown, mesh.triangles)
         if not shown.visible:
             continue
         overlays = (
@@ -805,6 +820,7 @@ def export_scene(
         "size": list(size),
         "samples": int(samples),
         "view_transform": "AgX",
+        "exposure": -0.6,  # the sun and the sky together: sand stays sand, not white
         "world": world,
         "sun": {
             "rotation_wxyz": _wxyz(_track_z(sun)),
@@ -819,7 +835,9 @@ def export_scene(
     }
     # a frame's key: everything its image depends on. Blender keeps an image whose
     # key it wrote beside it (frame_NNNNN.key) when asked to resume.
-    common = {k: scene[k] for k in ("version", "look", "size", "samples", "view_transform")}
+    common = {
+        k: scene[k] for k in ("version", "look", "size", "samples", "view_transform", "exposure")
+    }
     common.update(world=world, sun=scene["sun"])
     for frame in frames:
         used = {o["material"]: materials[o["material"]] for o in frame["objects"]}

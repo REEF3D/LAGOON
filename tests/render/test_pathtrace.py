@@ -465,3 +465,18 @@ def test_water_body_ends_on_the_bed():
     np.testing.assert_allclose(floor[:, 2], 0.1 * points[:, 0], atol=0.03)  # on the bed
     volume = _closed_and_outward(positions, body)
     assert volume == pytest.approx(5 * 3 * (1.0 - 0.25), rel=0.06)  # water above the bed only
+
+
+def test_water_body_ignores_hidden_triangles():
+    from lagoonviz.render.pathtrace import water_body
+
+    points, triangles = _grid()
+    hidden = triangles.copy()
+    hidden[6:8] = 0  # a dry cell, hidden as LAGOON does: degenerate, all corners 0
+    positions, body, smooth = water_body(points, hidden, bottom=0.0)
+    assert smooth.sum() == len(triangles) - 2  # the hidden ones are not on top
+    assert (body[:, 0] != body[:, 1]).all()  # and no degenerate ones anywhere
+    _closed_and_outward(positions, body)  # walls around the hole close it
+    _, outer, _ = water_body(points, triangles, bottom=0.0)
+    walls = len(outer) - 2 * len(triangles)
+    assert walls == 2 * (2 * 5 + 2 * 3)  # two triangles per edge of the outer rim only

@@ -151,6 +151,10 @@ def setup_render(scene, settings: dict) -> str:
             break
         except (TypeError, ValueError):
             continue
+    try:
+        scene.view_settings.exposure = float(settings.get("exposure", 0.0))
+    except (AttributeError, TypeError):
+        pass
     return use_gpu(scene)
 
 
