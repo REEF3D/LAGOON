@@ -436,5 +436,37 @@ def export_figure(window) -> str | None:
         return None
     finally:
         QApplication.restoreOverrideCursor()
+    record_figure(window, settings, written)
     window.statusBar().showMessage(f"Figure saved to {written}", 15000)
     return str(written)
+
+
+def record_figure(window, settings: dict, path) -> None:
+    """The figure into the session's recorded script (File → Export script)."""
+    from lagoonviz.render.script import figure_code
+
+    session = window.session
+    try:
+        rows = window.plots.shown_rows()
+        line = None
+        if settings["content"] == "validation" and settings.get("line") is not None:
+            row, column = settings["line"]
+            item_id, traces = rows[row]
+            line = (item_id, traces[column].name)
+        view = getattr(window.viewport, "view", None)
+        code = figure_code(
+            settings["content"],
+            path,
+            settings,
+            time=session.scene.time,
+            items=[item_id for item_id, _ in rows],
+            window=window.plots.time_window() if rows else None,
+            line=line,
+            camera=session.scene.camera,
+            plan=(session.scene.plan_view, session.scene.plan_side),
+            style=getattr(view, "style_name", "studio"),
+        )
+    except Exception:  # noqa: BLE001 (the figure is written; only the script misses it)
+        log.warning("figure not recorded for the script:\n%s", traceback.format_exc())
+        return
+    session.record_output(code)

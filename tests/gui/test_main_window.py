@@ -314,6 +314,10 @@ def test_save_screenshot(window, tmp_path):
     path = tmp_path / "shot.png"
     assert window.save_screenshot(path)
     assert path.read_bytes()[:4] == b"\x89PNG"
+    # in the recorded script: the 3D view rendered off screen
+    script = window.session.to_script()
+    assert "File > Save screenshot" in script and str(path) in script
+    compile(script, "<script>", "exec")
 
 
 def test_dev_remote_runs_actions(window, reef3d_run, tmp_path):
@@ -710,6 +714,23 @@ def test_export_figure(window, tmp_path, qtbot):
         },
     )
     assert figure.comparison.rmse < 1e-6 and spec.font_family == "serif"
+    # File > Export script makes the figure again
+    from lagoonviz.gui.export_figure import record_figure
+
+    validation = {
+        **settings,
+        "content": "validation",
+        "style": "Journal (serif)",
+        "line": (0, 0),
+        "measured": str(lab),
+        "measured_column": "WG1",
+    }
+    record_figure(window, validation, tmp_path / "validation.pdf")
+    script = window.session.to_script()
+    assert "File > Export figure: validation" in script and f"t.name == {trace.name!r}" in script
+    namespace = {"__name__": "__main__"}
+    exec(compile(script, "<script>", "exec"), namespace)
+    assert (tmp_path / "validation.pdf").stat().st_size > 1000
     assert window.act_export_figure.shortcut().toString() == "Ctrl+Shift+P"
 
 
@@ -765,3 +786,4 @@ def test_figure_editor(window, tmp_path, qtbot):
     assert editor.template.panels[0].lines[1].label == "again"
     written = editor.export(str(tmp_path / "gauge.pdf"))
     assert Path(written).stat().st_size > 1000
+    assert "File > Figure editor: export" in window.session.to_script()

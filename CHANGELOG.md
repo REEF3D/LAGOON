@@ -32,6 +32,14 @@
   same template draws the same figure for another run of the set-up; measured
   files next to the template are kept relative. `lagoonviz.core.figure_template`
   and `lagoonviz.render.figure.template_figure` do the same from Python.
+- The recorded script (*File → Export script*) has the outputs too: each figure
+  (Export figure, the figure editor), film and screenshot made is written into
+  it after the change it followed, as the `lagoonviz.render` calls that make it
+  again. They run when the script is run (`python script.py`), behind
+  `MAKE_OUTPUTS`, so `Session.from_script` and `lagoon-render` still only rebuild
+  the scene. In the script a screenshot is the 3D view, and films have no time
+  and colour-bar overlay (drawn with Qt). `lagoonviz.render.script` writes the
+  code; `Session.record_output` keeps it.
 
 ## 0.3.0.dev0 (phase 3, LAGOON format; in progress)
 

@@ -95,7 +95,10 @@ print(mesh.points.shape, mesh.point_data["eta"].max())
 ```
 
 In the application, *File → Export script* writes the same script, and the Python
-console shows every command as it runs.
+console shows every command as it runs. The figures, films and screenshots made in
+the session are in the script too, each after the change it followed: run it with
+`python script.py` (for another run of the set-up, change the `open_case` path) to
+make them again without the GUI. `Session.from_script` only rebuilds the scene.
 
 ## License
 

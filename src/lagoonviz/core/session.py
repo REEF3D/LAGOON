@@ -51,6 +51,8 @@ class Session:
         self.data = DataManager(self.scene)
         self.path: Path | None = None
         self._origin: Path | None = None  # file the recorded script starts from
+        #: figures, films and screenshots made: (command they followed, script code)
+        self._outputs: list[tuple[Command | None, str]] = []
         self._log_listeners: list[LogListener] = []
         self.stack.subscribe(self._on_stack)
 
@@ -282,6 +284,7 @@ class Session:
         path = Path(path)
         self.scene.load(path)
         self.stack.clear()
+        self._outputs.clear()
         self.path = path
         self._origin = path
 
@@ -289,22 +292,61 @@ class Session:
         """Start an empty session."""
         self.scene.load_dict(Scene().to_dict())
         self.stack.clear()
+        self._outputs.clear()
         self.path = None
         self._origin = None
 
     # ------------------------------------------------------------- scripts
+    def record_output(self, code: str) -> None:
+        """Note a figure, film or screenshot made now, as the Python that makes it
+        again (``lagoonviz.render.script`` writes it). It goes into the recorded
+        script after the change it followed; not an undo step."""
+        done = self.stack.done
+        self._outputs.append((done[-1] if done else None, code.rstrip("\n")))
+
+    @property
+    def outputs(self) -> list[str]:
+        """The code of the outputs made in this session, in order."""
+        return [code for _, code in self._outputs]
+
     def to_script(self) -> str:
-        """The session's history as a runnable Python script."""
+        """The session's history as a runnable Python script. Figures, films and
+        screenshots made are in it too, each where it was made; they are made again
+        when the script is run (``python script.py``), not by ``from_script``."""
         lines = [
             "# LAGOON session script, recorded from the command history",
             "from lagoonviz.core import Session",
             "",
         ]
+        if self._outputs:
+            lines += [
+                "# figures, films and screenshots: made again only when run as a script",
+                'MAKE_OUTPUTS = __name__ == "__main__"',
+                "",
+            ]
         if self._origin is not None:
             lines.append(f"session = Session.open({str(self._origin)!r})")
         else:
             lines.append("session = Session()")
-        lines += [command.to_script() for command in self.stack.done]
+        done = self.stack.done
+        after: dict[int, list[str]] = {}
+        later: list[str] = []  # made after changes since undone
+        for anchor, code in self._outputs:
+            if anchor is None:
+                after.setdefault(-1, []).append(code)
+                continue
+            index = next((i for i, command in enumerate(done) if command is anchor), None)
+            if index is None:
+                later.append(code)
+            else:
+                after.setdefault(index, []).append(code)
+        lines += after.get(-1, [])
+        for index, command in enumerate(done):
+            lines.append(command.to_script())
+            lines += after.get(index, [])
+        if later:
+            lines.append("# made with changes that were undone afterwards")
+            lines += later
         # view state last, so the script shows the same frame and view
         if self.scene.time:
             lines.append(f"session.set_time({self.scene.time!r})")

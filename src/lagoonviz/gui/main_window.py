@@ -801,10 +801,33 @@ class MainWindow(QMainWindow):
 
     def save_screenshot(self, path: str | Path) -> bool:
         ok = self.screenshot().save(str(path), "PNG")
+        if ok:
+            self._record_screenshot(path)
         self.statusBar().showMessage(
             f"Screenshot saved to {path}" if ok else f"Could not save {path}", 5000
         )
         return ok
+
+    def _record_screenshot(self, path: str | Path) -> None:
+        """The screenshot into the recorded script: there, the 3D view as it is now."""
+        from lagoonviz.render.script import screenshot_code
+
+        view = getattr(self.viewport, "view", None)
+        canvas = getattr(self.viewport, "canvas", self.viewport)
+        try:
+            camera = view.camera_state() if view is not None else self.session.scene.camera
+            scene = self.session.scene
+            code = screenshot_code(
+                path,
+                size=(canvas.width(), canvas.height()),
+                time=scene.time,
+                style=getattr(view, "style_name", "studio"),
+                camera=camera,
+                plan=(scene.plan_view, scene.plan_side),
+            )
+        except Exception:  # noqa: BLE001 (the screenshot is saved; the script misses it)
+            return
+        self.session.record_output(code)
 
     def _last_dir(self) -> str:
         return str(self.settings.value("files/last_dir", str(Path.home())))

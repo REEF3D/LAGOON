@@ -597,6 +597,11 @@ class FigureEditor(QDialog):
         except Exception as error:  # noqa: BLE001 (reported)
             QMessageBox.warning(self, "Export figure", f"The figure could not be made:\n{error}")
             return None
+        from lagoonviz.render.script import template_code
+
+        self.session.record_output(
+            template_code(self.template.to_dict(), written, dpi, self.session.scene.time)
+        )
         self.main_window.statusBar().showMessage(f"Figure saved to {written}", 15000)
         return str(written)
 

@@ -294,6 +294,25 @@ def export_animation(window) -> str | None:
     finally:
         session.set_time(keep_time)
     progress.close()
+    try:
+        from lagoonviz.render.script import film_code
+
+        session.record_output(
+            film_code(
+                path,
+                start=settings["start"],
+                end=settings["end"],
+                every=settings["every"],
+                size=settings["size"],
+                fps=settings["fps"],
+                style=style,
+                camera=session.scene.camera,
+                plan=(session.scene.plan_view, session.scene.plan_side),
+                overlay=bool(settings["overlay"]),
+            )
+        )
+    except Exception:  # noqa: BLE001 (the film is written; only the script misses it)
+        log.warning("film not recorded for the script:\n%s", traceback.format_exc())
     from lagoonviz.render.movie import film_summary
 
     summary = film_summary()
