@@ -361,9 +361,10 @@ class SceneRenderer:
             return
         from lagoonviz.render.cinematic import SURFACES
 
-        # at least a dozen repeats across the domain: a finer grain only shows close up
+        # three tiles across the domain at least (some 12 sand ripples): a finer grain
+        # turns into an even speckle when the whole domain is in view
         span = np.ptp(np.asarray(positions)[:, :2], axis=0).max() if len(positions) else 0.0
-        tile = max(SURFACES[surface_of(kind, material)].tile, float(span) / 12.0)
+        tile = max(SURFACES[surface_of(kind, material)].tile, float(span) / 3.0)
         uv = grain_coords(positions, tile)
         if not _update_buffer(mesh.geometry, "texcoords1", uv):
             mesh.geometry.texcoords1 = gfx.Buffer(uv)
