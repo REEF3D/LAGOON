@@ -81,6 +81,9 @@ class Scene:
         self.camera_keys: list[dict[str, Any]] = []
         #: the views and films follow the camera path through the keys
         self.camera_path: bool = False
+        #: where the sun is: (azimuth, elevation) in degrees, azimuth from +x towards
+        #: +y, elevation above the horizon; None: where the look puts it
+        self.sun: tuple[float, float] | None = None
 
     # ------------------------------------------------------------- observers
     def subscribe(self, callback: Observer) -> None:
@@ -207,6 +210,15 @@ class Scene:
             self.camera_path = bool(path)
         self._notify("camera_keys", None)
 
+    def set_sun(self, sun: tuple[float, float] | None) -> None:
+        """Where the sun is (azimuth, elevation in degrees), or None for the look's
+        own; observers get "sun"."""
+        if sun is not None:
+            azimuth, elevation = (float(v) for v in sun)
+            sun = (azimuth % 360.0, min(max(elevation, -90.0), 90.0))
+        self.sun = sun
+        self._notify("sun", None)
+
     # ------------------------------------------------------------- files
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -217,6 +229,7 @@ class Scene:
             "plan_side": self.plan_side,
             "camera_keys": copy.deepcopy(self.camera_keys),
             "camera_path": self.camera_path,
+            "sun": list(self.sun) if self.sun is not None else None,
             "counters": dict(self._counters),
             "items": [item.to_dict() for item in self._items.values()],
         }
@@ -247,6 +260,8 @@ class Scene:
             if isinstance(k, dict) and "time" in k and isinstance(k.get("state"), dict)
         ]
         self.camera_path = bool(data.get("camera_path", False)) and bool(self.camera_keys)
+        sun = data.get("sun")
+        self.sun = (float(sun[0]), float(sun[1])) if isinstance(sun, list | tuple) else None
         self._notify("reset", None)
 
     def save(self, path: str | Path) -> None:

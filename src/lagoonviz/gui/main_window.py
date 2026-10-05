@@ -280,6 +280,12 @@ class MainWindow(QMainWindow):
         )
         self.bridge.sceneChanged.connect(self._on_camera_keys)
         self._on_camera_keys("reset", "")
+        self.act_sun = self._action(
+            "S&un...",
+            self.show_sun_dialog,
+            tip="Where the light comes from: the 3D view, films and path tracing",
+        )
+        self.sun_dialog = None
         self.act_reset_layout = self._action("&Reset layout", self.reset_layout)
         self.act_about = self._action("&About LAGOON", self.about)
 
@@ -344,6 +350,7 @@ class MainWindow(QMainWindow):
             action.setChecked(name == current_look)
             action.triggered.connect(lambda _=False, n=name: self.set_viewport_look(n))
             self.look_actions[name] = action
+        view_menu.addAction(self.act_sun)
         view_menu.addSeparator()
         view_menu.addAction(self.act_compare)
         view_menu.addAction(self.act_full_screen)
@@ -560,6 +567,21 @@ class MainWindow(QMainWindow):
         if event == "camera_keys":  # keyframes are work worth saving (not undo steps)
             self.dirty = True
             self._update_title()
+
+    def show_sun_dialog(self):
+        """View → Sun: sliders for where the sun is; the 3D view follows."""
+        from lagoonviz.gui.sun_dialog import SunDialog
+
+        if self.sun_dialog is None:
+            self.sun_dialog = SunDialog(
+                self,
+                self.session,
+                lambda: getattr(getattr(self.viewport, "view", None), "style_name", None),
+            )
+        self.sun_dialog.show_sun()
+        self.sun_dialog.show()
+        self.sun_dialog.raise_()
+        return self.sun_dialog
 
     def set_viewport_look(self, name: str) -> None:
         """Background and lighting of the 3D view; remembered for the next start."""

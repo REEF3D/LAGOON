@@ -324,6 +324,8 @@ class Viewport3D(QWidget):
         self._apply_2d(*self._plan_state, frame=False)
         if self.session.scene.camera:
             self.view.set_camera_state(self.session.scene.camera)
+        if self.session.scene.sun is not None:
+            self.view.set_sun_direction(self.session.sun_direction())
         self.refresh()
 
     # ------------------------------------------------------------- state
@@ -534,6 +536,10 @@ class Viewport3D(QWidget):
         if event == "camera_keys":
             self.follow_path()
             return
+        if event == "sun":
+            self.view.set_sun_direction(self.session.sun_direction())
+            self.redraw()
+            return
         if self.comparing:
             self._fill_cases()
         if event == "reset":
@@ -543,6 +549,7 @@ class Viewport3D(QWidget):
             self._apply_2d(*self._plan_state, frame=False)  # a loaded session's
             if self.session.scene.camera:
                 self.view.set_camera_state(self.session.scene.camera)
+            self.view.set_sun_direction(self.session.sun_direction())  # a loaded session's
             self.refresh()
         elif event == "view":  # 2D or 3D, or the 2D side: everything is drawn again
             self.refresh()

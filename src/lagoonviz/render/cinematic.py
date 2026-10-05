@@ -31,6 +31,8 @@ from functools import lru_cache
 
 import numpy as np
 
+from lagoonviz.core.looks import LOOK_SUNS
+
 # ======================================================================== presets
 
 
@@ -68,7 +70,7 @@ OPEN_OCEAN = Preset(
     zenith="#3a6fb0",
     horizon="#cfe0ee",
     ground="#123848",
-    sun_direction=(-0.75, -0.35, 0.56),
+    sun_direction=LOOK_SUNS["open_ocean"],
     sun=3.2,
     ambient=0.2,
     headlamp=0.35,
@@ -82,7 +84,7 @@ WAVE_FLUME = Preset(
     zenith="#f4f2ee",  # ceiling between the lights
     horizon="#c9c7c2",  # walls
     ground="#6d6b67",  # floor
-    sun_direction=(0.0, 0.25, 1.0),  # the ceiling lights, nearly overhead
+    sun_direction=LOOK_SUNS["wave_flume"],  # the ceiling lights, nearly overhead
     sun_color="#ffffff",
     sun=2.6,
     ambient=0.35,
@@ -101,7 +103,7 @@ UNDERWATER = Preset(
     zenith="#9fd6e6",  # Snell's window: the bright sky seen through the surface
     horizon="#1f6f86",
     ground="#04202c",
-    sun_direction=(-0.2, -0.1, 1.0),
+    sun_direction=LOOK_SUNS["underwater"],
     sun_color="#d8f4ff",
     sun=2.2,
     ambient=0.45,

@@ -60,6 +60,7 @@ View
     [ ] Open ocean (cinematic)
     [ ] Wave flume (cinematic)
     [ ] Underwater (cinematic)
+  Sun...
   ----
   [ ] Compare side by side  [Ctrl+Shift+2]
   [ ] Full screen viewer  [Ctrl+Shift+F]

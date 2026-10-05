@@ -825,7 +825,8 @@ def export_scene(
         frame["camera"]["clip_start"] = max(1e-4 * extent, (distance - extent) * 1e-3, 1e-5)
         frame["camera"]["clip_end"] = (distance + extent) * 4.0
     write_hdr(folder / "environment.hdr", environment_panorama(preset, 1024))
-    sun = np.asarray(preset.sun_direction, float)
+    own = session.sun_direction()  # the session's sun, else the look's
+    sun = np.asarray(own if own is not None else preset.sun_direction, float)
     sun /= np.linalg.norm(sun)
     world: dict[str, Any] = {
         "environment": "environment.hdr",

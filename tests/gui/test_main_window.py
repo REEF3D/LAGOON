@@ -534,6 +534,27 @@ def test_viewport_look_is_remembered(window):
     assert window.look_actions["ocean"].isChecked()
 
 
+def test_sun_dialog_moves_the_light(window):
+    dialog = window.show_sun_dialog()
+    assert window.session.scene.sun is None
+    assert not dialog.own.isEnabled()
+    dialog.azimuth.setValue(120.0)
+    dialog.elevation.setValue(25.0)
+    azimuth, elevation = window.session.scene.sun
+    assert azimuth == pytest.approx(120.0)
+    assert elevation == pytest.approx(25.0)
+    view = getattr(window.viewport, "view", None)
+    if view is not None:
+        expected = np.array(window.session.sun_direction())
+        assert np.allclose(view.sun_direction, expected / np.linalg.norm(expected))
+    assert dialog.own.isEnabled()
+    assert "session.set_sun(" in window.session.to_script()
+    dialog.own.click()
+    assert window.session.scene.sun is None
+    assert window.show_sun_dialog() is dialog
+    dialog.close()
+
+
 def test_timeline_starts_where_the_shown_run_has_data(window, tmp_path):
     import os
     import time

@@ -21,6 +21,7 @@ from lagoonviz.core.data.manager import (
     Trails,
     VectorArrows,
 )
+from lagoonviz.core.looks import DEFAULT_SUN
 from lagoonviz.render.cinematic import PRESETS, grain_coords, surface_of
 
 #: The lights and gloss of every look: a soft sun from above for the shadows, most of
@@ -66,7 +67,7 @@ DEFAULT_STYLE = "studio"
 #: where the sun stands, seen from the scene: about 31 degrees above the horizon and
 #: mostly from -x, across the crests of waves that travel along x (REEF3D's usual
 #: set-up), so the slopes facing it and facing away differ clearly
-SUN_DIRECTION = np.array((-0.9, -0.4, 0.6)) / np.linalg.norm((-0.9, -0.4, 0.6))
+SUN_DIRECTION = np.array(DEFAULT_SUN) / np.linalg.norm(DEFAULT_SUN)
 #: shadow map depth bias, as a fraction of the shadow camera's depth range
 SHADOW_BIAS = 0.0008
 
@@ -186,6 +187,8 @@ class SceneRenderer:
         self.scene.add(self.ambient)
         # a sun from above, fixed in the scene: wave crests read the same from any side
         self.sun = gfx.DirectionalLight(intensity=look["sun"])
+        #: the session's sun (a unit vector towards it), or None for the look's own
+        self.sun_override: np.ndarray | None = None
         self.sun_direction = _sun_direction(look)
         self._sun_colour(look)
         self.sun.local.position = tuple(self.sun_direction)
@@ -369,6 +372,20 @@ class SceneRenderer:
         if not _update_buffer(mesh.geometry, "texcoords1", uv):
             mesh.geometry.texcoords1 = gfx.Buffer(uv)
 
+    def set_sun_direction(self, direction) -> None:
+        """Put the sun towards ``direction`` (a vector, z up), or back where the look
+        puts it (None)."""
+        if direction is None:
+            self.sun_override = None
+            self.sun_direction = _sun_direction(STYLES[self.style_name])
+        else:
+            d = np.asarray(direction, float)
+            self.sun_override = d / max(float(np.linalg.norm(d)), 1e-12)
+            self.sun_direction = self.sun_override
+        self.sun.local.position = tuple(self.sun_direction)
+        self._shadow_fit = None
+        self._fit_shadow()
+
     def _fit_shadow(self) -> None:
         """Aim the sun's shadow map at what is shown: it covers the scene's bounding
         sphere, seen from the sun, so any domain size gets the full map resolution."""
@@ -487,7 +504,9 @@ class SceneRenderer:
         self.scene.add(self.background)
         self.ambient.intensity = look["ambient"]
         self.sun.intensity = look["sun"]
-        self.sun_direction = _sun_direction(look)
+        self.sun_direction = (
+            self.sun_override if self.sun_override is not None else _sun_direction(look)
+        )
         self._sun_colour(look)
         self.sun.cast_shadow = bool(look.get("shadows", False)) and not self.plan
         self._shadow_fit = None

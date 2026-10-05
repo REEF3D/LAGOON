@@ -67,6 +67,7 @@ spec = FigureSpec.from_style("Journal (serif)", width_mm=90)
 save_figure(series_figure(session, spec), "gauges.pdf", spec)
 
 session.orbit_camera(degrees=360)                  # a camera path around the scene
+session.set_sun(azimuth=200, elevation=20)         # where the light comes from
 path_trace(session, "showcase.mp4", size=(1920, 1080), look="open_ocean", samples=64)
 ```
 

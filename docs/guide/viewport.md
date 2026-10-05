@@ -42,6 +42,19 @@ values, over the bed), from the front or side it is an elevation of the shapes.
   physically based materials, reflections and, under water, fog. See
   [Cinematic looks and path tracing](cinematic.md).
 
+## The sun
+
+*View → Sun...* moves the light: **Direction** turns it around the vertical
+(0° from +x, 90° from +y) and **Height** lifts it from just over the horizon
+(long shadows) to straight overhead. The 3D view follows while the sliders move.
+Your sun is saved with the session and used by films and by path tracing too;
+**Look's own** gives the sun back to the look. In a script:
+
+```python
+session.set_sun(azimuth=200, elevation=20)  # degrees
+session.set_sun()                           # the look's own sun again
+```
+
 *View → Theme* switches the window between light and dark.
 
 ![The Ocean look](../images/view-ocean.png)

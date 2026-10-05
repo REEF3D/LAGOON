@@ -134,6 +134,8 @@ class OffscreenView:
             else:
                 self.scene.frame("perspective")
             self._camera_set = True
+        if session.scene.sun is not None or self.scene.sun_override is not None:
+            self.scene.set_sun_direction(session.sun_direction())  # the session's sun
         # the camera path through the keyframes, when it is on: the camera of this time
         state = session.camera_at()
         if state is not None:

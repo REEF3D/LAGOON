@@ -349,6 +349,37 @@ class Session:
         keys = [CameraKey.from_dict(k) for k in self.scene.camera_keys]
         return camera_at(keys, self.scene.time if time is None else float(time))
 
+    def set_sun(self, azimuth: float | None = None, elevation: float | None = None) -> None:
+        """Put the sun at ``azimuth`` degrees (from +x towards +y: 0 shines from +x,
+        90 from +y) and ``elevation`` degrees above the horizon; both None: where the
+        look puts it. It lights the 3D view, films and path tracing alike. View state:
+        not an undo step."""
+        if azimuth is None and elevation is None:
+            self.scene.set_sun(None)
+            return
+        current = self.sun_angles()
+        self.scene.set_sun(
+            (
+                current[0] if azimuth is None else float(azimuth),
+                current[1] if elevation is None else float(elevation),
+            )
+        )
+
+    def sun_angles(self, look: str | None = None) -> tuple[float, float]:
+        """(azimuth, elevation) of the sun in degrees: the session's, else the look's."""
+        import math
+
+        if self.scene.sun is not None:
+            return self.scene.sun
+        x, y, z = sun_vector(look)
+        return math.degrees(math.atan2(y, x)) % 360.0, math.degrees(math.asin(z))
+
+    def sun_direction(self) -> tuple[float, float, float] | None:
+        """The unit vector towards the session's sun, or None (the look's own)."""
+        if self.scene.sun is None:
+            return None
+        return direction_of(*self.scene.sun)
+
     def set_camera(self, state: dict[str, Any] | None) -> None:
         """Remember the 3D view (saved with the session). View state: not an undo step."""
         self.scene.camera = dict(state) if state else None
@@ -451,6 +482,9 @@ class Session:
             lines.append(f"session.add_camera_key({key['time']!r}, {key['state']!r})")
         if self.scene.camera_keys and not self.scene.camera_path:
             lines.append("session.set_camera_path(False)")
+        if self.scene.sun is not None:
+            azimuth, elevation = self.scene.sun
+            lines.append(f"session.set_sun({azimuth!r}, {elevation!r})")
         return "\n".join(lines) + "\n"
 
     @staticmethod
@@ -459,3 +493,23 @@ class Session:
         namespace: dict[str, Any] = {}
         exec(compile(source, "<lagoon script>", "exec"), namespace)
         return namespace["session"]
+
+
+def direction_of(azimuth: float, elevation: float) -> tuple[float, float, float]:
+    """The unit vector towards a sun at ``azimuth`` (degrees from +x towards +y) and
+    ``elevation`` (degrees above the horizon)."""
+    import math
+
+    a, e = math.radians(azimuth), math.radians(elevation)
+    return (math.cos(e) * math.cos(a), math.cos(e) * math.sin(a), math.sin(e))
+
+
+def sun_vector(look: str | None = None) -> tuple[float, float, float]:
+    """The unit vector towards the sun of a look (its own, without the session's)."""
+    import math
+
+    from lagoonviz.core.looks import DEFAULT_SUN, LOOK_SUNS
+
+    x, y, z = LOOK_SUNS.get(look or "", DEFAULT_SUN)
+    n = math.sqrt(x * x + y * y + z * z)
+    return x / n, y / n, z / n

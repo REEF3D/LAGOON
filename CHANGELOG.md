@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Sun**: *View → Sun...* sets where the light comes from (direction and
+  height); the 3D view, films and Cycles renders use it, it is saved with the
+  session and scripts set it with `Session.set_sun(azimuth, elevation)`.
+
 ## 1.0.0rc1 (first release candidate)
 
 The first public release of LAGOON, the post-processor of REEF3D, as a candidate
