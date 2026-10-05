@@ -254,6 +254,10 @@ def test_camera_keyframes(window, reef3d_run):
     window.act_clear_keys.trigger()
     assert timeline.slider.markers == [] and not timeline.path_button.isEnabled()
     assert not window.act_remove_key.isEnabled()
+    window.act_orbit.trigger()  # once around over the timeline (0 to 2 s)
+    keys = session.scene.camera_keys
+    assert len(keys) == 13 and keys[0]["time"] == 0.0 and keys[-1]["time"] == 2.0
+    assert timeline.path_button.isChecked() and len(timeline.slider.markers) == 3  # 3 frames
 
 
 def test_playback_advances_and_wraps(window, reef3d_run):

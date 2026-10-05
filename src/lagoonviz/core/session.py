@@ -281,6 +281,57 @@ class Session:
         self.scene.set_camera_keys(keys, path=self.scene.camera_path and bool(keys))
         return True
 
+    def orbit_camera(
+        self,
+        degrees: float = 360.0,
+        start: float | None = None,
+        end: float | None = None,
+        centre=None,
+    ) -> int:
+        """Camera keyframes that take the saved view around the scene: ``degrees``
+        about the vertical axis through ``centre`` (default: the middle of the data
+        shown now) from ``start`` to ``end`` (default: the timeline's first and last
+        frame). Replaces the keyframes there were; turns the camera path on. Returns
+        the number of keys."""
+        from lagoonviz.core.camera_path import orbit_keys
+
+        state = self.scene.camera
+        if not state:
+            raise ValueError("no camera to orbit with: show the 3D view first")
+        if start is None or end is None:
+            times = self.data.timeline()[0]
+            if not len(times):
+                raise ValueError("no timeline: open a case, or give start and end")
+            start = float(times[0]) if start is None else start
+            end = float(times[-1]) if end is None else end
+        if centre is None:
+            centre = self.data_centre()
+            if centre is None:
+                raise ValueError("nothing shown to orbit around: give a centre")
+        keys = orbit_keys(state, centre, float(start), float(end), float(degrees))
+        self.scene.set_camera_keys([k.to_dict() for k in keys], path=True)
+        return len(keys)
+
+    def data_centre(self):
+        """The middle of the box of the visible data at the current time, or None."""
+        import numpy as np
+
+        lows, highs = [], []
+        for item_id in self.data.data_items():
+            if not self.scene.get(item_id).visible:
+                continue
+            mesh = self.data.load(item_id)
+            if mesh is None:
+                continue
+            points = np.asarray(self.data.display(item_id, mesh).positions, float).reshape(-1, 3)
+            points = points[np.isfinite(points).all(axis=1)]
+            if len(points):
+                lows.append(points.min(axis=0))
+                highs.append(points.max(axis=0))
+        if not lows:
+            return None
+        return ((np.min(lows, axis=0) + np.max(highs, axis=0)) / 2).tolist()
+
     def clear_camera_keys(self) -> None:
         self.scene.set_camera_keys([], path=False)
 

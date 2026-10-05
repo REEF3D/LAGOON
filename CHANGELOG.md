@@ -19,7 +19,9 @@
   field of view and zoom alike, easing in and out at the first and last key.
   Keys are saved with the session and written by *Export script*
   (`session.add_camera_key(time, state)`); `lagoonviz.core.camera_path` does the
-  interpolation.
+  interpolation. The easing at the ends is done in time, so the path keeps its
+  shape there. *Orbit around the scene* (`session.orbit_camera(degrees)`) makes
+  the keyframes of one turn around the middle of the data over the timeline.
 - Path tracing with Blender's Cycles (*File → Export animation → Renderer*,
   `lagoon-render --engine cycles`, `lagoonviz.render.pathtrace.path_trace`):
   stills and films of the 3D view in a cinematic look, rendered by headless

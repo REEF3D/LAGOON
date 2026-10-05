@@ -67,6 +67,7 @@ View
     Add camera keyframe  [Ctrl+K]
     Remove camera keyframe (disabled)
     [ ] Follow camera path (disabled)
+    Orbit around the scene
     ----
     Clear camera keyframes (disabled)
   Save screenshot...  [F12]

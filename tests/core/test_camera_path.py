@@ -110,3 +110,52 @@ def test_session_keys(tmp_path):
     session.add_camera_key(0.0, _state(0, 0, 1))
     session.reset()
     assert session.scene.camera_keys == []
+
+
+def test_orbit_stays_on_the_circle_and_looks_at_the_centre():
+    from lagoonviz.core.camera_path import orbit_keys
+
+    def forward(state):
+        x, y, z, w = state["rotation"]
+        u = np.array([x, y, z])
+        v = np.array([0.0, 0.0, -1.0])
+        return v + 2 * np.cross(u, np.cross(u, v) + w * v)
+
+    # a camera at (20, 0, 5) looking at the centre (0, 0, 5), along -x
+    start = _state(20, 0, 5)
+    from lagoonviz.render.pathtrace import look_rotation
+
+    start["rotation"] = look_rotation([-1.0, 0.0, 0.0])
+    np.testing.assert_allclose(forward(start), [-1, 0, 0], atol=1e-12)
+    keys = orbit_keys(start, (0, 0, 5), 0.0, 12.0, 360.0)
+    assert len(keys) == 13 and keys[0].time == 0.0 and keys[-1].time == 12.0
+    for t in np.linspace(0.0, 12.0, 97):
+        state = camera_at(keys, t)
+        p = np.asarray(state["position"])
+        assert np.hypot(p[0], p[1]) == pytest.approx(20.0, rel=3e-3)  # on the circle
+        assert p[2] == pytest.approx(5.0)
+        to_centre = (np.array([0, 0, 5]) - p) / np.linalg.norm(np.array([0, 0, 5]) - p)
+        assert forward(state) @ to_centre > 0.999  # looking at the centre
+    np.testing.assert_allclose(keys[3].state["position"], [0, 20, 5], atol=1e-9)  # 90 deg
+    np.testing.assert_allclose(keys[-1].state["position"], [20, 0, 5], atol=1e-9)
+    assert len(orbit_keys(start, (0, 0, 5), 0.0, 1.0, 45.0)) == 3
+
+
+def test_session_orbit(tmp_path):
+    from reef3d_fixtures import make_run
+
+    session = Session()
+    session.open_case(make_run(tmp_path / "run", volume=False))
+    with pytest.raises(ValueError, match="camera"):
+        session.orbit_camera()
+    session.set_camera(_state(30, -20, 8))
+    assert session.orbit_camera(degrees=90) == 4
+    keys = session.scene.camera_keys
+    assert [k["time"] for k in keys] == [0.0, 2 / 3, 4 / 3, 2.0]
+    assert session.scene.camera_path
+    centre = np.asarray(session.data_centre())
+    first, last = (np.asarray(k["state"]["position"]) for k in (keys[0], keys[-1]))
+    # a quarter turn about the vertical through the data's middle
+    a, b = first[:2] - centre[:2], last[:2] - centre[:2]
+    assert a[0] * b[1] - a[1] * b[0] > 0 and abs(a @ b) < 1e-6 * (a @ a)
+    assert "session.add_camera_key(" in session.to_script()

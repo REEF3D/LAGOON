@@ -263,6 +263,11 @@ class MainWindow(QMainWindow):
             tip="The 3D view and films follow the camera path through the keyframes",
         )
         self.act_camera_path.setCheckable(True)
+        self.act_orbit = self._action(
+            "&Orbit around the scene",
+            self.orbit_camera,
+            tip="Keyframes that take the 3D view once around the scene over the timeline",
+        )
         self.act_clear_keys = self._action(
             "Clear camera keyframes",
             self.session.clear_camera_keys,
@@ -341,6 +346,7 @@ class MainWindow(QMainWindow):
         camera_menu.addAction(self.act_add_key)
         camera_menu.addAction(self.act_remove_key)
         camera_menu.addAction(self.act_camera_path)
+        camera_menu.addAction(self.act_orbit)
         camera_menu.addSeparator()
         camera_menu.addAction(self.act_clear_keys)
         view_menu.addAction(self.act_screenshot)
@@ -494,6 +500,37 @@ class MainWindow(QMainWindow):
             return 0
         self.statusBar().showMessage(
             f"Camera keyframe at t = {self.session.scene.time:.2f} s ({count} in all)", 5000
+        )
+        return count
+
+    def orbit_camera(self, degrees: float = 360.0) -> int:
+        """Keyframes that take the 3D view as it is now once around the middle of what
+        it shows, over the whole timeline (they replace the keyframes there were).
+        Returns the number of keys (0 if there is nothing to go around)."""
+        if self.session.scene.camera_keys and self.ask_before_discard:
+            answer = QMessageBox.question(
+                self,
+                "Orbit around the scene",
+                "The orbit replaces the camera keyframes there are. Go on?",
+                QMessageBox.Ok | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if answer != QMessageBox.Ok:
+                return 0
+        view = getattr(self.viewport, "view", None)
+        centre = None
+        if view is not None:
+            self.session.set_camera(view.camera_state())
+            corners = view.bounds()
+            if corners is not None:
+                centre = ((corners[0] + corners[1]) / 2).tolist()
+        try:
+            count = self.session.orbit_camera(degrees, centre=centre)
+        except ValueError as error:
+            self.statusBar().showMessage(f"No orbit: {error}", 8000)
+            return 0
+        self.statusBar().showMessage(
+            f"Camera orbit: {count} keyframes over the timeline; play to see it", 8000
         )
         return count
 
