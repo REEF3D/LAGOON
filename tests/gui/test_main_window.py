@@ -1,5 +1,7 @@
 """GUI tests (offscreen). The GUI must only drive the core through Session."""
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import QSettings, Qt
 
@@ -709,3 +711,57 @@ def test_export_figure(window, tmp_path, qtbot):
     )
     assert figure.comparison.rmse < 1e-6 and spec.font_family == "serif"
     assert window.act_export_figure.shortcut().toString() == "Ctrl+Shift+P"
+
+
+def test_figure_editor(window, tmp_path, qtbot):
+    """File > Figure editor: lines dropped onto panels, a live preview, templates."""
+    pytest.importorskip("matplotlib")
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.core.figure_template import FigureTemplate, Line
+    from lagoonviz.gui.figure_editor import MIME, _decode, _encode
+
+    run = make_run(tmp_path / "run", frames=4, print_interval=0.5, series=True)
+    window.open_case(run)
+    editor = window.open_figure_editor()
+    qtbot.addWidget(editor)
+    assert window.open_figure_editor() is editor  # one per window
+    # what can be drawn: the case's time-series files and their columns
+    top = editor.sources.topLevelItem(0)
+    assert top is not None and top.childCount() > 0
+    line = top.child(0).data(0, Qt.UserRole)
+    assert isinstance(line, Line)
+    assert _decode(_encode(line)) == line
+    assert editor.sources.mimeData([top.child(0)]).hasFormat(MIME)
+    # a line onto empty space: a new time panel; another onto that panel
+    editor.add_line(Line(line.source, line.column))
+    editor.add_line(Line(line.source, line.column, label="again", linestyle="--"), 0)
+    assert len(editor.template.panels) == 1 and len(editor.template.panels[0].lines) == 2
+    assert editor.settings_stack.currentWidget() is editor.line_form
+    assert editor.label_box.text() == "again"
+    # a spectrum panel, moved up, then removed
+    editor.add_panel("spectrum")
+    editor.add_line(Line(line.source, line.column), 1)
+    editor.tree.setCurrentItem(editor.tree.topLevelItem(1))
+    editor.move_selected(-1)
+    assert editor.template.panels[0].kind == "spectrum"
+    editor.remove_selected()
+    assert [p.kind for p in editor.template.panels] == ["time"]
+    # the panel's settings change the template
+    editor.tree.setCurrentItem(editor.tree.topLevelItem(0))
+    editor.ymax_box.setText("0.5")
+    editor.ymax_box.editingFinished.emit()
+    assert editor.template.panels[0].ymax == 0.5
+    # the preview, drawn after the edits settle
+    editor.draw_preview()
+    assert not editor.preview.pixmap().isNull()
+    assert editor.problems.text() == ""
+    # a template round trip and the figure written
+    saved = editor.save_template(str(tmp_path / "gauge"))
+    assert saved.endswith(".lagoonfig")
+    editor.template = FigureTemplate()
+    editor.open_template(saved)
+    assert len(editor.template.panels[0].lines) == 2
+    assert editor.template.panels[0].lines[1].label == "again"
+    written = editor.export(str(tmp_path / "gauge.pdf"))
+    assert Path(written).stat().st_size > 1000

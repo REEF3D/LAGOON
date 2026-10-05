@@ -214,6 +214,11 @@ class MainWindow(QMainWindow):
             "Ctrl+Shift+P",
             tip="The plots, the wave profiles or the 3D view as a paper figure (PDF, SVG, PNG)",
         )
+        self.act_figure_editor = self._action(
+            "Figure &editor...",
+            self.open_figure_editor,
+            tip="Build a figure by dragging time series onto panels; keep it as a template",
+        )
         self.act_compare = self._action(
             "&Compare side by side",
             self.toggle_compare,
@@ -258,6 +263,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.act_export_script)
         file_menu.addAction(self.act_export_figure)
+        file_menu.addAction(self.act_figure_editor)
         file_menu.addAction(self.act_export_movie)
         file_menu.addAction(self.act_screenshot)
         file_menu.addSeparator()
@@ -631,6 +637,12 @@ class MainWindow(QMainWindow):
         from lagoonviz.gui.export_figure import export_figure
 
         return export_figure(self)
+
+    def open_figure_editor(self):
+        """File → Figure editor: a figure built by hand, kept as a template."""
+        from lagoonviz.gui.figure_editor import open_figure_editor
+
+        return open_figure_editor(self)
 
     def export_animation(self) -> str | None:
         """File → Export animation: an MP4 of the 3D view over the timeline."""

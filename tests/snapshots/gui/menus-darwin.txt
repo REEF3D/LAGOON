@@ -13,6 +13,7 @@ File
   ----
   Export script...
   Export figure...  [Ctrl+Shift+P]
+  Figure editor...
   Export animation...  [Ctrl+Shift+E]
   Save screenshot...  [F12]
   ----

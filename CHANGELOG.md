@@ -22,6 +22,16 @@
   (computed line, measured points, RMSE, bias, correlation r and Willmott's
   skill d). `lagoonviz.core.analysis` has the numbers (spectrum,
   wave_parameters, compare, read_measurements).
+- *File → Figure editor*: a figure built by hand. Drag time-series columns of the
+  open cases (or of measured files) onto panels, or double-click them; time and
+  spectrum panels, stacked; per line a label, colour, line style, marker and
+  width; per panel the y label and range, a log axis, a time window and the
+  statistics against the measured line; the figure's style, width, height, font
+  size and title. The preview is drawn again after each change. Figures are kept
+  as templates (`*.lagoonfig`, JSON) that name lines by file and column, so the
+  same template draws the same figure for another run of the set-up; measured
+  files next to the template are kept relative. `lagoonviz.core.figure_template`
+  and `lagoonviz.render.figure.template_figure` do the same from Python.
 
 ## 0.3.0.dev0 (phase 3, LAGOON format; in progress)
 

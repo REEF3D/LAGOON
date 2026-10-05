@@ -454,6 +454,149 @@ def view_figure(
     return figure
 
 
+# ======================================================================== templates
+def template_spec(template, dpi: int = 300, **overrides) -> FigureSpec:
+    """The figure settings of a template (its style, size and title)."""
+    return FigureSpec.from_style(
+        template.style,
+        width_mm=template.width_mm,
+        height_mm=template.height_mm,
+        font_size=template.font_size,
+        title=template.title,
+        dpi=dpi,
+        **overrides,
+    )
+
+
+def template_figure(session: Session, template, spec: FigureSpec | None = None):
+    """A figure from a template (``lagoonviz.core.figure_template``): its panels
+    stacked, time panels over time (measured lines as points), spectrum panels
+    with Hm0 and Tp. A line whose data is missing is left out and named in the
+    figure's ``missing`` list."""
+    from lagoonviz.core.analysis import compare, spectrum, wave_parameters
+    from lagoonviz.core.figure_template import resolve
+
+    spec = spec or template_spec(template)
+    if not template.panels:
+        raise ValueError("the figure has no panels: drag a time series onto it")
+    missing: list[str] = []
+    with _context(spec):
+        figure = _figure(spec, 32.0 * len(template.panels) + 14.0)
+        axes = figure.subplots(len(template.panels), 1, squeeze=False)[:, 0]
+        times = [a for a, p in zip(axes, template.panels, strict=True) if p.kind == "time"]
+        for other in times[1:]:
+            other.sharex(times[0])
+        seconds = session.data.time_in_seconds()
+        for ax, panel in zip(axes, template.panels, strict=True):
+            drawn = []
+            for index, line in enumerate(panel.lines):
+                try:
+                    data = resolve(session, line)
+                except (KeyError, OSError, ValueError) as error:
+                    missing.append(f"{line.title()}: {error}")
+                    continue
+                color = line.color or (
+                    "0.15" if line.measured else spec.palette[index % len(spec.palette)]
+                )
+                style = {
+                    "color": color,
+                    "linestyle": "none" if line.linestyle == "none" else line.linestyle,
+                    "label": data.name,
+                }
+                if line.width:
+                    style["linewidth"] = line.width
+                if line.marker:
+                    style.update(marker=line.marker, markersize=3, markerfacecolor="none")
+                elif line.measured and line.linestyle in ("none", "-"):
+                    style.update(
+                        linestyle="none",
+                        marker="o",
+                        markersize=2.5,
+                        markerfacecolor="none",
+                        markeredgewidth=0.5,
+                    )
+                if panel.kind == "spectrum":
+                    try:
+                        f, s = spectrum(data.time, data.values, start=panel.start, end=panel.end)
+                    except ValueError as error:
+                        missing.append(f"{line.title()}: {error}")
+                        continue
+                    waves = wave_parameters(f, s)
+                    style["label"] = (
+                        f"{data.name}: $H_{{m0}}$ = {waves.hm0:.3g}, $T_p$ = {waves.tp:.3g} s"
+                    )
+                    ax.plot(f, s, **style)
+                else:
+                    keep = np.ones(data.time.size, bool)
+                    if panel.start is not None:
+                        keep &= data.time >= panel.start
+                    if panel.end is not None:
+                        keep &= data.time <= panel.end
+                    ax.plot(data.time[keep], data.values[keep], **style)
+                drawn.append(data)
+            if panel.kind == "spectrum":
+                ax.set_xlabel("f [Hz]")
+                units = {d.unit for d in drawn if d.unit}
+                ax.set_ylabel(
+                    panel.ylabel or (f"S [{units.pop()}$^2$/Hz]" if len(units) == 1 else "S")
+                )
+                ax.set_ylim(bottom=0)
+            else:
+                units = {d.unit for d in drawn if d.unit}
+                default = (
+                    _label(drawn[0].name, drawn[0].unit)
+                    if len(drawn) == 1
+                    else (f"[{units.pop()}]" if len(units) == 1 else "")
+                )
+                ax.set_ylabel(panel.ylabel or default)
+                ax.set_xlabel("t [s]" if seconds else "output")
+                ax.margins(x=0)
+                if panel.compare:
+                    computed = [d for d in drawn if not d.line.measured]
+                    measured = [d for d in drawn if d.line.measured]
+                    if computed and measured:
+                        try:
+                            stats = compare(
+                                computed[0].time,
+                                computed[0].values,
+                                measured[0].time,
+                                measured[0].values,
+                                panel.start,
+                                panel.end,
+                            )
+                            ax.text(
+                                0.01,
+                                0.03,
+                                f"RMSE = {stats.rmse:.3g}, bias = {stats.bias:.2g}, "
+                                f"r = {stats.r:.3f}, d = {stats.skill:.3f}",
+                                transform=ax.transAxes,
+                                fontsize=spec.font_size * 0.85,
+                                va="bottom",
+                                bbox={
+                                    "facecolor": "white",
+                                    "edgecolor": "none",
+                                    "alpha": 0.85,
+                                    "pad": 1.5,
+                                },
+                            )
+                        except ValueError as error:
+                            missing.append(f"comparison: {error}")
+            if panel.logy:
+                ax.set_yscale("log")
+            if panel.ymin is not None or panel.ymax is not None:
+                ax.set_ylim(panel.ymin, panel.ymax)
+            if len(drawn) > 1:
+                ax.legend(loc="best")
+        # inner time panels share the x labels of the lowest one
+        for ax in times[:-1]:
+            if ax is not times[-1]:
+                ax.set_xlabel("")
+        if spec.title:
+            figure.suptitle(spec.title)
+    figure.missing = missing
+    return figure
+
+
 # ======================================================================== saving
 def save_figure(figure, path: str | Path, spec: FigureSpec | None = None) -> Path:
     """Write a figure; the format follows the extension (PDF, SVG, EPS: vectors)."""
