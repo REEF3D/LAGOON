@@ -30,6 +30,8 @@ vertices, triangles = store.bodies["nhflow_body"].mesh(10)  # bodies at output 1
 xyz = store.particles["cfd_particles"].positions(10)  # particles at output 10
 ```
 
+How to make, open and read stores: [GUIDE.md](GUIDE.md).
+
 REEF3D output is converted with `lagoon-convert CASE` (LAGOON application);
 REEF3D can also write stores itself during a run: `P 18 1` instead of the VTU/VTP
 files, `P 18 2` as well as them (see the REEF3D patches).

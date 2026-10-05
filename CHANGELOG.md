@@ -2,6 +2,10 @@
 
 ## 0.3.0.dev0 (phase 3, LAGOON format; in progress)
 
+- LAGOON format 0.2 complete: `lagoon-format` 0.2.0 (SPEC.md 0.2, no longer a
+  draft) and a user guide, `lagoon-format/GUIDE.md`: making stores (REEF3D's
+  `P 18`, the converter), opening them (LAGOON, ParaView, Python, zarr-python) and
+  the `P 18` text for REEF3D's user guide.
 - LAGOON format 0.1 (`lagoon-format/SPEC.md`): one Zarr v3 store per run, one
   group per output (volume, free surface, bed), one block per MPI rank. σ-grids
   keep x, y and σ once and per output only the fields and two heights per column

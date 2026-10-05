@@ -1,11 +1,14 @@
 # LAGOON data format specification
 
-Version: 0.2 (draft for review)
+Version: 0.2 (5 October 2026)
 Status: σ-grid volumes (FNPF, NHFLOW), Cartesian volumes (CFD), structured
 surfaces (free surface, bed), time series (wave gauges, 6DOF, forces), wave
 profiles, floating bodies, particles (CPM, NHFLOW) and objects (DEM elements, ice
-floes, rod trees, mooring lines) are specified and implemented
-(`lagoon_format.store`, converter `lagoon-convert`).
+floes, rod trees, mooring lines) are specified and implemented: the reference
+reader and writer `lagoon_format` 0.2.0, the converter `lagoon-convert`, and
+REEF3D's own store output (`P 18`) for volumes, surfaces, bodies, NHFLOW
+particles, DEM elements and ice floes. How to make and read stores:
+[GUIDE.md](GUIDE.md).
 
 Changes in 0.2: time series tables (section 7), wave profiles (section 8),
 floating bodies (section 9), particles and objects (section 10). A 0.1 reader
@@ -80,10 +83,10 @@ Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
 {"zarr_format": 3, "node_type": "group",
  "attributes": {
    "lagoon": {
-     "format": "lagoon", "version": "0.1",
+     "format": "lagoon", "version": "0.2",
      "solver": "FNPF",
      "outputs": ["volume", "free_surface", "bed"],
-     "created_by": "lagoon-convert 0.1 (lagoon-format 0.1.0)",
+     "created_by": "lagoon-convert 0.2.0 (lagoon-format 0.2.0)",
      "created": "2026-10-04T12:00:00Z",
      "source": "REEF3D VTK output"
    },
