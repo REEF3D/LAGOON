@@ -52,8 +52,8 @@ class Preset:
     env_intensity: float = 1.0  # how strongly materials reflect the surroundings
     water_color: str = "#0f4c5c"  # the water's own colour, when coloured by nothing
     water_roughness: float = 0.06
-    #: depth fog: its colour, and where it is half thick, in sizes of the scene (the
-    #: diagonal of what is shown) from the camera
+    #: depth fog: its colour, and how far beyond the scene's near side it is half
+    #: thick, in sizes of the scene (the diagonal of what is shown)
     fog: tuple[str, float] | None = None
     background: tuple[str, str] | None = None  # a gradient instead of the cube (bottom, top)
     contours: str = "#1e2833"
@@ -109,7 +109,7 @@ UNDERWATER = Preset(
     env_intensity=0.7,
     water_color="#2a8aa0",
     water_roughness=0.1,
-    fog=("#0b4a5e", 1.6),
+    fog=("#0b4a5e", 0.8),
     background=("#03202b", "#1d6f86"),
     contours="#e8eef5",
     shadows=False,
@@ -278,8 +278,9 @@ def _tileable_noise(size: int, cells: int, rng: np.random.Generator) -> np.ndarr
 
 
 GRAINS = {
-    # octaves: (cells across the tile, weight)
-    "sand": ((64, 0.6), (128, 0.4), (16, 0.25)),
+    # octaves: (cells across the tile, weight); sand: ripples a few to a tile (they show
+    # at the scale of a whole domain), the grains on them
+    "sand": ((4, 0.9), (8, 0.45), (32, 0.15), (128, 0.08)),
     "rock": ((4, 1.0), (8, 0.6), (16, 0.35), (32, 0.2), (64, 0.1)),
     "concrete": ((32, 0.5), (128, 0.5)),
 }
@@ -357,3 +358,65 @@ def pbr_material(surface: str, preset: Preset):
         material.normal_map = grain_texture(s.grain)
         material.normal_scale = (s.grain_scale, s.grain_scale)
     return material
+
+
+_FOG_WGSL = """
+    @fragment
+    fn fs_main(varyings: Varyings) -> @location(0) vec4<f32> {
+        let texIndex = vec2i(varyings.position.xy);
+        let d = textureLoad(depthTex, texIndex, 0);
+        // the distance along the view: standard depth, 0 at the near and 1 at the far plane
+        let n = u_effect.near;
+        let f = u_effect.far;
+        let z = n * f / max(f - d * (f - n), 1e-9);
+        let amount = 1.0 - exp(-u_effect.density * max(z - u_effect.start, 0.0));
+        let color = textureLoad(colorTex, texIndex, 0);
+        return vec4<f32>(mix(color.rgb, u_effect.color.rgb, amount), color.a);
+    }
+"""
+
+
+@lru_cache(maxsize=1)
+def depth_fog_class():
+    """A pygfx effect pass: fog that thickens with the distance from the camera,
+    1 - exp(-density (z - start)) beyond ``start``. pygfx's own fog pass works on the
+    raw depth, which hardly changes across a scene; this one turns it back into the
+    distance (with the camera's near and far planes)."""
+    import pygfx as gfx
+    from pygfx.renderers.wgpu import EffectPass
+
+    class DepthFogPass(EffectPass):
+        USES_DEPTH = True
+        uniform_type = dict(
+            EffectPass.uniform_type,
+            color="4xf4",
+            near="f4",
+            far="f4",
+            start="f4",
+            density="f4",
+        )
+        wgsl = _FOG_WGSL
+
+        def __init__(self, color="#0b4a5e"):
+            super().__init__()
+            self.set(color, 0.1, 1000.0, 0.0, 0.0)
+
+        def set(self, color, near, far, start, density) -> None:
+            self._uniform_data["color"] = tuple(gfx.Color(color))
+            self._uniform_data["near"] = float(near)
+            self._uniform_data["far"] = float(far)
+            self._uniform_data["start"] = float(start)
+            self._uniform_data["density"] = float(density)
+
+    return DepthFogPass
+
+
+def fog_settings(half: float, camera_position, low, high) -> tuple[float, float]:
+    """(start, density) of the depth fog: clear up to the scene's near side (its
+    bounding sphere seen from the camera), half thick ``half`` scene sizes beyond."""
+    low, high = np.asarray(low, float), np.asarray(high, float)
+    size = max(float(np.linalg.norm(high - low)), 1e-9)
+    centre = (low + high) / 2
+    distance = float(np.linalg.norm(np.asarray(camera_position, float) - centre))
+    start = max(distance - size / 2, 0.0)
+    return start, float(np.log(2.0) / (max(half, 1e-6) * size))

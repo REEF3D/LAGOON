@@ -855,16 +855,19 @@ class SceneRenderer:
         self.apply_effects(renderer)
         renderer.render(self.scene, self.camera)
 
-    def fog_power(self, half: float) -> float:
-        """pygfx's fog mixes in the fog colour by depth ** power. The depth buffer holds
-        about 1 - near / z, so the fog is exp(-power near / z): half thick at
-        z = power near / ln 2. Half thick at ``half`` sizes of the scene."""
+    def _set_fog(self, fog: tuple[str, float]) -> None:
+        """The fog for the camera as it is now: clear up to the scene, half thick
+        ``fog[1]`` scene sizes into it."""
+        from lagoonviz.render.cinematic import fog_settings
+
         corners = self.bounds(visible_only=True)
-        size = float(np.linalg.norm(corners[1] - corners[0])) if corners is not None else 1.0
-        near = float(getattr(self.camera, "near", 0.0) or 0.0)
-        if near <= 0.0 or size <= 0.0:
-            return 1.0
-        return float(np.log(2.0) * half * size / near)
+        if corners is None:
+            corners = (np.zeros(3), np.ones(3))
+        position = np.asarray(self.camera.world.position, float)
+        start, density = fog_settings(fog[1], position, *corners)
+        near = float(getattr(self.camera, "near", 0.1) or 0.1)
+        far = float(getattr(self.camera, "far", 1000.0) or 1000.0)
+        self._fog.set(fog[0], near, far, start, density)
 
     def apply_effects(self, renderer) -> None:
         """The look's post effects on a renderer: the depth fog of the underwater look,
@@ -880,10 +883,11 @@ class SceneRenderer:
             return
         if self._fog is None:
             try:
-                self._fog = gfx.renderers.wgpu.FogPass(color=fog[0])
-            except AttributeError:  # an older pygfx: no fog
+                from lagoonviz.render.cinematic import depth_fog_class
+
+                self._fog = depth_fog_class()(fog[0])
+            except (AttributeError, ImportError):  # an older pygfx: no fog
                 return
-        self._fog.color = fog[0]
-        self._fog.power = self.fog_power(fog[1])
+        self._set_fog(fog)
         if passes[:1] != (self._fog,):
             renderer.effect_passes = (self._fog, *kept)

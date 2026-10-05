@@ -154,3 +154,17 @@ def test_display_carries_the_material(tmp_path):
     session.set_property(body.id, "material", "rock")
     shown = session.data.display(body.id, session.data.load(body.id))
     assert shown.material == "rock"
+
+
+def test_fog_starts_at_the_scene():
+    from lagoonviz.render.cinematic import fog_settings
+
+    low, high = np.zeros(3), np.array([8.0, 3.0, 1.0])
+    size = np.linalg.norm(high)
+    camera = (low + high) / 2 + np.array([0.0, -3 * size, 0.0])
+    start, density = fog_settings(0.8, camera, low, high)
+    assert start == pytest.approx(2.5 * size)  # clear up to the near side
+    # half thick 0.8 scene sizes beyond it
+    assert 1 - np.exp(-density * 0.8 * size) == pytest.approx(0.5)
+    inside, _ = fog_settings(0.8, (low + high) / 2, low, high)
+    assert inside == 0.0  # the camera inside the scene: fog from the camera on
