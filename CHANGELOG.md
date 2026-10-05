@@ -3,14 +3,16 @@
 ## Unreleased
 
 - **Sun**: *View → Sun...* sets where the light comes from (direction and
-  height); the 3D view, films and Cycles renders use it, it is saved with the
-  session and scripts set it with `Session.set_sun(azimuth, elevation)`.
+  height); the 3D view, films and Cycles renders use it, the sky's sun glow (and
+  the glint on the water) moves along, it is saved with the session and scripts
+  set it with `Session.set_sun(azimuth, elevation)`.
 - **Cycles, coasts**: in the Open ocean look the bed is dressed as land by height
-  above the still water level and slope (sand, wet sand, grass, heath, rock), ends
-  in cliffs at the sides of the domain, and the sea runs on to the horizon with a
-  long swell under the ripples. Clear water fades out where it thins at the shore
-  (no more blue specks over the sand) with a band of foam off the beach. AgX
-  with medium high contrast instead of its flat default.
+  above the still water level and slope (sand, wet sand, grass with patches of
+  heath, rock), with fine relief. The world runs on beyond the domain: the bed
+  continues past its sides and sinks into the sea, and the water is one body with
+  the sea out to the horizon (a long swell under the ripples). Clear water fades
+  out where it thins at the shore (no more blue specks over the sand), with broken
+  foam off the beach. AgX with medium high contrast instead of its flat default.
 
 ## 1.0.0rc1 (first release candidate)
 

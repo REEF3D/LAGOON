@@ -364,32 +364,36 @@ def add_sun(collection, sun: dict) -> None:
 
 # ======================================================================== materials
 def terrain(tree, spec: dict):
-    """A coast's colour and roughness from the height above the still water level
-    and the slope: sand under water, wet sand at the water line, dry sand, grass,
-    heath higher up, rock where steep; ragged edges and patches from noise."""
+    """A coast's colour, roughness and fine relief from the height above the still
+    water level and the slope: sand under water, wet sand at the water line, dry sand,
+    grass with patches of heath, rock where steep. Wide, ragged transitions (noise at
+    two sizes), so it reads as land seen from the air, not as the bands of a map.
+    Returns the colour, the roughness and the normal."""
     land = spec["terrain"]
     geometry = tree.nodes.new("ShaderNodeNewGeometry")
     position = tree.nodes.new("ShaderNodeSeparateXYZ")
     tree.links.new(geometry.outputs["Position"], position.inputs[0])
     normal = tree.nodes.new("ShaderNodeSeparateXYZ")
     tree.links.new(geometry.outputs["Normal"], normal.inputs[0])
-    patches = noise(tree, float(land["scale"]), 5.0, 0.55)
-    # the height above the water, as a fraction of the land's rise, a little ragged
+    scale = float(land["scale"])
+    patches = noise(tree, scale, 5.0, 0.55)
+    ragged = noise(tree, 8.0 * scale, 6.0, 0.6)
+    # the height above the water, as a fraction of the land's rise, ragged
     height = calc(tree, "SUBTRACT", position.outputs["Z"], float(land["level"]))
     height = calc(tree, "DIVIDE", height, float(land["relief"]))
-    height = calc(tree, "ADD", height, calc(tree, "MULTIPLY_ADD", patches, 0.08, -0.04))
+    height = calc(tree, "ADD", height, calc(tree, "MULTIPLY_ADD", patches, 0.14, -0.07))
+    height = calc(tree, "ADD", height, calc(tree, "MULTIPLY_ADD", ragged, 0.05, -0.025))
     ramp = tree.nodes.new("ShaderNodeValToRGB")
     tree.links.new(map_range(tree, height, -0.05, 1.0), ramp.inputs["Fac"])
     under = spec.get("color") or land["sand"]
     stops = (
         (-0.05, under),
-        (-0.004, land["wet"]),
-        (0.012, land["wet"]),
-        (0.03, land["sand"]),
-        (0.07, land["sand"]),
-        (0.16, land["grass"]),
-        (0.6, land["grass"]),
-        (0.9, land["heath"]),
+        (0.0, land["wet"]),
+        (0.02, land["sand"]),
+        (0.035, land["sand"]),
+        (0.12, land["grass"]),
+        (0.45, land["grass"]),
+        (0.8, land["heath"]),
     )
     elements = ramp.color_ramp.elements
     for _ in range(len(stops) - len(elements)):
@@ -397,15 +401,31 @@ def terrain(tree, spec: dict):
     for element, (h, color) in zip(elements, stops, strict=False):
         element.position = (h + 0.05) / 1.05
         element.color = rgba(color)
-    # rock where it is steep (the normal leans more than about 35 degrees)
-    steep = map_range(tree, normal.outputs["Z"], 0.84, 0.66)
-    color = mix_color(tree, steep, ramp.outputs["Color"], rgba(land["rock"]))
+    # patches of heath in the grass
+    other = noise(tree, 2.5 * scale, 4.0, 0.5)
+    heath = calc(
+        tree,
+        "MULTIPLY",
+        map_range(tree, other, 0.55, 0.72),
+        map_range(tree, height, 0.06, 0.15),
+    )
+    color = mix_color(tree, heath, ramp.outputs["Color"], rgba(land["heath"]))
+    # rock where it is steep (the normal leans more than about 30 to 50 degrees)
+    upright = calc(tree, "ADD", normal.outputs["Z"], calc(tree, "MULTIPLY_ADD", ragged, 0.2, -0.1))
+    steep = map_range(tree, upright, 0.86, 0.62)
+    color = mix_color(tree, steep, color, rgba(land["rock"]))
     shade = tree.nodes.new("ShaderNodeHueSaturation")  # lighter and darker patches
     connect(tree, color, shade.inputs["Color"])
-    connect(tree, map_range(tree, patches, 0.3, 0.7, 0.82, 1.08), shade.inputs["Value"])
+    connect(tree, map_range(tree, patches, 0.3, 0.7, 0.85, 1.1), shade.inputs["Value"])
     # wet sand and the bed under water shine a little; dry land is matt
     rough = map_range(tree, height, 0.004, 0.03, 0.4, 0.95)
-    return shade.outputs["Color"], rough
+    # fine relief: a few pixels across, so the land is not smooth clay
+    detail = float(land.get("detail") or 40.0 * scale)
+    bump = tree.nodes.new("ShaderNodeBump")
+    set_input(bump, ("Strength",), 0.35)
+    set_input(bump, ("Distance",), 0.3 / max(detail, 1e-9))
+    tree.links.new(noise(tree, detail, 10.0, 0.6), bump.inputs["Height"])
+    return shade.outputs["Color"], rough, bump.outputs["Normal"]
 
 
 def shore(tree, spec: dict) -> None:
@@ -424,8 +444,9 @@ def shore(tree, spec: dict) -> None:
     fade, reach = float(band["fade"]), float(band.get("foam") or 0.0)
     if reach > fade:
         foam = principled_node(tree, (0.85, 0.88, 0.88), 0.45)
-        patches = map_range(tree, noise(tree, float(band["scale"]), 6.0, 0.6), 0.42, 0.62)
-        amount = calc(tree, "MULTIPLY", map_range(tree, depth, fade, reach, 0.9, 0.0), patches)
+        # broken: only where the noise is high, never a continuous line
+        patches = map_range(tree, noise(tree, float(band["scale"]), 6.0, 0.65), 0.5, 0.68)
+        amount = calc(tree, "MULTIPLY", map_range(tree, depth, fade, reach, 0.7, 0.0), patches)
         mix = tree.nodes.new("ShaderNodeMixShader")
         tree.links.new(amount, mix.inputs[0])
         tree.links.new(shader, mix.inputs[1])
@@ -460,9 +481,10 @@ def make_material(key: str, spec: dict):
     set_input(bsdf, ("Roughness",), float(spec["roughness"]))
     if spec.get("terrain"):
         try:
-            color, rough = terrain(tree, spec)
+            color, rough, relief = terrain(tree, spec)
             tree.links.new(color, bsdf.inputs["Base Color"])
             tree.links.new(rough, bsdf.inputs["Roughness"])
+            tree.links.new(relief, bsdf.inputs["Normal"])
         except (AttributeError, KeyError, IndexError, TypeError, RuntimeError) as error:
             print(f"LAGOON warning: no land colours ({error!r})", flush=True)
     set_input(bsdf, ("Metallic",), float(spec["metallic"]))

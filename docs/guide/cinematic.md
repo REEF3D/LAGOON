@@ -49,9 +49,10 @@ the shore it fades away, so the sand shows instead of a sheet of glass.
 In the **Open ocean** look a coast looks like one: the bed (coloured by nothing)
 is dressed by its height above the still water level and its slope, with sand
 under water, wet sand at the water line, dry sand, grass and heath higher up, and
-rock where it is steep. The land ends in cliffs at the sides of the domain, the
-sea runs on beyond them to the horizon, and a band of foam lies just off the
-beach. *View → Sun...* sets where the light comes from.
+rock where it is steep. Beyond the domain the world runs on: the land and the sea
+floor continue past its sides and sink away, and the water is one body with the
+sea out to the horizon, so the domain does not sit on the sea like a card. Broken
+foam lies just off the beach. *View → Sun...* sets where the light comes from.
 
 1. Install Blender 4.2 or newer. LAGOON finds it in Applications (macOS), on the
    `PATH`, or where the environment variable `LAGOON_BLENDER` points.

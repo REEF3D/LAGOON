@@ -298,8 +298,8 @@ def water_body(
     (facing down) and walls along the surface's open edges (the sides of the domain
     and the shore of dry land), all facing out. ``bottom`` is the floor's height: a
     number, or a function of (n, 2) points giving heights (the bed, so the water
-    ends on it). Returns positions, triangles and which triangles are smooth (the
-    surface; walls and floor flat).
+    ends on it), or a height per corner. Returns positions, triangles and which
+    triangles are smooth (the surface; walls and floor flat).
 
     Path tracing needs the water as a volume: light refracts into it, is absorbed
     on its way through (the deeper, the bluer) and refracts out again; a surface
@@ -315,11 +315,13 @@ def water_body(
     t, rim = _facing_up_and_rim(p, t)
     n = len(p)
     base = np.where(finite[:, None], p, 0.0)  # corners of dry land: unused
+    depth = max(float(np.ptp(base[finite, 2])) if finite.any() else 1.0, 1e-6)
     if callable(bottom):
         # on the bed, a little under it (the bed hides the floor), never above the water
-        depth = np.ptp(base[finite, 2]) if finite.any() else 1.0
-        heights = bottom(base[:, :2]) - 1e-3 * max(float(depth), 1e-6)
-        heights = np.minimum(heights, base[:, 2] - 1e-4 * max(float(depth), 1e-6))
+        heights = bottom(base[:, :2]) - 1e-3 * depth
+        heights = np.minimum(heights, base[:, 2] - 1e-4 * depth)
+    elif np.ndim(bottom) == 1:  # a height per corner, never above the water
+        heights = np.minimum(np.asarray(bottom, float), base[:, 2] - 1e-4 * depth)
     else:
         heights = np.full(n, float(bottom))
     floor = base.copy()
@@ -408,6 +410,124 @@ def ocean_ring(low, high, level: float, reach: float):
         a, b = j, (j + 1) % 4
         triangles += [(a, 4 + a, 4 + b), (a, 4 + b, b)]
     return positions, np.array(triangles, np.uint32)
+
+
+def rim_loop(positions: np.ndarray, triangles: np.ndarray) -> np.ndarray | None:
+    """The outer edge of a surface as one closed loop of its corners, counter-clockwise
+    seen from above (the surface on its left); None when it has no single clear one
+    (the loop must enclose at least half of the surface's box)."""
+    p = np.asarray(positions, np.float64).reshape(-1, 3)
+    t = np.asarray(triangles, np.int64).reshape(-1, 3)
+    finite = np.isfinite(p).all(axis=1)
+    t = t[finite[t].all(axis=1)]
+    t = t[(t[:, 0] != t[:, 1]) & (t[:, 1] != t[:, 2]) & (t[:, 0] != t[:, 2])]
+    if not len(t):
+        return None
+    _, rim = _facing_up_and_rim(p, t)
+    following: dict[int, list[int]] = {}
+    for a, b in rim.tolist():
+        following.setdefault(a, []).append(b)
+    used: set[int] = set()
+    best, best_area = None, 0.0
+    for start in following:
+        if start in used:
+            continue
+        loop, v = [start], start
+        used.add(start)
+        while True:
+            nexts = [w for w in following.get(v, ()) if w == start or w not in used]
+            if not nexts:
+                loop = None  # open: a pinch or a broken edge
+                break
+            v = nexts[0]
+            if v == start:
+                break
+            loop.append(v)
+            used.add(v)
+        if loop is None or len(loop) < 3:
+            continue
+        x, y = p[loop, 0], p[loop, 1]
+        area = 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
+        if area > best_area:
+            best, best_area = loop, area
+    if best is None:
+        return None
+    box = np.ptp(p[np.unique(t), :2], axis=0)
+    if best_area < 0.5 * float(box[0] * box[1]):
+        return None
+    return np.asarray(best, np.int64)
+
+
+def ring_distances(step: float, reach: float, growth: float = 1.45) -> np.ndarray:
+    """Distances out from a rim for rings of corners: the first a cell out, then each
+    gap ``growth`` times the last, up to ``reach``."""
+    out, d, gap = [], 0.0, max(float(step), 1e-9)
+    while d < reach:
+        d = min(d + gap, float(reach))
+        out.append(d)
+        gap *= growth
+    return np.asarray(out)
+
+
+def outward_rings(xy: np.ndarray, distances: np.ndarray, extent: float) -> np.ndarray:
+    """Rings around a counter-clockwise loop ``xy`` (m, 2) at ``distances`` out
+    (k, m, 2): near ones parallel to the loop (its corners kept), far ones rounding
+    into circles, so they never cross."""
+    xy = np.asarray(xy, float)
+    edge = np.roll(xy, -1, axis=0) - xy
+    length = np.maximum(np.linalg.norm(edge, axis=1), 1e-12)
+    normal = np.stack([edge[:, 1], -edge[:, 0]], 1) / length[:, None]  # to the right: out
+    before = np.roll(normal, 1, axis=0)
+    # mitred: each side moves out by the distance, corners stay corners
+    miter = (before + normal) / np.maximum(1.0 + (before * normal).sum(axis=1), 0.5)[:, None]
+    centre = xy.mean(axis=0)
+    radial = xy - centre
+    radius = np.maximum(np.linalg.norm(radial, axis=1), 1e-12)
+    unit = radial / radius[:, None]
+    rings = []
+    for d in distances:
+        s = np.clip((d - 0.2 * extent) / (2.0 * extent), 0.0, 1.0)
+        w = s * s * (3 - 2 * s)
+        rings.append((1 - w) * (xy + miter * d) + w * (centre + unit * (radius + d)[:, None]))
+    return np.asarray(rings)
+
+
+def ring_triangles(loop: np.ndarray, start: int, rings: int) -> np.ndarray:
+    """Triangles from a loop of corners (their indices) out through ``rings`` rings of
+    len(loop) new corners each, numbered from ``start`` ring by ring; facing up."""
+    m = len(loop)
+    index = np.concatenate([loop[None, :], start + np.arange(rings * m).reshape(rings, m)])
+    inner, outer = index[:-1], index[1:]
+    a, b = inner, np.roll(inner, -1, axis=1)
+    c, d = np.roll(outer, -1, axis=1), outer
+    return np.concatenate(
+        [np.stack([a, c, b], -1).reshape(-1, 3), np.stack([a, d, c], -1).reshape(-1, 3)]
+    )
+
+
+def loop_mean(values: np.ndarray, half: int) -> np.ndarray:
+    """A moving mean over ``2 half + 1`` neighbours along a closed loop."""
+    values = np.asarray(values, float)
+    m = len(values)
+    half = max(int(half), 0)
+    if half == 0:
+        return values
+    if 2 * half + 1 >= m:  # the whole loop
+        return np.full(m, values.mean())
+    total = np.concatenate([[0.0], np.cumsum(np.concatenate([values, values, values]))])
+    i = np.arange(m) + m
+    return (total[i + half + 1] - total[i - half]) / (2 * half + 1)
+
+
+def apron(rim_heights: np.ndarray, distances: np.ndarray, step: float, slope: float, deep):
+    """Heights of the bed beyond the domain (k, m): each ring continues the rim's
+    heights, ever more smoothed along it, and sinks to ``deep`` over about ``slope``
+    out, so the land runs down into the sea and the sea floor falls away."""
+    out = []
+    for d in distances:
+        smooth = loop_mean(rim_heights, round(0.5 * d / max(step, 1e-12)))
+        out.append(deep + (smooth - deep) * math.exp(-((d / slope) ** 2)))
+    return np.asarray(out)
 
 
 # ======================================================================== cameras
@@ -533,6 +653,9 @@ class _Collector:
         #: the still water level (as drawn), where the land begins and the sea around
         #: the domain lies; None when not known
         self.level: float | None = None
+        #: how far out the land and the sea reach beyond the domain (0: they end there)
+        self.far = 0.0
+        self.sea_done = False
         self.objects: list[dict[str, Any]] = []
         self.arrays: dict[str, np.ndarray] = {}
         self.materials: dict[str, dict[str, Any]] = {}
@@ -660,6 +783,11 @@ class _Collector:
         land = kind == "bathymetry" and rgb is None and self.coast and len(finite)
         if land:
             spec["terrain"] = self.terrain(finite, span)
+            spec["grain"] = None  # the terrain has its own fine relief
+            extended = self.beyond(shown.positions, shown.triangles)
+            if extended is not None:  # the land and the sea floor run on
+                self.add(shown.item_id, *extended, spec, None)
+                return
         self.add(shown.item_id, shown.positions, shown.triangles, spec, rgb)
         if land:
             # the land ends in cliffs at the sides of the domain, down under the sea
@@ -681,6 +809,52 @@ class _Collector:
         water level, and the sea runs on beyond the domain."""
         return self.preset.environment == "sky" and self.level is not None
 
+    def world(self) -> dict[str, float] | None:
+        """Sizes of the world beyond the domain under the open sky: the domain's size
+        (extent), how far the sea reaches (to the horizon), over what distance the land
+        and the sea floor sink away (slope), and how deep the far sea floor (deep_bed)
+        and the water's own floor (deep_water, under everything) lie."""
+        if not self.coast or self.bounds is None:
+            return None
+        low, high = (np.asarray(v, float) for v in self.bounds)
+        extent = max(float(np.ptp([low[:2], high[:2]], axis=0).max()), 1e-6)
+        level = float(self.level)
+        bottom = float(self.bed.z.min()) if self.bed is not None else float(low[2])
+        depth = max(level - bottom, 0.02 * extent)
+        return {
+            "extent": extent,
+            "reach": SEA_REACH * extent,
+            "slope": 0.4 * extent,
+            "deep_bed": level - 1.5 * depth,
+            "deep_water": level - 3.0 * depth,
+        }
+
+    def beyond(self, positions, triangles):
+        """The bed with its apron: rings of corners out from its outer edge to the
+        horizon, continuing its heights and sinking into the sea (positions and
+        triangles), or None when it has no clear outer edge."""
+        world = self.world()
+        p = np.asarray(positions, float).reshape(-1, 3)
+        loop = rim_loop(p, triangles) if world is not None else None
+        if loop is None:
+            return None
+        xy = p[loop, :2]
+        step = float(np.median(np.linalg.norm(np.roll(xy, -1, 0) - xy, axis=1)))
+        distances = ring_distances(step, world["reach"])
+        rings = outward_rings(xy, distances, world["extent"])
+        heights = apron(p[loop, 2], distances, step, world["slope"], world["deep_bed"])
+        new = np.concatenate([rings.reshape(-1, 2), heights.reshape(-1, 1)], axis=1)
+        self.far = max(self.far, world["reach"])
+        return (
+            np.concatenate([p, new]),
+            np.concatenate(
+                [
+                    np.asarray(triangles, np.int64).reshape(-1, 3),
+                    ring_triangles(loop, len(p), len(distances)),
+                ]
+            ),
+        )
+
     def terrain(self, points: np.ndarray, span: float) -> dict[str, Any]:
         """Colours of a coast by the height above the still water level and the slope:
         wet sand at the water line, dry sand above it, then grass and heath, rock where
@@ -693,11 +867,13 @@ class _Collector:
             # at least a tenth of the depth: low land is beach, not hills
             "relief": round(max(top - level, 0.1 * depth, 1e-6), 6),
             "scale": round(6.0 / max(span, 1e-6), 6),  # patches of colour, a few per side
-            "wet": linear_hex("#7d6c50"),
-            "sand": linear_hex("#c2ab80"),
-            "grass": linear_hex("#5f6b36"),
-            "heath": linear_hex("#6f6646"),
-            "rock": linear_hex("#6d6964"),
+            "detail": round(250.0 / max(span, 1e-6), 6),  # fine relief, a few pixels each
+            # natural, muted colours (as seen from the air, not a map's)
+            "wet": linear_hex("#6b604e"),
+            "sand": linear_hex("#a99878"),
+            "grass": linear_hex("#5d6540"),
+            "heath": linear_hex("#6e6449"),
+            "rock": linear_hex("#6f6860"),
         }
 
     def water(self, shown, all_triangles=None) -> None:
@@ -744,14 +920,19 @@ class _Collector:
             # well under the land: the surface dives under it within one cell, so the
             # shore is a clean line where water meets land
             top[dry, 2] = bed[dry] - 0.02 * span
+        # how deep the water is at each corner of the surface
+        film_top = np.full(len(top), 1e6)
+        if self.bed is not None:
+            ok = np.isfinite(top).all(axis=1)
+            film_top[ok] = top[ok, 2] - self.bed(top[ok, :2])
+        extended = self.sea_beyond(top, triangles) if self.bed is not None else None
+        if extended is not None:  # one body of water with the sea out to the horizon
+            top, triangles, bottom, film_top = extended
         positions, triangles, smooth = water_body(top, triangles, bottom)
         if not len(triangles):
             return
-        # how deep the water is at each corner of the surface (walls and floor: deep)
-        film = np.full(len(positions), 1e6, np.float32)
-        if self.bed is not None:
-            ok = np.isfinite(top).all(axis=1)
-            film[: len(top)][ok] = top[ok, 2] - self.bed(top[ok, :2])
+        film = np.full(len(positions), 1e6, np.float32)  # walls and floor: deep
+        film[: len(top)] = film_top
         tint = linear(_hex(self.preset.water_color))
         tint = 0.3 + 0.7 * tint / max(float(tint.max()), 1e-6)  # what the water lets through
         under = self.preset.fog is not None
@@ -775,23 +956,67 @@ class _Collector:
             # wind ripples, much smaller than the waves: they break up the reflections
             "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.2},
             # at the shore the water thins out to nothing (no sheet of glass over the
-            # sand); under the open sky a band of foam where it breaks on the beach
+            # sand); under the open sky broken foam where it breaks on the beach
             "shore": {
                 "fade": round(0.03 * depth, 6),
-                "foam": round(0.1 * depth, 6) if self.preset.environment == "sky" else 0.0,
-                "scale": round(40.0 / extent, 6),
+                "foam": round(0.05 * depth, 6) if self.preset.environment == "sky" else 0.0,
+                "scale": round(60.0 / extent, 6),
             }
             if self.bed is not None
             else None,
         }
+        if extended is not None:  # a long, low swell under the ripples, out to sea
+            spec["swell"] = {"scale": round(4.0 / extent, 6), "strength": 0.15}
         attributes = {"lagoon_depth": film} if self.bed is not None else None
         self.add(shown.item_id, positions, triangles, spec, None, smooth, attributes)
         self.water_bodies += 1
 
+    def sea_beyond(self, top: np.ndarray, triangles):
+        """The water's surface with the sea around it: rings out from its outer edge to
+        the horizon, the waves at the edge dying out into the still water level, under
+        the land where the bed's apron (:meth:`beyond`) stays above it. Returns the
+        surface, its triangles, the floor's height per corner (the bed in the domain,
+        far down beyond it) and the water's depth per corner; None without an edge."""
+        world = self.world()
+        loop = rim_loop(top, triangles) if world is not None else None
+        if loop is None:
+            return None
+        n = len(top)
+        xy = top[loop, :2]
+        step = float(np.median(np.linalg.norm(np.roll(xy, -1, 0) - xy, axis=1)))
+        distances = ring_distances(step, world["reach"])
+        rings = outward_rings(xy, distances, world["extent"])
+        land = apron(self.bed(xy), distances, step, world["slope"], world["deep_bed"])
+        level = float(self.level)
+        decay = np.exp(-distances / max(3 * step, 0.02 * world["extent"]))[:, None]
+        z = level + (top[loop, 2] - level)[None, :] * decay
+        finite = top[np.isfinite(top).all(axis=1)]
+        span = max(float(np.ptp(finite[:, 2])), 1e-6) if len(finite) else 1.0
+        z = np.where(land > level, np.minimum(z, land - 0.02 * span), z)
+        surface = np.concatenate(
+            [top, np.concatenate([rings.reshape(-1, 2), z.reshape(-1, 1)], axis=1)]
+        )
+        faces = np.concatenate(
+            [
+                np.asarray(triangles, np.int64).reshape(-1, 3),
+                ring_triangles(loop, n, len(distances)),
+            ]
+        )
+        ok = np.isfinite(top).all(axis=1)
+        floor = np.full(len(surface), world["deep_water"])
+        floor[:n][ok] = self.bed(top[ok, :2]) - 1e-3 * span
+        film = np.full(len(surface), 1e6)
+        film[:n][ok] = top[ok, 2] - self.bed(top[ok, :2])
+        film[n:] = (z - land).ravel()
+        self.far = max(self.far, world["reach"])
+        self.sea_done = True
+        return surface, faces, floor, film
+
     def sea(self) -> None:
-        """The sea beyond the domain, out to the horizon: deep water at the still water
-        level all around (only with a body of water under the open sky)."""
-        if not (self.coast and self.water_bodies and self.bounds is not None):
+        """The sea beyond the domain, out to the horizon, when the water could not run
+        on itself (:meth:`sea_beyond`): deep water at the still water level all around
+        (only with a body of water under the open sky)."""
+        if self.sea_done or not (self.coast and self.water_bodies and self.bounds is not None):
             return
         low, high = (np.asarray(v, float) for v in self.bounds)
         extent = max(float(np.ptp([low[:2], high[:2]], axis=0).max()), 1e-6)
@@ -810,6 +1035,7 @@ class _Collector:
             "swell": {"scale": round(4.0 / extent, 6), "strength": 0.25},
         }
         self.add(SEA, positions, triangles, spec, None, np.zeros(len(triangles), bool))
+        self.far = max(self.far, SEA_REACH * extent)
 
 
 def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Collector:
@@ -952,6 +1178,7 @@ def export_scene(
     frames = []
     materials: dict[str, dict[str, Any]] = {}
     water_bodies = 0
+    fars: list[float] = []  # how far each frame's world reaches beyond the domain
     low = high = None
     try:
         for number, time in enumerate(times):
@@ -964,6 +1191,7 @@ def export_scene(
             centre = (bounds[0] + bounds[1]) / 2 if bounds is not None else np.zeros(3)
             collector = _frame_objects(session, preset, pixel_size(camera, centre, size[1]), bounds)
             water_bodies += collector.water_bodies
+            fars.append(collector.far)
             # one material table for the film: the frame's keys renamed into it
             rename = {}
             for key, spec in collector.materials.items():
@@ -998,14 +1226,12 @@ def export_scene(
     if low is None:
         low, high = np.full(3, -1.0), np.full(3, 1.0)
     extent = max(float(np.linalg.norm(high - low)), 1e-6)
-    for frame in frames:  # clip planes around everything, from wherever the camera is
+    for frame, far in zip(frames, fars, strict=False):  # clip planes around everything
         distance = float(np.linalg.norm(np.asarray(frame["camera"]["position"]) - (low + high) / 2))
         frame["camera"]["clip_start"] = max(1e-4 * extent, (distance - extent) * 1e-3, 1e-5)
         frame["camera"]["clip_end"] = (distance + extent) * 4.0
-        if any(o["name"] == SEA for o in frame["objects"]):  # out to the horizon
-            frame["camera"]["clip_end"] = max(
-                frame["camera"]["clip_end"], 3.0 * SEA_REACH * extent + distance
-            )
+        if far:  # out to the horizon
+            frame["camera"]["clip_end"] = max(frame["camera"]["clip_end"], 3.0 * far + distance)
     own = session.sun_direction()  # the session's sun, else the look's
     sun = np.asarray(own if own is not None else preset.sun_direction, float)
     sun /= np.linalg.norm(sun)

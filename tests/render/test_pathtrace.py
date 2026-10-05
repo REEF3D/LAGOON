@@ -19,17 +19,23 @@ from lagoonviz.core import Session
 from lagoonviz.render.cinematic import OPEN_OCEAN, UNDERWATER, WAVE_FLUME, panorama_directions
 from lagoonviz.render.pathtrace import (
     SEA,
+    apron,
     blender_camera,
     default_camera,
     environment_panorama,
     export_scene,
     find_blender,
     look_rotation,
+    loop_mean,
     ocean_ring,
+    outward_rings,
     path_trace,
     pixel_size,
     read_hdr,
     render_folder,
+    rim_loop,
+    ring_distances,
+    ring_triangles,
     rotate,
     skirt,
     spheres,
@@ -507,8 +513,9 @@ def test_ocean_ring_surrounds_the_domain():
 
 
 def test_coast_under_the_open_sky(reef3d_run, tmp_path):
-    """Open ocean, clear water: the bed dressed as land by height and slope, cliffs
-    at its sides, the sea around out to the horizon, the shore thinning out."""
+    """Open ocean, clear water: the bed dressed as land by height and slope, running
+    on beyond the domain and sinking into the sea; the water one body with the sea
+    out to the horizon (no seam, no cliffs, no separate sea); the shore thinning out."""
     session = Session()
     session.open_case(reef3d_run)
     surface = next(i.id for i in session.scene if i.kind == "free_surface")
@@ -520,26 +527,72 @@ def test_coast_under_the_open_sky(reef3d_run, tmp_path):
     scene = json.loads(path.read_text())
     frame = scene["frames"][0]
     by_name = {o["name"]: (i, o) for i, o in enumerate(frame["objects"])}
+    assert SEA not in by_name and f"{bed_id}#sides" not in by_name
     bed = scene["materials"][by_name[bed_id][1]["material"]]
     assert bed["terrain"]["level"] == pytest.approx(level, abs=1e-5)
-    assert bed["terrain"]["relief"] > 0
-    assert f"{bed_id}#sides" in by_name
-    sea = scene["materials"][by_name[SEA][1]["material"]]
-    assert sea["transmission"] == 0 and sea["swell"]["scale"] > 0
-    assert frame["camera"]["clip_end"] > 100 * frame["camera"]["clip_start"]
+    assert bed["terrain"]["relief"] > 0 and bed["terrain"]["detail"] > 0
+    assert bed["grain"] is None
     index, entry = by_name[surface]
     water = scene["materials"][entry["material"]]
     assert water["shore"]["fade"] > 0 and water["shore"]["foam"] > water["shore"]["fade"]
+    assert water["swell"]["scale"] > 0
     assert entry["attributes"] == ["lagoon_depth"]
     with np.load(tmp_path / "out" / frame["data"]) as arrays:
-        depth = arrays[f"attribute_{index}_lagoon_depth"]
+        ground = arrays[f"positions_{by_name[bed_id][0]}"].astype(float)
         positions = arrays[f"positions_{index}"]
+        depth = arrays[f"attribute_{index}_lagoon_depth"]
         assert depth.shape == (len(positions),)
-        sea_index = by_name[SEA][0]
-        assert np.allclose(arrays[f"positions_{sea_index}"][:, 2], level, atol=1e-4)
+        volume = _closed_and_outward(positions, arrays[f"triangles_{index}"])
+        assert volume > 0
+    session.set_time(0.0)
+    shown = session.data.display(bed_id, session.data.load(bed_id))
+    low, high = shown.positions.min(axis=0), shown.positions.max(axis=0)
+    extent = float(np.ptp([low[:2], high[:2]], axis=0).max())
+    centre = (low[:2] + high[:2]) / 2
+    reach = np.linalg.norm(ground[:, :2] - centre, axis=1)
+    assert reach.max() > 100 * extent  # out to the horizon
+    far = ground[reach > 10 * extent]
+    assert (far[:, 2] < level).all()  # the far sea floor is under the sea
+    water_far = positions[np.linalg.norm(positions[:, :2] - centre, axis=1) > 10 * extent]
+    assert water_far[:, 2].max() == pytest.approx(level, abs=1e-3)  # the still sea
+    assert water_far[:, 2].min() < far[:, 2].min()  # its floor deeper than the sea floor
+    assert frame["camera"]["clip_end"] > 100 * extent
     # in the wave flume: neither land nor sea, and no foam
     path = export_scene(session, tmp_path / "flume", [0.0], (64, 36), "wave_flume", 4)
     scene = json.loads(path.read_text())
     names = [o["name"] for o in scene["frames"][0]["objects"]]
     assert SEA not in names and f"{bed_id}#sides" not in names
     assert all("terrain" not in m for m in scene["materials"].values())
+
+
+def test_rim_loop_and_rings():
+    positions, triangles = _grid(6, 4)
+    loop = rim_loop(positions, triangles)
+    assert len(loop) == 2 * 5 + 2 * 3
+    xy = positions[loop, :2]
+    area = 0.5 * np.sum(xy[:, 0] * np.roll(xy[:, 1], -1) - np.roll(xy[:, 0], -1) * xy[:, 1])
+    assert area == pytest.approx(15.0)  # counter-clockwise: the whole grid
+    distances = ring_distances(1.0, 1000.0)
+    assert distances[0] == 1.0 and distances[-1] == 1000.0 and len(distances) < 30
+    rings = outward_rings(xy, distances, 5.0)
+    # the first ring a cell out all round (the corners mitred), the last nearly round
+    assert np.allclose(rings[0].min(axis=0), xy.min(axis=0) - 1.0)
+    radius = np.linalg.norm(rings[-1] - xy.mean(axis=0), axis=1)
+    assert radius.min() > 0.99 * 1000.0
+    points = np.concatenate([positions, np.c_[rings.reshape(-1, 2), np.zeros(rings[..., 0].size)]])
+    faces = ring_triangles(loop, len(positions), len(distances))
+    a, b, c = (points[faces[:, i]] for i in range(3))
+    assert (np.cross(b - a, c - a)[:, 2] > 0).all()  # facing up, none folded over
+    # two patches far apart: no single outer edge
+    second = positions + [100.0, 0.0, 0.0]
+    both = np.concatenate([positions, second])
+    assert rim_loop(both, np.concatenate([triangles, triangles + len(positions)])) is None
+
+
+def test_apron_continues_the_rim_and_sinks():
+    rim = np.array([5.0, 5.0, -2.0, -2.0, 5.0, 5.0, -2.0, -2.0])
+    out = apron(rim, np.array([0.0, 1.0, 10.0, 100.0]), 1.0, 10.0, -20.0)
+    assert np.allclose(out[0], rim)  # at the rim: the rim
+    assert out[2].max() < rim.max() and out[2].min() > -20.0
+    assert np.allclose(out[3], -20.0, atol=1e-6)  # far out: the deep floor
+    assert np.allclose(loop_mean(rim, 100), rim.mean())
