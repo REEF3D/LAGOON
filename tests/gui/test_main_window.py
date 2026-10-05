@@ -708,12 +708,22 @@ def test_export_figure(window, tmp_path, qtbot):
             **settings,
             "content": "validation",
             "style": "Journal (serif)",
+            "font_family": None,  # the style's
             "line": (0, 0),
             "measured": str(lab),
             "measured_column": "WG1",
         },
     )
     assert figure.comparison.rmse < 1e-6 and spec.font_family == "serif"
+    # the dialog: choosing a style sets its font (which can then still be changed)
+    from lagoonviz.gui.export_figure import ExportFigureDialog
+
+    dialog = ExportFigureDialog(window, available_contents(window.session, True), str(tmp_path))
+    qtbot.addWidget(dialog)
+    dialog.style.setCurrentText("Journal (serif)")
+    assert dialog.settings()["font_family"] == "serif"
+    dialog.style.setCurrentText("REEF3D")
+    assert dialog.settings()["font_family"] == "sans-serif"
     # File > Export script makes the figure again
     from lagoonviz.gui.export_figure import record_figure
 
