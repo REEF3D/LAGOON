@@ -26,7 +26,7 @@ and :func:`pbr_material` make the pygfx objects.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 
 import numpy as np
@@ -363,13 +363,27 @@ def grain_coords(positions: np.ndarray, tile: float) -> np.ndarray:
 
 
 # ======================================================================== pygfx
-@lru_cache(maxsize=8)
-def environment_texture(name: str, size: int = 256):
+def sun_key(direction) -> tuple[float, float, float]:
+    """A sun direction as a short hashable key (unit vector, 3 decimals)."""
+    d = np.asarray(direction, float)
+    d = d / max(float(np.linalg.norm(d)), 1e-12)
+    return tuple(round(float(v), 3) for v in d)
+
+
+def with_sun(preset: Preset, direction=None) -> Preset:
+    """The preset with its sun towards ``direction`` (None: its own)."""
+    if direction is None:
+        return preset
+    return replace(preset, sun_direction=sun_key(direction))
+
+
+@lru_cache(maxsize=12)
+def environment_texture(name: str, size: int = 256, sun: tuple | None = None):
     """The preset's surroundings as a pygfx cube texture (mipmapped: rough materials
-    reflect it blurred)."""
+    reflect it blurred), with the sun's glow towards ``sun`` (None: the preset's)."""
     import pygfx as gfx
 
-    faces = environment_faces(PRESETS[name], size)
+    faces = environment_faces(with_sun(PRESETS[name], sun), size)
     return gfx.Texture(faces, dim=2, size=(size, size, 6), generate_mipmaps=True)
 
 
@@ -398,7 +412,7 @@ def pbr_material(surface: str, preset: Preset):
     if s.clearcoat:
         material.clearcoat = s.clearcoat
         material.clearcoat_roughness = 0.1
-    material.env_map = environment_texture(preset.name)
+    material.env_map = environment_texture(preset.name, sun=sun_key(preset.sun_direction))
     material.env_map_intensity = preset.env_intensity
     if s.grain:
         material.normal_map = grain_texture(s.grain, s.relief)

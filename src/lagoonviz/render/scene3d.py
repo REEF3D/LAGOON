@@ -104,14 +104,17 @@ def _background(colors: tuple[str, str]) -> gfx.Background:
     return gfx.Background(None, gfx.BackgroundMaterial(*colors))
 
 
-def _look_background(look: dict) -> gfx.Background:
-    """A look's background: its colour gradient, or a cinematic look's surroundings."""
+def _look_background(look: dict, sun=None) -> gfx.Background:
+    """A look's background: its colour gradient, or a cinematic look's surroundings
+    (with the sun's glow towards ``sun``, None: the look's own)."""
     name = look.get("cinematic")
     preset = PRESETS.get(name) if name else None
     if preset is not None and preset.background is None:
-        from lagoonviz.render.cinematic import environment_texture
+        from lagoonviz.render.cinematic import environment_texture, sun_key
 
-        return gfx.Background(None, gfx.BackgroundSkyboxMaterial(map=environment_texture(name)))
+        key = sun_key(sun if sun is not None else preset.sun_direction)
+        texture = environment_texture(name, sun=key)
+        return gfx.Background(None, gfx.BackgroundSkyboxMaterial(map=texture))
     return _background(look["background"])
 
 
@@ -235,8 +238,14 @@ class SceneRenderer:
 
     @property
     def preset(self):
-        """The cinematic preset of the look, or None for an engineering look."""
-        return PRESETS.get(STYLES[self.style_name].get("cinematic") or "")
+        """The cinematic preset of the look (with the session's sun, if it has one), or
+        None for an engineering look."""
+        from lagoonviz.render.cinematic import with_sun
+
+        preset = PRESETS.get(STYLES[self.style_name].get("cinematic") or "")
+        if preset is None:
+            return None
+        return with_sun(preset, getattr(self, "sun_override", None))
 
     def _sun_colour(self, look: dict) -> None:
         preset = PRESETS.get(look.get("cinematic") or "")
@@ -372,9 +381,10 @@ class SceneRenderer:
         if not _update_buffer(mesh.geometry, "texcoords1", uv):
             mesh.geometry.texcoords1 = gfx.Buffer(uv)
 
-    def set_sun_direction(self, direction) -> None:
+    def set_sun_direction(self, direction, surroundings: bool = True) -> None:
         """Put the sun towards ``direction`` (a vector, z up), or back where the look
-        puts it (None)."""
+        puts it (None). ``surroundings``: the sky's sun glow moves along now (it takes
+        a moment; while a slider moves, :meth:`refresh_surroundings` once it rests)."""
         if direction is None:
             self.sun_override = None
             self.sun_direction = _sun_direction(STYLES[self.style_name])
@@ -382,22 +392,45 @@ class SceneRenderer:
             d = np.asarray(direction, float)
             self.sun_override = d / max(float(np.linalg.norm(d)), 1e-12)
             self.sun_direction = self.sun_override
-        self.sun.local.position = tuple(self.sun_direction)
         self._shadow_fit = None
         self._fit_shadow()
+        if surroundings:
+            self.refresh_surroundings()
+
+    def refresh_surroundings(self) -> None:
+        """A cinematic look's surroundings again, with the sun's glow where the sun is
+        now: the background and what the materials reflect (the glint on the water)."""
+        preset = self.preset
+        if preset is None or preset.background is not None and not self._shown:
+            return
+        from lagoonviz.render.cinematic import environment_texture, sun_key
+
+        texture = environment_texture(preset.name, sun=sun_key(self.sun_direction))
+        if preset.background is None:
+            self.scene.remove(self.background)
+            self.background = _look_background(STYLES[self.style_name], self.sun_direction)
+            self.scene.add(self.background)
+        for shown in self._shown.values():
+            material = getattr(shown.mesh, "material", None)
+            if getattr(material, "env_map", None) is not None:
+                material.env_map = texture
 
     def _fit_shadow(self) -> None:
-        """Aim the sun's shadow map at what is shown: it covers the scene's bounding
-        sphere, seen from the sun, so any domain size gets the full map resolution."""
-        if not self.sun.cast_shadow:
-            return
-        corners = self.bounds(visible_only=False)
+        """Point the sun along ``sun_direction``. With shadows, its shadow map is aimed
+        at what is shown: it covers the scene's bounding sphere, seen from the sun, so
+        any domain size gets the full map resolution."""
+        corners = self.bounds(visible_only=False) if self.sun.cast_shadow else None
         if corners is None:
+            # no shadow map to aim: only the direction counts (from the target to the
+            # light), so the target goes back to the origin
+            self._shadow_fit = None
+            self.sun.target.local.position = (0.0, 0.0, 0.0)
+            self.sun.local.position = tuple(self.sun_direction)
             return
         low, high = corners
         centre = (low + high) / 2
         radius = max(float(np.linalg.norm(high - low)) / 2, 1e-6)
-        fit = (*np.round(centre, 3), round(radius, 3))
+        fit = (*np.round(centre, 3), round(radius, 3), *np.round(self.sun_direction, 6))
         if fit == self._shadow_fit:
             return
         self._shadow_fit = fit
@@ -500,7 +533,7 @@ class SceneRenderer:
         self.style_name = style if style in STYLES else DEFAULT_STYLE
         look = STYLES[self.style_name]
         self.scene.remove(self.background)
-        self.background = _look_background(look)
+        self.background = _look_background(look, self.sun_override)
         self.scene.add(self.background)
         self.ambient.intensity = look["ambient"]
         self.sun.intensity = look["sun"]
@@ -844,6 +877,7 @@ class SceneRenderer:
         look = STYLES[self.style_name]
         self.sun.cast_shadow = bool(look.get("shadows", False)) and not self.plan
         self._shadow_fit = None
+        self._fit_shadow()
 
     def set_orthographic(self, orthographic: bool) -> None:
         self.camera.fov = 0 if orthographic else 45

@@ -317,6 +317,10 @@ class Viewport3D(QWidget):
         self._save_camera.setSingleShot(True)
         self._save_camera.setInterval(400)
         self._save_camera.timeout.connect(self._store_camera)
+        self._sun_timer = QTimer(self)  # the sky's sun glow follows once the sun rests
+        self._sun_timer.setSingleShot(True)
+        self._sun_timer.setInterval(150)
+        self._sun_timer.timeout.connect(self._sun_rests)
 
         self._loaded.connect(self._on_loaded)
         bridge.sceneChanged.connect(self._on_scene)
@@ -532,12 +536,19 @@ class Viewport3D(QWidget):
         self.redraw()
         return True
 
+    def _sun_rests(self) -> None:
+        self.view.refresh_surroundings()
+        self.redraw()
+
     def _on_scene(self, event: str, item_id: str) -> None:
         if event == "camera_keys":
             self.follow_path()
             return
         if event == "sun":
-            self.view.set_sun_direction(self.session.sun_direction())
+            # the light at once; the sky's sun glow (a new environment map) once the
+            # sliders rest
+            self.view.set_sun_direction(self.session.sun_direction(), surroundings=False)
+            self._sun_timer.start()
             self.redraw()
             return
         if self.comparing:

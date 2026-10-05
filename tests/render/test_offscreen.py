@@ -223,6 +223,40 @@ def test_sun_casts_shadows_over_the_whole_scene(reef3d_run):
     _keep("render_shadows.png", image)
 
 
+def test_sun_points_where_asked_in_every_look(reef3d_run):
+    """The light shines from the sun's direction (light minus target) in looks with
+    and without shadows, after switching looks and in 2D; the sky's glow follows."""
+    from lagoonviz.render.scene3d import STYLES, SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer("open_ocean")
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+    wanted = np.array([0.3, -0.8, 0.5])
+    wanted /= np.linalg.norm(wanted)
+
+    def shining_from():
+        d = np.asarray(view.sun.local.position, float) - view.sun.target.local.position
+        return d / np.linalg.norm(d)
+
+    view.set_sun_direction(wanted)
+    for style in [*STYLES, "open_ocean"]:
+        view.set_style(style)
+        assert np.allclose(shining_from(), wanted, atol=1e-5), style
+        view.set_sun_direction(wanted)
+        assert np.allclose(shining_from(), wanted, atol=1e-5), style
+    view.set_plan(True)
+    assert np.allclose(shining_from(), wanted, atol=1e-5)
+    view.set_plan(False)
+    water = next(s for s in view._shown.values() if s.kind == "free_surface")
+    glowing = water.mesh.material.env_map
+    view.set_sun_direction(None)
+    assert np.allclose(shining_from(), view.sun_direction, atol=1e-5)
+    assert water.mesh.material.env_map is not glowing  # the glow went back too
+
+
 def test_renderer_never_writes_into_cached_frames(reef3d_run):
     """pygfx buffers keep the array they get: they must not be the cached frame's."""
     from lagoonviz.render.scene3d import SceneRenderer

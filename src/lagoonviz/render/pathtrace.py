@@ -46,6 +46,7 @@ from lagoonviz.render.cinematic import (
     Preset,
     environment_panorama,
     surface_of,
+    with_sun,
 )
 
 log = logging.getLogger("lagoon.pathtrace")
@@ -1005,10 +1006,11 @@ def export_scene(
             frame["camera"]["clip_end"] = max(
                 frame["camera"]["clip_end"], 3.0 * SEA_REACH * extent + distance
             )
-    write_hdr(folder / "environment.hdr", environment_panorama(preset, 1024))
     own = session.sun_direction()  # the session's sun, else the look's
     sun = np.asarray(own if own is not None else preset.sun_direction, float)
     sun /= np.linalg.norm(sun)
+    # the surroundings with their sun glow where the sun is
+    write_hdr(folder / "environment.hdr", environment_panorama(with_sun(preset, sun), 1024))
     world: dict[str, Any] = {
         "environment": "environment.hdr",
         "strength": preset.env_intensity,

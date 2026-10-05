@@ -179,3 +179,16 @@ def test_fog_starts_at_the_scene():
     assert 1 - np.exp(-density * 0.8 * size) == pytest.approx(0.5)
     inside, _ = fog_settings(0.8, (low + high) / 2, low, high)
     assert inside == 0.0  # the camera inside the scene: fog from the camera on
+
+
+def test_the_sky_glows_where_the_sun_is():
+    from lagoonviz.render.cinematic import with_sun
+
+    moved = with_sun(OPEN_OCEAN, (0.6, 0.6, 0.3))
+    assert moved.name == OPEN_OCEAN.name and moved.water_color == OPEN_OCEAN.water_color
+    assert with_sun(OPEN_OCEAN, None) is OPEN_OCEAN
+    faces = sky_faces(128, moved)
+    sun = np.asarray(moved.sun_direction)
+    assert _brightness(sample(faces, sun / np.linalg.norm(sun))[0]) > 250
+    old = np.asarray(OPEN_OCEAN.sun_direction) / np.linalg.norm(OPEN_OCEAN.sun_direction)
+    assert _brightness(sample(faces, old)[0]) < 250
