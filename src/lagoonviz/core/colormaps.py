@@ -70,9 +70,44 @@ _STOPS: dict[str, list[str]] = {
         "#d8e219",
         "#fde725",
     ],
-    # rainbow as in Tecplot, with slightly muted ends so the extremes keep a gradient:
-    # muted blue, blue, cyan, green, yellow, red, muted red
-    "rainbow": ["#2b2bc4", "#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff0000", "#c42b2b"],
+    # rainbow: Google's Turbo (Mikhailov 2019, Apache-2.0; 33 stops of matplotlib's
+    # table), as SEASTATE's maps: dark blue, blue, cyan, green, yellow, orange, dark
+    # red, its lightness rising and falling smoothly, without jet's bands
+    "rainbow": [
+        "#30123b",
+        "#392a73",
+        "#4040a2",
+        "#4456c7",
+        "#466be3",
+        "#4680f6",
+        "#4294ff",
+        "#37a8fa",
+        "#28bceb",
+        "#1ccdd8",
+        "#18ddc2",
+        "#1fe9af",
+        "#32f298",
+        "#4ef97d",
+        "#6dfe62",
+        "#8bff4b",
+        "#a4fc3c",
+        "#b9f635",
+        "#cdec34",
+        "#dfdf37",
+        "#eecf3a",
+        "#f8be39",
+        "#fdac34",
+        "#fe962b",
+        "#fb7e21",
+        "#f46617",
+        "#eb500e",
+        "#df3f08",
+        "#d02f05",
+        "#be2102",
+        "#a91601",
+        "#920b01",
+        "#7a0403",
+    ],
     # sediment: deep bed dark, shallow bed light sand
     "sand": ["#2f2418", "#5a4630", "#87704f", "#b39c72", "#d9c59a", "#f3e7c9"],
     # dark to mid-light grey: never paper white, so a grey bed stands out on white

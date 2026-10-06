@@ -34,7 +34,7 @@ Surfaces, slices and objects share these properties:
 - **Colour by**: a variable of the output (a vector's magnitude, or one of its
   components, `velocity.x`), or `none` for a plain colour.
 - **Colour map**: `reef3d`, `ocean`, `tension`, `lagoon_blue`, `balance`,
-  `viridis`, `rainbow`, `sand`, `greys`, `white`.
+  `viridis`, `rainbow` (Google's Turbo), `sand`, `greys`, `white`.
 - **Automatic range** spans the values over a sample of the outputs, so a colour
   means the same value at every time; switched off, *Range min* and *Range max*
   hold. *Fit range to this frame* sets them to the current output.

@@ -97,7 +97,7 @@ def test_light_theme_and_studio_look_by_default(window):
 
 
 def test_colour_maps_offered(window, reef3d_run):
-    """Tecplot-like rainbow and white are offered; cividis was replaced by rainbow."""
+    """Rainbow (Turbo) and white are offered; cividis was replaced by rainbow."""
     window.open_case(reef3d_run)
     window.scene_tree.select("free_surface-1")
     combo = window.properties.editors["colormap"]

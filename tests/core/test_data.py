@@ -697,7 +697,7 @@ def test_plain_colour_follows_the_colour_map(reef3d_run):
         shown = s.data.display(bed, mesh)
         assert shown.values is None and shown.color == color
     s.set_property(bed, "colormap", "rainbow")
-    assert s.data.display(bed, mesh).color == "#00ff00"  # the middle of the map
+    assert s.data.display(bed, mesh).color == "#a4fc3c"  # the middle of the map (Turbo)
 
 
 def test_loader_drops_frames_nobody_waits_for():
