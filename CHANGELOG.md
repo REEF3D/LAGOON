@@ -4,8 +4,8 @@
 
 - **Rainbow is Turbo**: the rainbow colour map is now Google's Turbo, as in
   SEASTATE's maps (blue through cyan, green and yellow to red, without Turbo's
-  darkest ends), in place of the Tecplot-like rainbow; its smooth lightness shows
-  no false bands.
+  darkest ends, yellow and orange given more of the range than green), in place
+  of the Tecplot-like rainbow; its smooth lightness shows no false bands.
 - **3D view as Blender renders it**: the Open ocean, Wave flume and Diorama looks
   show ÆgirFrames' sky picture in the 3D view too, as Cycles shows it (AgX), turned
   to the sun, lighting the model and reflected by the water; the sun stands at the
