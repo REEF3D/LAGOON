@@ -653,8 +653,7 @@ def make_mesh(name: str, positions, triangles, colors, smooth=None, attributes=N
         mesh.polygons.foreach_set("loop_total", np.full(m, 3, np.int32))
     except (AttributeError, TypeError, RuntimeError):
         pass
-    mesh.update(calc_edges=True)
-    mesh.validate(clean_customdata=False)
+    mesh.update(calc_edges=True)  # LAGOON wrote proper triangles only: no validating
     faces = len(mesh.polygons)
     flags = np.ones(faces, dtype=bool)
     if smooth is not None and len(smooth) == faces:  # validate() removed no faces
@@ -760,45 +759,107 @@ def make_points(name: str, positions, radius, material, groups: dict):
     return bpy.data.objects.new(name, mesh)
 
 
-def clear(collection) -> None:
-    for obj in list(collection.objects):
+class Frames:
+    """The objects of the frame shown, kept for the next: a mesh whose triangles stay
+    the same (the bed, the water's body) is moved in place rather than made again,
+    so a film spends its time on light, not on building meshes. Materials are made
+    when first used."""
+
+    def __init__(self, collection, specs: dict) -> None:
+        self.collection = collection
+        self.specs = specs
+        self.materials: dict = {}
+        #: name -> (object, digest of its triangles and smooth flags)
+        self.kept: dict[str, tuple] = {}
+
+    def material(self, key: str):
+        if key not in self.materials:
+            self.materials[key] = make_material(key, self.specs[key])
+        return self.materials[key]
+
+    def build(self, frame: dict, arrays) -> int:
+        """The frame's objects; returns the number of triangles (and particles)."""
+        count = 0
+        wanted = set()
+        for index, entry in enumerate(frame["objects"]):
+            name = entry["name"]
+            wanted.add(name)
+            material = self.material(entry["material"])
+            if entry.get("points"):  # white water: a cloud of small spheres, made anew
+                self._drop(name)
+                obj = make_points(
+                    name,
+                    arrays[f"points_{index}"],
+                    arrays[f"radius_{index}"],
+                    material,
+                    POINT_GROUPS,
+                )
+                self.collection.objects.link(obj)
+                self.kept[name] = (obj, None)
+                count += len(arrays[f"points_{index}"])
+                continue
+            positions = arrays[f"positions_{index}"]
+            triangles = arrays[f"triangles_{index}"]
+            colors = arrays[f"colors_{index}"] if entry.get("colors") else None
+            smooth = arrays[f"smooth_{index}"] if f"smooth_{index}" in arrays else None
+            attributes = {
+                key: arrays[f"attribute_{index}_{key}"] for key in entry.get("attributes", ())
+            }
+            digest = _digest(triangles, smooth, colors is not None, sorted(attributes), entry)
+            known = self.kept.get(name)
+            if known is not None and known[1] == digest:
+                obj = known[0]
+                _move(obj.data, positions, colors, attributes)
+                if obj.data.materials[0] is not material:
+                    obj.data.materials[0] = material
+            else:
+                self._drop(name)
+                mesh = make_mesh(name, positions, triangles, colors, smooth, attributes)
+                mesh.materials.append(material)
+                obj = bpy.data.objects.new(name, mesh)
+                self.collection.objects.link(obj)
+                if entry.get("subdivide"):
+                    subdivide(obj, mesh, int(entry["subdivide"]))
+                self.kept[name] = (obj, digest)
+            count += len(triangles)
+        for name in [n for n in self.kept if n not in wanted]:
+            self._drop(name)
+        return count
+
+    def _drop(self, name: str) -> None:
+        known = self.kept.pop(name, None)
+        if known is None:
+            return
+        obj = known[0]
         data = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)
         if data is not None and getattr(data, "users", 0) == 0:
             bpy.data.meshes.remove(data)
 
 
-def build_frame(collection, frame: dict, arrays, materials: dict) -> int:
-    """The frame's objects; returns the number of triangles."""
-    clear(collection)
-    count = 0
-    for index, entry in enumerate(frame["objects"]):
-        if entry.get("points"):  # white water: a cloud of small spheres
-            obj = make_points(
-                entry["name"],
-                arrays[f"points_{index}"],
-                arrays[f"radius_{index}"],
-                materials[entry["material"]],
-                POINT_GROUPS,
-            )
-            collection.objects.link(obj)
-            count += len(arrays[f"points_{index}"])
-            continue
-        positions = arrays[f"positions_{index}"]
-        triangles = arrays[f"triangles_{index}"]
-        colors = arrays[f"colors_{index}"] if entry.get("colors") else None
-        smooth = arrays[f"smooth_{index}"] if f"smooth_{index}" in arrays else None
-        attributes = {
-            key: arrays[f"attribute_{index}_{key}"] for key in entry.get("attributes", ())
-        }
-        mesh = make_mesh(entry["name"], positions, triangles, colors, smooth, attributes)
-        mesh.materials.append(materials[entry["material"]])
-        obj = bpy.data.objects.new(entry["name"], mesh)
-        collection.objects.link(obj)
-        if entry.get("subdivide"):
-            subdivide(obj, mesh, int(entry["subdivide"]))
-        count += len(triangles)
-    return count
+def _digest(triangles, smooth, colors: bool, attributes: list, entry: dict) -> str:
+    """What a mesh's make-up depends on: its triangles, smooth flags, attribute names
+    and subdivision (not its positions or values, which can be moved in place)."""
+    import hashlib
+
+    h = hashlib.sha1()
+    h.update(np.ascontiguousarray(triangles).tobytes())
+    if smooth is not None:
+        h.update(np.ascontiguousarray(smooth).tobytes())
+    h.update(repr((colors, attributes, entry.get("subdivide"))).encode())
+    return h.hexdigest()
+
+
+def _move(mesh, positions, colors, attributes: dict) -> None:
+    """New corner positions, colours and values for a mesh whose triangles stay."""
+    mesh.vertices.foreach_set("co", np.ascontiguousarray(positions, np.float32).ravel())
+    if colors is not None:
+        values = np.ones((len(positions), 4), np.float32)
+        values[:, :3] = np.asarray(colors, np.float32).reshape(-1, 3)
+        mesh.color_attributes[COLOR_ATTRIBUTE].data.foreach_set("color", values.ravel())
+    for key, values in attributes.items():
+        mesh.attributes[key].data.foreach_set("value", np.asarray(values, np.float32).ravel())
+    mesh.update()
 
 
 def set_camera(obj, camera: dict) -> None:
@@ -831,10 +892,10 @@ def main(argv: list[str]) -> int:
     add_sun(lights, settings["sun"])
     if settings["world"].get("fog"):
         add_fog(lights, settings["world"]["fog"])
-    materials = {key: make_material(key, spec) for key, spec in settings["materials"].items()}
-    print(f"LAGOON scene set up: {len(materials)} materials", flush=True)
     collection = bpy.data.collections.new(COLLECTION)
     scene.collection.children.link(collection)
+    built = Frames(collection, settings["materials"])  # materials made when first used
+    print(f"LAGOON scene set up: {len(settings['materials'])} materials", flush=True)
     camera = bpy.data.objects.new("LAGOON camera", bpy.data.cameras.new("LAGOON camera"))
     scene.collection.objects.link(camera)
     scene.camera = camera
@@ -854,8 +915,9 @@ def main(argv: list[str]) -> int:
         started = time.perf_counter()
         print(f"LAGOON building frame {done}/{len(numbers)}", flush=True)
         with np.load(data) as arrays:
-            triangles = build_frame(collection, frame, arrays, materials)
+            triangles = built.build(frame, arrays)
         set_camera(camera, frame["camera"])
+        building = time.perf_counter() - started
         scene.render.filepath = str(image)
         stamp.unlink(missing_ok=True)
         print(f"LAGOON rendering frame {done}/{len(numbers)} ({triangles} triangles)", flush=True)
@@ -864,7 +926,9 @@ def main(argv: list[str]) -> int:
             stamp.write_text(frame["key"], encoding="utf-8")
         seconds = time.perf_counter() - started
         print(
-            f"LAGOON frame {done}/{len(numbers)} {triangles} triangles {seconds:.1f} s", flush=True
+            f"LAGOON frame {done}/{len(numbers)} {triangles} triangles {seconds:.1f} s"
+            f" (building {building:.1f} s, rendering {seconds - building:.1f} s)",
+            flush=True,
         )
     return 0
 

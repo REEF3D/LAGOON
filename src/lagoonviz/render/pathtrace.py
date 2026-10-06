@@ -75,8 +75,10 @@ SEA_REACH = 400.0
 #: the name of the sea's object
 SEA = "LAGOON sea"
 #: surfaces up to this many triangles are subdivided once in Blender (smooth crests)
-SUBDIVIDE_LIMIT = 2_000_000
-SUBDIVIDE_TWICE = 500_000
+#: materials whose numbers differ less than this (relatively) are taken as one: the
+#: water's depth-scaled values change a little from frame to frame, and every new
+#: material is a new shader for Cycles to set up
+MATERIAL_TOLERANCE = 0.03
 #: the haze inside the water (ÆgirFrames' ocean water): a principled volume that
 #: mostly absorbs, a little blue-green, per metre
 AEGIR_HAZE = {"color": [0.0428, 0.0658, 0.0732], "density": 0.01, "absorption": [0.0, 0.0, 0.0]}
@@ -204,6 +206,32 @@ def read_hdr(path: str | Path) -> np.ndarray:
     exponent = rgbe[..., 3].astype(np.float64)
     scale = np.where(exponent > 0, np.exp2(exponent - 136.0), 0.0)
     return (rgbe[..., :3] * scale[..., None]).astype(np.float32)
+
+
+def subdivision_levels(triangles: int, pixels: int, most: int = 2) -> int:
+    """How often to subdivide a smooth surface (each time a triangle becomes six), at
+    most ``most`` times, as long as it stays at no more than one triangle for each
+    pixel of the image: finer is not seen. A coarse lab mesh gets two levels (as
+    ÆgirFrames uses), a fine coast mesh one or none."""
+    levels = 0
+    while levels < most and triangles * 6 ** (levels + 1) <= pixels:
+        levels += 1
+    return levels
+
+
+def same_material(a: dict, b: dict, tolerance: float = MATERIAL_TOLERANCE) -> bool:
+    """Two material specs alike: the same keys and texts, numbers within a tolerance."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(same_material(a[k], b[k], tolerance) for k in a)
+    if isinstance(a, list | tuple) and isinstance(b, list | tuple):
+        if len(a) != len(b):
+            return False
+        return all(same_material(x, y, tolerance) for x, y in zip(a, b, strict=True))
+    if isinstance(a, bool) or isinstance(b, bool) or a is None or b is None:
+        return type(a) is type(b) and a == b
+    if isinstance(a, int | float) and isinstance(b, int | float):
+        return abs(a - b) <= tolerance * max(abs(a), abs(b)) + 1e-12
+    return a == b
 
 
 # ======================================================================== geometry
@@ -700,9 +728,11 @@ def look_preset(look: str | None) -> Preset:
 class _Collector:
     """The objects and materials of a frame, as arrays and plain values."""
 
-    def __init__(self, preset: Preset, pixel: float, bounds=None) -> None:
+    def __init__(self, preset: Preset, pixel: float, bounds=None, pixels: int = 1920 * 1080):
         self.preset = preset
         self.pixel = pixel
+        #: the image's size in pixels: how finely surfaces need subdividing
+        self.pixels = int(pixels)
         #: (low, high) of the frame's data: the floor and the depth of water bodies
         self.bounds = bounds
         self.water_bodies = 0
@@ -720,7 +750,7 @@ class _Collector:
 
     def material(self, spec: dict[str, Any]) -> str:
         for key, known in self.materials.items():
-            if known == spec:
+            if same_material(known, spec):
                 return key
         key = f"m{len(self.materials)}"
         self.materials[key] = spec
@@ -741,12 +771,20 @@ class _Collector:
         triangles = np.asarray(triangles, np.uint32).reshape(-1, 3)
         if not len(triangles):
             return
+        # only proper triangles: none at dry land (outside the record) and none with a
+        # corner twice (hidden ones), so Blender takes the mesh as it is (no validating)
         finite = np.isfinite(positions).all(axis=1)
-        if not finite.all():  # dry land, outside the record: no triangles there
-            triangles = triangles[finite[triangles].all(axis=1)]
-            positions = np.where(finite[:, None], positions, 0.0).astype(np.float32)
+        keep = finite[triangles].all(axis=1)
+        keep &= (triangles[:, 0] != triangles[:, 1]) & (triangles[:, 1] != triangles[:, 2])
+        keep &= triangles[:, 0] != triangles[:, 2]
+        if not keep.all():
+            triangles = triangles[keep]
+            if smooth is not None and len(smooth) == len(keep):
+                smooth = np.asarray(smooth, bool)[keep]
             if not len(triangles):
                 return
+        if not finite.all():
+            positions = np.where(finite[:, None], positions, 0.0).astype(np.float32)
         index = len(self.objects)
         self.arrays[f"positions_{index}"] = positions
         self.arrays[f"triangles_{index}"] = triangles
@@ -759,9 +797,9 @@ class _Collector:
             for key, values in attributes.items():
                 self.arrays[f"attribute_{index}_{key}"] = np.asarray(values, np.float32)
             entry["attributes"] = sorted(attributes)
-        if subdivide and len(triangles) <= SUBDIVIDE_LIMIT:
-            # smoothed in Blender (its flat faces kept): twice, as ÆgirFrames does, unless big
-            entry["subdivide"] = 2 if len(triangles) <= SUBDIVIDE_TWICE else 1
+        levels = subdivision_levels(len(triangles), self.pixels) if subdivide else 0
+        if levels:  # smoothed in Blender (its flat faces kept)
+            entry["subdivide"] = levels
         self.objects.append(entry)
 
     def points(self, name: str, positions, radius, material: dict[str, Any]) -> None:
@@ -1188,10 +1226,12 @@ class _Collector:
         self.far = max(self.far, SEA_REACH * extent)
 
 
-def _frame_objects(session, preset: Preset, pixel: float, bounds=None) -> _Collector:
+def _frame_objects(
+    session, preset: Preset, pixel: float, bounds=None, pixels: int = 1920 * 1080
+) -> _Collector:
     """The objects of the session's current time, as the 3D view shows them."""
     data = session.data
-    out = _Collector(preset, pixel, bounds)
+    out = _Collector(preset, pixel, bounds, pixels)
     shown_items = []
     for item_id in data.data_items():
         item = session.scene.get(item_id)
@@ -1425,14 +1465,16 @@ def export_scene(
                 high = bounds[1] if high is None else np.maximum(high, bounds[1])
             camera = blender_camera(camera_state_at(session, time, bounds), size)
             centre = (bounds[0] + bounds[1]) / 2 if bounds is not None else np.zeros(3)
-            collector = _frame_objects(session, preset, pixel_size(camera, centre, size[1]), bounds)
+            collector = _frame_objects(
+                session, preset, pixel_size(camera, centre, size[1]), bounds, size[0] * size[1]
+            )
             collector.white_water(particles)
             water_bodies += collector.water_bodies
             fars.append(collector.far)
             # one material table for the film: the frame's keys renamed into it
             rename = {}
             for key, spec in collector.materials.items():
-                found = next((k for k, v in materials.items() if v == spec), None)
+                found = next((k for k, v in materials.items() if same_material(v, spec)), None)
                 if found is None:
                     found = f"m{len(materials)}"
                     materials[found] = spec

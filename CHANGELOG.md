@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Faster Cycles films, same pictures**: meshes whose triangles stay from frame to
+  frame (the bed, structures, the water when its mesh keeps its make-up) are moved
+  in place instead of built again; materials alike within 3 % are shared and made
+  when first used (a film had hundreds); smooth surfaces are subdivided only as far
+  as the picture can show (at most one triangle per pixel); broken triangles are
+  dropped on export, so Blender no longer checks every mesh. Each frame's line in
+  `blender.log` says how long building and rendering took.
 - **Cycles as ÆgirFrames renders**: water as tinted glass seen by the camera only
   (light and shadows pass through to the bed), a faint haze, subdivided twice;
   the Open ocean and Diorama looks lit by ÆgirFrames' sky picture (MIT, NTNU),

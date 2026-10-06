@@ -255,7 +255,10 @@ bpy.ops.render.render.side_effect = render
 sys.modules["bpy"] = bpy
 script = sys.argv[sys.argv.index("-P") + 1]
 sys.argv = [sys.argv[0]] + sys.argv[1:]
-runpy.run_path(script, run_name="__main__")
+try:
+    runpy.run_path(script, run_name="__main__")
+finally:
+    print("FAKE meshes made %d" % bpy.data.meshes.new.call_count, flush=True)
 """
 
 
@@ -294,6 +297,52 @@ def test_blender_script_renders_each_frame(reef3d_run, tmp_path, fake_blender):
     assert after[0] == before[0] and after[2] == before[2] and after[1] != before[1]
     render_folder(folder, fake_blender)  # without resume: all again
     assert all(a != b for a, b in zip(after, (p.read_bytes() for p in images), strict=True))
+
+
+def test_frames_reuse_their_meshes(reef3d_run, tmp_path, fake_blender):
+    """A film whose meshes keep their triangles builds them once and moves them after;
+    each frame's line says how long building and rendering took."""
+    session = Session()
+    session.open_case(reef3d_run)
+    session.set_camera(default_camera([0, 0, -1], [10, 4, 1]))
+    folder = tmp_path / "film.cycles"
+    times = [0.0, 1.0, 2.0, 3.0]
+    export_scene(session, folder, times, (64, 36), "wave_flume", 4)
+    render_folder(folder, fake_blender)
+    log = (folder / "blender.log").read_text()
+    lines = [x for x in log.splitlines() if x.startswith("LAGOON frame")]
+    assert len(lines) == len(times)
+    assert all("building" in x and "rendering" in x for x in lines)
+    assert [x.split()[2] for x in lines] == ["1/4", "2/4", "3/4", "4/4"]
+    made = int(log.split("FAKE meshes made ")[1].split()[0])
+    first = np.load(folder / "frame_00000.npz")
+    objects = json.loads((folder / "scene.json").read_text())
+    assert made < len(times) * len([k for k in first.files if k.startswith("triangles_")])
+    assert objects["materials"]  # made lazily, but all named in the scene
+
+
+def test_subdivision_follows_the_picture():
+    from lagoonviz.render.pathtrace import subdivision_levels
+
+    full_hd = 1920 * 1080
+    assert subdivision_levels(2_000, full_hd) == 2  # a lab tank: smoothed twice
+    assert subdivision_levels(100_000, full_hd) == 1
+    assert subdivision_levels(600_000, full_hd) == 0  # already finer than the pixels
+    assert subdivision_levels(2_000, 64 * 36) == 0
+    assert subdivision_levels(10, full_hd, most=1) == 1
+
+
+def test_alike_materials_are_shared():
+    from lagoonviz.render.pathtrace import same_material
+
+    a = {"kind": "water", "color": [0.1, 0.4, 0.5], "roughness": 0.0, "volume": {"d": 0.01}}
+    b = {"kind": "water", "color": [0.101, 0.405, 0.5], "roughness": 0.0, "volume": {"d": 0.0102}}
+    assert same_material(a, b)
+    assert not same_material(a, {**b, "color": [0.2, 0.4, 0.5]})
+    assert not same_material(a, {**b, "kind": "bed"})
+    assert not same_material(a, {**b, "roughness": 0.1})  # 0 against 0.1: not alike
+    assert not same_material({"x": True}, {"x": 1})
+    assert not same_material(a, {k: v for k, v in a.items() if k != "volume"})
 
 
 def test_stopping_blender(reef3d_run, tmp_path, fake_blender, monkeypatch):
@@ -626,13 +675,13 @@ def test_diorama_is_a_model_on_a_stand(reef3d_run, tmp_path):
     surface = next(i.id for i in session.scene if i.kind == "free_surface")
     bed_id = next(i.id for i in session.scene if i.kind == "bathymetry")
     session.set_property(surface, "variable", "none")
-    path = export_scene(session, tmp_path / "out", [0.0], (64, 36), "diorama", 4)
+    path = export_scene(session, tmp_path / "out", [0.0], (1920, 1080), "diorama", 4)
     scene = json.loads(path.read_text())
     frame = scene["frames"][0]
     by_name = {o["name"]: (i, o) for i, o in enumerate(frame["objects"])}
     assert SEA not in by_name and f"{bed_id}#sides" in by_name
     assert all("terrain" not in m or m["terrain"] is None for m in scene["materials"].values())
-    assert by_name[surface][1]["subdivide"] == 2  # smooth crests, as ÆgirFrames
+    assert by_name[surface][1]["subdivide"] == 2  # smooth crests in HD, as ÆgirFrames
     water = scene["materials"][by_name[surface][1]["material"]]
     assert water["shore"]["foam"] == 0.0
     # ÆgirFrames' ocean water: tinted glass seen by the camera only, a faint haze
