@@ -9,6 +9,11 @@ asks the loader to read the next frames ahead.
 Camera keyframes: the key button stores the 3D view at this time, the slider marks
 the keys, and the path button makes the views and films follow the smooth camera
 path through them (``lagoonviz.core.camera_path``).
+
+The play range: two thick stripes on the slider, at its ends unless moved, mark
+where playing starts and ends (dragged with the mouse; saved with the session, and
+the export dialog starts from it). The repeat button plays the range again and
+again; off, playing stops at its end.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ import time
 from collections.abc import Callable
 
 import numpy as np
-from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
@@ -44,6 +49,10 @@ DEFAULT_FPS = 12
 MAX_FPS = 240
 
 
+#: how near (pixels) a press must be to a range stripe to drag it
+STRIPE_REACH = 7
+
+
 class ClickSlider(QSlider):
     """A slider that goes where it is pressed and follows the mouse until let go.
 
@@ -55,11 +64,41 @@ class ClickSlider(QSlider):
     button is let go, and nothing steps on its own.
     """
 
+    #: a range stripe is being dragged: the range (start, end) in slider values
+    rangeMoved = Signal(int, int)
+    #: a range stripe was let go
+    rangeReleased = Signal()
+
     def __init__(self, *args) -> None:
         super().__init__(*args)
         self._dragging = False
         #: slider values marked with a small diamond (the camera keyframes)
         self.markers: list[int] = []
+        #: the play range in slider values (None: the whole slider)
+        self.play_range: tuple[int, int] | None = None
+        self._stripe: int | None = None  # 0 or 1 while a stripe is dragged
+
+    def bounds(self) -> tuple[int, int]:
+        """The play range in slider values, within the slider."""
+        low, high = self.play_range or (self.minimum(), self.maximum())
+        low = min(max(low, self.minimum()), self.maximum())
+        high = min(max(high, low), self.maximum())
+        return low, high
+
+    def set_play_range(self, play_range: tuple[int, int] | None) -> None:
+        self.play_range = None if play_range is None else (int(play_range[0]), int(play_range[1]))
+        self.update()
+
+    def _stripe_at(self, x: float) -> int | None:
+        """The range stripe under a horizontal position (the nearer one), or None."""
+        low, high = self.bounds()
+        distances = [abs(x - self.x_of(low)), abs(x - self.x_of(high))]
+        nearest = (
+            0
+            if distances[0] < distances[1] or (distances[0] == distances[1] and x < self.x_of(low))
+            else 1
+        )
+        return nearest if distances[nearest] <= STRIPE_REACH else None
 
     def set_markers(self, values: list[int]) -> None:
         self.markers = sorted(set(int(v) for v in values))
@@ -82,10 +121,12 @@ class ClickSlider(QSlider):
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         super().paintEvent(event)
-        if not self.markers:
-            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        self._paint_range(painter)
+        if not self.markers:
+            painter.end()
+            return
         colour = QColor(COLORS["cursor"])
         r = 4.5
         y = self.height() - r - 1  # under the groove, clear of the handle
@@ -101,6 +142,20 @@ class ClickSlider(QSlider):
             painter.fillPath(path, colour)
         painter.end()
 
+    def _paint_range(self, painter: QPainter) -> None:
+        """The play range: outside it the slider is dimmed, at its ends thick stripes."""
+        low, high = self.bounds()
+        x0, x1 = self.x_of(low), self.x_of(high)
+        shade = QColor(COLORS["text"])
+        shade.setAlphaF(0.12)
+        if low > self.minimum():
+            painter.fillRect(QRectF(0, 2, x0, self.height() - 4), shade)
+        if high < self.maximum():
+            painter.fillRect(QRectF(x1, 2, self.width() - x1, self.height() - 4), shade)
+        stripe = QColor(COLORS["accent"])
+        for x in (x0, x1):
+            painter.fillRect(QRectF(x - 2.5, 2, 5, self.height() - 4), stripe)
+
     def wheelEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         event.ignore()  # scrolling (two fingers on a trackpad) must not move the time
 
@@ -108,12 +163,29 @@ class ClickSlider(QSlider):
         if event.button() != Qt.LeftButton:
             super().mousePressEvent(event)
             return
+        self._stripe = self._stripe_at(event.position().x())
+        if self._stripe is not None:  # a range stripe: drag it, the time stays
+            event.accept()
+            return
         self._dragging = True
         self.setSliderDown(True)  # first, so playing leaves the handle alone
         self.setSliderPosition(self.value_at(event.position().x()))
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if self._stripe is not None:
+            value = self.value_at(event.position().x())
+            low, high = self.bounds()
+            if self._stripe == 0:
+                low = min(value, high)
+            else:
+                high = max(value, low)
+            if (low, high) != self.bounds():
+                self.play_range = (low, high)
+                self.update()
+                self.rangeMoved.emit(low, high)
+            event.accept()
+            return
         if not self._dragging:
             super().mouseMoveEvent(event)
             return
@@ -121,6 +193,11 @@ class ClickSlider(QSlider):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if self._stripe is not None and event.button() == Qt.LeftButton:
+            self._stripe = None
+            self.rangeReleased.emit()
+            event.accept()
+            return
         if not self._dragging or event.button() != Qt.LeftButton:
             super().mouseReleaseEvent(event)
             return
@@ -170,7 +247,7 @@ class TimelinePanel(QWidget):
                 button.clicked.connect(slot)
             return button
 
-        self.first_button = tool("first", "First frame", lambda: self.go_to_frame(0))
+        self.first_button = tool("first", "Start of the play range", self.go_to_start)
         self.prev_button = tool("previous", "Previous frame", lambda: self.step(-1))
         self.play_button = QToolButton()
         self.play_button.setText("Play")
@@ -182,7 +259,12 @@ class TimelinePanel(QWidget):
         self.play_button.setAutoRaise(True)
         self.play_button.toggled.connect(self._toggle_play)
         self.next_button = tool("next", "Next frame", lambda: self.step(1))
-        self.last_button = tool("last", "Last frame", lambda: self.go_to_frame(self.n_frames - 1))
+        self.last_button = tool("last", "End of the play range", self.go_to_end)
+        self.repeat_button = tool(
+            "repeat", "Repeat: play the range again and again (off: stop at its end)", None
+        )
+        self.repeat_button.setCheckable(True)
+        self.repeat_button.setChecked(True)
 
         self.key_button = tool(
             "keyframe", "Camera keyframe: the 3D view at this time (Ctrl+K)", self.keyRequested.emit
@@ -196,6 +278,8 @@ class TimelinePanel(QWidget):
         self.slider.valueChanged.connect(self._on_slider)
         # let go: the time is where the handle is, whatever happened meanwhile
         self.slider.sliderReleased.connect(lambda: self._on_slider(self.slider.value()))
+        # the play range: dragged on the slider, kept in the session when let go
+        self.slider.rangeReleased.connect(self._store_range)
 
         self.label = QLabel()
         self.label.setMinimumWidth(150)
@@ -218,6 +302,7 @@ class TimelinePanel(QWidget):
         for widget in (self.first_button, self.prev_button, self.play_button, self.next_button):
             layout.addWidget(widget)
         layout.addWidget(self.last_button)
+        layout.addWidget(self.repeat_button)
         layout.addWidget(self.key_button)
         layout.addWidget(self.path_button)
         layout.addWidget(self.slider, 1)
@@ -241,8 +326,16 @@ class TimelinePanel(QWidget):
         self.timer.timeout.connect(self._tick)
         self._last_step = 0.0
         bridge.timeChanged.connect(self._show_time)
-        bridge.sceneChanged.connect(lambda *_: self.update_range())
+        bridge.sceneChanged.connect(self._on_scene)
         self.update_range()
+
+    def _on_scene(self, event: str, _item: str) -> None:
+        if event == "play_range":
+            self.show_play_range()
+        elif event in ("camera_keys", "sun"):
+            self.update_keys()
+        else:
+            self.update_range()
 
     # ------------------------------------------------------------- range
     @property
@@ -278,6 +371,47 @@ class TimelinePanel(QWidget):
         self._fit_label()
         self._show_time(self.session.scene.time)
         self.update_keys()
+        self.show_play_range()
+
+    # ------------------------------------------------------------- play range
+    def time_of(self, value: int) -> float:
+        """The time of a slider value: its frame's, or its share of the end time."""
+        if self.has_frames:
+            frame = min(max(int(value), self.first_frame), self.n_frames - 1)
+            return float(self.times[frame - self.first_frame])
+        return value / STEPS * self.end_time
+
+    def show_play_range(self) -> None:
+        """The stripes where the session's play range is (at the ends without one)."""
+        played = self.session.scene.play_range
+        if played is None:
+            self.slider.set_play_range(None)
+            return
+        self.slider.set_play_range((self.slider_value(played[0]), self.slider_value(played[1])))
+
+    def play_bounds(self) -> tuple[int, int]:
+        """The play range in slider values (frames)."""
+        return self.slider.bounds()
+
+    def _store_range(self) -> None:
+        """A stripe let go: the range into the session (None when it is all of it)."""
+        low, high = self.slider.bounds()
+        if (low, high) == (self.slider.minimum(), self.slider.maximum()):
+            self.session.set_play_range(None)
+        else:
+            self.session.set_play_range(self.time_of(low), self.time_of(high))
+
+    def go_to_start(self) -> None:
+        self._go_to_value(self.play_bounds()[0])
+
+    def go_to_end(self) -> None:
+        self._go_to_value(self.play_bounds()[1])
+
+    def _go_to_value(self, value: int) -> None:
+        if self.has_frames:
+            self.go_to_frame(value)
+        else:
+            self.session.set_time(self.time_of(value))
 
     def update_keys(self) -> None:
         """Mark the camera keyframes on the slider; the path button follows the scene."""
@@ -379,6 +513,7 @@ class TimelinePanel(QWidget):
             (self.last_button, "last"),
             (self.key_button, "keyframe"),
             (self.path_button, "camera_path"),
+            (self.repeat_button, "repeat"),
         ):
             button.setIcon(icon(name))
         playing = self.play_button.isChecked()
@@ -389,6 +524,10 @@ class TimelinePanel(QWidget):
         self.play_button.setText("Pause" if playing else "Play")
         self.play_button.setIcon(icon("pause" if playing else "play", COLORS["cursor"]))
         if playing:
+            low, high = self.play_bounds()
+            here = self.slider_value(self.session.scene.time)
+            if not low <= here < high:  # outside the range, or at its end: from its start
+                self.go_to_start()
             self._last_step = 0.0
             self.timer.start(0)
         else:
@@ -418,10 +557,14 @@ class TimelinePanel(QWidget):
         if self.busy() or self.slider.isSliderDown():
             return  # wait until the current frame is on screen, or the slider is let go
         PERF.count("frames advanced")
+        low, high = self.play_bounds()
         if self.has_frames:
             frame = self.frame_of(self.session.scene.time) + 1
-            if frame >= self.n_frames:
-                frame = self.first_frame
+            if frame > high or frame < low:
+                if not self.repeat_button.isChecked():
+                    self.play_button.setChecked(False)  # once through: stop at the end
+                    return
+                frame = low
             self.go_to_frame(frame)
             if self.loader is not None:
                 self.loader.prefetch(
@@ -433,6 +576,9 @@ class TimelinePanel(QWidget):
             return
         step = self.end_time / STEPS * 2
         time = self.session.scene.time + step
-        if time > self.end_time:
-            time = 0.0
+        if time > self.time_of(high) + 1e-9:
+            if not self.repeat_button.isChecked():
+                self.play_button.setChecked(False)
+                return
+            time = self.time_of(low)
         self.session.set_time(time)

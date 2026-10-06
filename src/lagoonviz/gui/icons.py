@@ -209,6 +209,24 @@ def _camera_path(p: QPainter) -> None:
     _diamond(p, 40, 14, 7, True)
 
 
+def _repeat(p: QPainter) -> None:
+    # two arrows chasing each other round a loop
+    top = QPainterPath(QPointF(14, 34))
+    top.lineTo(14, 26)
+    top.quadTo(14, 18, 22, 18)
+    top.lineTo(48, 18)
+    p.drawPath(top)
+    p.drawLine(QPointF(48, 18), QPointF(41, 11))
+    p.drawLine(QPointF(48, 18), QPointF(41, 25))
+    bottom = QPainterPath(QPointF(50, 30))
+    bottom.lineTo(50, 38)
+    bottom.quadTo(50, 46, 42, 46)
+    bottom.lineTo(16, 46)
+    p.drawPath(bottom)
+    p.drawLine(QPointF(16, 46), QPointF(23, 39))
+    p.drawLine(QPointF(16, 46), QPointF(23, 53))
+
+
 DRAWINGS: dict[str, Draw] = {
     "open_case": _folder,
     "open": _open,
@@ -231,6 +249,7 @@ DRAWINGS: dict[str, Draw] = {
     "reload": _reload,
     "keyframe": _keyframe,
     "camera_path": _camera_path,
+    "repeat": _repeat,
 }
 
 _cache: dict[tuple[str, str], QIcon] = {}

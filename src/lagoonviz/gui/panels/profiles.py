@@ -17,6 +17,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, Q
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from lagoonviz.core.plotting import nice_step, nice_ticks, tick_label
+from lagoonviz.core.scene import VIEW_EVENTS
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.perf import PERF
 from lagoonviz.gui.theme import COLORS, SERIES_COLORS
@@ -39,7 +40,9 @@ class ProfilesPanel(QWidget):
         self._ranges: dict[tuple, tuple[float, float]] = {}
         if bridge is not None:
             bridge.timeChanged.connect(lambda _t: self.update())
-            bridge.sceneChanged.connect(lambda *_: self.refresh())
+            bridge.sceneChanged.connect(
+                lambda event, _item: None if event in VIEW_EVENTS else self.refresh()
+            )
         self.refresh()
 
     def sizeHint(self) -> QSize:  # noqa: N802 (Qt naming)

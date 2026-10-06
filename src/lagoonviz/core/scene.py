@@ -28,6 +28,10 @@ Observer = Callable[[str, str | None], None]
 PLAN_SIDES = ("top", "front", "back", "right", "left")
 
 
+#: events of view state, not of the items (panels that only show items skip them)
+VIEW_EVENTS = ("camera_keys", "sun", "play_range")
+
+
 @dataclass
 class SceneItem:
     """One entry in the scene tree: a case, a surface, a slice, a gauge, ..."""
@@ -84,6 +88,8 @@ class Scene:
         #: where the sun is: (azimuth, elevation) in degrees, azimuth from +x towards
         #: +y, elevation above the horizon; None: where the look puts it
         self.sun: tuple[float, float] | None = None
+        #: the part of the timeline that plays (start, end times); None: all of it
+        self.play_range: tuple[float, float] | None = None
 
     # ------------------------------------------------------------- observers
     def subscribe(self, callback: Observer) -> None:
@@ -219,6 +225,15 @@ class Scene:
         self.sun = sun
         self._notify("sun", None)
 
+    def set_play_range(self, play_range: tuple[float, float] | None) -> None:
+        """The part of the timeline that plays (start, end times), or None for all of
+        it; observers get "play_range"."""
+        if play_range is not None:
+            start, end = sorted(float(v) for v in play_range)
+            play_range = (start, end)
+        self.play_range = play_range
+        self._notify("play_range", None)
+
     # ------------------------------------------------------------- files
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -230,6 +245,7 @@ class Scene:
             "camera_keys": copy.deepcopy(self.camera_keys),
             "camera_path": self.camera_path,
             "sun": list(self.sun) if self.sun is not None else None,
+            "play_range": list(self.play_range) if self.play_range is not None else None,
             "counters": dict(self._counters),
             "items": [item.to_dict() for item in self._items.values()],
         }
@@ -262,6 +278,10 @@ class Scene:
         self.camera_path = bool(data.get("camera_path", False)) and bool(self.camera_keys)
         sun = data.get("sun")
         self.sun = (float(sun[0]), float(sun[1])) if isinstance(sun, list | tuple) else None
+        played = data.get("play_range")
+        self.play_range = (
+            (float(played[0]), float(played[1])) if isinstance(played, list | tuple) else None
+        )
         self._notify("reset", None)
 
     def save(self, path: str | Path) -> None:

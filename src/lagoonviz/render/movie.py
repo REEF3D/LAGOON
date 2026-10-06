@@ -51,11 +51,17 @@ def frame_times(
     session: Session, start: int | None = None, end: int | None = None, every: int = 1
 ) -> list[float]:
     """Times of the frames to film: the timeline's frames ``start`` to ``end`` (both
-    included, numbered as the timeline shows them; default: all), every
-    ``every``-th one. With a run log the times are the logged ones."""
+    included, numbered as the timeline shows them; default: the session's play
+    range, else all), every ``every``-th one. With a run log the times are the
+    logged ones."""
     times, steps, _ = session.data.timeline()
     if not len(steps):
         return []
+    played = session.scene.play_range
+    if played is not None:
+        nearest = [int(steps[int(np.abs(np.asarray(times) - t).argmin())]) for t in played]
+        start = nearest[0] if start is None else start
+        end = nearest[1] if end is None else end
     start = int(steps[0]) if start is None else int(start)
     end = int(steps[-1]) if end is None else int(end)
     chosen = np.nonzero((steps >= start) & (steps <= end))[0][:: max(int(every), 1)]

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Play range**: two stripes on the timeline's slider mark where playing starts
+  and ends; dragged, they restrict playback, the export dialog and films to a part
+  of the run (saved with the session, `Session.set_play_range`). A **repeat**
+  button loops the range, or plays it once.
 - **Sun**: *View → Sun...* sets where the light comes from (direction and
   height); the 3D view, films and Cycles renders use it, the sky's sun glow (and
   the glint on the water) moves along, it is saved with the session and scripts

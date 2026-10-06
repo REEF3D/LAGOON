@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from lagoonviz.core.kinds import KINDS
+from lagoonviz.core.scene import VIEW_EVENTS
 from lagoonviz.gui.bridge import SessionBridge
 
 ID_ROLE = Qt.UserRole
@@ -118,7 +119,7 @@ class SceneTreePanel(QWidget):
         return None
 
     def _on_scene(self, event: str, item_id: str) -> None:
-        if event in ("camera_keys", "sun"):
+        if event in VIEW_EVENTS:
             return  # nothing in the tree changes
         if event == "changed":
             # update in place: rebuilding here would delete the entry that is

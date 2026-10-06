@@ -105,6 +105,11 @@ class ExportAnimationDialog(QDialog):
             spin.setToolTip(f"Frames {first} to {last}, as numbered on the timeline")
         self.start.setValue(first)
         self.end.setValue(last)
+        played = session.scene.play_range
+        if played is not None and len(steps):  # the timeline's play range
+            times = np.asarray(session.data.timeline()[0], float)
+            self.start.setValue(int(steps[int(np.abs(times - played[0]).argmin())]))
+            self.end.setValue(int(steps[int(np.abs(times - played[1]).argmin())]))
         # the first frame never after the last
         self.start.valueChanged.connect(lambda v: self.end.setValue(max(self.end.value(), v)))
         self.end.valueChanged.connect(lambda v: self.start.setValue(min(self.start.value(), v)))

@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from lagoonviz.core.data.manager import BackgroundLoader, FrameKey
+from lagoonviz.core.scene import VIEW_EVENTS
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.panels.colorbar import ColorBarEntry, ColorBarStrip
 from lagoonviz.gui.perf import PERF
@@ -551,6 +552,8 @@ class Viewport3D(QWidget):
             self._sun_timer.start()
             self.redraw()
             return
+        if event in VIEW_EVENTS:
+            return  # e.g. the play range: nothing to draw again
         if self.comparing:
             self._fill_cases()
         if event == "reset":

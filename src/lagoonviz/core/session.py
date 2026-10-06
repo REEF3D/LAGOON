@@ -365,6 +365,20 @@ class Session:
             )
         )
 
+    def set_play_range(self, start: float | None = None, end: float | None = None) -> None:
+        """Play only the part of the timeline from ``start`` to ``end`` (times); both
+        None: all of it. Playback, films and the export dialog keep to it. View state:
+        not an undo step."""
+        if start is None and end is None:
+            self.scene.set_play_range(None)
+            return
+        times = self.data.timeline()[0]
+        first = float(times[0]) if len(times) else 0.0
+        last = float(times[-1]) if len(times) else first
+        self.scene.set_play_range(
+            (first if start is None else float(start), last if end is None else float(end))
+        )
+
     def sun_angles(self, look: str | None = None) -> tuple[float, float]:
         """(azimuth, elevation) of the sun in degrees: the session's, else the look's."""
         import math
@@ -485,6 +499,9 @@ class Session:
         if self.scene.sun is not None:
             azimuth, elevation = self.scene.sun
             lines.append(f"session.set_sun({azimuth!r}, {elevation!r})")
+        if self.scene.play_range is not None:
+            start, end = self.scene.play_range
+            lines.append(f"session.set_play_range({start!r}, {end!r})")
         return "\n".join(lines) + "\n"
 
     @staticmethod

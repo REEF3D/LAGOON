@@ -25,11 +25,12 @@ console: 'Python console' in BottomDockWidgetArea
 profiles: 'Wave profiles' in BottomDockWidgetArea tabbed with dock_plots
 
 PLAYER
-button '' tip='First frame' (disabled)
+button '' tip='Start of the play range' (disabled)
 button '' tip='Previous frame' (disabled)
 button 'Play' [ ] tip='Play / pause (Space in the viewport)'
 button '' tip='Next frame' (disabled)
-button '' tip='Last frame' (disabled)
+button '' tip='End of the play range' (disabled)
+button '' [x] tip='Repeat: play the range again and again (off: stop at its end)'
 button '' tip='Camera keyframe: the 3D view at this time (Ctrl+K)'
 button '' [ ] tip='Follow the camera path through the keyframes' (disabled)
 slider in [0, 1000]

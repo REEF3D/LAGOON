@@ -555,6 +555,53 @@ def test_sun_dialog_moves_the_light(window):
     dialog.close()
 
 
+def test_timeline_play_range_and_repeat(window, tmp_path):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from reef3d_fixtures import make_run
+
+    run = make_run(tmp_path / "run", frames=6, print_interval=0.5)
+    window.open_case(run)
+    timeline, session = window.timeline, window.session
+    timeline.busy = lambda: False
+    slider = timeline.slider
+    slider.resize(600, 32)
+    assert slider.bounds() == (0, 5)  # the stripes at the ends
+    # drag the start stripe to frame 2: the range starts there, the time stays
+    y = slider.height() // 2
+    QTest.mousePress(slider, Qt.LeftButton, Qt.NoModifier, QPoint(round(slider.x_of(0)), y))
+    QTest.mouseMove(slider, QPoint(round(slider.x_of(2)), y))
+    QTest.mouseRelease(slider, Qt.LeftButton, Qt.NoModifier, QPoint(round(slider.x_of(2)), y))
+    assert session.scene.play_range == pytest.approx((1.0, 2.5))
+    assert session.scene.time == 0.0
+    assert slider.bounds() == (2, 5)
+    timeline.go_to_start()
+    assert session.scene.time == pytest.approx(1.0)
+    # once through: playing stops at the end of the range
+    timeline.repeat_button.setChecked(False)
+    session.set_time(2.0)
+    timeline.play_button.setChecked(True)
+    timeline._advance()
+    assert session.scene.time == pytest.approx(2.5)
+    timeline._advance()
+    assert not timeline.play_button.isChecked() and session.scene.time == pytest.approx(2.5)
+    # repeat: from the end back to the start of the range
+    timeline.repeat_button.setChecked(True)
+    timeline.play_button.setChecked(True)  # at the end: starts again from the start
+    assert session.scene.time == pytest.approx(1.0)
+    session.set_time(2.5)
+    timeline._advance()
+    assert session.scene.time == pytest.approx(1.0)
+    timeline.play_button.setChecked(False)
+    # the export dialog starts from the range; a loaded session brings its range back
+    from lagoonviz.gui.export_movie import ExportAnimationDialog
+
+    dialog = ExportAnimationDialog(window, session, str(tmp_path), (640, 360))
+    assert (dialog.start.value(), dialog.end.value()) == (2, 5)
+    session.set_play_range()
+    assert slider.bounds() == (0, 5)
+
+
 def test_timeline_starts_where_the_shown_run_has_data(window, tmp_path):
     import os
     import time

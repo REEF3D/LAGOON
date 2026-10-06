@@ -24,6 +24,7 @@ from PySide6.QtWidgets import QComboBox, QSizePolicy, QWidget
 from lagoonviz.core.data.manager import Trace
 from lagoonviz.core.data.series import decimate
 from lagoonviz.core.plotting import nice_step, nice_ticks, tick_label, value_range
+from lagoonviz.core.scene import VIEW_EVENTS
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.perf import PERF
 from lagoonviz.gui.theme import COLORS, SERIES_COLORS
@@ -74,7 +75,9 @@ class PlotsPanel(QWidget):
         self.hover_time: float | None = None
         if bridge is not None:
             bridge.timeChanged.connect(lambda _t: self.update())
-            bridge.sceneChanged.connect(lambda *_: self.refresh())
+            bridge.sceneChanged.connect(
+                lambda event, _item: None if event in VIEW_EVENTS else self.refresh()
+            )
         self.refresh()
 
     def sizeHint(self) -> QSize:  # noqa: N802 (Qt naming)
