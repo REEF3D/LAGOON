@@ -91,13 +91,38 @@ class ClickSlider(QSlider):
         self.play_range = None if play_range is None else (int(play_range[0]), int(play_range[1]))
         self.update()
 
+    def initStyleOption(self, option) -> None:  # noqa: N802 (Qt naming)
+        """The groove a little in from both ends: room for the range stripes beside the
+        handle (Qt 6 asks this for painting and for the handle's place alike)."""
+        super().initStyleOption(option)
+        inset = self._inset()
+        option.rect = option.rect.adjusted(inset, 0, -inset, 0)
+
+    def _inset(self) -> int:
+        """How far the groove sits in from each end: a stripe's width beyond the handle."""
+        return int(self._gap()) + 4
+
+    def _gap(self) -> float:
+        """How far a range stripe stands beyond the handle's centre: just clear of the
+        handle, so at the ends both can be grabbed."""
+        handle = self.style().pixelMetric(QStyle.PM_SliderLength, None, self)
+        return handle / 2 + STRIPE_REACH  # a press on the handle never takes the stripe
+
+    def stripe_x(self, which: int) -> float:
+        """Where a range stripe is drawn: the start's left of its handle position, the
+        end's right of it."""
+        low, high = self.bounds()
+        if which == 0:
+            return self.x_of(low) - self._gap()
+        return self.x_of(high) + self._gap()
+
     def _stripe_at(self, x: float) -> int | None:
         """The range stripe under a horizontal position (the nearer one), or None."""
-        low, high = self.bounds()
-        distances = [abs(x - self.x_of(low)), abs(x - self.x_of(high))]
+        distances = [abs(x - self.stripe_x(0)), abs(x - self.stripe_x(1))]
         nearest = (
             0
-            if distances[0] < distances[1] or (distances[0] == distances[1] and x < self.x_of(low))
+            if distances[0] < distances[1]
+            or (distances[0] == distances[1] and x < self.stripe_x(0))
             else 1
         )
         return nearest if distances[nearest] <= STRIPE_REACH else None
@@ -147,7 +172,7 @@ class ClickSlider(QSlider):
     def _paint_range(self, painter: QPainter) -> None:
         """The play range: outside it the slider is dimmed, at its ends thick stripes."""
         low, high = self.bounds()
-        x0, x1 = self.x_of(low), self.x_of(high)
+        x0, x1 = self.stripe_x(0), self.stripe_x(1)
         shade = QColor(COLORS["text"])
         shade.setAlphaF(0.12)
         if low > self.minimum():
@@ -176,12 +201,12 @@ class ClickSlider(QSlider):
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         if self._stripe is not None:
-            value = self.value_at(event.position().x())
+            x = event.position().x()
             low, high = self.bounds()
-            if self._stripe == 0:
-                low = min(value, high)
+            if self._stripe == 0:  # the stripe under the mouse, beside its handle position
+                low = min(self.value_at(x + self._gap()), high)
             else:
-                high = max(value, low)
+                high = max(self.value_at(x - self._gap()), low)
             if (low, high) != self.bounds():
                 self.play_range = (low, high)
                 self.update()

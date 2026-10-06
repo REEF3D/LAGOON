@@ -567,11 +567,16 @@ def test_timeline_play_range_and_repeat(window, tmp_path):
     slider = timeline.slider
     slider.resize(600, 32)
     assert slider.bounds() == (0, 5)  # the stripes at the ends
-    # drag the start stripe to frame 2: the range starts there, the time stays
+    # the stripes stand beside the handle: at the start both can be grabbed
     y = slider.height() // 2
-    QTest.mousePress(slider, Qt.LeftButton, Qt.NoModifier, QPoint(round(slider.x_of(0)), y))
-    QTest.mouseMove(slider, QPoint(round(slider.x_of(2)), y))
-    QTest.mouseRelease(slider, Qt.LeftButton, Qt.NoModifier, QPoint(round(slider.x_of(2)), y))
+    assert slider.stripe_x(0) < slider.x_of(0) - 5
+    assert slider._stripe_at(slider.x_of(0)) is None  # a press on the handle is the handle's
+    # drag the start stripe to frame 2: the range starts there, the time stays
+    gap = slider.x_of(0) - slider.stripe_x(0)
+    press, there = round(slider.stripe_x(0)), round(slider.x_of(2) - gap)
+    QTest.mousePress(slider, Qt.LeftButton, Qt.NoModifier, QPoint(press, y))
+    QTest.mouseMove(slider, QPoint(there, y))
+    QTest.mouseRelease(slider, Qt.LeftButton, Qt.NoModifier, QPoint(there, y))
     assert session.scene.play_range == pytest.approx((1.0, 2.5))
     assert session.scene.time == 0.0
     assert slider.bounds() == (2, 5)
