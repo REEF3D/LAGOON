@@ -249,7 +249,19 @@ def test_sun_points_where_asked_in_every_look(reef3d_run):
         assert np.allclose(shining_from(), wanted, atol=1e-5), style
     view.set_plan(True)
     assert np.allclose(shining_from(), wanted, atol=1e-5)
+    # the headlamp shines in 2D as in the 3D view, not straight down onto every face
+    from lagoonviz.render.scene3d import HEADLAMP, PLAN_HEADLAMP, VIEWS
+
+    lamp = view.headlamp
+    assert lamp.parent is view.scene
+    shine = np.asarray(lamp.target.world.position) - np.asarray(lamp.world.position)
+    along = np.asarray(VIEWS["perspective"][0], float)
+    assert np.allclose(shine / np.linalg.norm(shine), along / np.linalg.norm(along), atol=1e-6)
+    view.set_plan(True)  # again: no change
+    assert lamp.parent is view.scene
+    assert np.allclose(lamp.local.position, PLAN_HEADLAMP)
     view.set_plan(False)
+    assert lamp.parent is view.camera and np.allclose(lamp.local.position, HEADLAMP)
     water = next(s for s in view._shown.values() if s.kind == "free_surface")
     glowing = water.mesh.material.env_map
     view.set_sun_direction(None)

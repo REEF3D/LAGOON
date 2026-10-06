@@ -103,6 +103,15 @@ VIEWS = {
     "perspective": ((-1.0, 1.2, -0.7), (0.0, 0.0, 1.0)),
 }
 
+#: the headlamp's place on the camera (pygfx: a light on a camera shines along the view)
+HEADLAMP = (0.4, -0.6, 1.0)
+#: 2D from the top: the headlamp, fixed in the scene, shines as it does in the 3D view
+#: (along the perspective view's direction); straight down it would light every flat
+#: face fully and put a glare over them, a washed-out picture
+PLAN_HEADLAMP = tuple(
+    -np.asarray(VIEWS["perspective"][0]) / np.linalg.norm(VIEWS["perspective"][0])
+)
+
 
 def _background(colors: tuple[str, str]) -> gfx.Background:
     if hasattr(gfx.Background, "from_color"):
@@ -212,7 +221,7 @@ class SceneRenderer:
         except AttributeError:  # older pygfx: up is given per call
             pass
         self.headlamp = gfx.DirectionalLight(intensity=look["headlamp"])
-        self.headlamp.local.position = (0.4, -0.6, 1.0)
+        self.headlamp.local.position = HEADLAMP
         self.camera.add(self.headlamp)  # moves with the camera
         self.scene.add(self.camera)
         self.content = gfx.Group()
@@ -1044,13 +1053,26 @@ class SceneRenderer:
 
     def set_plan(self, on: bool) -> None:
         """2D: the items are flat layers seen from above; the sun's shadows would only
-        darken the lower layers, so they are off."""
+        darken the lower layers, so they are off. The headlamp shines as in the 3D
+        view, not straight down."""
         self.plan = bool(on)
         look = STYLES[self.style_name]
         self.sun.cast_shadow = bool(look.get("shadows", False)) and not self.plan
         self._shadow_fit = None
         self._fit_shadow()
+        self._place_headlamp()
         self._refresh_stand()  # no stand in 2D
+
+    def _place_headlamp(self) -> None:
+        """On the camera in 3D (it shines along the view); in 2D from the top fixed in
+        the scene, shining as in the 3D view, so the light is the same."""
+        lamp = self.headlamp
+        home = self.scene if self.plan else self.camera
+        if lamp.parent is not home:
+            if lamp.parent is not None:
+                lamp.parent.remove(lamp)
+            home.add(lamp)
+        lamp.local.position = PLAN_HEADLAMP if self.plan else HEADLAMP
 
     def set_orthographic(self, orthographic: bool) -> None:
         self.camera.fov = 0 if orthographic else 45

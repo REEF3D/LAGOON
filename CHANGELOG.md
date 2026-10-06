@@ -7,7 +7,9 @@
   after the case folder.
 - **2D view lit as the 3D view**: from the top the items are still drawn flat and
   seen straight down, but shaded with their own shapes' normals, so waves, the
-  bed's relief and the water's glint read as in 3D (the same look and sun).
+  bed's relief and the water's glint read as in 3D (the same look and sun). The
+  headlamp shines as in the 3D view instead of straight down, which lit every flat
+  face fully and laid a glare over them (a washed-out picture).
 - **Cycles closer to ÆgirFrames**: the Open ocean look is now a model in the sky
   picture, as ÆgirFrames shows a case (the land cut off in rock at the domain's
   sides, the water a body with clear walls), no longer a sea running on to the
