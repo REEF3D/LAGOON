@@ -922,10 +922,11 @@ class DataManager:
             positions[:, 2] = level + exaggeration * (positions[:, 2] - level)
             normals = exaggerate_normals(normals, exaggeration)
         if self.scene.flat:
-            # 2D: flat, stacked by kind so the free surface lies over the bed
+            # 2D: flat, stacked by kind so the free surface lies over the bed; the
+            # normals stay those of the shapes, so the light falls as in the 3D view
+            # (waves and the bed's relief shaded, the water's glint)
             positions = np.array(positions, dtype=np.float32, copy=True)
             positions[:, 2] = PLAN_LAYERS.get(item.kind, 1.0)
-            normals = np.tile(np.array([0.0, 0.0, 1.0], np.float32), (len(positions), 1))
         variable = str(props.get("variable", "none"))
         try:
             values = mesh.scalar(variable)

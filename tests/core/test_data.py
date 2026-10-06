@@ -755,8 +755,9 @@ def test_dem_elements(tmp_path):
 
 
 def test_plan_view_draws_everything_flat(tmp_path):
-    """2D: every item flat, the free surface over the bed, gauges on top; saved with
-    the session and in the script, so the export films it the same way."""
+    """2D: every item flat but lit as in 3D, the free surface over the bed, gauges on
+    top; saved with the session and in the script, so the export films it the same
+    way."""
     from reef3d_fixtures import make_run
 
     from lagoonviz.core.data.manager import PLAN_LAYERS, PLAN_MARKS
@@ -764,7 +765,8 @@ def test_plan_view_draws_everything_flat(tmp_path):
     run = make_run(tmp_path / "plan", frames=5, print_interval=0.5, series=True, dem=0.25)
     s = Session()
     s.open_case(run)
-    s.set_property("case-1", "exaggeration", 5.0)  # makes no difference in 2D
+    s.set_property("case-1", "exaggeration", 5.0)  # the heights flat, the light as in 3D
+    in_3d = {i: s.data.display(i, s.data.load(i)).normals for i in s.data.data_items()}
     events = []
     s.scene.subscribe(lambda event, _id: events.append(event))
     s.set_plan_view(True)
@@ -773,7 +775,8 @@ def test_plan_view_draws_everything_flat(tmp_path):
         shown = s.data.display(item_id, s.data.load(item_id))
         kind = s.scene.get(item_id).kind
         np.testing.assert_allclose(shown.positions[:, 2], PLAN_LAYERS[kind])
-        np.testing.assert_allclose(shown.normals[:, 2], 1.0)
+        # shaded as in the 3D view: the shapes' own normals, not straight up
+        np.testing.assert_allclose(shown.normals, in_3d[item_id])
         assert shown.values is not None or kind != "free_surface"  # still coloured by eta
     marks = s.data.gauge_marks("series-1")
     assert np.all(marks.staffs[..., 2] == PLAN_MARKS)

@@ -27,7 +27,9 @@ the mouse over the view):
 ++2++ switches to a flat, orthographic view without rotation, where any drag
 moves the view. In it, ++1++, ++3++ and ++7++ choose the side it looks from: from
 the top every item is drawn flat (the free surface as a plane coloured by its
-values, over the bed), from the front or side it is an elevation of the shapes.
+values, over the bed) but lit as in the 3D view, in the same look and light, so
+waves and the bed's relief stay shaded; from the front or side it is an elevation
+of the shapes.
 ++2++ again goes back to 3D. The buttons in the corner of the view do the same.
 
 ![The 2D view from the top](../images/view-top.png)
