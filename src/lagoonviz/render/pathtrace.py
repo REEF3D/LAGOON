@@ -40,13 +40,13 @@ from typing import Any
 
 import numpy as np
 
-from lagoonviz.core.colormaps import PLAIN_COLORS, colors
+from lagoonviz.core.colormaps import colors
 from lagoonviz.render.cinematic import (
     PRESETS,
     SURFACES,
     Preset,
-    Surface,
     environment_panorama,
+    look_colour,
     panorama_directions,
     surface_of,
     with_sun,
@@ -893,15 +893,13 @@ class _Collector:
         finite = shown.positions[np.isfinite(shown.positions).all(axis=1)]
         span = float(np.ptp(finite[:, :2], axis=0).max()) if len(finite) else 0.0
         land = kind == "bathymetry" and rgb is None and self.dressed and len(finite)
-        own = _own_color(shown, kind)
-        if kind == "bathymetry" and rgb is None and not land and own and self.preset.bed:
-            # the look's bed (ÆgirFrames' dark rock) for a bed in its default colour
-            s = SURFACES["rock"]
-            spec.update(color=linear_hex(self.preset.bed), roughness=s.roughness)
-        if kind in ("structure", "body") and rgb is None and own and self.preset.structure:
-            # ÆgirFrames' solids: red, half metallic, matte
-            s = Surface(1.0, metalness=0.5)
-            spec.update(color=linear_hex(self.preset.structure), roughness=1.0, metallic=0.5)
+        # a look's own colours (ÆgirFrames' dark rock bed, red solids) for an item in
+        # its kind's default colour
+        given = look_colour(self.preset, kind, shown.color, shown.material)
+        if given is not None and rgb is None and not land:
+            color, surface = given
+            s = SURFACES[surface]
+            spec.update(color=linear_hex(color), roughness=s.roughness, metallic=s.metalness)
         if s.grain and rgb is None:
             spec["grain"] = {
                 "kind": s.grain,
@@ -1247,14 +1245,6 @@ class _Collector:
         }
         self.add(SEA, positions, triangles, spec, None, np.zeros(len(triangles), bool))
         self.far = max(self.far, SEA_REACH * extent)
-
-
-def _own_color(shown, kind: str) -> bool:
-    """Whether an item shows its kind's default colour (no colour, material or colour
-    map of its own chosen), so a look may give it its own."""
-    if getattr(shown, "material", "") or not isinstance(shown.color, str):
-        return False
-    return shown.color.lower() == PLAIN_COLORS.get(kind, "").lower()
 
 
 def _frame_objects(
@@ -1652,11 +1642,19 @@ def _sky_picture_world(preset: Preset, folder: Path, sun: np.ndarray, own: bool)
     return world, lamp
 
 
+@functools.lru_cache(maxsize=2)
+def sky_picture(name: str) -> np.ndarray:
+    """A sky picture of render/assets as (h, w, 3) linear light (read once)."""
+    sky = read_hdr(SKY_FOLDER / name)
+    sky.flags.writeable = False
+    return sky
+
+
 @functools.lru_cache(maxsize=4)
 def sky_sun(name: str) -> tuple[float, float]:
     """Azimuth and elevation (radians, as LAGOON's directions) of a sky picture's sun:
     its brightest point."""
-    sky = read_hdr(SKY_FOLDER / name)
+    sky = sky_picture(name)
     brightness = sky @ np.array([0.2126, 0.7152, 0.0722])
     row, column = np.unravel_index(int(np.argmax(brightness)), brightness.shape)
     d = panorama_directions(sky.shape[1])[row, column]

@@ -13,6 +13,7 @@ LOOK_SUNS: dict[str, tuple[float, float, float]] = {
     "wave_flume": (0.0, 0.25, 1.0),  # the ceiling lights, nearly overhead
     "underwater": (-0.2, -0.1, 1.0),  # light from above through the surface
     "diorama": (-0.5, -0.6, 1.0),  # high and to the front: soft, short shadows
+    "diorama_classic": (-0.5, -0.6, 1.0),
 }
 
 #: where the engineering looks (studio, ocean) put the sun

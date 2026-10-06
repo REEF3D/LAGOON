@@ -192,3 +192,57 @@ def test_the_sky_glows_where_the_sun_is():
     assert _brightness(sample(faces, sun / np.linalg.norm(sun))[0]) > 250
     old = np.asarray(OPEN_OCEAN.sun_direction) / np.linalg.norm(OPEN_OCEAN.sun_direction)
     assert _brightness(sample(faces, old)[0]) < 250
+
+
+def test_agx_as_blender_shows_light():
+    from lagoonviz.render.cinematic import agx
+
+    grey = np.array([0.0, 0.01, 0.18, 1.0, 20.0])[:, None] * np.ones(3)
+    shown = agx(grey)[:, 0]
+    assert shown[0] == pytest.approx(0.0, abs=1e-3)
+    assert shown[2] == pytest.approx(0.5, abs=0.02)  # middle grey in the middle
+    assert np.all(np.diff(shown) > 0) and shown[-1] > 0.99  # bright light rolls off
+
+
+def test_sky_picture_in_the_3d_view():
+    """The looks with a sky picture show it in the 3D view as Cycles does: turned so
+    its sun stands at the look's sun's azimuth, the sea below the horizon darker than
+    the sky; Diorama classic keeps its backdrop and LAGOON's own surroundings."""
+    from lagoonviz.render.cinematic import DIORAMA, DIORAMA_CLASSIC, uses_picture, with_sun
+    from lagoonviz.render.pathtrace import sky_sun
+
+    assert uses_picture(DIORAMA) and uses_picture(OPEN_OCEAN) and uses_picture(WAVE_FLUME)
+    assert not uses_picture(UNDERWATER) and not uses_picture(DIORAMA_CLASSIC)
+    assert DIORAMA_CLASSIC.background is not None and DIORAMA_CLASSIC.bed is None
+    assert PRESETS["diorama_classic"] is DIORAMA_CLASSIC
+    _, elevation = sky_sun("sea_clear_sky.hdr")
+    for azimuth in (0.0, 2.0):
+        preset = with_sun(DIORAMA, (np.cos(azimuth), np.sin(azimuth), 1.0))
+        faces = environment_faces(preset, 64)
+        sun = [np.cos(elevation) * np.cos(azimuth), np.cos(elevation) * np.sin(azimuth)]
+        towards, away = sample(faces, [(*sun, np.sin(elevation)), (-sun[0], -sun[1], 0.5)])
+        assert _brightness(towards) > _brightness(away) + 60  # the sun where it should be
+        sky, sea = sample(faces, [(-sun[0], -sun[1], 0.1), (-sun[0], -sun[1], -0.6)])
+        assert _brightness(sky) > _brightness(sea)
+
+
+def test_aegir_colours_for_default_colours():
+    from lagoonviz.core.colormaps import PLAIN_COLORS
+    from lagoonviz.render.cinematic import (
+        AEGIR_RED,
+        AEGIR_ROCK,
+        DIORAMA,
+        DIORAMA_CLASSIC,
+        look_colour,
+    )
+
+    bed, structure = PLAIN_COLORS["bathymetry"], PLAIN_COLORS["structure"]
+    assert look_colour(DIORAMA, "bathymetry", bed) == (AEGIR_ROCK, "rock")
+    assert look_colour(DIORAMA, "structure", structure) == (AEGIR_RED, "painted")
+    assert look_colour(DIORAMA, "body", PLAIN_COLORS["body"]) == (AEGIR_RED, "painted")
+    assert look_colour(OPEN_OCEAN, "bathymetry", bed) is None  # dressed as land instead
+    assert look_colour(DIORAMA_CLASSIC, "bathymetry", bed) is None  # sand, as it was
+    assert look_colour(DIORAMA, "bathymetry", "#ffffff") is None  # a colour chosen
+    assert look_colour(DIORAMA, "structure", structure, "steel") is None  # a material
+    assert look_colour(None, "bathymetry", bed) is None
+    assert SURFACES["painted"].metalness == 0.5 and SURFACES["painted"].roughness == 1.0

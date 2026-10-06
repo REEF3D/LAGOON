@@ -40,8 +40,13 @@ of the shapes.
 
 - **Studio** (light grey, the default) and **Ocean** (dark blue): plain, even
   lighting for reading values.
-- **Open ocean**, **Wave flume**, **Underwater** and **Diorama**: the cinematic
-  looks, with physically based materials, reflections and, under water, fog. See
+- **Open ocean**, **Wave flume**, **Underwater**, **Diorama** and **Diorama
+  classic**: the cinematic looks, with physically based materials, reflections
+  and, under water, fog. Open ocean, Wave flume and Diorama show what Blender
+  renders: ÆgirFrames' sky picture around the model (lighting it and reflected by
+  the water, its sun where the look's sun is), the bed as dark rock and structures
+  in ÆgirFrames' red (in their default colours). Diorama classic keeps the earlier
+  Diorama: a blue backdrop and a block of sand. See
   [Cinematic looks and path tracing](cinematic.md).
 
 ## The sun

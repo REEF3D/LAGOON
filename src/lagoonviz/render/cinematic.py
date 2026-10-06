@@ -69,12 +69,13 @@ class Preset:
     #: how strongly the water absorbs light: over its mean depth it keeps exp(-absorb)
     absorb: float = 0.45
     sun_angle: float = 1.0  # the sun's size [degrees]: larger, softer shadows
-    #: path tracing: a sky picture (an HDR panorama in render/assets) that lights the
-    #: scene and is seen behind it, its sun turned to where the look's sun is
+    #: a sky picture (an HDR panorama in render/assets) that lights the scene and is
+    #: seen behind it, its sun turned to where the look's sun is; path traced always,
+    #: in the 3D view unless the look has a ``background`` of its own
     sky_picture: str | None = None
-    #: path tracing: the bed's colour when it has the bed's own default (a dark rock,
-    #: as ÆgirFrames' terrain), and that of structures and bodies with theirs
-    #: (ÆgirFrames' red, half metallic and matte); None: their own colours
+    #: path tracing and the 3D view: the bed's colour when it has the bed's own
+    #: default (a dark rock, as ÆgirFrames' terrain), and that of structures and bodies
+    #: with theirs (ÆgirFrames' red, half metallic and matte); None: their own colours
     bed: str | None = None
     structure: str | None = None
     extra: dict = field(default_factory=dict)
@@ -117,10 +118,8 @@ WAVE_FLUME = Preset(
     env_intensity=0.9,
     water_color="#20687c",  # ÆgirFrames' ocean water, as in its wave tank renders
     water_roughness=0.04,
-    # the hall is reflected; behind the model a plain light gradient (a hall at
-    # infinity would show its floor's edge as a curved horizon)
-    background=("#a7a49f", "#ecebe8"),
-    # path traced as ÆgirFrames shows a tank: in its sky picture, on a dark floor
+    # as ÆgirFrames shows a tank: in its sky picture (also in the 3D view), on a
+    # dark floor
     sky_picture="sea_clear_sky.hdr",
     bed=AEGIR_ROCK,
     structure=AEGIR_RED,
@@ -160,7 +159,6 @@ DIORAMA = Preset(
     env_intensity=1.1,
     water_color="#20687c",  # ÆgirFrames' ocean water (linear 0.014, 0.138, 0.202)
     water_roughness=0.04,
-    background=("#3e5f86", "#a9bfd3"),  # a blue backdrop, lighter at the top
     contours="#e8eef5",
     world="diorama",
     absorb=1.1,
@@ -169,7 +167,17 @@ DIORAMA = Preset(
     bed=AEGIR_ROCK,
     structure=AEGIR_RED,
 )
-PRESETS = {p.name: p for p in (OPEN_OCEAN, WAVE_FLUME, UNDERWATER, DIORAMA)}
+#: the Diorama look as it was before it took ÆgirFrames' sky picture and colours into
+#: the 3D view: a blue backdrop, LAGOON's own soft sky reflected, a block of sand
+DIORAMA_CLASSIC = replace(
+    DIORAMA,
+    name="diorama_classic",
+    label="Diorama classic",
+    background=("#3e5f86", "#a9bfd3"),  # a blue backdrop, lighter at the top
+    bed=None,
+    structure=None,
+)
+PRESETS = {p.name: p for p in (OPEN_OCEAN, WAVE_FLUME, UNDERWATER, DIORAMA, DIORAMA_CLASSIC)}
 
 
 # ======================================================================== materials
@@ -195,6 +203,7 @@ SURFACES = {
     "ice": Surface(0.18, ior=1.31, clearcoat=0.6),
     "wood": Surface(0.7),
     "plain": Surface(0.6),
+    "painted": Surface(1.0, metalness=0.5),  # ÆgirFrames' solids: half metallic, matte
 }
 #: the material of an item kind that names none
 KIND_SURFACES = {
@@ -214,6 +223,23 @@ def surface_of(kind: str, material: str = "") -> str:
     if material in SURFACES:
         return material
     return KIND_SURFACES.get(kind, "plain")
+
+
+def look_colour(preset: Preset | None, kind: str, color, material: str = ""):
+    """The colour and surface a look gives an item shown in its kind's default colour
+    (no colour, colour map or material of its own chosen): ÆgirFrames' dark rock for
+    a bed, its red for structures and bodies; None when the item keeps its own."""
+    from lagoonviz.core.colormaps import PLAIN_COLORS
+
+    if preset is None or material or not isinstance(color, str):
+        return None
+    if color.lower() != PLAIN_COLORS.get(kind, "").lower():
+        return None
+    if kind == "bathymetry" and preset.bed:
+        return preset.bed, "rock"
+    if kind in ("structure", "body") and preset.structure:
+        return preset.structure, "painted"
+    return None
 
 
 # ======================================================================== environments
@@ -324,8 +350,94 @@ ENVIRONMENTS = {"sky": sky_colours, "hall": hall_colours, "deep": deep_colours}
 
 
 def environment_faces(preset: Preset, size: int = 256) -> np.ndarray:
-    """The cube map faces of a preset's surroundings."""
-    return _to_uint8(ENVIRONMENTS[preset.environment](cube_directions(size), preset))
+    """The cube map faces of a preset's surroundings: its sky picture (as Cycles shows
+    it) or LAGOON's own."""
+    d = cube_directions(size)
+    if uses_picture(preset):
+        return _to_uint8(picture_colours(d, preset))
+    return _to_uint8(ENVIRONMENTS[preset.environment](d, preset))
+
+
+def uses_picture(preset: Preset) -> bool:
+    """The 3D view shows the look's sky picture (a look with a background of its own
+    keeps that and LAGOON's surroundings)."""
+    return bool(preset.sky_picture) and preset.background is None
+
+
+#: Blender's AgX view transform, as the minimal fit of its curve (Wrensch 2023): the
+#: inset into AgX's space, the log range in stops, the outset back
+AGX_INSET = np.array(
+    [
+        [0.842479062253094, 0.0423282422610123, 0.0423756549057051],
+        [0.0784335999999992, 0.878468636469772, 0.0784336],
+        [0.0792237451477643, 0.0791661274605434, 0.879142973793104],
+    ]
+)
+AGX_OUTSET = np.array(
+    [
+        [1.19687900512017, -0.0528968517574562, -0.0529716355144438],
+        [-0.0980208811401368, 1.15190312990417, -0.0980434501171241],
+        [-0.0990297440797205, -0.0989611768448433, 1.15107367264116],
+    ]
+)
+AGX_STOPS = (-12.47393, 4.026069)
+
+
+def agx(linear: np.ndarray) -> np.ndarray:
+    """Linear light (..., 3) as Blender's AgX shows it: display values in [0, 1]."""
+    x = np.asarray(linear, np.float64) @ AGX_INSET
+    low, high = AGX_STOPS
+    x = (np.clip(np.log2(np.maximum(x, 1e-10)), low, high) - low) / (high - low)
+    x2 = x * x
+    x4 = x2 * x2
+    y = (
+        15.5 * x4 * x2
+        - 40.14 * x4 * x
+        + 31.96 * x4
+        - 6.868 * x2 * x
+        + 0.4298 * x2
+        + 0.1191 * x
+        - 0.00232
+    )
+    return np.clip(y @ AGX_OUTSET, 0.0, 1.0)
+
+
+def picture_turn(preset: Preset) -> float:
+    """How far a look's sky picture is turned about z (radians) so its sun stands at
+    the azimuth of the look's sun, as Cycles turns it."""
+    from lagoonviz.render.pathtrace import sky_sun
+
+    azimuth, _ = sky_sun(str(preset.sky_picture))
+    sun = np.asarray(preset.sun_direction, float)
+    return azimuth - float(np.arctan2(sun[1], sun[0]))
+
+
+def picture_colours(d: np.ndarray, preset: Preset) -> np.ndarray:
+    """The look's sky picture seen in directions ``d`` (..., 3), turned to its sun and
+    shown as Cycles shows it (AgX): display values."""
+    from lagoonviz.render.pathtrace import sky_picture
+
+    sky = sky_picture(str(preset.sky_picture))
+    turn = picture_turn(preset)
+    c, s = np.cos(turn), np.sin(turn)
+    x = c * d[..., 0] - s * d[..., 1]
+    y = s * d[..., 0] + c * d[..., 1]
+    z = np.clip(d[..., 2], -1.0, 1.0)
+    height, width = sky.shape[:2]
+    # Blender's equirectangular map (see panorama_directions), sampled bilinearly
+    u = (0.5 - np.arctan2(y, x) / (2 * np.pi)) * width - 0.5
+    v = (0.5 - np.arcsin(z) / np.pi) * height - 0.5
+    u0, v0 = np.floor(u).astype(int), np.floor(v).astype(int)
+    fu, fv = (u - u0)[..., None], (v - v0)[..., None]
+    rows = np.clip([v0, v0 + 1], 0, height - 1)
+    cols = np.mod([u0, u0 + 1], width)
+    linear = (
+        sky[rows[0], cols[0]] * (1 - fu) * (1 - fv)
+        + sky[rows[0], cols[1]] * fu * (1 - fv)
+        + sky[rows[1], cols[0]] * (1 - fu) * fv
+        + sky[rows[1], cols[1]] * fu * fv
+    )
+    return agx(linear)
 
 
 def panorama_directions(width: int) -> np.ndarray:

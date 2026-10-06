@@ -61,6 +61,7 @@ View
     [ ] Wave flume (cinematic)
     [ ] Underwater (cinematic)
     [ ] Diorama (cinematic)
+    [ ] Diorama classic (cinematic)
   Sun...
   ----
   [ ] Compare side by side  [Ctrl+Shift+2]

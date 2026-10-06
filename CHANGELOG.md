@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **3D view as Blender renders it**: the Open ocean, Wave flume and Diorama looks
+  show ÆgirFrames' sky picture in the 3D view too, as Cycles shows it (AgX), turned
+  to the sun, lighting the model and reflected by the water; the sun stands at the
+  picture's height. A bed in its default colour is dark rock, structures and
+  bodies ÆgirFrames' red, as in the render, and Open ocean stands on its block.
+  **Diorama classic** keeps the earlier Diorama (blue backdrop, block of sand).
 - **Opening REEF3D_Case opens the case**: REEF3D's own folder (the run log and
   control files) opened only the wave gauges; it now opens the whole case, named
   after the case folder.

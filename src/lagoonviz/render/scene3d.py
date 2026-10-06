@@ -22,7 +22,13 @@ from lagoonviz.core.data.manager import (
     VectorArrows,
 )
 from lagoonviz.core.looks import DEFAULT_SUN
-from lagoonviz.render.cinematic import PRESETS, grain_coords, surface_of
+from lagoonviz.render.cinematic import (
+    PRESETS,
+    grain_coords,
+    look_colour,
+    surface_of,
+    uses_picture,
+)
 
 #: The lights and gloss of every look: a soft sun from above for the shadows, most of
 #: the light from a headlamp that moves with the camera, so slopes keep their shading
@@ -134,11 +140,26 @@ def _look_background(look: dict, sun=None) -> gfx.Background:
 
 
 def _sun_direction(look: dict) -> np.ndarray:
+    """Towards a look's own sun; under a sky picture at the picture's sun's height (as
+    Cycles lights it), in the direction of the look's sun."""
     preset = PRESETS.get(look.get("cinematic") or "")
     if preset is None:
         return SUN_DIRECTION
     direction = np.asarray(preset.sun_direction, float)
-    return direction / np.linalg.norm(direction)
+    direction = direction / np.linalg.norm(direction)
+    if uses_picture(preset):
+        from lagoonviz.render.pathtrace import sky_sun
+
+        _, elevation = sky_sun(str(preset.sky_picture))
+        azimuth = np.arctan2(direction[1], direction[0])
+        direction = np.array(
+            [
+                np.cos(elevation) * np.cos(azimuth),
+                np.cos(elevation) * np.sin(azimuth),
+                np.sin(elevation),
+            ]
+        )
+    return direction
 
 
 def _rgba(color: str) -> tuple[float, float, float, float]:
@@ -273,12 +294,20 @@ class SceneRenderer:
         except (AttributeError, ValueError):
             pass
 
+    def _surface(self, kind: str, shown: DisplaySurface) -> tuple[str, str]:
+        """The colour and surface an item is drawn with in the look: the look's own
+        for an item in its kind's default colour (ÆgirFrames' rock, red), else its own."""
+        given = look_colour(self.preset, kind, shown.color, shown.material)
+        if given is not None and shown.values is None:
+            return given
+        return shown.color, surface_of(kind, shown.material)
+
     def _material(self, kind: str, shown: DisplaySurface) -> gfx.Material:
         preset = self.preset
         if preset is not None:
             from lagoonviz.render.cinematic import pbr_material
 
-            material = pbr_material(surface_of(kind, shown.material), preset)
+            material = pbr_material(self._surface(kind, shown)[1], preset)
         else:
             material = gfx.MeshPhongMaterial(side="both")
             self._gloss(material, kind)
@@ -309,7 +338,7 @@ class SceneRenderer:
             material.map = None
             preset = self.preset
             water = preset is not None and surface_of(kind, shown.material) == "water"
-            material.color = preset.water_color if water else shown.color
+            material.color = preset.water_color if water else self._surface(kind, shown)[0]
         opacity = shown.opacity
         if self.diorama and kind in WATER_KINDS and shown.values is None:
             opacity = min(opacity, DIORAMA_WATER_OPACITY)  # the bed shows through
@@ -393,13 +422,14 @@ class SceneRenderer:
     # ------------------------------------------------------------- the diorama's stand
     @property
     def diorama(self) -> bool:
-        """The Diorama look in 3D: the model on a stand (sides of bed and water)."""
+        """A look that shows the model on a stand (the Diorama and, as Cycles renders
+        it, Open ocean), in 3D: the sides of bed and water."""
         preset = self.preset
-        return preset is not None and preset.world == "diorama" and not self.plan
+        return preset is not None and preset.world in ("diorama", "model") and not self.plan
 
     def _update_stand(self, item_id: str) -> None:
-        """The sides of an item in the Diorama look: the bed a solid block of sand down
-        to a base, the water's sides down to the bed (see-through, in its colour)."""
+        """The sides of an item on a stand: the bed a solid block down to a base, the
+        water's sides down to the bed (see-through, in its colour)."""
         shown = self._shown.get(item_id)
         if not self.diorama or shown is None or shown.kind not in ("bathymetry", *WATER_KINDS):
             self._remove_stand(item_id)
@@ -472,9 +502,10 @@ class SceneRenderer:
 
         preset = self.preset
         if shown.kind == "bathymetry":
-            material = pbr_material("sand", preset)
+            color, surface = self._surface(shown.kind, shown.display)
+            material = pbr_material("rock" if surface == "rock" else "sand", preset)
             material.normal_map = None  # the grain needs texture coordinates the sides lack
-            material.color = shown.display.color
+            material.color = color
             return material
         material = pbr_material("water", preset)
         material.color = preset.water_color
