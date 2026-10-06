@@ -207,8 +207,8 @@ def setup_render(scene, settings: dict) -> str:
             break
         except (TypeError, ValueError):
             continue
-    for look in (settings.get("look_contrast") or "Medium High Contrast",):
-        # AgX's own contrast (the plain one is flat): named "AgX - <look>" in Blender 4
+    look = settings.get("look_contrast", "Medium High Contrast")
+    if look:  # AgX's own contrast: named "AgX - <look>" in Blender 4 (none: AgX as it is)
         for name in (f"AgX - {look}", look):
             try:
                 scene.view_settings.look = name
@@ -238,6 +238,12 @@ def setup_world(scene, folder: Path, world: dict) -> None:
     environment = nodes.new("ShaderNodeTexEnvironment")
     environment.image = bpy.data.images.load(str(folder / world["environment"]))
     links.new(environment.outputs["Color"], light.inputs["Color"])
+    if world.get("rotation"):  # a sky picture turned about z: its sun where the sun is
+        coords = nodes.new("ShaderNodeTexCoord")
+        turn = nodes.new("ShaderNodeMapping")
+        turn.inputs["Rotation"].default_value = (0.0, 0.0, float(world["rotation"]))
+        links.new(coords.outputs["Generated"], turn.inputs["Vector"])
+        links.new(turn.outputs["Vector"], environment.inputs["Vector"])
     shader = light.outputs["Background"]
     sky = physical_sky(nodes, world.get("sky"))
     if sky is not None:
@@ -512,7 +518,12 @@ def make_material(key: str, spec: dict):
         set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.1)
     if float(spec.get("alpha", 1.0)) < 1.0:
         set_input(bsdf, ("Alpha",), float(spec["alpha"]))
-    if float(spec["transmission"]) > 0:
+    if spec.get("camera_only"):
+        # ÆgirFrames' water: only the camera sees it (refracting and reflecting); light,
+        # shadows and reflections pass through it, so the bed under it is lit as in air
+        path = tree.nodes.new("ShaderNodeLightPath")
+        tree.links.new(path.outputs["Is Camera Ray"], bsdf.inputs["Alpha"])
+    elif float(spec["transmission"]) > 0:
         # sunlight passes the water surface to the bed: shadow rays see it as a
         # tinted window (the refracted light itself, caustics, would take far longer)
         output = tree.nodes.get("Material Output") or tree.nodes.new("ShaderNodeOutputMaterial")
@@ -531,7 +542,12 @@ def make_material(key: str, spec: dict):
         # haze under water)
         output = tree.nodes.get("Material Output") or tree.nodes.new("ShaderNodeOutputMaterial")
         color = rgba(volume["color"])
-        if float(volume.get("scatter", 0.0)) > 0:
+        if volume.get("absorption") is not None:  # a principled volume as given
+            medium = tree.nodes.new("ShaderNodeVolumePrincipled")
+            set_input(medium, ("Color",), color)
+            set_input(medium, ("Absorption Color",), rgba(volume["absorption"]))
+            set_input(medium, ("Density",), float(volume["density"]))
+        elif float(volume.get("scatter", 0.0)) > 0:
             # mostly absorbing; a little scattering (dark), so the haze stays blue
             medium = tree.nodes.new("ShaderNodeVolumePrincipled")
             dim = float(volume["scatter"])

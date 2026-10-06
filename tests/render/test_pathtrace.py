@@ -629,10 +629,14 @@ def test_diorama_is_a_model_on_a_stand(reef3d_run, tmp_path):
     by_name = {o["name"]: (i, o) for i, o in enumerate(frame["objects"])}
     assert SEA not in by_name and f"{bed_id}#sides" in by_name
     assert all("terrain" not in m or m["terrain"] is None for m in scene["materials"].values())
-    assert by_name[surface][1]["subdivide"] == 1
-    assert scene["sun"]["angle"] > 1.0  # soft shadows
+    assert by_name[surface][1]["subdivide"] == 2  # smooth crests, as ÆgirFrames
     water = scene["materials"][by_name[surface][1]["material"]]
     assert water["shore"]["foam"] == 0.0
+    # ÆgirFrames' ocean water: tinted glass seen by the camera only, a faint haze
+    assert water["camera_only"] and water["transmission"] == 1.0 and water["roughness"] == 0
+    assert water["color"] == pytest.approx([0.0144, 0.1384, 0.2016], abs=2e-3)
+    assert water["volume"]["density"] == pytest.approx(0.01)
+    assert water["ripples"] is None  # smooth glass in the diorama
     with np.load(tmp_path / "out" / frame["data"]) as arrays:
         bed = arrays[f"positions_{by_name[bed_id][0]}"]
         sides = arrays[f"positions_{by_name[f'{bed_id}#sides'][0]}"]
@@ -710,3 +714,64 @@ def test_white_water_follows_the_outputs(tmp_path):
     finally:
         WhiteWater._surface = original
     assert session.scene.time == 1.0
+
+
+def test_sky_picture_is_turned_to_the_sun(reef3d_run, tmp_path):
+    """Open ocean and Diorama: ÆgirFrames' sky picture lights the scene and is seen
+    behind it, turned so its sun stands in the sun's direction; plain AgX, a weak
+    lamp from where the picture's sun is."""
+    from lagoonviz.render.pathtrace import SKY_FOLDER, read_hdr, sky_sun
+
+    azimuth, elevation = sky_sun("sea_clear_sky.hdr")
+    assert math.degrees(elevation) == pytest.approx(29, abs=2)
+    session = Session()
+    session.open_case(reef3d_run)
+    path = export_scene(session, tmp_path / "a", [0.0], (64, 36), "diorama", 4)
+    scene = json.loads(path.read_text())
+    world = scene["world"]
+    assert world["sky"] is None and world["background"] is None
+    assert (tmp_path / "a" / "environment.hdr").read_bytes() == (
+        SKY_FOLDER / "sea_clear_sky.hdr"
+    ).read_bytes()
+    assert scene["exposure"] == 0.0 and scene["look_contrast"] is None
+    assert scene["sun"]["strength"] == pytest.approx(1.0)
+    lamp = np.asarray(scene["sun"]["direction"])
+    wanted = math.atan2(lamp[1], lamp[0])
+    assert math.asin(lamp[2]) == pytest.approx(elevation, abs=1e-6)  # the picture's height
+    # turning the picture by the rotation brings its sun to the lamp's direction
+    assert (azimuth - world["rotation"] - wanted + math.pi) % (2 * math.pi) == pytest.approx(
+        math.pi, abs=1e-6
+    )
+    # the session's sun: the picture turns with it, the lamp comes from it
+    session.set_sun(200.0, 40.0)
+    scene = json.loads(
+        export_scene(session, tmp_path / "b", [0.0], (64, 36), "diorama", 4).read_text()
+    )
+    turned = (azimuth - scene["world"]["rotation"]) % (2 * math.pi)
+    assert math.degrees(turned) == pytest.approx(200.0, abs=1e-4)
+    assert math.degrees(math.asin(scene["sun"]["direction"][2])) == pytest.approx(40.0, abs=1e-4)
+    # LAGOON's own sky in the other looks
+    scene = json.loads(
+        export_scene(session, tmp_path / "c", [0.0], (64, 36), "wave_flume", 4).read_text()
+    )
+    assert "rotation" not in scene["world"] and scene["look_contrast"]
+    assert read_hdr(tmp_path / "c" / "environment.hdr").shape == (512, 1024, 3)
+
+
+def test_hdr_run_lengths():
+    from lagoonviz.render.pathtrace import _rle
+
+    row = np.array([5, 5, 5, 5, 1, 2, 7, 7, 7] + [3] * 300 + [9], np.uint8)
+    coded = _rle(row)
+    assert len(coded) < 20
+    decoded = []
+    at = 0
+    while at < len(coded):
+        count = coded[at]
+        if count > 128:
+            decoded += [coded[at + 1]] * (count - 128)
+            at += 2
+        else:
+            decoded += list(coded[at + 1 : at + 1 + count])
+            at += 1 + count
+    assert decoded == row.tolist()

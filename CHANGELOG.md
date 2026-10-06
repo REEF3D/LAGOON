@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Cycles as ÆgirFrames renders**: water as tinted glass seen by the camera only
+  (light and shadows pass through to the bed), a faint haze, subdivided twice;
+  the Open ocean and Diorama looks lit by ÆgirFrames' sky picture (MIT, NTNU),
+  turned to the sun, with plain AgX; foam as their diffuse particles. Sky pictures
+  are written run-length coded.
 - **Play range**: two stripes on the timeline's slider mark where playing starts
   and ends; dragged, they restrict playback, the export dialog and films to a part
   of the run (saved with the session, `Session.set_play_range`). A **repeat**

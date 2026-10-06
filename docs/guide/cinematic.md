@@ -47,12 +47,21 @@ a separate program; Blender's window never opens.
 
 Clear water (a free surface coloured by nothing) goes to Blender as a body of
 water: the surface, walls along the sides of the domain and the shore, and a
-floor, filled with water that absorbs light on its way through (shallow water is
-clear, deep water takes the look's water colour) and, under water, scatters it.
-Its surface reflects the sky and the sun and carries small wind ripples that break
-the reflections into glitter. Water coloured by a variable stays an opaque,
-coloured surface, so its colours read. Where the water thins out to nothing at
-the shore it fades away, so the sand shows instead of a sheet of glass.
+floor. Above water it is rendered as [ÆgirFrames](https://github.com/NTNU-MCS/aegir-frames)
+renders the ocean: glass in the look's water colour that refracts and reflects
+what the camera sees, while light, shadows and reflections pass through it, so the
+bed and the structures under it are lit as in air and cast their shadows on the
+bed; a faint haze fills it. It is subdivided twice when rendered, for smooth
+crests. On the open sea it carries small wind ripples that break the reflections
+into glitter. Under water the water absorbs light the deeper it goes and scatters
+it. Water coloured by a variable stays an opaque, coloured surface, so its colours
+read. Where the water thins out to nothing at the shore it fades away, so the sand
+shows instead of a sheet of glass.
+
+The **Open ocean** and **Diorama** looks are lit by ÆgirFrames' sky picture, a
+panorama of a clear sky over the sea with a low sun, which is also seen behind the
+model. It is turned so that its sun stands in the sun's direction (*View → Sun...*);
+its sun's height is the picture's own, about 30°.
 
 In the **Open ocean** look a coast looks like one: the bed (coloured by nothing)
 is dressed by its height above the still water level and its slope, with sand

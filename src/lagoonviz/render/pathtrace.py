@@ -24,6 +24,7 @@ Everything here is NumPy only; :func:`render_folder` starts Blender.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
@@ -45,6 +46,7 @@ from lagoonviz.render.cinematic import (
     SURFACES,
     Preset,
     environment_panorama,
+    panorama_directions,
     surface_of,
     with_sun,
 )
@@ -74,43 +76,30 @@ SEA_REACH = 400.0
 SEA = "LAGOON sea"
 #: surfaces up to this many triangles are subdivided once in Blender (smooth crests)
 SUBDIVIDE_LIMIT = 2_000_000
-#: materials of white water: foam a matt white, spray droplets glinting, bubbles
-#: seen through the water
+SUBDIVIDE_TWICE = 500_000
+#: the haze inside the water (ÆgirFrames' ocean water): a principled volume that
+#: mostly absorbs, a little blue-green, per metre
+AEGIR_HAZE = {"color": [0.0428, 0.0658, 0.0732], "density": 0.01, "absorption": [0.0, 0.0, 0.0]}
+#: materials of white water, as ÆgirFrames' diffuse particles: light grey, half
+#: see-through
 WHITE_WATER: dict[str, dict[str, Any]] = {
-    "foam": {
-        "color": [0.82, 0.85, 0.86],
-        "roughness": 0.55,
+    kind: {
+        "color": [0.8, 0.8, 0.8],
+        "roughness": 0.5,
         "metallic": 0.0,
         "ior": 1.33,
-        "transmission": 0.0,
-        "coat": 0.0,
-        "alpha": 1.0,
-        "grain": None,
-        "white_water": "foam",
-    },
-    "spray": {
-        "color": [0.9, 0.93, 0.95],
-        "roughness": 0.2,
-        "metallic": 0.0,
-        "ior": 1.33,
-        "transmission": 0.3,
-        "coat": 0.0,
-        "alpha": 1.0,
-        "grain": None,
-        "white_water": "spray",
-    },
-    "bubbles": {
-        "color": [0.85, 0.9, 0.92],
-        "roughness": 0.25,
-        "metallic": 0.0,
-        "ior": 1.0,
-        "transmission": 0.0,
+        "transmission": 0.5,
         "coat": 0.0,
         "alpha": 0.7,
         "grain": None,
-        "white_water": "bubbles",
-    },
+        "white_water": kind,
+    }
+    for kind in ("foam", "spray", "bubbles")
 }
+#: sky pictures (HDR panoramas) for path tracing
+SKY_FOLDER = Path(__file__).with_name("assets")
+#: the sun lamp's strength under a sky picture (its own sun lights the scene)
+SKY_PICTURE_SUN = 1.0
 #: ``progress(done, total) -> keep going``
 Progress = Callable[[int, int], bool]
 
@@ -150,11 +139,41 @@ def write_hdr(path: str | Path, rgb: np.ndarray) -> None:
     for row in rgbe:
         chunks.append(start)
         for channel in range(4):
-            values = row[:, channel].tobytes()
-            for at in range(0, width, 128):  # literal runs of up to 128 bytes
-                piece = values[at : at + 128]
-                chunks.append(bytes((len(piece),)) + piece)
+            chunks.append(_rle(row[:, channel]))
     Path(path).write_bytes(b"".join(chunks))
+
+
+def _rle(values: np.ndarray) -> bytes:
+    """One channel of a scanline, run-length coded as Radiance does: runs of one
+    value (3 to 127 long) as count + 128 and the value, the rest as literal pieces of
+    up to 128 bytes."""
+    values = np.asarray(values, np.uint8)
+    n = len(values)
+    # where runs of equal values start, and how long they are
+    change = np.flatnonzero(np.diff(values.astype(np.int16))) + 1
+    starts = np.concatenate([[0], change])
+    lengths = np.diff(np.concatenate([starts, [n]]))
+    out = bytearray()
+    literal_from = 0
+    for begin, length in zip(starts.tolist(), lengths.tolist(), strict=True):
+        if length < 3:
+            continue
+        _literal(out, values, literal_from, begin)
+        value = int(values[begin])
+        while length >= 3:
+            count = min(length, 127)
+            out += bytes((128 + count, value))
+            begin += count
+            length -= count
+        literal_from = begin  # a tail of 1 or 2 joins the next literal piece
+    _literal(out, values, literal_from, n)
+    return bytes(out)
+
+
+def _literal(out: bytearray, values: np.ndarray, start: int, end: int) -> None:
+    for at in range(start, end, 128):
+        piece = values[at : min(at + 128, end)].tobytes()
+        out += bytes((len(piece),)) + piece
 
 
 def read_hdr(path: str | Path) -> np.ndarray:
@@ -741,7 +760,8 @@ class _Collector:
                 self.arrays[f"attribute_{index}_{key}"] = np.asarray(values, np.float32)
             entry["attributes"] = sorted(attributes)
         if subdivide and len(triangles) <= SUBDIVIDE_LIMIT:
-            entry["subdivide"] = 1  # smoothed once more in Blender (its flat faces kept)
+            # smoothed in Blender (its flat faces kept): twice, as ÆgirFrames does, unless big
+            entry["subdivide"] = 2 if len(triangles) <= SUBDIVIDE_TWICE else 1
         self.objects.append(entry)
 
     def points(self, name: str, positions, radius, material: dict[str, Any]) -> None:
@@ -950,10 +970,13 @@ class _Collector:
         }
 
     def water(self, shown, all_triangles=None) -> None:
-        """Clear water as path tracing sees it: a closed body (surface, walls, floor)
-        of glass-clear water that refracts and reflects at its surface, with small
-        ripples on it, absorbing light on the way through it in the look's water
-        colour (the deeper, the bluer), and under water also scattering it (haze)."""
+        """Clear water as path tracing sees it: a closed body (surface, walls, floor).
+
+        Above water as ÆgirFrames renders it: glass in the look's water colour, smooth
+        (ripples only on the open sea), refracting and reflecting what the camera
+        sees, while light, shadows and reflections pass through it (it is there for
+        camera rays only), with a faint dark haze inside. Under water a body that
+        absorbs light the deeper it goes and scatters it (haze)."""
         points = np.asarray(shown.positions, float)
         finite = points[np.isfinite(points).all(axis=1)]
         if not len(finite):
@@ -1007,8 +1030,11 @@ class _Collector:
         film = np.full(len(positions), 1e6, np.float32)  # walls and floor: deep
         film[: len(top)] = film_top
         tint = linear(_hex(self.preset.water_color))
-        tint = 0.3 + 0.7 * tint / max(float(tint.max()), 1e-6)  # what the water lets through
         under = self.preset.fog is not None
+        if not under:
+            self._glass_water(shown, positions, triangles, smooth, film, extent, depth, extended)
+            return
+        tint = 0.3 + 0.7 * tint / max(float(tint.max()), 1e-6)  # what the water lets through
         spec = {
             "color": [1.0, 1.0, 1.0],
             "roughness": 0.02,
@@ -1036,6 +1062,36 @@ class _Collector:
             "shore": {
                 "fade": round(0.03 * depth, 6),
                 "foam": round(0.05 * depth, 6) if self.preset.world == "coast" else 0.0,
+                "scale": round(60.0 / extent, 6),
+            }
+            if self.bed is not None
+            else None,
+        }
+        if extended is not None:  # a long, low swell under the ripples, out to sea
+            spec["swell"] = {"scale": round(4.0 / extent, 6), "strength": 0.15}
+        attributes = {"lagoon_depth": film} if self.bed is not None else None
+        self.add(shown.item_id, positions, triangles, spec, None, smooth, attributes, True)
+        self.water_bodies += 1
+
+    def _glass_water(self, shown, positions, triangles, smooth, film, extent, depth, extended):
+        """The water body as ÆgirFrames' ocean water (see :meth:`water`)."""
+        coast = self.preset.world == "coast"
+        spec = {
+            "color": linear_hex(self.preset.water_color),
+            "roughness": 0.0,
+            "metallic": 0.0,
+            "ior": 1.33,
+            "transmission": 1.0,
+            "water": True,
+            "coat": 0.0,
+            "alpha": 1.0,
+            "grain": None,
+            "camera_only": True,
+            "volume": dict(AEGIR_HAZE),
+            "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.2} if coast else None,
+            "shore": {
+                "fade": round(0.03 * depth, 6),
+                "foam": round(0.05 * depth, 6) if coast else 0.0,
                 "scale": round(60.0 / extent, 6),
             }
             if self.bed is not None
@@ -1398,24 +1454,10 @@ def export_scene(
     own = session.sun_direction()  # the session's sun, else the look's
     sun = np.asarray(own if own is not None else preset.sun_direction, float)
     sun /= np.linalg.norm(sun)
-    # the surroundings with their sun glow where the sun is
-    write_hdr(folder / "environment.hdr", environment_panorama(with_sun(preset, sun), 1024))
-    world: dict[str, Any] = {
-        "environment": "environment.hdr",
-        "strength": preset.env_intensity,
-        "background": [linear_hex(c) for c in preset.background] if preset.background else None,
-        "fog": None,
-        # under the open sky: Blender's physical sky (Nishita) when it has one; the
-        # sun itself is the sun lamp, so the sky's own sun disc stays off
-        "sky": {
-            "elevation": math.asin(float(np.clip(sun[2], -1.0, 1.0))),
-            # Cycles puts the sky's sun at azimuth rotation + 90 degrees from +x
-            "rotation": math.atan2(-float(sun[0]), float(sun[1])),
-            "strength": 0.35,
-        }
-        if preset.environment == "sky"
-        else None,
-    }
+    if preset.sky_picture:
+        world, sun = _sky_picture_world(preset, folder, sun, own is not None)
+    else:
+        world, sun = _made_world(preset, folder, sun), sun
     if preset.fog is not None and not water_bodies:  # a water body has its own haze
         color, half = preset.fog
         margin = 0.1 * (high - low) + 0.01 * extent
@@ -1425,21 +1467,25 @@ def export_scene(
             "low": (low - margin).tolist(),
             "high": (high + margin).tolist(),
         }
+    picture = bool(preset.sky_picture)
     scene = {
         "version": VERSION,
         "look": preset.name,
         "size": list(size),
         "samples": int(samples),
         "view_transform": "AgX",
-        "look_contrast": "Medium High Contrast",  # AgX's own is flat
-        "exposure": -0.6,  # the sun and the sky together: sand stays sand, not white
+        # under a sky picture as ÆgirFrames renders: AgX as it is, the picture's own
+        # light; under LAGOON's own sky, AgX's contrast and a little less exposure
+        "look_contrast": None if picture else "Medium High Contrast",
+        "exposure": 0.0 if picture else -0.6,
         "world": world,
         "sun": {
             "rotation_wxyz": _wxyz(_track_z(sun)),
             "direction": sun.tolist(),
             "color": linear_hex(preset.sun_color),
-            "strength": preset.sun,
-            "angle": preset.sun_angle,  # degrees: soft edges
+            # the picture's own sun lights the scene; the lamp only adds a little
+            "strength": SKY_PICTURE_SUN if picture else preset.sun,
+            "angle": 0.53 if picture else preset.sun_angle,  # degrees: soft edges
             "shadows": preset.shadows,
         },
         "materials": materials,
@@ -1459,6 +1505,71 @@ def export_scene(
     path = folder / "scene.json"
     path.write_text(json.dumps(scene, indent=1), encoding="utf-8")
     return path
+
+
+def _made_world(preset: Preset, folder: Path, sun: np.ndarray) -> dict[str, Any]:
+    """LAGOON's own surroundings for a look, with their sun glow where the sun is."""
+    write_hdr(folder / "environment.hdr", environment_panorama(with_sun(preset, sun), 1024))
+    world: dict[str, Any] = {
+        "environment": "environment.hdr",
+        "strength": preset.env_intensity,
+        "background": [linear_hex(c) for c in preset.background] if preset.background else None,
+        "fog": None,
+        # under the open sky: Blender's physical sky (Nishita) when it has one; the
+        # sun itself is the sun lamp, so the sky's own sun disc stays off
+        "sky": {
+            "elevation": math.asin(float(np.clip(sun[2], -1.0, 1.0))),
+            # Cycles puts the sky's sun at azimuth rotation + 90 degrees from +x
+            "rotation": math.atan2(-float(sun[0]), float(sun[1])),
+            "strength": 0.35,
+        }
+        if preset.environment == "sky"
+        else None,
+    }
+    return world
+
+
+def _sky_picture_world(preset: Preset, folder: Path, sun: np.ndarray, own: bool):
+    """A sky picture as the surroundings (ÆgirFrames' way): it lights the scene and is
+    seen behind it, turned so its sun stands in the sun's direction. Its sun's height
+    is the picture's; the lamp, weak, comes from where the picture's sun is (or from
+    the session's sun when it has one). Returns the world and the lamp's direction."""
+    source = SKY_FOLDER / str(preset.sky_picture)
+    shutil.copyfile(source, folder / "environment.hdr")
+    azimuth, elevation = sky_sun(str(preset.sky_picture))
+    wanted = math.atan2(float(sun[1]), float(sun[0]))
+    if not own:
+        lamp = np.array(
+            [
+                math.cos(elevation) * math.cos(wanted),
+                math.cos(elevation) * math.sin(wanted),
+                math.sin(elevation),
+            ]
+        )
+    else:
+        lamp = sun
+    world = {
+        "environment": "environment.hdr",
+        "strength": 1.0,
+        # the picture turned about z: its sun from ``azimuth`` to ``wanted``
+        "rotation": round(azimuth - wanted, 6),
+        "background": None,
+        "fog": None,
+        "sky": None,
+        "picture": preset.sky_picture,
+    }
+    return world, lamp
+
+
+@functools.lru_cache(maxsize=4)
+def sky_sun(name: str) -> tuple[float, float]:
+    """Azimuth and elevation (radians, as LAGOON's directions) of a sky picture's sun:
+    its brightest point."""
+    sky = read_hdr(SKY_FOLDER / name)
+    brightness = sky @ np.array([0.2126, 0.7152, 0.0722])
+    row, column = np.unravel_index(int(np.argmax(brightness)), brightness.shape)
+    d = panorama_directions(sky.shape[1])[row, column]
+    return math.atan2(float(d[1]), float(d[0])), math.asin(float(np.clip(d[2], -1.0, 1.0)))
 
 
 def _track_z(direction) -> list[float]:

@@ -72,6 +72,7 @@ def test_readmes_work_on_pypi():
 def test_package_files():
     package = Path(lagoonviz.__file__).parent
     assert (package / "render" / "blender_cycles.py").exists()  # run by Blender
+    assert (package / "render" / "assets" / "sea_clear_sky.hdr").exists()  # Cycles' sky
     assert (package / "gui" / "resources" / "icon.png").exists()
     scripts = _toml(ROOT / "pyproject.toml")["project"]["scripts"]
     assert set(scripts) == {"lagoon", "lagoon-render", "lagoon-convert"}

@@ -67,6 +67,9 @@ class Preset:
     #: how strongly the water absorbs light: over its mean depth it keeps exp(-absorb)
     absorb: float = 0.45
     sun_angle: float = 1.0  # the sun's size [degrees]: larger, softer shadows
+    #: path tracing: a sky picture (an HDR panorama in render/assets) that lights the
+    #: scene and is seen behind it, its sun turned to where the look's sun is
+    sky_picture: str | None = None
     extra: dict = field(default_factory=dict)
 
 
@@ -81,9 +84,10 @@ OPEN_OCEAN = Preset(
     sun=3.2,
     ambient=0.2,
     headlamp=0.35,
-    water_color="#0d4a5e",
+    water_color="#20687c",  # ÆgirFrames' ocean water (linear 0.014, 0.138, 0.202)
     contours="#e8eef5",
     world="coast",
+    sky_picture="sea_clear_sky.hdr",
 )
 WAVE_FLUME = Preset(
     "wave_flume",
@@ -137,13 +141,14 @@ DIORAMA = Preset(
     ambient=0.35,
     headlamp=0.45,
     env_intensity=1.1,
-    water_color="#1d5d96",  # clear blue water, deep blue through its sides
+    water_color="#20687c",  # ÆgirFrames' ocean water (linear 0.014, 0.138, 0.202)
     water_roughness=0.04,
     background=("#3e5f86", "#a9bfd3"),  # a blue backdrop, lighter at the top
     contours="#e8eef5",
     world="diorama",
     absorb=1.1,
     sun_angle=8.0,
+    sky_picture="sea_clear_sky.hdr",
 )
 PRESETS = {p.name: p for p in (OPEN_OCEAN, WAVE_FLUME, UNDERWATER, DIORAMA)}
 
