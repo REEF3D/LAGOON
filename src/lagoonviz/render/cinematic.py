@@ -60,6 +60,13 @@ class Preset:
     background: tuple[str, str] | None = None  # a gradient instead of the cube (bottom, top)
     contours: str = "#1e2833"
     shadows: bool = True
+    #: what path tracing builds around the data: "box" (the domain as it is), "coast"
+    #: (land and sea run on to the horizon) or "diorama" (a model on a stand: the bed
+    #: a solid block of sand, the water a body with clear sides)
+    world: str = "box"
+    #: how strongly the water absorbs light: over its mean depth it keeps exp(-absorb)
+    absorb: float = 0.45
+    sun_angle: float = 1.0  # the sun's size [degrees]: larger, softer shadows
     extra: dict = field(default_factory=dict)
 
 
@@ -76,6 +83,7 @@ OPEN_OCEAN = Preset(
     headlamp=0.35,
     water_color="#0d4a5e",
     contours="#e8eef5",
+    world="coast",
 )
 WAVE_FLUME = Preset(
     "wave_flume",
@@ -116,7 +124,28 @@ UNDERWATER = Preset(
     contours="#e8eef5",
     shadows=False,
 )
-PRESETS = {p.name: p for p in (OPEN_OCEAN, WAVE_FLUME, UNDERWATER)}
+DIORAMA = Preset(
+    "diorama",
+    "Diorama",
+    "sky",
+    zenith="#8fb0d0",  # a soft, even sky: the model lit as in a light tent
+    horizon="#e4ecf3",
+    ground="#5b7491",
+    sun_direction=LOOK_SUNS["diorama"],
+    sun_color="#fff8ec",
+    sun=2.0,
+    ambient=0.35,
+    headlamp=0.45,
+    env_intensity=1.1,
+    water_color="#1d5d96",  # clear blue water, deep blue through its sides
+    water_roughness=0.04,
+    background=("#3e5f86", "#a9bfd3"),  # a blue backdrop, lighter at the top
+    contours="#e8eef5",
+    world="diorama",
+    absorb=1.1,
+    sun_angle=8.0,
+)
+PRESETS = {p.name: p for p in (OPEN_OCEAN, WAVE_FLUME, UNDERWATER, DIORAMA)}
 
 
 # ======================================================================== materials

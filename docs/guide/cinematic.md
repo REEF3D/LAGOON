@@ -4,7 +4,7 @@ For showcase pictures rather than for reading values.
 
 ## Cinematic looks
 
-*View → Viewport look* has three cinematic looks besides Studio and Ocean:
+*View → Viewport look* has four cinematic looks besides Studio and Ocean:
 
 === "Open ocean"
 
@@ -23,6 +23,14 @@ For showcase pictures rather than for reading values.
     The camera below the surface: blue depth fog, light from above.
 
     ![Underwater](../images/look-underwater.png)
+
+=== "Diorama"
+
+    The model on a stand against a blue backdrop: soft light, the bed a solid
+    block of sand, the water a clear blue body seen through its sides when path
+    traced.
+
+    ![Diorama](../images/look-diorama.png)
 
 They use physically based materials: smooth water that reflects its
 surroundings, sand and rock with a fine grain, concrete, steel, ice and wood (the

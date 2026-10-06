@@ -38,8 +38,8 @@ values, over the bed), from the front or side it is an elevation of the shapes.
 
 - **Studio** (light grey, the default) and **Ocean** (dark blue): plain, even
   lighting for reading values.
-- **Open ocean**, **Wave flume** and **Underwater**: the cinematic looks, with
-  physically based materials, reflections and, under water, fog. See
+- **Open ocean**, **Wave flume**, **Underwater** and **Diorama**: the cinematic
+  looks, with physically based materials, reflections and, under water, fog. See
   [Cinematic looks and path tracing](cinematic.md).
 
 ## The sun

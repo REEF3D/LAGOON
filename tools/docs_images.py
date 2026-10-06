@@ -138,6 +138,7 @@ IMAGES: dict[str, Callable] = {
     "look-open-ocean": _view("look-open-ocean", style="open_ocean"),
     "look-wave-flume": _view("look-wave-flume", style="wave_flume"),
     "look-underwater": _view("look-underwater", style="underwater"),
+    "look-diorama": _view("look-diorama", style="diorama"),
     "figure-series": _figure("series"),
     "figure-spectra": _figure("spectra"),
     "figure-profiles": _figure("profiles"),

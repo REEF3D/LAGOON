@@ -72,6 +72,8 @@ DOT_SIZE = 8.0
 SEA_REACH = 400.0
 #: the name of the sea's object
 SEA = "LAGOON sea"
+#: surfaces up to this many triangles are subdivided once in Blender (smooth crests)
+SUBDIVIDE_LIMIT = 2_000_000
 #: ``progress(done, total) -> keep going``
 Progress = Callable[[int, int], bool]
 
@@ -677,6 +679,7 @@ class _Collector:
         rgb=None,
         smooth=None,
         attributes: dict[str, np.ndarray] | None = None,
+        subdivide: bool = False,
     ) -> None:
         positions = np.asarray(positions, np.float32).reshape(-1, 3)
         triangles = np.asarray(triangles, np.uint32).reshape(-1, 3)
@@ -700,6 +703,8 @@ class _Collector:
             for key, values in attributes.items():
                 self.arrays[f"attribute_{index}_{key}"] = np.asarray(values, np.float32)
             entry["attributes"] = sorted(attributes)
+        if subdivide and len(triangles) <= SUBDIVIDE_LIMIT:
+            entry["subdivide"] = 1  # smoothed once more in Blender (its flat faces kept)
         self.objects.append(entry)
 
     @staticmethod
@@ -788,7 +793,13 @@ class _Collector:
             if extended is not None:  # the land and the sea floor run on
                 self.add(shown.item_id, *extended, spec, None)
                 return
-        self.add(shown.item_id, shown.positions, shown.triangles, spec, rgb)
+        self.add(shown.item_id, shown.positions, shown.triangles, spec, rgb, subdivide=water)
+        if kind == "bathymetry" and self.preset.world == "diorama" and len(finite):
+            # a model on a stand: the bed a solid block of sand, its sides down to a base
+            sides = dict(spec, color=spec["color"] or linear_hex(shown.color), terrain=None)
+            positions, triangles = skirt(shown.positions, shown.triangles, self.base(finite))
+            flat = np.zeros(len(triangles), bool)
+            self.add(f"{shown.item_id}#sides", positions, triangles, sides, None, flat)
         if land:
             # the land ends in cliffs at the sides of the domain, down under the sea
             zspan = max(float(np.ptp(finite[:, 2])), 1e-6)
@@ -803,11 +814,19 @@ class _Collector:
                 np.zeros(len(triangles), bool),
             )
 
+    def base(self, bed: np.ndarray) -> float:
+        """The height of the diorama's base: under the bed by a quarter of the water's
+        greatest depth (a block of sand, not a sheet)."""
+        low = float(bed[:, 2].min())
+        span = float(np.ptp(bed[:, :2], axis=0).max()) if len(bed) else 1.0
+        depth = float(self.level) - low if self.level is not None else float(np.ptp(bed[:, 2]))
+        return low - max(0.25 * depth, 0.01 * span, 1e-6)
+
     @property
     def coast(self) -> bool:
         """Land and sea under the open sky: the bed is dressed as land above the still
         water level, and the sea runs on beyond the domain."""
-        return self.preset.environment == "sky" and self.level is not None
+        return self.preset.world == "coast" and self.level is not None
 
     def world(self) -> dict[str, float] | None:
         """Sizes of the world beyond the domain under the open sky: the domain's size
@@ -948,9 +967,12 @@ class _Collector:
             "grain": None,
             "volume": {
                 "color": [round(float(v), 4) for v in tint],
-                # straight through the water's mean depth, light keeps about two
-                # thirds (Beer-Lambert): the bed shows, deep water turns blue
-                "density": round(0.45 / (depth * max(1.0 - float(tint.mean()), 0.05)), 6),
+                # straight through the water's mean depth, light keeps exp(-absorb)
+                # (Beer-Lambert; about two thirds in most looks): the bed shows,
+                # deep water turns blue
+                "density": round(
+                    self.preset.absorb / (depth * max(1.0 - float(tint.mean()), 0.05)), 6
+                ),
                 "scatter": 0.1 if under else 0.0,
             },
             # wind ripples, much smaller than the waves: they break up the reflections
@@ -959,7 +981,7 @@ class _Collector:
             # sand); under the open sky broken foam where it breaks on the beach
             "shore": {
                 "fade": round(0.03 * depth, 6),
-                "foam": round(0.05 * depth, 6) if self.preset.environment == "sky" else 0.0,
+                "foam": round(0.05 * depth, 6) if self.preset.world == "coast" else 0.0,
                 "scale": round(60.0 / extent, 6),
             }
             if self.bed is not None
@@ -968,7 +990,7 @@ class _Collector:
         if extended is not None:  # a long, low swell under the ripples, out to sea
             spec["swell"] = {"scale": round(4.0 / extent, 6), "strength": 0.15}
         attributes = {"lagoon_depth": film} if self.bed is not None else None
-        self.add(shown.item_id, positions, triangles, spec, None, smooth, attributes)
+        self.add(shown.item_id, positions, triangles, spec, None, smooth, attributes, True)
         self.water_bodies += 1
 
     def sea_beyond(self, top: np.ndarray, triangles):
@@ -1276,7 +1298,7 @@ def export_scene(
             "direction": sun.tolist(),
             "color": linear_hex(preset.sun_color),
             "strength": preset.sun,
-            "angle": 1.0,  # degrees: soft edges, as the sky's sun
+            "angle": preset.sun_angle,  # degrees: soft edges
             "shadows": preset.shadows,
         },
         "materials": materials,

@@ -623,6 +623,35 @@ def make_mesh(name: str, positions, triangles, colors, smooth=None, attributes=N
     return mesh
 
 
+def subdivide(obj, mesh, levels: int = 1) -> None:
+    """Catmull-Clark subdivision when rendering (smooth crests, no facets); the edges
+    of flat faces (walls, floors, the sides of a block) creased, so they keep their
+    shape."""
+    try:
+        edges = np.zeros(len(mesh.loops), np.int32)
+        mesh.loops.foreach_get("edge_index", edges)
+        smooth = np.zeros(len(mesh.polygons), bool)
+        mesh.polygons.foreach_get("use_smooth", smooth)
+        totals = np.zeros(len(mesh.polygons), np.int32)
+        mesh.polygons.foreach_get("loop_total", totals)
+        crease = np.zeros(len(mesh.edges), np.float32)
+        crease[edges[~np.repeat(smooth, totals)]] = 1.0
+        if crease.any():
+            attribute = mesh.attributes.get("crease_edge")
+            if attribute is None:
+                attribute = mesh.attributes.new("crease_edge", "FLOAT", "EDGE")
+            attribute.data.foreach_set("value", crease)
+    except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+        print(f"LAGOON warning: no creases ({error!r})", flush=True)
+    modifier = obj.modifiers.new("LAGOON smooth", "SUBSURF")
+    modifier.levels = 0  # the viewport (never opened) stays light
+    modifier.render_levels = int(levels)
+    try:
+        modifier.subdivision_type = "CATMULL_CLARK"
+    except (AttributeError, TypeError):
+        pass
+
+
 def clear(collection) -> None:
     for obj in list(collection.objects):
         data = obj.data
@@ -647,6 +676,8 @@ def build_frame(collection, frame: dict, arrays, materials: dict) -> int:
         mesh.materials.append(materials[entry["material"]])
         obj = bpy.data.objects.new(entry["name"], mesh)
         collection.objects.link(obj)
+        if entry.get("subdivide"):
+            subdivide(obj, mesh, int(entry["subdivide"]))
         count += len(triangles)
     return count
 

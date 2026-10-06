@@ -13,6 +13,10 @@
   the sea out to the horizon (a long swell under the ripples). Clear water fades
   out where it thins at the shore (no more blue specks over the sand), with broken
   foam off the beach. AgX with medium high contrast instead of its flat default.
+- **Diorama look**: the model on a stand against a blue backdrop, in soft light;
+  path traced, the bed is a solid block of sand and the water a clear blue body
+  seen through its sides. Water surfaces are subdivided once when Blender renders
+  them (smooth crests; walls and floors stay flat).
 
 ## 1.0.0rc1 (first release candidate)
 

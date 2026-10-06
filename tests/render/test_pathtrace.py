@@ -359,7 +359,7 @@ def test_real_blender(reef3d_run, tmp_path):
     session = Session()
     session.open_case(reef3d_run)
     folder = Path(os.environ.get("LAGOON_TEST_OUTPUT") or tmp_path)
-    for look in ("open_ocean", "wave_flume", "underwater"):
+    for look in ("open_ocean", "wave_flume", "underwater", "diorama"):
         deadline = time.monotonic() + 900
         target = folder / f"cycles_{look}.png"
         out = path_trace(
@@ -375,7 +375,7 @@ def test_real_blender(reef3d_run, tmp_path):
     # clear water (coloured by nothing): the water must show, not only the bed
     surface = next(i.id for i in session.scene if i.kind == "free_surface")
     session.set_property(surface, "variable", "none")
-    for look in ("open_ocean", "underwater"):
+    for look in ("open_ocean", "underwater", "diorama"):
         out = path_trace(
             session, folder / f"cycles_clear_{look}.png", size=(480, 270), look=look, samples=24
         )
@@ -596,3 +596,29 @@ def test_apron_continues_the_rim_and_sinks():
     assert out[2].max() < rim.max() and out[2].min() > -20.0
     assert np.allclose(out[3], -20.0, atol=1e-6)  # far out: the deep floor
     assert np.allclose(loop_mean(rim, 100), rim.mean())
+
+
+def test_diorama_is_a_model_on_a_stand(reef3d_run, tmp_path):
+    """The bed a solid block (its sides down to a base under it), the water a closed
+    body with clear sides, smoothed when rendered; no land dressing, no sea around."""
+    session = Session()
+    session.open_case(reef3d_run)
+    surface = next(i.id for i in session.scene if i.kind == "free_surface")
+    bed_id = next(i.id for i in session.scene if i.kind == "bathymetry")
+    session.set_property(surface, "variable", "none")
+    path = export_scene(session, tmp_path / "out", [0.0], (64, 36), "diorama", 4)
+    scene = json.loads(path.read_text())
+    frame = scene["frames"][0]
+    by_name = {o["name"]: (i, o) for i, o in enumerate(frame["objects"])}
+    assert SEA not in by_name and f"{bed_id}#sides" in by_name
+    assert all("terrain" not in m or m["terrain"] is None for m in scene["materials"].values())
+    assert by_name[surface][1]["subdivide"] == 1
+    assert scene["sun"]["angle"] > 1.0  # soft shadows
+    water = scene["materials"][by_name[surface][1]["material"]]
+    assert water["shore"]["foam"] == 0.0
+    with np.load(tmp_path / "out" / frame["data"]) as arrays:
+        bed = arrays[f"positions_{by_name[bed_id][0]}"]
+        sides = arrays[f"positions_{by_name[f'{bed_id}#sides'][0]}"]
+        index = by_name[surface][0]
+        assert _closed_and_outward(arrays[f"positions_{index}"], arrays[f"triangles_{index}"]) > 0
+    assert sides[:, 2].min() < bed[:, 2].min()  # down to a base under the bed
