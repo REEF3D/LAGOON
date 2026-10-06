@@ -1088,7 +1088,9 @@ class _Collector:
             "grain": None,
             "camera_only": True,
             "volume": dict(AEGIR_HAZE),
-            "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.2} if coast else None,
+            "ripples": self._far_fade({"scale": round(120.0 / extent, 6), "strength": 0.2})
+            if coast
+            else None,
             "shore": {
                 "fade": round(0.03 * depth, 6),
                 "foam": round(0.05 * depth, 6) if coast else 0.0,
@@ -1098,10 +1100,25 @@ class _Collector:
             else None,
         }
         if extended is not None:  # a long, low swell under the ripples, out to sea
-            spec["swell"] = {"scale": round(4.0 / extent, 6), "strength": 0.15}
+            spec["swell"] = self._far_fade({"scale": round(4.0 / extent, 6), "strength": 0.15})
         attributes = {"lagoon_depth": film} if self.bed is not None else None
         self.add(shown.item_id, positions, triangles, spec, None, smooth, attributes, True)
         self.water_bodies += 1
+
+    def _far_fade(self, waves: dict[str, Any]) -> dict[str, Any]:
+        """Small waves drawn as bumps fade out far from the domain: there they are
+        smaller than a pixel (they would shimmer in stripes), and the sea far off looks
+        smooth anyway. Their noise is measured from the domain's middle."""
+        if self.bounds is None:
+            return waves
+        low, high = (np.asarray(v, float) for v in self.bounds)
+        extent = max(float(np.ptp([low[:2], high[:2]], axis=0).max()), 1e-6)
+        centre = (low + high) / 2
+        return {
+            **waves,
+            "centre": [round(float(v), 6) for v in centre],
+            "fade": [round(1.5 * extent, 6), round(6.0 * extent, 6)],
+        }
 
     def sea_beyond(self, top: np.ndarray, triangles):
         """The water's surface with the sea around it: rings out from its outer edge to
@@ -1120,7 +1137,8 @@ class _Collector:
         rings = outward_rings(xy, distances, world["extent"])
         land = apron(self.bed(xy), distances, step, world["slope"], world["deep_bed"])
         level = float(self.level)
-        decay = np.exp(-distances / max(3 * step, 0.02 * world["extent"]))[:, None]
+        # the waves at the edge run on and die out gently (no line where they stop)
+        decay = np.exp(-distances / max(3 * step, 0.1 * world["extent"]))[:, None]
         z = level + (top[loop, 2] - level)[None, :] * decay
         finite = top[np.isfinite(top).all(axis=1)]
         span = max(float(np.ptp(finite[:, 2])), 1e-6) if len(finite) else 1.0
@@ -1163,8 +1181,8 @@ class _Collector:
             "coat": 0.0,
             "alpha": 1.0,
             "grain": None,
-            "ripples": {"scale": round(120.0 / extent, 6), "strength": 0.2},
-            "swell": {"scale": round(4.0 / extent, 6), "strength": 0.25},
+            "ripples": self._far_fade({"scale": round(120.0 / extent, 6), "strength": 0.2}),
+            "swell": self._far_fade({"scale": round(4.0 / extent, 6), "strength": 0.25}),
         }
         self.add(SEA, positions, triangles, spec, None, np.zeros(len(triangles), bool))
         self.far = max(self.far, SEA_REACH * extent)

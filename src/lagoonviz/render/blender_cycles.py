@@ -469,6 +469,49 @@ def shore(tree, spec: dict) -> None:
     tree.links.new(mix.outputs["Shader"], output.inputs["Surface"])
 
 
+def wave_bump(tree, waves: dict, detail: float, roughness: float, depth: float):
+    """Small waves as a bump: noise of ``scale`` per metre, measured from ``centre``
+    (precise near the domain), fading out between the ``fade`` distances from it."""
+    scale = float(waves["scale"])
+    coords = tree.nodes.new("ShaderNodeTexCoord")
+    where = coords.outputs["Object"]
+    centre = waves.get("centre")
+    if centre is not None:
+        offset = tree.nodes.new("ShaderNodeVectorMath")
+        offset.operation = "SUBTRACT"
+        tree.links.new(where, offset.inputs[0])
+        offset.inputs[1].default_value = tuple(float(v) for v in centre)
+        where = offset.outputs["Vector"]
+    wave = tree.nodes.new("ShaderNodeTexNoise")
+    set_input(wave, ("Scale",), scale)
+    set_input(wave, ("Detail",), detail)
+    set_input(wave, ("Roughness",), roughness)
+    tree.links.new(where, wave.inputs["Vector"])
+    bump = tree.nodes.new("ShaderNodeBump")
+    set_input(bump, ("Strength",), float(waves["strength"]))
+    set_input(bump, ("Distance",), depth / max(scale, 1e-6))
+    tree.links.new(wave.outputs["Fac"], bump.inputs["Height"])
+    fade = waves.get("fade")
+    if centre is not None and fade:
+        flat = tree.nodes.new("ShaderNodeVectorMath")  # distance in the horizontal
+        flat.operation = "MULTIPLY"
+        tree.links.new(where, flat.inputs[0])
+        flat.inputs[1].default_value = (1.0, 1.0, 0.0)
+        length = tree.nodes.new("ShaderNodeVectorMath")
+        length.operation = "LENGTH"
+        tree.links.new(flat.outputs["Vector"], length.inputs[0])
+        strength = map_range(
+            tree,
+            length.outputs["Value"],
+            float(fade[0]),
+            float(fade[1]),
+            float(waves["strength"]),
+            0.0,
+        )
+        tree.links.new(strength, bump.inputs["Strength"])
+    return bump
+
+
 def principled_node(tree, color, roughness: float):
     node = tree.nodes.new("ShaderNodeBsdfPrincipled")
     set_input(node, ("Base Color",), rgba(color))
@@ -563,25 +606,12 @@ def make_material(key: str, spec: dict):
     if ripples:
         # wind ripples on the water: they break the reflections of the sky and the sun
         # into glitter, as on real water
-        coords = tree.nodes.new("ShaderNodeTexCoord")
-        wave = tree.nodes.new("ShaderNodeTexNoise")
-        set_input(wave, ("Scale",), float(ripples["scale"]))
-        set_input(wave, ("Detail",), 3.0)
-        set_input(wave, ("Roughness",), 0.5)
-        tree.links.new(coords.outputs["Object"], wave.inputs["Vector"])
-        bump = tree.nodes.new("ShaderNodeBump")
-        set_input(bump, ("Strength",), float(ripples["strength"]))
-        set_input(bump, ("Distance",), 0.2 / max(float(ripples["scale"]), 1e-6))
-        tree.links.new(wave.outputs["Fac"], bump.inputs["Height"])
+        bump = wave_bump(tree, ripples, 3.0, 0.5, 0.2)
         tree.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
         swell = spec.get("swell")
         if swell:
             # long, low swell under the ripples (the sea beyond the domain)
-            under = tree.nodes.new("ShaderNodeBump")
-            set_input(under, ("Strength",), float(swell["strength"]))
-            set_input(under, ("Distance",), 0.3 / max(float(swell["scale"]), 1e-6))
-            height = noise(tree, float(swell["scale"]), 2.0, 0.4)
-            tree.links.new(height, under.inputs["Height"])
+            under = wave_bump(tree, swell, 2.0, 0.4, 0.3)
             tree.links.new(under.outputs["Normal"], bump.inputs["Normal"])
     if spec.get("shore"):
         try:

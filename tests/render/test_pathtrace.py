@@ -553,6 +553,9 @@ def test_coast_under_the_open_sky(reef3d_run, tmp_path):
     water = scene["materials"][entry["material"]]
     assert water["shore"]["fade"] > 0 and water["shore"]["foam"] > water["shore"]["fade"]
     assert water["swell"]["scale"] > 0
+    # small waves fade out far off (no shimmering stripes on the far sea)
+    near, far = water["ripples"]["fade"]
+    assert 0 < near < far and len(water["ripples"]["centre"]) == 3
     assert entry["attributes"] == ["lagoon_depth"]
     with np.load(tmp_path / "out" / frame["data"]) as arrays:
         ground = arrays[f"positions_{by_name[bed_id][0]}"].astype(float)
