@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from lagoon_format.run import FOLDER as RUN_FOLDER
 from lagoon_format.run import Output, Run, RunLog, read_case
 
 from lagoonviz.core.data.mesh import (
@@ -1087,12 +1088,15 @@ def _prefer_stores(datasets: list[Dataset], stored: list[Dataset]) -> list[Datas
 
 def open_case(path: str | Path, stores: bool = True) -> Case:
     """Open a REEF3D case folder, one output folder, one output file or a LAGOON
-    store. ``stores=False`` leaves LAGOON stores in the case folder out (the
-    converter reads the VTK output)."""
+    store; REEF3D_Case (the run log and control files) opens its case.
+    ``stores=False`` leaves LAGOON stores in the case folder out (the converter reads
+    the VTK output)."""
     from lagoonviz.core.data.amr import AMR_FOLDER, amr_datasets
     from lagoonviz.core.data.lagoon import find_stores, store_datasets, stored_series
 
     path = Path(path).expanduser()
+    if path.is_dir() and path.name == RUN_FOLDER:
+        path = path.parent  # REEF3D's own folder (run log, control files): the whole case
     if path.is_file() and path.suffix == ".vtm" and AMR_FOLDER.match(path.parent.name):
         path = path.parent  # an AMR index: its folder (all outputs)
     if not path.exists():

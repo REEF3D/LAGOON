@@ -7,7 +7,9 @@ a moored floating box.
 ## Open the run
 
 Start LAGOON and choose *File → Open case…* (++ctrl+shift+o++), then the folder
-REEF3D wrote its `REEF3D_*` folders into. From a terminal:
+REEF3D wrote its `REEF3D_*` folders into (the folder REEF3D ran in; choosing its
+`REEF3D_Case` folder opens it too). A single output folder, such as
+`REEF3D_FNPF_WSF`, opens only that output. From a terminal:
 
 ```bash
 lagoon ~/runs/flume

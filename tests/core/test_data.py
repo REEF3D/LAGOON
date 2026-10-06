@@ -147,6 +147,13 @@ def test_open_output_folder_or_file(reef3d_run):
     assert one.path == reef3d_run
     with pytest.raises(FileNotFoundError):
         open_case(reef3d_run / "missing")
+    run_folder = reef3d_run / "REEF3D_Case"  # REEF3D's run log: opens the whole case
+    run_folder.mkdir(exist_ok=True)
+    whole = open_case(run_folder)
+    assert whole.path == reef3d_run and set(whole.datasets) == set(open_case(reef3d_run).datasets)
+    session = Session()
+    session.open_case(run_folder)
+    assert session.scene.get("case-1").name == reef3d_run.name
     empty = reef3d_run.parent / "empty"
     empty.mkdir()
     with pytest.raises(ValueError):

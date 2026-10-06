@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Opening REEF3D_Case opens the case**: REEF3D's own folder (the run log and
+  control files) opened only the wave gauges; it now opens the whole case, named
+  after the case folder.
 - **2D view lit as the 3D view**: from the top the items are still drawn flat and
   seen straight down, but shaded with their own shapes' normals, so waves, the
   bed's relief and the water's glint read as in 3D (the same look and sun).

@@ -107,7 +107,10 @@ class Session:
             children.append(AddItem("profile", profiles.name, {"source": profiles.key}))
         command = OpenCase(path, name, children)
         if name is None:
-            command.case.name = Path(path).expanduser().name or str(path)
+            given = Path(path).expanduser()
+            if given.name == "REEF3D_Case":  # REEF3D's run log folder opens its case
+                given = Path(case.path)
+            command.case.name = given.name or str(path)
             command.label = f"Open {command.case.name}"
         self.stack.execute(command)
         assert command.item_id is not None
