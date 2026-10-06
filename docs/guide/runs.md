@@ -28,6 +28,14 @@ particles), and its time series and wave profiles. When a folder holds the outpu
 of several runs, the run written last is shown. The volume, slices, iso-surfaces
 and streamlines are in the *Add* menu.
 
+The solids of the case (a monopile, a breakwater, the blocks that shape a beach)
+come from DIVEMesh: LAGOON reads `DIVEMesh_Paraview/REEF3D_Solid.vtp`, which
+DIVEMesh writes with every solid of `control.txt`, STL geometries included.
+Without it, the common solids are built from `control.txt` itself (boxes,
+cylinders, cones, spheres, wedges and polyhedra: S 10, S 32, S 33, S 41 – S 43,
+S 51, S 61 – S 63, S 81 – S 84). They are shown as one structure, *DIVEMesh
+solids*; the faces that lie in the bed REEF3D writes are left out.
+
 ## Time
 
 The timeline steps through REEF3D's outputs. Their times come from the run log

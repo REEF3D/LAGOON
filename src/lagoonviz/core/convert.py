@@ -202,7 +202,9 @@ def store_size(path: Path) -> int:
     return sum(p.stat().st_size for p in Path(path).rglob("*") if p.is_file())
 
 
-def chosen_datasets(case: Case, roles=tuple(ROLES)) -> dict[str, Dataset]:
+def chosen_datasets(
+    case: Case, roles=tuple(r for r in ROLES if r != "solid")
+) -> dict[str, Dataset]:
     """The datasets to convert, one per role: those LAGOON shows for the case (of
     several runs in a folder, the latest, unless it is only a short start)."""
     shown = case.main_datasets()

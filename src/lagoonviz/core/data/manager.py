@@ -30,7 +30,7 @@ from lagoonviz.core.scene import Scene, SceneItem
 from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
 
 #: item kinds that show a dataset, and the dataset role they use by default
-DATA_KINDS = {kind: role for role, kind in ROLES.items()} | {
+DATA_KINDS = {kind: role for role, kind in ROLES.items() if role != "solid"} | {
     "slice": "volume",
     "iso_surface": "volume",
     "streamlines": "volume",

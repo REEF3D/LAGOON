@@ -66,6 +66,7 @@ ROLES = {
     "rods": "rods",
     "particles": "particles",
     "amr": "amr",
+    "solid": "structure",  # DIVEMesh's solids (a monopile, the blocks under a beach)
 }
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
@@ -125,6 +126,7 @@ ROLE_LABELS = {
     "rods": "rod trees",
     "particles": "particles",
     "amr": "AMR surface",
+    "solid": "solids",
 }
 
 
@@ -585,9 +587,13 @@ class Case:
         """Length of the timeline: the highest output number plus one."""
         return max((d.last_step + 1 for d in self.datasets.values()), default=0)
 
+    def _shown_run(self) -> list[Dataset]:
+        """The shown datasets the run wrote (DIVEMesh's solids were written before it)."""
+        return [d for d in self.main_datasets().values() if d.role != "solid"]
+
     def main_profiles(self) -> list[ProfileSet]:
         """Wave profiles written during the shown run (as for :meth:`main_series`)."""
-        shown = list(self.main_datasets().values())
+        shown = self._shown_run()
         if not shown:
             return list(self.profiles.values())
         start = min(d.written_span()[0] for d in shown) - 600.0
@@ -600,7 +606,7 @@ class Case:
         A series belongs to the run if its file was last written while the run's
         surfaces were written. Wave gauges come first, then forces and motions.
         """
-        shown = list(self.main_datasets().values())
+        shown = self._shown_run()
         if shown:
             start = min(d.written_span()[0] for d in shown) - 600.0
             end = max(d.written_span()[1] for d in shown) + 600.0
@@ -663,9 +669,14 @@ class Case:
         if options:
             chosen["amr"] = preferred(options)
             chosen.pop("free_surface", None)
+        # DIVEMesh's solids belong to the case, not to a run: always shown
+        solids = [d for d in self.datasets.values() if d.role == "solid"]
+        if solids:
+            chosen["solid"] = solids[0]
         # beds are drawn first, so a transparent free surface shows them
         order = (
             "bed",
+            "solid",
             "structure",
             "body",
             "dem",
@@ -687,6 +698,70 @@ class Case:
                 f"variables: {', '.join(dataset.components)}"
             )
         return "\n".join(lines)
+
+
+class SolidDataset(Dataset):
+    """DIVEMesh's solids of a case (:mod:`lagoonviz.core.data.divemesh`): one frame,
+    shown at any time, read from DIVEMesh_Paraview/REEF3D_Solid.vtp or built from
+    control.txt. The faces that lie in the bed (``bed_source``'s first frame) are
+    left out."""
+
+    def __init__(self, source: Path, case_dir: Path) -> None:
+        self.source = source
+        #: the bed whose faces the solids leave out (set when the case is opened)
+        self.bed_source: Dataset | None = None
+        self._mesh: SurfaceMesh | None = None
+        super().__init__(
+            "divemesh_solids", "DIVEMesh", "solid", [Frame(0, source, [source])], case_dir
+        )
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        return "PolyData", {}
+
+    @property
+    def label(self) -> str:
+        return "DIVEMesh solids"
+
+    def read(self, index: int = 0, variables: list[str] | None = None) -> SurfaceMesh:
+        if self._mesh is None:
+            self._mesh = self._build()
+        return self._mesh
+
+    def _build(self) -> SurfaceMesh:
+        from lagoonviz.core.data.divemesh import bed_faces, solids_from_control
+
+        if self.source.suffix == ".vtp":
+            mesh = self._read_plain(self.frames[0], [], False)
+            points, triangles = mesh.points, mesh.triangles
+        else:
+            points, triangles, _ = solids_from_control(self.source)
+        if self.bed_source is not None and len(triangles):
+            try:
+                bed = self.bed_source.read(0, []).points
+            except (OSError, ValueError):
+                bed = None
+            if bed is not None:
+                triangles = triangles[~bed_faces(points, triangles, bed)]
+        return SurfaceMesh(
+            points=np.ascontiguousarray(points, dtype=np.float32),
+            triangles=np.ascontiguousarray(triangles, dtype=np.uint32),
+            point_data={},
+        ).with_normals()
+
+    def written_span(self) -> tuple[float, float]:
+        try:
+            written = self.source.stat().st_mtime
+        except OSError:
+            written = 0.0
+        return written, written
+
+
+def solid_datasets(case_dir: Path) -> list[Dataset]:
+    """DIVEMesh's solids of a case folder, when it has any."""
+    from lagoonviz.core.data.divemesh import find_solids
+
+    source = find_solids(case_dir)
+    return [SolidDataset(source, case_dir)] if source is not None else []
 
 
 # ----------------------------------------------------------------- discovery
@@ -1064,6 +1139,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
             # a plain folder with VTU/VTP files
             datasets = _dataset_from_folder(path)
     datasets = _prefer_stores(datasets, stored)
+    if path == case_dir or store_paths:  # the case itself: its solids too
+        datasets += solid_datasets(case_dir)
     series = find_series(case_dir)
     profiles = find_profiles(case_dir)
     if store_paths:  # tables and profiles of LAGOON stores replace the text files
@@ -1084,4 +1161,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
             n += 1
         dataset.key = key
         case.datasets[key] = dataset
+    for dataset in case.datasets.values():
+        if isinstance(dataset, SolidDataset):
+            dataset.bed_source = case.by_role("bed")
     return case

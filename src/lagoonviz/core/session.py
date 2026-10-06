@@ -95,8 +95,8 @@ class Session:
         for role, dataset in case.main_datasets().items():
             kind = ROLES[role]
             props: dict[str, Any] = {}
-            if sum(d.role == role for d in case.datasets.values()) > 1:
-                props["dataset"] = dataset.key
+            if sum(d.role == role for d in case.datasets.values()) > 1 or role == "solid":
+                props["dataset"] = dataset.key  # (solids: shown as a structure)
             variable = dataset.default_variable()
             if variable != KINDS[kind].properties["variable"].default:
                 props["variable"] = variable

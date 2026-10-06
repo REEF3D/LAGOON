@@ -13,6 +13,10 @@
   the sea out to the horizon (a long swell under the ripples). Clear water fades
   out where it thins at the shore (no more blue specks over the sand), with broken
   foam off the beach. AgX with medium high contrast instead of its flat default.
+- **DIVEMesh solids**: a case shows its solids (a monopile, a breakwater, the
+  blocks under a beach) as a structure, read from DIVEMesh's
+  `DIVEMesh_Paraview/REEF3D_Solid.vtp` or, without it, built from the S commands
+  of `control.txt`; their faces in the bed are left out.
 - **Diorama look**: the model on a stand against a blue backdrop, in soft light;
   path traced, the bed is a solid block of sand and the water a clear blue body
   seen through its sides. Water surfaces are subdivided once when Blender renders
