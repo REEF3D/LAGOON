@@ -233,8 +233,10 @@ def film_code(
     overlay: bool = False,
     engine: str = "pygfx",
     samples: int = 64,
+    foam: bool = True,
 ) -> str:
-    """File → Export animation (``engine`` "cycles": path traced by Blender)."""
+    """File → Export animation (``engine`` "cycles": path traced by Blender, with
+    white water unless ``foam`` is off)."""
     imports = ["from lagoonviz.render.movie import frame_times, write_movie"]
     body = [line for line in _view(0.0, camera, plan) if not line.startswith("session.set_time")]
     body.append(f"times = frame_times(session, {start!r}, {end!r}, {int(every)!r})")
@@ -254,6 +256,7 @@ def film_code(
                     repr(style),
                     repr(int(samples)),
                     repr(float(fps)),
+                    *([] if foam else ["foam=False"]),
                 ],
             )
         )

@@ -13,6 +13,11 @@
   the sea out to the horizon (a long swell under the ripples). Clear water fades
   out where it thins at the shore (no more blue specks over the sand), with broken
   foam off the beach. AgX with medium high contrast instead of its flat default.
+- **Foam, spray and bubbles** in path traced films and stills: white water born
+  where REEF3D flags breaking, on sharp fast crests and where the surface flow
+  traps air, then spray flying, foam drifting and fading, bubbles rising
+  (diffuse particles after Ihmsen et al. 2012, scaled to the case), rendered by
+  Cycles as point clouds. *Foam and spray* in the export dialog, `--no-foam`.
 - **DIVEMesh solids**: a case shows its solids (a monopile, a breakwater, the
   blocks under a beach) as a structure, read from DIVEMesh's
   `DIVEMesh_Paraview/REEF3D_Solid.vtp` or, without it, built from the S commands

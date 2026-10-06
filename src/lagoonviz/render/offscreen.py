@@ -99,6 +99,12 @@ def main(argv: list[str] | None = None) -> int:
     cycles.add_argument("--samples", type=int, default=64, help="Cycles samples per pixel")
     cycles.add_argument("--blender", help="the Blender executable (default: found)")
     cycles.add_argument(
+        "--no-foam",
+        dest="foam",
+        action="store_false",
+        help="no white water (default: foam, spray and bubbles where the surface breaks)",
+    )
+    cycles.add_argument(
         "--fresh",
         action="store_true",
         help="render every frame again (default: keep frames rendered before from the "
@@ -170,6 +176,7 @@ def _path_trace(session: Session, args, size: tuple[int, int]) -> int:
         report,
         resume=not args.fresh,
         status=blender_says,
+        foam=args.foam,
     )
     print(f"\nwrote {written} ({size[0]}x{size[1]}, Cycles)")
     return 0

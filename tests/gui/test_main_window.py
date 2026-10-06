@@ -615,6 +615,9 @@ def test_export_dialog_path_traced(window, reef3d_run, monkeypatch, tmp_path):
     settings = dialog.settings()
     assert settings["engine"] == "cycles" and settings["samples"] == 64
     assert settings["overlay"] is False  # Cycles films show the scene alone
+    assert settings["foam"] is True  # white water unless turned off
+    dialog.foam.setChecked(False)
+    assert dialog.settings()["foam"] is False
     blender = tmp_path / "blender"
     blender.write_text("")
     monkeypatch.setattr(pathtrace, "find_blender", lambda: str(blender))

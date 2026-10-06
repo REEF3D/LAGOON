@@ -74,6 +74,21 @@ lagoon-render flume.lagoon-session still.png --engine cycles --style open_ocean
 lagoon-render flume.lagoon-session film.mp4 --engine cycles --samples 64 --size 1920x1080
 ```
 
+### Foam, spray and bubbles
+
+Path traced films and stills show white water where the free surface breaks:
+spray thrown off the crests, foam drifting on the surface and fading, bubbles
+under it rising to the top. It is born where REEF3D flags breaking (NHFLOW's
+`breaking`), on sharp crests whose water runs forward fast, and where the
+surface flow converges and traps air, and it moves with the free surface's
+velocity from output to output. Its size and lifetime scale with the case (the
+cells and the water depth), so a flume and a coast look alike. A still runs the
+foam from a few wave periods before its time, so it has formed.
+
+It needs the free surface's velocity on its grid (NHFLOW and FNPF write it) and
+the output times in seconds. *Foam and spray* in the export dialog, or
+`--no-foam` on the command line, turns it off.
+
 ### Time
 
 Path tracing takes from seconds to minutes per frame, depending on the size, the

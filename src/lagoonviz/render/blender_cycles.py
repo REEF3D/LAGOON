@@ -30,8 +30,11 @@ import bpy  # Blender's own module: only there inside Blender
 import numpy as np
 
 COLLECTION = "LAGOON frame"
+#: geometry node groups drawing particles, one per material (made once)
+POINT_GROUPS: dict = {}
 COLOR_ATTRIBUTE = "lagoon_color"
 DEPTH_ATTRIBUTE = "lagoon_depth"  # how deep the water is, per corner of its surface
+RADIUS_ATTRIBUTE = "lagoon_radius"  # the size of each particle of white water
 
 
 # ======================================================================== helpers
@@ -652,6 +655,65 @@ def subdivide(obj, mesh, levels: int = 1) -> None:
         pass
 
 
+def points_group(material):
+    """A geometry node group drawing a mesh's vertices as spheres (a point cloud,
+    which Cycles renders directly) of radius ``lagoon_radius``, in ``material``."""
+    group = bpy.data.node_groups.new(f"LAGOON points {material.name}", "GeometryNodeTree")
+    interface = getattr(group, "interface", None)
+    if interface is not None:  # Blender 4
+        interface.new_socket(name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+        interface.new_socket(name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    else:  # Blender 3
+        group.inputs.new("NodeSocketGeometry", "Geometry")
+        group.outputs.new("NodeSocketGeometry", "Geometry")
+    nodes, links = group.nodes, group.links
+    source = nodes.new("NodeGroupInput")
+    sink = nodes.new("NodeGroupOutput")
+    to_points = nodes.new("GeometryNodeMeshToPoints")
+    radius = nodes.new("GeometryNodeInputNamedAttribute")
+    radius.data_type = "FLOAT"
+    radius.inputs["Name"].default_value = RADIUS_ATTRIBUTE
+    value = radius.outputs.get("Attribute") or next(o for o in radius.outputs if o.enabled)
+    paint = nodes.new("GeometryNodeSetMaterial")
+    paint.inputs["Material"].default_value = material
+    links.new(source.outputs[0], to_points.inputs["Mesh"])
+    links.new(value, to_points.inputs["Radius"])
+    links.new(to_points.outputs["Points"], paint.inputs["Geometry"])
+    links.new(paint.outputs["Geometry"], sink.inputs[0])
+    return group
+
+
+def make_points(name: str, positions, radius, material, groups: dict):
+    """Particles (foam, spray, bubbles) as an object: a point cloud of spheres by
+    geometry nodes, or small tetrahedra where those fail."""
+    positions = np.ascontiguousarray(positions, np.float32).reshape(-1, 3)
+    radius = np.ascontiguousarray(radius, np.float32).reshape(-1)
+    try:
+        group = groups.get(material.name)
+        if group is None:
+            group = groups[material.name] = points_group(material)
+        mesh = bpy.data.meshes.new(name)
+        mesh.vertices.add(len(positions))
+        mesh.vertices.foreach_set("co", positions.ravel())
+        attribute = mesh.attributes.new(RADIUS_ATTRIBUTE, "FLOAT", "POINT")
+        attribute.data.foreach_set("value", radius)
+        mesh.update()
+        mesh.materials.append(material)
+        obj = bpy.data.objects.new(name, mesh)
+        modifier = obj.modifiers.new("LAGOON points", "NODES")
+        modifier.node_group = group
+        return obj
+    except (AttributeError, KeyError, RuntimeError, StopIteration, TypeError) as error:
+        print(f"LAGOON warning: particles as tetrahedra ({error!r})", flush=True)
+    corners = np.array([(1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)], np.float32)
+    points = (positions[:, None, :] + radius[:, None, None] * corners).reshape(-1, 3)
+    faces = np.array([(0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)])
+    triangles = (np.arange(len(positions))[:, None, None] * 4 + faces).reshape(-1, 3)
+    mesh = make_mesh(name, points, triangles, None, np.zeros(len(triangles), bool))
+    mesh.materials.append(material)
+    return bpy.data.objects.new(name, mesh)
+
+
 def clear(collection) -> None:
     for obj in list(collection.objects):
         data = obj.data
@@ -665,6 +727,17 @@ def build_frame(collection, frame: dict, arrays, materials: dict) -> int:
     clear(collection)
     count = 0
     for index, entry in enumerate(frame["objects"]):
+        if entry.get("points"):  # white water: a cloud of small spheres
+            obj = make_points(
+                entry["name"],
+                arrays[f"points_{index}"],
+                arrays[f"radius_{index}"],
+                materials[entry["material"]],
+                POINT_GROUPS,
+            )
+            collection.objects.link(obj)
+            count += len(arrays[f"points_{index}"])
+            continue
         positions = arrays[f"positions_{index}"]
         triangles = arrays[f"triangles_{index}"]
         colors = arrays[f"colors_{index}"] if entry.get("colors") else None

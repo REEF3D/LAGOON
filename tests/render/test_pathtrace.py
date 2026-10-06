@@ -349,7 +349,7 @@ def test_command_line_cycles(reef3d_run, tmp_path, fake_blender, capsys):
 
 
 @pytest.mark.skipif(find_blender() is None, reason="Blender not installed")
-def test_real_blender(reef3d_run, tmp_path):
+def test_real_blender(reef3d_run, tmp_path, monkeypatch):
     """Blender itself: one small frame per look. The first run compiles Cycles'
     GPU kernels (some minutes); later ones take seconds. With LAGOON_TEST_OUTPUT
     set, the images are kept there; while one renders, Blender's output is in
@@ -380,6 +380,23 @@ def test_real_blender(reef3d_run, tmp_path):
             session, folder / f"cycles_clear_{look}.png", size=(480, 270), look=look, samples=24
         )
         assert out.read_bytes().startswith(b"\x89PNG"), look
+    # white water: point clouds by geometry nodes (here a band of foam and spray)
+    from lagoonviz.render import pathtrace
+
+    def particles(self, time):
+        rng = np.random.default_rng(0)
+        foam = np.c_[rng.uniform(2, 6, 4000), rng.uniform(0, 4, 4000), np.full(4000, 2.08)]
+        spray = foam[:600] + [0.0, 0.0, 0.3]
+        return {
+            "foam": (foam.astype(np.float32), np.full(4000, 0.03, np.float32)),
+            "spray": (spray.astype(np.float32), np.full(600, 0.015, np.float32)),
+        }
+
+    monkeypatch.setattr(pathtrace.WhiteWater, "at", particles)
+    out = path_trace(
+        session, folder / "cycles_foam_diorama.png", size=(480, 270), look="diorama", samples=24
+    )
+    assert out.read_bytes().startswith(b"\x89PNG")
 
 
 def test_blender_progress_lines():
@@ -622,3 +639,74 @@ def test_diorama_is_a_model_on_a_stand(reef3d_run, tmp_path):
         index = by_name[surface][0]
         assert _closed_and_outward(arrays[f"positions_{index}"], arrays[f"triangles_{index}"]) > 0
     assert sides[:, 2].min() < bed[:, 2].min()  # down to a base under the bed
+
+
+def test_white_water_goes_to_blender(reef3d_run, tmp_path, fake_blender, monkeypatch):
+    """Foam, spray and bubbles become point clouds with their own materials; Blender
+    builds them (here: the stand-in) beside the meshes."""
+    from lagoonviz.render import pathtrace
+
+    calls = []
+
+    def particles(self, time):
+        calls.append(time)
+        rng = np.random.default_rng(int(time * 10))
+        return {
+            "foam": (rng.random((50, 3)).astype(np.float32), np.full(50, 0.01, np.float32)),
+            "spray": (rng.random((20, 3)).astype(np.float32), np.full(20, 0.005, np.float32)),
+        }
+
+    monkeypatch.setattr(pathtrace.WhiteWater, "at", particles)
+    session = Session()
+    session.open_case(reef3d_run)
+    folder = tmp_path / "film.cycles"
+    path = export_scene(session, folder, [0.0, 1.0], (64, 36), "diorama", 4)
+    assert calls == [0.0, 1.0]
+    scene = json.loads(path.read_text())
+    frame = scene["frames"][1]
+    by_name = {o["name"]: (i, o) for i, o in enumerate(frame["objects"])}
+    index, foam = by_name["LAGOON foam"]
+    assert foam["points"] and scene["materials"][foam["material"]]["white_water"] == "foam"
+    with np.load(folder / frame["data"]) as arrays:
+        assert arrays[f"points_{index}"].shape == (50, 3)
+        assert arrays[f"radius_{index}"].shape == (50,)
+    images = render_folder(folder, fake_blender)
+    assert len(images) == 2
+    # without foam: no particles
+    calls.clear()
+    path = export_scene(session, tmp_path / "plain", [0.0], (64, 36), "diorama", 4, foam=False)
+    assert not calls
+    names = [o["name"] for o in json.loads(path.read_text())["frames"][0]["objects"]]
+    assert "LAGOON foam" not in names
+
+
+def test_white_water_follows_the_outputs(tmp_path):
+    """The simulation reads the free surface output by output, from a warm-up before
+    the first time, without moving the session's time."""
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.render.pathtrace import WhiteWater
+
+    run = make_run(tmp_path / "run", frames=6, print_interval=0.5)
+    session = Session()
+    session.open_case(run)
+    session.set_time(1.0)
+    white = WhiteWater(session)
+    assert white.ok
+    read = []
+    original = WhiteWater._surface
+
+    def spy(self, time):
+        read.append(time)
+        return original(self, time)
+
+    WhiteWater._surface = spy
+    try:
+        white.at(2.0)
+        assert read[0] == 2.0 and min(read) < 2.0 and max(read) == 2.0
+        read.clear()
+        white.at(2.5)  # on from where it was
+        assert read == [2.5]
+    finally:
+        WhiteWater._surface = original
+    assert session.scene.time == 1.0

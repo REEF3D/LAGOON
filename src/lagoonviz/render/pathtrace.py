@@ -74,6 +74,43 @@ SEA_REACH = 400.0
 SEA = "LAGOON sea"
 #: surfaces up to this many triangles are subdivided once in Blender (smooth crests)
 SUBDIVIDE_LIMIT = 2_000_000
+#: materials of white water: foam a matt white, spray droplets glinting, bubbles
+#: seen through the water
+WHITE_WATER: dict[str, dict[str, Any]] = {
+    "foam": {
+        "color": [0.82, 0.85, 0.86],
+        "roughness": 0.55,
+        "metallic": 0.0,
+        "ior": 1.33,
+        "transmission": 0.0,
+        "coat": 0.0,
+        "alpha": 1.0,
+        "grain": None,
+        "white_water": "foam",
+    },
+    "spray": {
+        "color": [0.9, 0.93, 0.95],
+        "roughness": 0.2,
+        "metallic": 0.0,
+        "ior": 1.33,
+        "transmission": 0.3,
+        "coat": 0.0,
+        "alpha": 1.0,
+        "grain": None,
+        "white_water": "spray",
+    },
+    "bubbles": {
+        "color": [0.85, 0.9, 0.92],
+        "roughness": 0.25,
+        "metallic": 0.0,
+        "ior": 1.0,
+        "transmission": 0.0,
+        "coat": 0.0,
+        "alpha": 0.7,
+        "grain": None,
+        "white_water": "bubbles",
+    },
+}
 #: ``progress(done, total) -> keep going``
 Progress = Callable[[int, int], bool]
 
@@ -707,6 +744,23 @@ class _Collector:
             entry["subdivide"] = 1  # smoothed once more in Blender (its flat faces kept)
         self.objects.append(entry)
 
+    def points(self, name: str, positions, radius, material: dict[str, Any]) -> None:
+        """Particles drawn as small spheres (Blender's point clouds): foam, spray."""
+        positions = np.asarray(positions, np.float32).reshape(-1, 3)
+        if not len(positions):
+            return
+        index = len(self.objects)
+        self.arrays[f"points_{index}"] = positions
+        self.arrays[f"radius_{index}"] = np.asarray(radius, np.float32).reshape(-1)
+        self.objects.append(
+            {"name": name, "material": self.material(material), "colors": False, "points": True}
+        )
+
+    def white_water(self, particles: dict[str, tuple[np.ndarray, np.ndarray]]) -> None:
+        """Foam, spray and bubbles (:mod:`lagoonviz.core.foam`), each with its material."""
+        for kind, (positions, radius) in particles.items():
+            self.points(f"LAGOON {kind}", positions, radius, WHITE_WATER[kind])
+
     @staticmethod
     def plain(color: str | None, roughness: float = 0.5) -> dict[str, Any]:
         return {
@@ -1178,6 +1232,88 @@ def camera_state_at(session, time: float, bounds) -> dict[str, Any]:
     return state
 
 
+class WhiteWater:
+    """Foam, spray and bubbles for the frames of a film (:mod:`lagoonviz.core.foam`):
+    the simulation runs through REEF3D's outputs up to each frame's time, from a
+    warm-up before the first one, so a still shows foam that has had time to form.
+    Off (``ok`` False) without a free surface with velocity on a grid, or without
+    times in seconds."""
+
+    def __init__(self, session, settings=None) -> None:
+        from lagoonviz.core.foam import FoamSettings
+
+        self.session = session
+        self.settings = settings or FoamSettings()
+        self.item = next(
+            (
+                item_id
+                for item_id in session.data.data_items()
+                if session.scene.get(item_id).kind == "free_surface"
+                and session.scene.get(item_id).visible
+            ),
+            None,
+        )
+        times, _, unit = session.data.timeline()
+        self.outputs = np.asarray(times, float) if unit == "s" else np.zeros(0)
+        self.sim = None
+        self.grid = None
+        self.ok = self.item is not None and len(self.outputs) > 0
+
+    def _surface(self, time: float):
+        """The free surface's grid at a time (heights as drawn, velocity, breaking)."""
+        from lagoonviz.core.foam import SurfaceGrid
+
+        data = self.session.data  # read directly: the session's time stays
+        dataset = data.dataset(self.item)
+        index = data.frame_index(self.item, time)
+        if dataset is None or index is None or "velocity" not in dataset.components:
+            return None, None
+        wanted = [n for n in ("velocity", "breaking", "WL", "depth") if n in dataset.components]
+        raw = dataset.read(index, wanted)
+        points = data.placed(self.item, raw.points)  # exaggerated as drawn
+        grid = SurfaceGrid.from_points(
+            points, raw.point_data["velocity"], raw.point_data.get("breaking")
+        )
+        depth = None
+        for name in ("WL", "depth"):  # the water depth (NHFLOW: WL, FNPF: depth)
+            if name in raw.point_data and depth is None:
+                values = np.asarray(raw.point_data[name], float)
+                values = values[np.isfinite(values) & (values > 0)]
+                depth = float(np.median(values)) if len(values) else None
+        return grid, depth
+
+    def at(self, time: float) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        """The white water at a time (per kind: positions and radii)."""
+        from lagoonviz.core.foam import FoamSimulation
+
+        if not self.ok:
+            return {}
+        if self.sim is None or self.sim.time is None or time < self.sim.time - 1e-9:
+            grid, depth = self._surface(time)
+            if grid is None:
+                self.ok = False
+                return {}
+            if depth is None:
+                depth = max(float(np.nanmax(grid.z) - np.nanmin(grid.z)) * 5.0, 10 * grid.h)
+            self.sim = FoamSimulation(depth, self.settings)
+            warm = 10.0 * self.sim.unit_time  # long enough for foam to form and fade
+            before = self.outputs[(self.outputs >= time - warm) & (self.outputs < time)]
+            start = float(before[0]) if len(before) else time
+            self.grid, _ = self._surface(start)
+            self.sim.time = start
+        steps = self.outputs[(self.outputs > self.sim.time + 1e-9) & (self.outputs < time)]
+        for t in [*steps.tolist(), time]:
+            if t <= self.sim.time + 1e-9:
+                continue
+            grid, _ = self._surface(t)
+            if grid is None or self.grid is None or grid.z.shape != self.grid.z.shape:
+                self.grid, self.sim.time = grid, t  # a jump: start afresh from here
+                continue
+            self.sim.advance(self.grid, grid, self.sim.time, t)
+            self.grid = grid
+        return self.sim.particles()
+
+
 def export_scene(
     session,
     folder: str | Path,
@@ -1186,9 +1322,11 @@ def export_scene(
     look: str = "open_ocean",
     samples: int = 64,
     progress: Progress | None = None,
+    foam: bool = True,
 ) -> Path:
     """Write the session at ``times`` for Blender: ``scene.json``, a ``frame_NNNNN.npz``
-    per time and ``environment.hdr``. Returns the path of ``scene.json``."""
+    per time and ``environment.hdr``. With ``foam``, white water (foam, spray and
+    bubbles) where the free surface breaks. Returns the path of ``scene.json``."""
     folder = Path(folder).expanduser()
     folder.mkdir(parents=True, exist_ok=True)
     preset = look_preset(look)
@@ -1197,6 +1335,7 @@ def export_scene(
         raise ValueError("nothing to render: no times")
     size = (int(size[0]), int(size[1]))
     original_time = session.scene.time
+    white = WhiteWater(session) if foam else None
     frames = []
     materials: dict[str, dict[str, Any]] = {}
     water_bodies = 0
@@ -1204,6 +1343,7 @@ def export_scene(
     low = high = None
     try:
         for number, time in enumerate(times):
+            particles = white.at(time) if white is not None else {}
             session.set_time(time)
             bounds = _bounds(session)
             if bounds is not None:
@@ -1212,6 +1352,7 @@ def export_scene(
             camera = blender_camera(camera_state_at(session, time, bounds), size)
             centre = (bounds[0] + bounds[1]) / 2 if bounds is not None else np.zeros(3)
             collector = _frame_objects(session, preset, pixel_size(camera, centre, size[1]), bounds)
+            collector.white_water(particles)
             water_bodies += collector.water_bodies
             fars.append(collector.far)
             # one material table for the film: the frame's keys renamed into it
@@ -1519,6 +1660,7 @@ def path_trace(
     resume: bool = True,
     cancel: Callable[[], bool] | None = None,
     status: Callable[[str], None] | None = None,
+    foam: bool = True,
 ) -> Path:
     """Path trace the session with Blender: a still (``.png``, at ``times[0]`` or the
     session's time), a film (``.mp4``/``.mov``) or numbered PNGs (a folder). The
@@ -1536,7 +1678,7 @@ def path_trace(
     times = list(times)[:1] if still else list(times)
     keep = work is not None or not still
     work = Path(work) if work is not None else work_folder(output)
-    export_scene(session, work, times, size, look, samples)
+    export_scene(session, work, times, size, look, samples, foam=foam)
     written = finish(work, output, fps, blender, progress, resume, cancel, status)
     if not keep:  # a still keeps no frames (on failure, the folder and its log stay)
         shutil.rmtree(work, ignore_errors=True)

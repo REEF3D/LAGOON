@@ -150,9 +150,16 @@ class ExportAnimationDialog(QDialog):
             "or set LAGOON_BLENDER"
         )
         self.blender_label.setWordWrap(True)
+        self.foam = QCheckBox("Foam and spray")
+        self.foam.setChecked(True)
+        self.foam.setToolTip(
+            "White water where the surface breaks: spray off the crests, foam drifting "
+            "on the surface, bubbles under it (from the free surface's velocity)"
+        )
         cycles = QHBoxLayout()
         cycles.addWidget(QLabel("samples"))
         cycles.addWidget(self.samples)
+        cycles.addWidget(self.foam)
         cycles.addWidget(self.blender_label, 1)
         self.cycles_row = QWidget()
         self.cycles_row.setLayout(cycles)
@@ -205,6 +212,7 @@ class ExportAnimationDialog(QDialog):
             "overlay": self.overlay.isChecked() and self.overlay.isEnabled(),
             "engine": self.engine.currentData(),
             "samples": self.samples.value(),
+            "foam": self.foam.isChecked(),
         }
 
 
@@ -390,6 +398,7 @@ def _record_film(session: Session, path: Path, settings: dict, style: str) -> No
                 overlay=bool(settings["overlay"]),
                 engine=settings.get("engine", "pygfx"),
                 samples=settings.get("samples", 64),
+                foam=settings.get("foam", True),
             )
         )
     except Exception:  # noqa: BLE001 (the film is written; only the script misses it)
@@ -413,7 +422,16 @@ def _path_trace(session, path, times, settings, style, progress, blender) -> Pat
         return not progress.wasCanceled()
 
     try:
-        export_scene(session, work, times, settings["size"], style, settings["samples"], prepared)
+        export_scene(
+            session,
+            work,
+            times,
+            settings["size"],
+            style,
+            settings["samples"],
+            prepared,
+            foam=settings.get("foam", True),
+        )
     except Exception as error:  # noqa: BLE001 (report, keep the window)
         log.error("path tracing export failed:\n%s", traceback.format_exc())
         QMessageBox.warning(progress.parentWidget(), "Export animation", f"Failed:\n{error}")
