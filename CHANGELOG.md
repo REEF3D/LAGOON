@@ -27,8 +27,8 @@
   `DIVEMesh_Paraview/REEF3D_Solid.vtp` or, without it, built from the S commands
   of `control.txt`; their faces in the bed are left out.
 - **Diorama look**: the model on a stand against a blue backdrop, in soft light;
-  path traced, the bed is a solid block of sand and the water a clear blue body
-  seen through its sides. Water surfaces are subdivided once when Blender renders
+  the bed a solid block of sand and the water see-through with blue sides, in the
+  3D view as path traced (there a clear blue body of water). Water surfaces are subdivided once when Blender renders
   them (smooth crests; walls and floors stay flat).
 
 ## 1.0.0rc1 (first release candidate)

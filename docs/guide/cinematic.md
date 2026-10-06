@@ -26,9 +26,9 @@ For showcase pictures rather than for reading values.
 
 === "Diorama"
 
-    The model on a stand against a blue backdrop: soft light, the bed a solid
-    block of sand, the water a clear blue body seen through its sides when path
-    traced.
+    The model on a stand against a blue backdrop, in soft light: the bed a solid
+    block of sand, the water see-through with blue sides down to the bed (path
+    traced: a clear blue body of water).
 
     ![Diorama](../images/look-diorama.png)
 

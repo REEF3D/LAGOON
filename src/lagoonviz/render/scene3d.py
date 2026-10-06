@@ -64,6 +64,12 @@ for _name, _preset in PRESETS.items():
     }
 DEFAULT_STYLE = "studio"
 
+#: the Diorama look in 3D: how see-through the water's top and sides are
+DIORAMA_WATER_OPACITY = 0.8
+DIORAMA_SIDE_OPACITY = 0.7
+#: item kinds that are water
+WATER_KINDS = ("free_surface", "amr")
+
 #: where the sun stands, seen from the scene: about 31 degrees above the horizon and
 #: mostly from -x, across the crests of waves that travel along x (REEF3D's usual
 #: set-up), so the slopes facing it and facing away differ clearly
@@ -219,6 +225,10 @@ class SceneRenderer:
         self._gauges: dict[str, gfx.Group] = {}
         #: contour lines of an item; outside ``content``, like the gauges
         self._contours: dict[str, gfx.Line] = {}
+        #: the Diorama look's stand: the sides of the bed and of the water, per item
+        self._stand: dict[str, gfx.Mesh] = {}
+        self._rims: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # triangles -> open edges
+        self._bed_heights: tuple[np.ndarray, object] | None = None  # bed positions -> heights
 
     # ------------------------------------------------------------- items
     def _texture(self, colormap: str):
@@ -291,11 +301,14 @@ class SceneRenderer:
             preset = self.preset
             water = preset is not None and surface_of(kind, shown.material) == "water"
             material.color = preset.water_color if water else shown.color
-        material.opacity = shown.opacity
+        opacity = shown.opacity
+        if self.diorama and kind in WATER_KINDS and shown.values is None:
+            opacity = min(opacity, DIORAMA_WATER_OPACITY)  # the bed shows through
+        material.opacity = opacity
         # transparent surfaces must not hide what lies behind them
         if hasattr(material, "alpha_mode"):
             try:
-                material.alpha_mode = "blend" if shown.opacity < 1.0 else "solid"
+                material.alpha_mode = "blend" if opacity < 1.0 else "solid"
             except (ValueError, TypeError):
                 pass
 
@@ -365,7 +378,159 @@ class SceneRenderer:
         current.colormap = shown.colormap
         current.has_values = shown.values is not None
         current.display = shown
+        self._update_stand(shown.item_id)
         self._fit_shadow()
+
+    # ------------------------------------------------------------- the diorama's stand
+    @property
+    def diorama(self) -> bool:
+        """The Diorama look in 3D: the model on a stand (sides of bed and water)."""
+        preset = self.preset
+        return preset is not None and preset.world == "diorama" and not self.plan
+
+    def _update_stand(self, item_id: str) -> None:
+        """The sides of an item in the Diorama look: the bed a solid block of sand down
+        to a base, the water's sides down to the bed (see-through, in its colour)."""
+        shown = self._shown.get(item_id)
+        if not self.diorama or shown is None or shown.kind not in ("bathymetry", *WATER_KINDS):
+            self._remove_stand(item_id)
+            if item_id in self._shown and shown.kind == "bathymetry":
+                self._bed_heights = None
+            return
+        display = shown.display
+        positions = np.asarray(display.positions, np.float64)
+        rim = self._rim(item_id, positions, display.triangles)
+        if rim is None or not len(rim):
+            self._remove_stand(item_id)
+            return
+        top_a, top_b = positions[rim[:, 0]], positions[rim[:, 1]]
+        if shown.kind == "bathymetry":
+            low_a = low_b = np.full(len(rim), self._base())
+        else:
+            heights = self._bed_under()
+            if heights is not None:
+                low_a, low_b = heights(top_a[:, :2]), heights(top_b[:, :2])
+            else:
+                low_a = low_b = np.full(len(rim), self._base())
+        keep = np.isfinite(top_a).all(axis=1) & np.isfinite(top_b).all(axis=1)
+        keep &= np.isfinite(low_a) & np.isfinite(low_b)
+        keep &= (top_a[:, 2] > low_a) | (top_b[:, 2] > low_b)
+        top_a, top_b, low_a, low_b = top_a[keep], top_b[keep], low_a[keep], low_b[keep]
+        if not len(top_a):
+            self._remove_stand(item_id)
+            return
+        bottom_a, bottom_b = top_a.copy(), top_b.copy()
+        bottom_a[:, 2], bottom_b[:, 2] = (
+            np.minimum(low_a, top_a[:, 2]),
+            np.minimum(low_b, top_b[:, 2]),
+        )
+        k = len(top_a)
+        points = np.concatenate([top_a, top_b, bottom_b, bottom_a]).astype(np.float32)
+        i = np.arange(k)
+        faces = np.concatenate(
+            [np.stack([i, i + k, i + 2 * k], 1), np.stack([i, i + 2 * k, i + 3 * k], 1)]
+        )
+        # flat faces, facing out (to the right of the rim seen from above)
+        d = top_b - top_a
+        out = np.stack([d[:, 1], -d[:, 0], np.zeros(k)], 1)
+        out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-12)
+        normals = np.concatenate([out, out, out, out]).astype(np.float32)
+        indices = faces.astype(np.uint32)
+        mesh = self._stand.get(item_id)
+        if (
+            mesh is not None
+            and mesh.geometry.positions.data.shape == points.shape
+            and _update_buffer(mesh.geometry, "positions", points)
+            and _update_buffer(mesh.geometry, "normals", normals)
+        ):
+            mesh.visible = shown.mesh.visible
+            return
+        self._remove_stand(item_id)
+        geometry = gfx.Geometry(positions=points, indices=indices, normals=normals)
+        mesh = gfx.Mesh(geometry, self._stand_material(shown))
+        mesh.cast_shadow = shown.kind == "bathymetry"
+        mesh.receive_shadow = True
+        mesh.visible = shown.mesh.visible
+        self.scene.add(mesh)
+        self._stand[item_id] = mesh
+        if shown.kind == "bathymetry":  # the water's sides end on this bed
+            for other, item in list(self._shown.items()):
+                if item.kind in WATER_KINDS:
+                    self._update_stand(other)
+
+    def _stand_material(self, shown: _Shown) -> gfx.Material:
+        from lagoonviz.render.cinematic import pbr_material
+
+        preset = self.preset
+        if shown.kind == "bathymetry":
+            material = pbr_material("sand", preset)
+            material.normal_map = None  # the grain needs texture coordinates the sides lack
+            material.color = shown.display.color
+            return material
+        material = pbr_material("water", preset)
+        material.color = preset.water_color
+        material.opacity = DIORAMA_SIDE_OPACITY
+        try:
+            material.alpha_mode = "blend"
+        except (AttributeError, ValueError, TypeError):
+            pass
+        return material
+
+    def _rim(self, item_id: str, positions: np.ndarray, triangles: np.ndarray):
+        """The open edges of an item's surface (kept while its triangles stay the same)."""
+        from lagoonviz.render.pathtrace import _facing_up_and_rim
+
+        known = self._rims.get(item_id)
+        if known is not None and known[0] is triangles:
+            return known[1]
+        t = np.asarray(triangles, np.int64).reshape(-1, 3)
+        finite = np.isfinite(positions).all(axis=1)
+        t = t[finite[t].all(axis=1)]
+        t = t[(t[:, 0] != t[:, 1]) & (t[:, 1] != t[:, 2]) & (t[:, 0] != t[:, 2])]
+        rim = _facing_up_and_rim(positions, t)[1] if len(t) else None
+        self._rims[item_id] = (triangles, rim)
+        return rim
+
+    def _bed_under(self):
+        """The bed's heights under any point (the first bed shown), or None."""
+        from lagoonviz.render.pathtrace import BedHeights
+
+        bed = next((s for s in self._shown.values() if s.kind == "bathymetry"), None)
+        if bed is None or bed.display is None:
+            return None
+        positions = bed.display.positions
+        if self._bed_heights is None or self._bed_heights[0] is not positions:
+            try:
+                heights = BedHeights(np.asarray(positions, float))
+            except ValueError:
+                return None
+            self._bed_heights = (positions, heights)
+        return self._bed_heights[1]
+
+    def _base(self) -> float:
+        """The stand's base: under the lowest bed by a quarter of the model's height."""
+        corners = self.bounds(visible_only=False)
+        if corners is None:
+            return 0.0
+        low, high = corners
+        bed = [s.low for s in self._shown.values() if s.kind == "bathymetry" and s.low is not None]
+        bottom = float(min(b[2] for b in bed)) if bed else float(low[2])
+        size = float(np.ptp([low[:2], high[:2]], axis=0).max())
+        return bottom - max(0.25 * (float(high[2]) - bottom), 0.01 * size, 1e-6)
+
+    def _remove_stand(self, item_id: str) -> None:
+        mesh = self._stand.pop(item_id, None)
+        if mesh is not None:
+            self.scene.remove(mesh)
+
+    def _refresh_stand(self) -> None:
+        """The stand again for every item (the look or the 2D view changed)."""
+        for item_id in list(self._stand):
+            self._remove_stand(item_id)
+        self._bed_heights = None
+        if self.diorama:
+            for item_id in list(self._shown):
+                self._update_stand(item_id)
 
     def _grain(self, mesh: gfx.Mesh, positions: np.ndarray, kind: str, material: str) -> None:
         """Texture coordinates of a material's grain (its normal map), from the positions."""
@@ -527,6 +692,8 @@ class SceneRenderer:
     def set_visible(self, item_id: str, visible: bool) -> None:
         if item_id in self._shown:
             self._shown[item_id].mesh.visible = visible
+        if item_id in self._stand:
+            self._stand[item_id].visible = visible
 
     def set_style(self, style: str) -> None:
         """Switch the look (background and lights) of the viewport."""
@@ -565,6 +732,7 @@ class SceneRenderer:
                 )
             elif hasattr(material, "shininess"):
                 self._gloss(material, shown.kind)
+        self._refresh_stand()
 
     def item_at(self, world_object) -> str | None:
         """The item a picked pygfx object belongs to."""
@@ -661,6 +829,10 @@ class SceneRenderer:
         shown = self._shown.pop(item_id, None)
         if shown is not None:
             self.content.remove(shown.mesh)
+        self._remove_stand(item_id)
+        self._rims.pop(item_id, None)
+        if shown is not None and shown.kind == "bathymetry":
+            self._bed_heights = None
         self.update_contours(item_id, None)
         self.update_vectors(item_id, None)
         self.update_trails(item_id, None)
@@ -878,6 +1050,7 @@ class SceneRenderer:
         self.sun.cast_shadow = bool(look.get("shadows", False)) and not self.plan
         self._shadow_fit = None
         self._fit_shadow()
+        self._refresh_stand()  # no stand in 2D
 
     def set_orthographic(self, orthographic: bool) -> None:
         self.camera.fov = 0 if orthographic else 45

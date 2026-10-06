@@ -518,3 +518,39 @@ def test_film_follows_the_camera_path(reef3d_run, tmp_path):
     view.render(0.0)
     np.testing.assert_allclose(view.scene.camera_state()["position"], end["position"], atol=1e-5)
     _keep("camera-path-end.png", last)
+
+
+def test_diorama_stands_the_model_on_a_block(reef3d_run):
+    """The Diorama look in 3D: the bed's sides down to a base under it, the water's
+    sides down to the bed, the water a little see-through; gone in other looks and
+    in 2D."""
+    from lagoonviz.render.scene3d import DIORAMA_WATER_OPACITY, SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer("diorama")
+    kinds = {}
+    for item_id in session.data.data_items():
+        kind = session.scene.get(item_id).kind
+        kinds[kind] = item_id
+        mesh = session.data.load(item_id)
+        view.update(kind, session.data.display(item_id, mesh))
+    bed, water = kinds["bathymetry"], kinds["free_surface"]
+    assert set(view._stand) >= {bed, water}
+    bed_low = view._shown[bed].low
+    sides = view._stand[bed].geometry.positions.data
+    assert sides[:, 2].min() < bed_low[2] - 1e-6  # a block, not a sheet
+    water_sides = view._stand[water].geometry.positions.data
+    assert water_sides[:, 2].min() >= bed_low[2] - 1e-4  # down to the bed, not below
+    assert view._shown[water].mesh.material.opacity == pytest.approx(DIORAMA_WATER_OPACITY)
+    image = render_session(session, (320, 180), style="diorama")
+    _keep("render_diorama.png", image)
+    view.set_plan(True)
+    assert not view._stand  # no stand in 2D
+    view.set_plan(False)
+    assert view._stand
+    view.set_style("studio")
+    assert not view._stand
+    view.remove(bed)
+    view.set_style("diorama")
+    assert bed not in view._stand
