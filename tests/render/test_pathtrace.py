@@ -5,6 +5,7 @@ run the Blender script against a stand-in ``bpy`` that writes a small PNG for ea
 render, so the whole way from a session to a film is tested anywhere.
 """
 
+import dataclasses
 import json
 import math
 import os
@@ -16,7 +17,16 @@ import numpy as np
 import pytest
 
 from lagoonviz.core import Session
-from lagoonviz.render.cinematic import OPEN_OCEAN, UNDERWATER, WAVE_FLUME, panorama_directions
+from lagoonviz.core.colormaps import PLAIN_COLORS
+from lagoonviz.render.cinematic import (
+    AEGIR_RED,
+    AEGIR_ROCK,
+    OPEN_OCEAN,
+    PRESETS,
+    UNDERWATER,
+    WAVE_FLUME,
+    panorama_directions,
+)
 from lagoonviz.render.pathtrace import (
     SEA,
     apron,
@@ -25,6 +35,7 @@ from lagoonviz.render.pathtrace import (
     environment_panorama,
     export_scene,
     find_blender,
+    linear_hex,
     look_rotation,
     loop_mean,
     ocean_ring,
@@ -578,10 +589,12 @@ def test_ocean_ring_surrounds_the_domain():
     assert area.sum() == pytest.approx(2000.0**2 - 40.0)  # all but the domain
 
 
-def test_coast_under_the_open_sky(reef3d_run, tmp_path):
-    """Open ocean, clear water: the bed dressed as land by height and slope, running
-    on beyond the domain and sinking into the sea; the water one body with the sea
-    out to the horizon (no seam, no cliffs, no separate sea); the shore thinning out."""
+def test_coast_under_the_open_sky(reef3d_run, tmp_path, monkeypatch):
+    """The "coast" world, clear water: the bed dressed as land by height and slope,
+    running on beyond the domain and sinking into the sea; the water one body with
+    the sea out to the horizon (no seam, no cliffs, no separate sea); the shore
+    thinning out."""
+    monkeypatch.setitem(PRESETS, "open_ocean", dataclasses.replace(OPEN_OCEAN, world="coast"))
     session = Session()
     session.open_case(reef3d_run)
     surface = next(i.id for i in session.scene if i.kind == "free_surface")
@@ -632,6 +645,97 @@ def test_coast_under_the_open_sky(reef3d_run, tmp_path):
     names = [o["name"] for o in scene["frames"][0]["objects"]]
     assert SEA not in names and f"{bed_id}#sides" not in names
     assert all("terrain" not in m for m in scene["materials"].values())
+
+
+def _export(session, folder, look, size=(64, 36)):
+    path = export_scene(session, folder, [0.0], size, look, 4)
+    scene = json.loads(path.read_text())
+    frame = scene["frames"][0]
+    by_name = {o["name"]: (i, o) for i, o in enumerate(frame["objects"])}
+    return scene, frame, by_name
+
+
+def test_open_ocean_is_a_model_in_the_sky(reef3d_run, tmp_path):
+    """Open ocean as ÆgirFrames shows a case: the bed dressed as land, cut off in rock
+    at the sides of the domain down to a base, the water a body with clear sides and
+    ripples; no sea running on to the horizon, all in the sky picture."""
+    session = Session()
+    session.open_case(reef3d_run)
+    surface = next(i.id for i in session.scene if i.kind == "free_surface")
+    bed_id = next(i.id for i in session.scene if i.kind == "bathymetry")
+    session.set_property(surface, "variable", "none")
+    session.set_property(bed_id, "variable", "none")
+    scene, frame, by_name = _export(session, tmp_path / "out", "open_ocean")
+    assert SEA not in by_name and f"{bed_id}#sides" in by_name
+    assert scene["world"]["picture"] == "sea_clear_sky.hdr"
+    bed = scene["materials"][by_name[bed_id][1]["material"]]
+    assert bed["terrain"] is not None
+    sides = scene["materials"][by_name[f"{bed_id}#sides"][1]["material"]]
+    assert sides["terrain"] is None and sides["color"] == bed["terrain"]["rock"]
+    water = scene["materials"][by_name[surface][1]["material"]]
+    assert water["camera_only"] and water["ripples"]["scale"] > 0
+    assert water["shore"]["foam"] > 0 and "swell" not in water
+    session.set_time(0.0)
+    shown = session.data.display(bed_id, session.data.load(bed_id))
+    extent = float(np.ptp(shown.positions[:, :2], axis=0).max())
+    with np.load(tmp_path / "out" / frame["data"]) as arrays:
+        ground = arrays[f"positions_{by_name[bed_id][0]}"].astype(float)
+        water_xy = arrays[f"positions_{by_name[surface][0]}"][:, :2].astype(float)
+    for xy in (ground[:, :2], water_xy):  # nothing beyond the domain
+        assert np.ptp(xy, axis=0).max() <= extent * 1.001
+    assert frame["camera"]["clip_end"] < 100 * extent
+
+
+def test_aegir_bed_and_structures(reef3d_run, tmp_path):
+    """In ÆgirFrames' looks a bed of the default colour is dark rock (the wave flume and
+    the diorama), structures and bodies are ÆgirFrames' red; colours chosen stay."""
+    session = Session()
+    session.open_case(reef3d_run)
+    bed_id = next(i.id for i in session.scene if i.kind == "bathymetry")
+    session.set_property(bed_id, "variable", "none")
+    for look in ("wave_flume", "diorama"):
+        scene, _, by_name = _export(session, tmp_path / look, look)
+        bed = scene["materials"][by_name[bed_id][1]["material"]]
+        assert bed["color"] == pytest.approx(linear_hex(AEGIR_ROCK))
+        assert bed["grain"]["kind"] == "rock"
+        assert scene["world"]["picture"] == "sea_clear_sky.hdr"
+        assert scene["look_contrast"] is None and scene["exposure"] == 0.0
+    scene, _, by_name = _export(session, tmp_path / "under", "underwater")
+    bed = scene["materials"][by_name[bed_id][1]["material"]]
+    assert bed["color"] == pytest.approx(linear_hex(PLAIN_COLORS["bathymetry"]))
+    session.set_property(bed_id, "colormap", "white")  # a colour of its own: kept
+    scene, _, by_name = _export(session, tmp_path / "white", "diorama")
+    bed = scene["materials"][by_name[bed_id][1]["material"]]
+    assert bed["color"] == pytest.approx([1.0, 1.0, 1.0])
+
+
+def test_structures_are_aegir_red(tmp_path):
+    from types import SimpleNamespace
+
+    from lagoonviz.render.pathtrace import _Collector
+
+    cube = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], float)
+    faces = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
+    for look, color, red in (
+        ("diorama", PLAIN_COLORS["structure"], True),
+        ("open_ocean", PLAIN_COLORS["body"], True),
+        ("underwater", PLAIN_COLORS["structure"], False),
+        ("diorama", "#123456", False),
+    ):
+        out = _Collector(PRESETS[look], 0.01)
+        kind = "body" if color == PLAIN_COLORS["body"] else "structure"
+        shown = SimpleNamespace(
+            item_id="s", positions=cube, triangles=faces, color=color, material="",
+            opacity=1.0, segments=None, visible=True, values=None, point_size=None,
+        )  # fmt: skip
+        out.surface(kind, shown)
+        spec = out.materials[out.objects[0]["material"]]
+        if red:
+            assert spec["color"] == pytest.approx(linear_hex(AEGIR_RED))
+            assert spec["metallic"] == 0.5 and spec["roughness"] == 1.0
+            assert spec["grain"] is None
+        else:
+            assert spec["color"] != pytest.approx(linear_hex(AEGIR_RED))
 
 
 def test_rim_loop_and_rings():
@@ -802,9 +906,9 @@ def test_sky_picture_is_turned_to_the_sun(reef3d_run, tmp_path):
     turned = (azimuth - scene["world"]["rotation"]) % (2 * math.pi)
     assert math.degrees(turned) == pytest.approx(200.0, abs=1e-4)
     assert math.degrees(math.asin(scene["sun"]["direction"][2])) == pytest.approx(40.0, abs=1e-4)
-    # LAGOON's own sky in the other looks
+    # LAGOON's own surroundings under water
     scene = json.loads(
-        export_scene(session, tmp_path / "c", [0.0], (64, 36), "wave_flume", 4).read_text()
+        export_scene(session, tmp_path / "c", [0.0], (64, 36), "underwater", 4).read_text()
     )
     assert "rotation" not in scene["world"] and scene["look_contrast"]
     assert read_hdr(tmp_path / "c" / "environment.hdr").shape == (512, 1024, 3)

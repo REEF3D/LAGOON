@@ -61,8 +61,10 @@ class Preset:
     contours: str = "#1e2833"
     shadows: bool = True
     #: what path tracing builds around the data: "box" (the domain as it is), "coast"
-    #: (land and sea run on to the horizon) or "diorama" (a model on a stand: the bed
-    #: a solid block of sand, the water a body with clear sides)
+    #: (land and sea run on to the horizon), "diorama" (a model on a stand: the bed
+    #: a solid block, the water a body with clear sides) or "model" (a diorama whose
+    #: bed is dressed as land, as in "coast", floating in the sky picture as
+    #: ÆgirFrames shows a case)
     world: str = "box"
     #: how strongly the water absorbs light: over its mean depth it keeps exp(-absorb)
     absorb: float = 0.45
@@ -70,8 +72,18 @@ class Preset:
     #: path tracing: a sky picture (an HDR panorama in render/assets) that lights the
     #: scene and is seen behind it, its sun turned to where the look's sun is
     sky_picture: str | None = None
+    #: path tracing: the bed's colour when it has the bed's own default (a dark rock,
+    #: as ÆgirFrames' terrain), and that of structures and bodies with theirs
+    #: (ÆgirFrames' red, half metallic and matte); None: their own colours
+    bed: str | None = None
+    structure: str | None = None
     extra: dict = field(default_factory=dict)
 
+
+#: ÆgirFrames' colours: its terrain's dark rock and its solids' red (linear 0.443,
+#: 0.014, 0.017, half metallic, roughness 1)
+AEGIR_ROCK = "#57524d"
+AEGIR_RED = "#b21f24"
 
 OPEN_OCEAN = Preset(
     "open_ocean",
@@ -86,8 +98,9 @@ OPEN_OCEAN = Preset(
     headlamp=0.35,
     water_color="#20687c",  # ÆgirFrames' ocean water (linear 0.014, 0.138, 0.202)
     contours="#e8eef5",
-    world="coast",
+    world="model",
     sky_picture="sea_clear_sky.hdr",
+    structure=AEGIR_RED,
 )
 WAVE_FLUME = Preset(
     "wave_flume",
@@ -102,11 +115,15 @@ WAVE_FLUME = Preset(
     ambient=0.35,
     headlamp=0.6,
     env_intensity=0.9,
-    water_color="#5f8f9a",  # clear tap water over a grey floor
+    water_color="#20687c",  # ÆgirFrames' ocean water, as in its wave tank renders
     water_roughness=0.04,
     # the hall is reflected; behind the model a plain light gradient (a hall at
     # infinity would show its floor's edge as a curved horizon)
     background=("#a7a49f", "#ecebe8"),
+    # path traced as ÆgirFrames shows a tank: in its sky picture, on a dark floor
+    sky_picture="sea_clear_sky.hdr",
+    bed=AEGIR_ROCK,
+    structure=AEGIR_RED,
 )
 UNDERWATER = Preset(
     "underwater",
@@ -149,6 +166,8 @@ DIORAMA = Preset(
     absorb=1.1,
     sun_angle=8.0,
     sky_picture="sea_clear_sky.hdr",
+    bed=AEGIR_ROCK,
+    structure=AEGIR_RED,
 )
 PRESETS = {p.name: p for p in (OPEN_OCEAN, WAVE_FLUME, UNDERWATER, DIORAMA)}
 

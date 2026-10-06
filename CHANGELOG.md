@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Cycles closer to ÆgirFrames**: the Open ocean look is now a model in the sky
+  picture, as ÆgirFrames shows a case (the land cut off in rock at the domain's
+  sides, the water a body with clear walls), no longer a sea running on to the
+  horizon; the Wave flume look is path traced in the sky picture with ÆgirFrames'
+  water, as its wave tank renders; a bed in its default colour is ÆgirFrames' dark
+  rock in the Wave flume and Diorama looks, and structures and bodies in their
+  default colours are ÆgirFrames' red, half metallic and matte. The Wave flume's
+  water is ÆgirFrames' water colour in the 3D view too.
 - **Faster Cycles films, same pictures**: meshes whose triangles stay from frame to
   frame (the bed, structures, the water when its mesh keeps its make-up) are moved
   in place instead of built again; materials alike within 3 % are shared and made

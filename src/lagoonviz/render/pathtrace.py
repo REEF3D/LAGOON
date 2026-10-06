@@ -40,11 +40,12 @@ from typing import Any
 
 import numpy as np
 
-from lagoonviz.core.colormaps import colors
+from lagoonviz.core.colormaps import PLAIN_COLORS, colors
 from lagoonviz.render.cinematic import (
     PRESETS,
     SURFACES,
     Preset,
+    Surface,
     environment_panorama,
     panorama_directions,
     surface_of,
@@ -891,13 +892,22 @@ class _Collector:
         }
         finite = shown.positions[np.isfinite(shown.positions).all(axis=1)]
         span = float(np.ptp(finite[:, :2], axis=0).max()) if len(finite) else 0.0
+        land = kind == "bathymetry" and rgb is None and self.dressed and len(finite)
+        own = _own_color(shown, kind)
+        if kind == "bathymetry" and rgb is None and not land and own and self.preset.bed:
+            # the look's bed (ÆgirFrames' dark rock) for a bed in its default colour
+            s = SURFACES["rock"]
+            spec.update(color=linear_hex(self.preset.bed), roughness=s.roughness)
+        if kind in ("structure", "body") and rgb is None and own and self.preset.structure:
+            # ÆgirFrames' solids: red, half metallic, matte
+            s = Surface(1.0, metalness=0.5)
+            spec.update(color=linear_hex(self.preset.structure), roughness=1.0, metallic=0.5)
         if s.grain and rgb is None:
             spec["grain"] = {
                 "kind": s.grain,
                 "tile": round(max(s.tile, span / 3), 6),
                 "relief": s.relief,
             }
-        land = kind == "bathymetry" and rgb is None and self.coast and len(finite)
         if land:
             spec["terrain"] = self.terrain(finite, span)
             spec["grain"] = None  # the terrain has its own fine relief
@@ -906,13 +916,15 @@ class _Collector:
                 self.add(shown.item_id, *extended, spec, None)
                 return
         self.add(shown.item_id, shown.positions, shown.triangles, spec, rgb, subdivide=water)
-        if kind == "bathymetry" and self.preset.world == "diorama" and len(finite):
-            # a model on a stand: the bed a solid block of sand, its sides down to a base
-            sides = dict(spec, color=spec["color"] or linear_hex(shown.color), terrain=None)
+        if kind == "bathymetry" and self.stand and len(finite):
+            # a model on a stand: the bed a solid block, its sides down to a base (land
+            # cut off in rock)
+            color = spec["terrain"]["rock"] if land else spec["color"] or linear_hex(shown.color)
+            sides = dict(spec, color=color, terrain=None)
             positions, triangles = skirt(shown.positions, shown.triangles, self.base(finite))
             flat = np.zeros(len(triangles), bool)
             self.add(f"{shown.item_id}#sides", positions, triangles, sides, None, flat)
-        if land:
+        elif land:
             # the land ends in cliffs at the sides of the domain, down under the sea
             zspan = max(float(np.ptp(finite[:, 2])), 1e-6)
             bottom = min(float(finite[:, 2].min()), float(self.level)) - 0.05 * zspan
@@ -933,6 +945,17 @@ class _Collector:
         span = float(np.ptp(bed[:, :2], axis=0).max()) if len(bed) else 1.0
         depth = float(self.level) - low if self.level is not None else float(np.ptp(bed[:, 2]))
         return low - max(0.25 * depth, 0.01 * span, 1e-6)
+
+    @property
+    def dressed(self) -> bool:
+        """The bed dressed as land by height above the still water level and slope,
+        the water with ripples and foam at the shore (under the open sky)."""
+        return self.preset.world in ("coast", "model") and self.level is not None
+
+    @property
+    def stand(self) -> bool:
+        """The domain as a model on a stand: the bed a block down to a base."""
+        return self.preset.world in ("diorama", "model")
 
     @property
     def coast(self) -> bool:
@@ -1113,7 +1136,7 @@ class _Collector:
 
     def _glass_water(self, shown, positions, triangles, smooth, film, extent, depth, extended):
         """The water body as ÆgirFrames' ocean water (see :meth:`water`)."""
-        coast = self.preset.world == "coast"
+        coast = self.dressed
         spec = {
             "color": linear_hex(self.preset.water_color),
             "roughness": 0.0,
@@ -1224,6 +1247,14 @@ class _Collector:
         }
         self.add(SEA, positions, triangles, spec, None, np.zeros(len(triangles), bool))
         self.far = max(self.far, SEA_REACH * extent)
+
+
+def _own_color(shown, kind: str) -> bool:
+    """Whether an item shows its kind's default colour (no colour, material or colour
+    map of its own chosen), so a look may give it its own."""
+    if getattr(shown, "material", "") or not isinstance(shown.color, str):
+        return False
+    return shown.color.lower() == PLAIN_COLORS.get(kind, "").lower()
 
 
 def _frame_objects(

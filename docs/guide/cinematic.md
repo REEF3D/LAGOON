@@ -51,25 +51,29 @@ floor. Above water it is rendered as [ÆgirFrames](https://github.com/NTNU-MCS/a
 renders the ocean: glass in the look's water colour that refracts and reflects
 what the camera sees, while light, shadows and reflections pass through it, so the
 bed and the structures under it are lit as in air and cast their shadows on the
-bed; a faint haze fills it. It is subdivided twice when rendered, for smooth
-crests. On the open sea it carries small wind ripples that break the reflections
-into glitter. Under water the water absorbs light the deeper it goes and scatters
+bed; a faint haze fills it. It is subdivided when rendered, for smooth crests
+(twice, unless its mesh is already as fine as the picture's pixels). In the Open
+ocean look it carries small wind ripples that break the reflections into
+glitter. Under water the water absorbs light the deeper it goes and scatters
 it. Water coloured by a variable stays an opaque, coloured surface, so its colours
 read. Where the water thins out to nothing at the shore it fades away, so the sand
 shows instead of a sheet of glass.
 
-The **Open ocean** and **Diorama** looks are lit by ÆgirFrames' sky picture, a
-panorama of a clear sky over the sea with a low sun, which is also seen behind the
-model. It is turned so that its sun stands in the sun's direction (*View → Sun...*);
-its sun's height is the picture's own, about 30°.
+The **Open ocean**, **Wave flume** and **Diorama** looks are path traced as
+ÆgirFrames shows a case: the domain as a model floating in ÆgirFrames' sky
+picture, a panorama of a clear sky over the sea with a low sun, which lights the
+model and is seen behind it. The picture is turned so that its sun stands in the
+sun's direction (*View → Sun...*); its sun's height is the picture's own, about
+30°. A bed in its default colour is ÆgirFrames' dark rock in the Wave flume and
+Diorama looks, and structures and bodies in their default colours are
+ÆgirFrames' red (half metallic, matte); colours you choose are kept.
 
 In the **Open ocean** look a coast looks like one: the bed (coloured by nothing)
 is dressed by its height above the still water level and its slope, with sand
 under water, wet sand at the water line, dry sand, grass and heath higher up, and
-rock where it is steep. Beyond the domain the world runs on: the land and the sea
-floor continue past its sides and sink away, and the water is one body with the
-sea out to the horizon, so the domain does not sit on the sea like a card. Broken
-foam lies just off the beach. *View → Sun...* sets where the light comes from.
+rock where it is steep. At the sides of the domain the land is cut off in rock
+down to a base, and the water ends in clear walls, with small wind ripples on it
+and broken foam just off the beach.
 
 1. Install Blender 4.2 or newer. LAGOON finds it in Applications (macOS), on the
    `PATH`, or where the environment variable `LAGOON_BLENDER` points.
