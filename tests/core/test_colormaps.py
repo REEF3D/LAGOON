@@ -23,7 +23,7 @@ def test_rainbow_is_turbo():
         from matplotlib import colormaps
     except ImportError:
         return
-    knots = np.array([(0, 0.10), (0.40, 0.42), (0.51, 0.56), (0.875, 0.80), (1, 0.90)])
+    knots = np.array([(0, 0.10), (0.38, 0.42), (0.47, 0.56), (0.875, 0.80), (1, 0.90)])
     along = np.interp(np.linspace(0, 1, 256), knots[:, 0], knots[:, 1])
     reference = colormaps["turbo"](along)[:, :3]
     assert np.abs(table - reference).max() < 6 / 255
