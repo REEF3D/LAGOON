@@ -77,6 +77,8 @@ class ClickSlider(QSlider):
         #: the play range in slider values (None: the whole slider)
         self.play_range: tuple[int, int] | None = None
         self._stripe: int | None = None  # 0 or 1 while a stripe is dragged
+        # twice a slider's usual height: room for tall range stripes, easy to grab
+        self.setMinimumHeight(2 * self.sizeHint().height())
 
     def bounds(self) -> tuple[int, int]:
         """The play range in slider values, within the slider."""
@@ -129,7 +131,7 @@ class ClickSlider(QSlider):
             return
         colour = QColor(COLORS["cursor"])
         r = 4.5
-        y = self.height() - r - 1  # under the groove, clear of the handle
+        y = min(self.height() - r - 1, self.height() / 2 + 11)  # under the groove and handle
         for value in self.markers:
             if not self.minimum() <= value <= self.maximum():
                 continue
