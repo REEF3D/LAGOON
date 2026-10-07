@@ -36,6 +36,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
+dist-mac/
 .pytest_cache/
 .ruff_cache/
 .import_linter_cache/

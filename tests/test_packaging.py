@@ -86,3 +86,33 @@ def test_conda_recipes_follow_the_versions():
         recipe = (ROOT / "packaging" / "conda-forge" / name / "recipe.yaml").read_text()
         found = re.search(r'^\s+version: "([^"]+)"', recipe, re.M).group(1)
         assert found == version, (name, found, version)
+
+
+def test_the_mac_app_recipe(tmp_path, monkeypatch):
+    """packaging/macos: the app takes LAGOON's data files, runs the command line
+    programs too, and gets an icon of every size macOS asks for."""
+    import runpy
+    import subprocess
+    import sys
+
+    import pytest
+
+    here = ROOT / "packaging" / "macos"
+    spec = (here / "LAGOON.spec").read_text()
+    assert "blender_cycles.py" in spec and 'collect_data_files("lagoonviz")' in spec
+    assert (ROOT / "logo" / "icon_dark.png").exists()
+    assert "plist" in (here / "entitlements.plist").read_text()
+    script = (here / "build_app.sh").read_text()
+    assert subprocess.run(["bash", "-n", str(here / "build_app.sh")]).returncode == 0
+    assert "LAGOON_SIGN_IDENTITY" in script and "notarytool" in script
+    # the app's own entry point: "convert" runs lagoon-convert
+    app = runpy.run_path(str(here / "lagoon_app.py"))
+    monkeypatch.setattr(sys, "argv", ["LAGOON", "convert", "--help"])
+    with pytest.raises(SystemExit) as stop:
+        app["main"]()
+    assert stop.value.code == 0
+    pytest.importorskip("PIL")
+    icon = runpy.run_path(str(here / "make_icon.py"))
+    icon["main"](str(ROOT / "logo" / "icon_dark.png"), str(tmp_path / "LAGOON.iconset"))
+    made = sorted(p.name for p in (tmp_path / "LAGOON.iconset").iterdir())
+    assert len(made) == 10 and "icon_512x512@2x.png" in made
