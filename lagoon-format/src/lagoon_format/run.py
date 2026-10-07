@@ -183,9 +183,11 @@ def check(log: RunLog) -> list[str]:
     problems = list(log.warnings)
     owners = log.owners()
     for run in log.runs:
-        times = [o.time for o in run.outputs]
-        if any(b < a for a, b in zip(times, times[1:], strict=False)):
-            problems.append(f"run {run.id}: output times go backwards")
+        # per stream: a store counts its volume output only at the next one (RUN.md)
+        for stream in {s for o in run.outputs for s in o.streams}:
+            times = [o.time for o in run.outputs if stream in o.streams]
+            if any(b < a for a, b in zip(times, times[1:], strict=False)):
+                problems.append(f"run {run.id}: output times of {stream} go backwards")
         for output in run.outputs:
             for stream in output.streams:
                 if stream not in run.streams:
@@ -207,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     for run in log.runs:
         span = (
-            f"t = {run.outputs[0].time:g} .. {run.outputs[-1].time:g} s"
+            f"t = {min(o.time for o in run.outputs):g} .. {max(o.time for o in run.outputs):g} s"
             if run.outputs
             else "no outputs"
         )

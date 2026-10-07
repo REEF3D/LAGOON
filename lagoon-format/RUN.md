@@ -120,7 +120,8 @@ A map from a short stream name (unique within the run) to its description.
 | `folder` | required | Output folder, relative to the case folder |
 | `files` | frames | File name pattern with `{step}` (output number) or `{iteration}`, Python/`fmt` style: `{step:08d}`. For parallel VTK it names the `.pvtu`/`.pvtp` file |
 | `file` | tables, static | One file: a table that grows over the run (gauges, forces, motions), or static geometry (a structure) |
-| `format` | required | `vtu`, `vtp`, `vtk-legacy`, `dat` (more later, e.g. `zarr`) |
+| `format` | required | `vtu`, `vtp`, `vtk-legacy`, `dat`, `zarr` (an output in a LAGOON store) |
+| `group` | zarr | The output in the store: `volume`, `free_surface`, `bed`, `amr/<solver>_amr` |
 | `pieces` | optional | MPI pieces per frame |
 | `variables` | optional | Point arrays: `components` (default 1), `unit`, `description` |
 | `static` | optional | `true` if the data does not change during the run (a fixed bed) |
@@ -190,7 +191,24 @@ Streams with their own counters (bodies, mooring lines, profiles) write their ow
 | `files` | optional | Map stream → file name, when a name does not follow its pattern |
 
 Streams that write at their own pace (profiles every N iterations) get their own
-`output` lines with only those streams. Tables (`file`) are not listed: they grow
+`output` lines with only those streams. Times increase within a stream, not
+necessarily across streams.
+
+Outputs that go into a LAGOON store instead of files (`P 18 1`; with `P 18 2` both)
+are streams with `format` `zarr`: `folder` is the store (`REEF3D_<SOLVER>.lagoon`),
+`group` the output in it, and there is no `files` pattern. Their `output` line
+comes when the store counts the output, i.e. once every rank has written its
+block. For the volume, which is written in the background, that is at the next
+volume output or at the end of the run, so the line can come after lines of other
+streams with later times; it carries the time and iteration of the output itself.
+
+```json
+{"type": "stream", "run": "20261007T082100Z-ef6a", "name": "lagoon_volume",
+ "stream": {"role": "volume", "folder": "REEF3D_CFD.lagoon", "group": "volume",
+            "format": "zarr", "pieces": 4}}
+{"type": "output", "run": "20261007T082100Z-ef6a", "step": 3, "time": 1.5,
+ "iteration": 600, "streams": ["lagoon_volume"]}
+``` Tables (`file`) are not listed: they grow
 on their own, and their rows carry their time.
 
 ### Record `end`: when a run stops

@@ -84,6 +84,10 @@ play range on the timeline; the sun where you want it; Turbo as the rainbow.
 - **Opening REEF3D_Case opens the case**: REEF3D's own folder (the run log and
   control files) opened only the wave gauges; it now opens the whole case, named
   after the case folder.
+- **Run log of outputs in a store** (`lagoon-format/RUN.md`): outputs REEF3D
+  writes only into its store (`P 18 1`) are listed as streams of format `zarr`
+  with the `group` in the store; times increase per stream (the store counts its
+  volume at the next one), and `python -m lagoon_format.run` checks them that way.
 
 ## 1.0.0rc1 (first release candidate)
 

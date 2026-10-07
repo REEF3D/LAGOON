@@ -184,3 +184,58 @@ def test_a_log_written_by_reef3d():
     owners = log.owners()
     fsf0 = Path("REEF3D_NHFLOW_VTP_FSF/REEF3D-NHFLOW-FSF-00000000.pvtp")
     assert owners[fsf0][0] is second  # the restart overwrote output 0
+
+
+def test_outputs_in_a_store(tmp_path):
+    """P 18 1: the outputs go into the store, the log lists them as zarr streams. The
+    volume is counted at the next volume output, after surface outputs of later times
+    (lines as REEF3D's runlog::stored writes them)."""
+    root = tmp_path / "case"
+    (root / "REEF3D_Case").mkdir(parents=True)
+    run = "20261007T082100Z-ef6a"
+
+    def stream(name, group):
+        spec = {"role": group, "folder": "REEF3D_CFD.lagoon", "group": group}
+        return {"type": "stream", "run": run, "name": name, "stream": spec | {"format": "zarr"}}
+
+    def output(name, step, time):
+        return {
+            "type": "output",
+            "run": run,
+            "step": step,
+            "time": time,
+            "iteration": int(time * 400),
+            "streams": [name],
+        }
+
+    records = [
+        {
+            "type": "run",
+            "format": "reef3d-run",
+            "version": 1,
+            "run": run,
+            "solver": "CFD",
+            "streams": {},
+        },
+        stream("lagoon_bed", "bed"),
+        output("lagoon_bed", 0, 0.0),
+        output("lagoon_bed", 1, 0.5),
+        stream("lagoon_volume", "volume"),
+        output("lagoon_volume", 0, 0.0),
+        output("lagoon_bed", 2, 1.0),
+        output("lagoon_volume", 1, 0.5),
+        output("lagoon_volume", 2, 1.0),
+        {"type": "end", "run": run, "time": 1.0, "status": "finished"},
+    ]
+    log_file = root / "REEF3D_Case" / "REEF3D_CFD_run.jsonl"
+    log_file.write_text("".join(json.dumps(r) + "\n" for r in records))
+    log = read_case(root)
+    (found,) = log.runs
+    assert found.streams["lagoon_volume"]["group"] == "volume"
+    assert [o.time for o in found.outputs if "lagoon_volume" in o.streams] == [0.0, 0.5, 1.0]
+    assert found.frames("lagoon_volume") == []  # no files: nothing on disk to own
+    assert check(log) == []  # times go back only across streams
+    assert main([str(root)]) == 0
+    records.append(output("lagoon_volume", 3, 0.25))
+    log_file.write_text("".join(json.dumps(r) + "\n" for r in records))
+    assert any("lagoon_volume go backwards" in p for p in check(read_case(root)))
