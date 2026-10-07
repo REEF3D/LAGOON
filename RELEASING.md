@@ -20,8 +20,6 @@ release with the changelog's section as its notes.
 3. **Documentation**: Settings → Pages → Source: *GitHub Actions*. The workflow
    `docs.yml` then publishes the site at https://reef3d.github.io/LAGOON/ from every
    push to `main`.
-4. Remove the stray `0001-Phase-0-foundations-of-the-LAGOON-application.patch` at
-   the top of the repository (`git rm`); it is not part of the packages.
 
 ## Each release
 
