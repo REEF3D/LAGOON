@@ -79,22 +79,43 @@ class AddItem(Command):
 
 
 class RemoveItem(Command):
+    """Remove an item; a case goes with every item that shows it (its surfaces,
+    volumes, slices, time series, ...), as one undo step."""
+
     def __init__(self, item_id: str):
         self.item_id = item_id
-        self._item: SceneItem | None = None
-        self._index = 0
+        #: what was taken out, in order, with where it stood
+        self._removed: list[tuple[SceneItem, int]] = []
         self.label = f"Remove {item_id}"
 
     def do(self, scene: Scene) -> None:
-        self._item, self._index = scene.pop(self.item_id)
-        self.label = f"Remove {self._item.name}"
+        target = scene.get(self.item_id)
+        ids = [self.item_id]
+        if target.kind == "case":
+            ids += _items_of_case(scene, self.item_id)
+        self._removed = [scene.pop(item_id) for item_id in ids]
+        self.label = f"Remove {self._removed[0][0].name}"
 
     def undo(self, scene: Scene) -> None:
-        assert self._item is not None
-        scene.insert(self._item, self._index)
+        for item, index in reversed(self._removed):
+            scene.insert(item, index)
 
     def to_script(self) -> str:
         return f"session.remove_item({_py(self.item_id)})"
+
+
+def _items_of_case(scene: Scene, case_id: str) -> list[str]:
+    """The items that show a case: those naming it, and, while it is the only case,
+    those naming none (they show the first case)."""
+    only = sum(item.kind == "case" for item in scene) == 1
+    found = []
+    for item in scene:
+        if item.id == case_id or "case" not in item.properties:
+            continue
+        named = item.properties.get("case") or ""
+        if named == case_id or (only and not named):
+            found.append(item.id)
+    return found
 
 
 class SetProperty(Command):

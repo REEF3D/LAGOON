@@ -85,3 +85,33 @@ def test_ids_after_undo_match_replay():
     s.set_property(third, "normal", "x")
     replayed = Session.from_script(s.to_script())
     assert replayed.scene.to_dict() == s.scene.to_dict()
+
+
+def test_removing_a_case_removes_what_shows_it(tmp_path):
+    """A case goes with its surfaces, slices, time series...; another case's items
+    stay; undo brings all of them back where they were."""
+    from reef3d_fixtures import make_run
+
+    first = make_run(tmp_path / "a", frames=2, series=True)
+    second = make_run(tmp_path / "b", frames=2)
+    s = Session()
+    a = s.open_case(first)
+    b = s.open_case(second)
+    shows_a = [i.id for i in s.scene if i.properties.get("case") == a]
+    shows_b = [i.id for i in s.scene if i.properties.get("case") == b]
+    assert shows_a and shows_b and any(s.scene.get(i).kind == "series" for i in shows_a)
+    before = s.scene.ids()
+    s.remove_item(a)
+    assert a not in s.scene and not any(i in s.scene for i in shows_a)
+    assert b in s.scene and all(i in s.scene for i in shows_b)
+    s.undo()
+    assert s.scene.ids() == before
+    s.redo()
+    assert a not in s.scene and b in s.scene
+    # the only case: items naming no case (they show it) go with it too
+    s.remove_item(b)
+    assert not [i for i in s.scene if "case" in i.properties]
+    c = s.open_case(second)
+    loose = s.add_item("slice")
+    s.remove_item(c)
+    assert loose not in s.scene

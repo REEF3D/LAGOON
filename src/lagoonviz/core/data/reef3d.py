@@ -1086,6 +1086,16 @@ def _prefer_stores(datasets: list[Dataset], stored: list[Dataset]) -> list[Datas
     return kept
 
 
+def _store_solver(path: Path) -> str:
+    """The solver a LAGOON store says it holds (upper case), or "" if it cannot say."""
+    from lagoon_format.store import Store
+
+    try:
+        return str(Store(path).solver or "").upper()
+    except (OSError, ValueError, KeyError):
+        return ""
+
+
 def open_case(path: str | Path, stores: bool = True) -> Case:
     """Open a REEF3D case folder, one output folder, one output file or a LAGOON
     store; REEF3D_Case (the run log and control files) opens its case.
@@ -1104,10 +1114,12 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     datasets: list[Dataset] = []
     stored: list[Dataset] = []
     store_paths: list[Path] = []
+    alone = ""  # a store opened on its own: its solver
     if path.is_dir() and path in find_stores(path.parent):  # a LAGOON store
         case_dir = path.parent
         stored = store_datasets(path)
         store_paths = [path]
+        alone = _store_solver(path)
     elif path.is_file() and path.suffix == ".dat":
         # a gauge or force table: its case is the folder above REEF3D_*
         case_dir = path.parent.parent if path.parent.name.startswith("REEF3D_") else path.parent
@@ -1149,6 +1161,17 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     profiles = find_profiles(case_dir)
     if store_paths:  # tables and profiles of LAGOON stores replace the text files
         series, profiles = stored_series(store_paths, series, profiles)
+    if alone:
+        # a store opened on its own is its solver's run: not the gauges of other
+        # solvers' runs in the same folder
+        series = {k: f for k, f in series.items() if f.solver.upper() == alone}
+        profiles = {k: f for k, f in profiles.items() if f.solver.upper() == alone}
+        if not stored and not series and not profiles:
+            raise ValueError(
+                f"{path.name} holds no outputs yet. REEF3D adds an output to the store "
+                "when it writes the next one, and the last when the run ends: open it "
+                "again (or File > Reload case) once the run has written more outputs."
+            )
     if not datasets and not series and not profiles:
         raise ValueError(f"no REEF3D VTU/VTP output or time series found in {path}")
     case = Case(

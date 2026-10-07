@@ -76,6 +76,11 @@ play range on the timeline; the sun where you want it; Turbo as the rainbow.
   starts and ends; dragged, they restrict playback, the export dialog and films
   to a part of the run (saved with the session, `Session.set_play_range`). A
   **repeat** button loops the range, or plays it once.
+- **Removing a case removes its items**: its surfaces, volumes, slices, time
+  series and the other items that show it go with it (one undo step).
+- **A store opened on its own** shows only its solver's run (no gauges of other
+  runs in the same folder); a store REEF3D has only just begun says it has no
+  outputs yet instead of opening something else.
 - **Opening REEF3D_Case opens the case**: REEF3D's own folder (the run log and
   control files) opened only the wave gauges; it now opens the whole case, named
   after the case folder.

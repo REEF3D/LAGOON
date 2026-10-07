@@ -443,3 +443,23 @@ def test_an_iso_surface_is_left_out(tmp_path):
     report = convert(run)
     assert "free_surface" in report.skipped and "free_surface" not in report.outputs
     assert report.outputs["volume"] == 2 and "left out: free_surface" in report.summary()
+
+
+def test_a_store_opened_on_its_own_is_its_solvers_run(tmp_path):
+    """Another solver's gauges in the same folder stay out; a store REEF3D has only
+    just begun (no output yet) says so instead of opening something else."""
+    run = make_run(tmp_path / "run", frames=3, print_interval=0.5)
+    store = convert(run).store
+    make_run(tmp_path / "run", solver="FNPF", frames=2, volume=False, series=True)
+    s = Session()
+    s.open_case(store)
+    kinds = [i.kind for i in s.scene]
+    assert "free_surface" in kinds and "series" not in kinds
+    empty = run / "REEF3D_CFD.lagoon"
+    empty.mkdir()
+    (empty / "zarr.json").write_text(
+        '{"zarr_format": 3, "node_type": "group", "attributes": {"lagoon": '
+        '{"format": "lagoon", "version": "0.3", "solver": "CFD", "outputs": []}}}'
+    )
+    with pytest.raises(ValueError, match="no outputs yet"):
+        open_case(empty)

@@ -3,7 +3,8 @@
 Everything shown is an item in the **Scene** panel: the cases, the surfaces and
 volumes drawn from them, the time series and wave profiles plotted from them. The
 *Add* menu (and the toolbar, for the common ones) adds items; ++delete++ removes
-the selected one, and *Edit → Undo* (++ctrl+z++) takes back any change. The check
+the selected one (a case with all the items that show it), and *Edit → Undo*
+(++ctrl+z++) takes back any change. The check
 box beside an item shows or hides it.
 
 Select an item to change it in the **Properties** panel. Each change runs as a

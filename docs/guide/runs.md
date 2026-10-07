@@ -61,4 +61,7 @@ the timeline at the newest output.
 A run converted to the [LAGOON format](format.md) (*File → Convert to LAGOON
 format…*, or `lagoon-convert`) is several times smaller and opens faster. A store
 in the case folder (`REEF3D_<SOLVER>.lagoon`) is read in place of the VTK files.
-REEF3D can also write the store itself during the run (`P 18 1`).
+REEF3D can also write the store itself during the run (`P 18 1`). A store opened
+on its own shows only its solver's run. REEF3D adds an output to the store when it
+writes the next one: a store opened just after the run started has no outputs yet;
+open it again, or reload, once the run has written more.
