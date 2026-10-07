@@ -1,73 +1,77 @@
 # Changelog
 
-## Unreleased
+## 1.0.0rc2 (second release candidate)
 
+The second candidate for 1.0: path traced pictures as ÆgirFrames renders them,
+and faster; the 3D view in the same light; foam and spray; DIVEMesh solids; a
+play range on the timeline; the sun where you want it; Turbo as the rainbow.
+
+### Path tracing with Blender's Cycles
+
+- **As ÆgirFrames renders**: clear water is tinted glass seen by the camera only
+  (light and shadows pass through it to the bed), with a faint haze; the Open
+  ocean, Wave flume and Diorama looks are a model floating in ÆgirFrames' sky
+  picture (MIT, NTNU), which lights it, turned so its sun stands in the sun's
+  direction, with Blender's AgX as it is. A bed in its default colour is
+  ÆgirFrames' dark rock in Wave flume and Diorama; structures and bodies in their
+  default colours are ÆgirFrames' red, half metallic and matte. Colours you choose
+  are kept.
+- **Open ocean** dresses a coast as land by its height above the still water
+  level and its slope (sand under water, wet sand, dry sand, grass and heath,
+  rock where it is steep) with fine relief; at the sides of the domain the land
+  is cut off in rock down to a base and the water ends in clear walls, with small
+  wind ripples, and the water thins out at the shore with broken foam off the
+  beach.
+- **Foam, spray and bubbles**: white water born where REEF3D flags breaking, on
+  sharp fast crests and where the surface flow traps air, then spray flying, foam
+  drifting and fading, bubbles rising (diffuse particles after Ihmsen et al.
+  2012, scaled to the case), rendered as point clouds. *Foam and spray* in the
+  export dialog, `--no-foam` on the command line.
+- **Faster films, same pictures**: meshes whose triangles stay from frame to frame
+  are moved in place instead of built again; materials alike within 3 % are
+  shared and made when first used; smooth surfaces are subdivided (up to twice,
+  for smooth crests) only as far as the picture can show; broken triangles are
+  dropped on export, so Blender no longer checks every mesh: about three times
+  faster in a test on a Mac. Each frame's line in `blender.log` says how long
+  building and rendering took.
+
+### The 3D view
+
+- **As Blender renders it**: Open ocean, Wave flume and Diorama show the same sky
+  picture in the 3D view (tone mapped as Cycles shows it, turned to the sun),
+  lighting the model and reflected by the water, the sun at the picture's height;
+  the same dark rock and red; Open ocean and Diorama stand on a block.
+- **Diorama** look: the model on a stand, the bed a solid block, the water
+  see-through with sides down to the bed. **Diorama classic** keeps it as it was
+  first: a blue backdrop, LAGOON's own soft sky and a block of sand.
+- **2D view lit as the 3D view**: from the top the items are still drawn flat and
+  seen straight down, but shaded with their own shapes' normals in the same look
+  and sun, so waves, the bed's relief and the water's glint read as in 3D; the
+  headlamp no longer shines straight down (which laid a washed-out glare over
+  every flat face).
+- **Sun**: *View → Sun...* sets where the light comes from (direction and
+  height); the 3D view, films and Cycles renders use it, the sky turns along, it
+  is saved with the session and scripts set it with
+  `Session.set_sun(azimuth, elevation)`.
 - **Rainbow is Turbo**: the rainbow colour map is now Google's Turbo, as in
   SEASTATE's maps (blue through cyan, green and yellow to red, without Turbo's
   darkest ends, yellow and orange given more of the range than green), in place
-  of the Tecplot-like rainbow; its smooth lightness shows no false bands.
-- **3D view as Blender renders it**: the Open ocean, Wave flume and Diorama looks
-  show ÆgirFrames' sky picture in the 3D view too, as Cycles shows it (AgX), turned
-  to the sun, lighting the model and reflected by the water; the sun stands at the
-  picture's height. A bed in its default colour is dark rock, structures and
-  bodies ÆgirFrames' red, as in the render, and Open ocean stands on its block.
-  **Diorama classic** keeps the earlier Diorama (blue backdrop, block of sand).
-- **Opening REEF3D_Case opens the case**: REEF3D's own folder (the run log and
-  control files) opened only the wave gauges; it now opens the whole case, named
-  after the case folder.
-- **2D view lit as the 3D view**: from the top the items are still drawn flat and
-  seen straight down, but shaded with their own shapes' normals, so waves, the
-  bed's relief and the water's glint read as in 3D (the same look and sun). The
-  headlamp shines as in the 3D view instead of straight down, which lit every flat
-  face fully and laid a glare over them (a washed-out picture).
-- **Cycles closer to ÆgirFrames**: the Open ocean look is now a model in the sky
-  picture, as ÆgirFrames shows a case (the land cut off in rock at the domain's
-  sides, the water a body with clear walls), no longer a sea running on to the
-  horizon; the Wave flume look is path traced in the sky picture with ÆgirFrames'
-  water, as its wave tank renders; a bed in its default colour is ÆgirFrames' dark
-  rock in the Wave flume and Diorama looks, and structures and bodies in their
-  default colours are ÆgirFrames' red, half metallic and matte. The Wave flume's
-  water is ÆgirFrames' water colour in the 3D view too.
-- **Faster Cycles films, same pictures**: meshes whose triangles stay from frame to
-  frame (the bed, structures, the water when its mesh keeps its make-up) are moved
-  in place instead of built again; materials alike within 3 % are shared and made
-  when first used (a film had hundreds); smooth surfaces are subdivided only as far
-  as the picture can show (at most one triangle per pixel); broken triangles are
-  dropped on export, so Blender no longer checks every mesh. Each frame's line in
-  `blender.log` says how long building and rendering took.
-- **Cycles as ÆgirFrames renders**: water as tinted glass seen by the camera only
-  (light and shadows pass through to the bed), a faint haze, subdivided twice;
-  the Open ocean and Diorama looks lit by ÆgirFrames' sky picture (MIT, NTNU),
-  turned to the sun, with plain AgX; foam as their diffuse particles. Sky pictures
-  are written run-length coded.
-- **Play range**: two stripes on the timeline's slider mark where playing starts
-  and ends; dragged, they restrict playback, the export dialog and films to a part
-  of the run (saved with the session, `Session.set_play_range`). A **repeat**
-  button loops the range, or plays it once.
-- **Sun**: *View → Sun...* sets where the light comes from (direction and
-  height); the 3D view, films and Cycles renders use it, the sky's sun glow (and
-  the glint on the water) moves along, it is saved with the session and scripts
-  set it with `Session.set_sun(azimuth, elevation)`.
-- **Cycles, coasts**: in the Open ocean look the bed is dressed as land by height
-  above the still water level and slope (sand, wet sand, grass with patches of
-  heath, rock), with fine relief. The world runs on beyond the domain: the bed
-  continues past its sides and sinks into the sea, and the water is one body with
-  the sea out to the horizon (a long swell under the ripples). Clear water fades
-  out where it thins at the shore (no more blue specks over the sand), with broken
-  foam off the beach. AgX with medium high contrast instead of its flat default.
-- **Foam, spray and bubbles** in path traced films and stills: white water born
-  where REEF3D flags breaking, on sharp fast crests and where the surface flow
-  traps air, then spray flying, foam drifting and fading, bubbles rising
-  (diffuse particles after Ihmsen et al. 2012, scaled to the case), rendered by
-  Cycles as point clouds. *Foam and spray* in the export dialog, `--no-foam`.
+  of the Tecplot-like rainbow; its smooth lightness shows no false bands. Saved
+  sessions and scripts that name `rainbow`, `turbo` or `jet` get it.
+
+### Runs and the timeline
+
 - **DIVEMesh solids**: a case shows its solids (a monopile, a breakwater, the
   blocks under a beach) as a structure, read from DIVEMesh's
   `DIVEMesh_Paraview/REEF3D_Solid.vtp` or, without it, built from the S commands
   of `control.txt`; their faces in the bed are left out.
-- **Diorama look**: the model on a stand against a blue backdrop, in soft light;
-  the bed a solid block of sand and the water see-through with blue sides, in the
-  3D view as path traced (there a clear blue body of water). Water surfaces are subdivided once when Blender renders
-  them (smooth crests; walls and floors stay flat).
+- **Play range**: two stripes beside the timeline's slider mark where playing
+  starts and ends; dragged, they restrict playback, the export dialog and films
+  to a part of the run (saved with the session, `Session.set_play_range`). A
+  **repeat** button loops the range, or plays it once.
+- **Opening REEF3D_Case opens the case**: REEF3D's own folder (the run log and
+  control files) opened only the wave gauges; it now opens the whole case, named
+  after the case folder.
 
 ## 1.0.0rc1 (first release candidate)
 

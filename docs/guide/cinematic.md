@@ -37,6 +37,8 @@ For showcase pictures rather than for reading values.
     The Diorama as it was: the model on a stand against a blue backdrop, in soft
     light, the bed a solid block of sand.
 
+    ![Diorama classic](../images/look-diorama-classic.png)
+
 They use physically based materials: smooth water that reflects its
 surroundings, sand and rock with a fine grain, concrete, steel, ice and wood (the
 *Material* of bodies, structures and other objects). The surroundings are made by

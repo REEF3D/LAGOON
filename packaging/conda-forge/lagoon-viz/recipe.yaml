@@ -7,7 +7,7 @@ schema_version: 1
 
 context:
   name: lagoon-viz
-  version: "1.0.0rc1"
+  version: "1.0.0rc2"
   python_min: "3.11"
 
 package:
