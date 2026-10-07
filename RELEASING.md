@@ -20,6 +20,8 @@ release with the changelog's section as its notes.
 3. **Documentation**: Settings → Pages → Source: *GitHub Actions*. The workflow
    `docs.yml` then publishes the site at https://reef3d.github.io/LAGOON/ from every
    push to `main`.
+4. Remove the stray `0001-Phase-0-foundations-of-the-LAGOON-application.patch` at
+   the top of the repository (`git rm`); it is not part of the packages.
 
 ## Each release
 
@@ -50,8 +52,62 @@ release with the changelog's section as its notes.
    section. Release candidates (`rc`, `a`, `b`) become pre-releases on GitHub, and
    `pip install lagoon-viz` keeps installing the last final version; testers use
    `pip install --pre lagoon-viz`.
-5. **Afterwards**: set the next development version (e.g. `1.0.1.dev0`) and open a
+5. **The Mac app**: build the DMG (next section) and attach it to the GitHub
+   release (*Edit release → Attach binaries*).
+6. **Afterwards**: set the next development version (e.g. `1.0.1.dev0`) and open a
    new changelog section.
+
+## The macOS app
+
+A standalone `LAGOON.app` (Python, LAGOON and everything it needs inside, nothing
+to install) in a DMG, for Macs with the chip of the Mac that builds it (Apple
+silicon: M1 and later):
+
+```bash
+bash packaging/macos/build_app.sh
+```
+
+It needs uv and Xcode's command line tools (`xcode-select --install`). It builds
+in a clean environment (`build/macos/`), makes the icon from `logo/icon_dark.png`,
+packs the app with PyInstaller (`packaging/macos/LAGOON.spec`), checks that the
+app starts, renders and converts a small run on its own, and writes
+`dist-mac/LAGOON-<version>-macos-arm64.dmg` (about 250 MB). Blender is not inside;
+the app finds an installed one as LAGOON does.
+
+The app's program also runs the command line tools:
+
+```bash
+/Applications/LAGOON.app/Contents/MacOS/LAGOON render CASE view.png
+/Applications/LAGOON.app/Contents/MacOS/LAGOON convert CASE
+```
+
+Started from the Finder, its log goes to `~/Library/Logs/LAGOON/lagoon.log`.
+
+**Signing.** Without an Apple Developer ID the app is signed ad hoc: it runs, but
+macOS stops a downloaded copy the first time; users open it with right-click →
+*Open* → *Open* (or `xattr -dr com.apple.quarantine /Applications/LAGOON.app`).
+With a Developer ID (Apple Developer Program), sign and notarize it, so it opens
+like any app:
+
+1. Once: in Xcode → Settings → Accounts make a *Developer ID Application*
+   certificate, and store an app-specific password for the notary service:
+
+   ```bash
+   xcrun notarytool store-credentials lagoon-notary \
+       --apple-id you@example.com --team-id TEAMID
+   ```
+
+2. Each release:
+
+   ```bash
+   LAGOON_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+   LAGOON_NOTARY_PROFILE=lagoon-notary \
+   bash packaging/macos/build_app.sh
+   ```
+
+   The app is signed with the hardened runtime
+   (`packaging/macos/entitlements.plist`), the DMG is sent to Apple, and the
+   notarization ticket is stapled to it.
 
 ## conda-forge
 

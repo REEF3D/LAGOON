@@ -21,6 +21,11 @@ without a screen.
 
 ## Install
 
+On a Mac with Apple silicon, the simplest is the app: download
+`LAGOON-<version>-macos-arm64.dmg` from the
+[releases](https://github.com/REEF3D/LAGOON/releases) and drag LAGOON into
+Applications (Python and LAGOON are inside).
+
 With pip, in any Python 3.11 to 3.13 environment (macOS, Linux, Windows):
 
 ```bash

@@ -2,6 +2,18 @@
 
 LAGOON runs on macOS, Linux and Windows with Python 3.11 to 3.13.
 
+=== "Mac app"
+
+    Download `LAGOON-<version>-macos-arm64.dmg` from the
+    [releases](https://github.com/REEF3D/LAGOON/releases) (Macs with Apple
+    silicon, M1 and later), open it and drag LAGOON into Applications. Nothing else
+    is needed: Python and LAGOON are inside. If macOS says the app cannot be
+    opened, open it the first time with right-click → *Open* → *Open*.
+
+    The app's program also runs the command line tools:
+    `/Applications/LAGOON.app/Contents/MacOS/LAGOON render CASE view.png` and
+    `... LAGOON convert CASE`.
+
 === "pip"
 
     ```bash

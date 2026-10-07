@@ -59,6 +59,13 @@ play range on the timeline; the sun where you want it; Turbo as the rainbow.
   of the Tecplot-like rainbow; its smooth lightness shows no false bands. Saved
   sessions and scripts that name `rainbow`, `turbo` or `jet` get it.
 
+### Installing
+
+- **A Mac app**: `LAGOON.app` in a DMG with Python and LAGOON inside, nothing to
+  install (Apple silicon); its program also runs `render` and `convert`. Built by
+  `packaging/macos/build_app.sh`, signed and notarized when a Developer ID is set
+  up (RELEASING.md).
+
 ### Runs and the timeline
 
 - **DIVEMesh solids**: a case shows its solids (a monopile, a breakwater, the
