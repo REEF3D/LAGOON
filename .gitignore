@@ -54,3 +54,8 @@ LAGOON.app/
 site/
 docs/images/*.png
 !docs/images/icon.png
+
+# render scratch and files the Claude app drops into the repository
+*.cycles/
+/speedtest.mp4
+Claude outputs/
