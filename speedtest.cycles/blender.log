@@ -1,0 +1,32 @@
+/Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup --python-exit-code 1 -P /Users/hansbihs/Codelite/LAGOON/src/lagoonviz/render/blender_cycles.py -- speedtest.cycles
+LAGOON reading speedtest.cycles
+LAGOON Cycles on METAL, 120 samples
+/Users/hansbihs/Codelite/LAGOON/src/lagoonviz/render/blender_cycles.py:73: DeprecationWarning: 'World.use_nodes' is expected to be removed in Blender 6.0
+  owner.use_nodes = True
+LAGOON scene set up: 9 materials
+LAGOON building frame 1/5
+/Users/hansbihs/Codelite/LAGOON/src/lagoonviz/render/blender_cycles.py:73: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+  owner.use_nodes = True
+LAGOON rendering frame 1/5 (396273 triangles)
+00:20.352  render           | Saved: 'speedtest.cycles/frame_00000.png'
+LAGOON frame 1/5 396273 triangles 19.7 s (building 0.2 s, rendering 19.5 s)
+LAGOON building frame 2/5
+LAGOON rendering frame 2/5 (397788 triangles)
+00:26.205  render           | Saved: 'speedtest.cycles/frame_00001.png'
+LAGOON frame 2/5 397788 triangles 5.9 s (building 0.1 s, rendering 5.8 s)
+LAGOON building frame 3/5
+LAGOON rendering frame 3/5 (399189 triangles)
+00:30.409  render           | Saved: 'speedtest.cycles/frame_00002.png'
+LAGOON frame 3/5 399189 triangles 4.2 s (building 0.0 s, rendering 4.2 s)
+LAGOON building frame 4/5
+LAGOON rendering frame 4/5 (399845 triangles)
+00:34.586  render           | Saved: 'speedtest.cycles/frame_00003.png'
+LAGOON frame 4/5 399845 triangles 4.2 s (building 0.0 s, rendering 4.1 s)
+LAGOON building frame 5/5
+LAGOON rendering frame 5/5 (400672 triangles)
+00:38.773  render           | Saved: 'speedtest.cycles/frame_00004.png'
+LAGOON frame 5/5 400672 triangles 4.2 s (building 0.0 s, rendering 4.1 s)
+Blender 5.2.2 LTS (hash d13f752e3b9c built 2026-09-15 01:49:19)
+
+Blender quit
+exit code 0
