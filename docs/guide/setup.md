@@ -15,7 +15,8 @@ LAGOON works in one of two modes, switched with the two buttons in the toolbar
   greyed in the scene) and the timeline rests. Each case with input files gets a
   *Case set-up* item when it has none.
 - **Results**: what the runs wrote, as always. The *Case set-up* items are there
-  too, switched off: tick one to see where the gauges and zones were.
+  too, switched off: tick one to see where the gauges and zones were. The Set-up
+  panel makes way for *Properties* (*View → Set-up* brings it back).
 
 Set-up items keep a check box of their own in each mode, so switching back and
 forth shows each mode as you left it. A case that has not run yet opens in the

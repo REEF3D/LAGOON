@@ -877,7 +877,11 @@ def _frames_in(folder: Path) -> dict[str, list[Frame]]:
                 new = f"{step:0{_width(path)}d}"
                 pieces = [path.parent / n.replace(f"-{old}-", f"-{new}-", 1) for n in names]
             frames.append(Frame(step, path, pieces))
-        series[stem] = frames
+        # a .pvtp/.pvtu whose pieces are gone (an earlier run's index file, its pieces
+        # written again and removed by a run with P 18 1): not an output
+        frames = [f for f in frames if f.pieces and f.pieces[0].is_file()]
+        if frames:
+            series[stem] = frames
     for stem, steps in serial.items():
         if stem not in series:
             series[stem] = [Frame(s, steps[s], [steps[s]]) for s in sorted(steps)]

@@ -47,6 +47,15 @@
   default, from the REEF3D and DIVEMesh user guides and the programs' readers
   (`tools/command_catalog.py`); input files are read and written back line by
   line, comments and order kept.
+- Back in the results, the Set-up panel makes way for *Properties*.
+
+### Fixes
+
+- **A LAGOON store opened on its own** (`REEF3D_FNPF.lagoon`) showed nothing when
+  its folder also held other output that could not be read: its frames were read
+  from the whole folder instead of the store.
+- `.pvtp`/`.pvtu` files whose pieces are gone (an earlier run's, the pieces
+  removed by a run with P 18 1) are left out instead of stopping the case.
 
 ## 1.0.0rc2 (second release candidate)
 

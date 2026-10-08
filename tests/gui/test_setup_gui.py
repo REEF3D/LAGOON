@@ -59,6 +59,10 @@ def test_a_case_that_has_not_run_opens_in_the_set_up(window, flume):
     window.act_mode_results.trigger()
     assert window.session.mode == "results" and window.timeline.isEnabled()
     assert not window.act_run_divemesh.isVisible()
+    # the right panel goes from the set-up to the properties
+    assert not window.docks["setup"].isVisible() and window.docks["properties"].isVisible()
+    window.act_mode_setup.trigger()
+    assert window.docks["setup"].isVisible()
 
 
 def test_the_results_are_greyed_in_the_set_up(window, reef3d_run):

@@ -646,7 +646,16 @@ class DataManager:
                 int(props.get("seeds", 60)),
                 str(props.get("lines_in", "volume")),
             )
-        return FrameKey(str(case.path), dataset.key, index, arrays, extra)
+        return FrameKey(self._case_key(item_id), dataset.key, index, arrays, extra)
+
+    def _case_key(self, item_id: str) -> str:
+        """The key of an item's case among the open cases: the path it was opened
+        with, resolved (a LAGOON store opened on its own is that store, not the
+        folder around it, which may hold other runs)."""
+        case_item = self.case_item(item_id)
+        assert case_item is not None
+        raw = str(case_item.properties.get("path", ""))
+        return self._resolved.get(raw) or str(Path(raw).expanduser().resolve())
 
     def cached(self, item_id: str, time: float | None = None) -> SurfaceMesh | None:
         key = self.frame_key(item_id, time)

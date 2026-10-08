@@ -102,6 +102,34 @@ def test_a_store_alone_opens_as_a_case(converted):
     assert all(isinstance(d, StoreDataset) for d in case.datasets.values())
 
 
+def test_a_store_alone_reads_from_the_store(converted):
+    """The frames of a store opened on its own come from that store, also when the
+    folder around it holds VTP index files whose pieces are gone (an earlier run
+    without P 18, its pieces written again and removed by a run with P 18 1)."""
+    run, report = converted
+    for piece in (run / "REEF3D_NHFLOW_VTP_FSF").glob("*-000001.vtp"):
+        piece.unlink()
+    session = Session()
+    session.open_case(report.store)
+    for kind in ("free_surface", "bathymetry"):
+        item = next(i for i in session.scene if i.kind == kind)
+        key = session.data.frame_key(item.id)
+        assert key.case == str(report.store.resolve())
+        assert session.data.load(item.id).points.shape[0] > 0
+
+
+def test_index_files_without_pieces_are_left_out(tmp_path):
+    run = make_run(tmp_path / "run", frames=3)
+    for piece in (run / "REEF3D_NHFLOW_VTP_FSF").glob("REEF3D-NHFLOW-FSF-0000000[01]-*.vtp"):
+        piece.unlink()  # outputs 0 and 1: only their .pvtp left
+    case = open_case(run)
+    assert [f.step for f in case.by_role("free_surface").frames] == [2]
+    for piece in (run / "REEF3D_NHFLOW_VTP_FSF").glob("*.vtp"):
+        piece.unlink()  # no output left: no free surface, the rest opens
+    case = open_case(run)
+    assert case.by_role("free_surface") is None and case.by_role("volume") is not None
+
+
 def test_newer_vtk_output_wins_over_the_store(tmp_path):
     run = make_run(tmp_path / "run", frames=3)
     convert(run, limit=2)

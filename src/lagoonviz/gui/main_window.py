@@ -530,11 +530,19 @@ class MainWindow(QMainWindow):
         self.timeline.setEnabled(not setup)
         self.act_play.setEnabled(not setup)
         self.act_run_divemesh.setVisible(setup)
+        switched = getattr(self, "_shown_mode", "results") != self.session.mode
         if setup and not self.full_screen:
             dock = self.docks["setup"]
             dock.show()
             dock.raise_()
-        if getattr(self, "_shown_mode", "results") != self.session.mode:
+        elif switched and not self.full_screen:
+            # back to the results: the Set-up panel makes way for Properties (View →
+            # Set-up shows it again, e.g. to edit the input files of a case that has run)
+            self.docks["setup"].hide()
+            dock = self.docks["properties"]
+            dock.show()
+            dock.raise_()
+        if switched:
             self.statusBar().showMessage(
                 "Set-up: the input files and DIVEMesh's grid; the results are hidden"
                 if setup
