@@ -162,6 +162,11 @@ class MainWindow(QMainWindow):
             tip="Open a REEF3D case folder (or one of its REEF3D_* output folders)",
         )
         self.act_open_case.setIconText("Open case")
+        self.act_new_case = self._action(
+            "&New case...",
+            self.new_case_dialog,
+            tip="Start a case in a folder: control.txt and ctrl.txt, edited in the Set-up panel",
+        )
         self.act_open_file = self._action(
             "Open output &file...",
             self.open_output_dialog,
@@ -339,6 +344,7 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         file_menu = bar.addMenu("&File")
         file_menu.addAction(self.act_open_case)
+        file_menu.addAction(self.act_new_case)
         file_menu.addAction(self.act_open_file)
         file_menu.addAction(self.act_reload)
         file_menu.addAction(self.act_follow)
@@ -775,6 +781,30 @@ class MainWindow(QMainWindow):
         path = QFileDialog.getExistingDirectory(self, "Open REEF3D case", self._last_dir())
         if path:
             self.open_case(path)
+
+    def new_case_dialog(self) -> str | None:
+        """File → New case: a folder (made in the dialog) for a case's input files."""
+        path = QFileDialog.getExistingDirectory(
+            self, "Folder of the new case (make one with New Folder)", self._last_dir()
+        )
+        if not path:
+            return None
+        try:
+            case_id = self.session.new_case(path)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, "Could not start the case", str(error))
+            return None
+        self._remember_dir(path)
+        self.setup_panel.refresh()
+        dock = self.docks["setup"]
+        dock.show()
+        dock.raise_()
+        self.statusBar().showMessage(
+            f"New case {Path(path).name}: add DIVEMesh's commands (control.txt: domain B 10, "
+            "cells B 1) and REEF3D's (ctrl.txt) in the Set-up panel, then Save",
+            15000,
+        )
+        return case_id
 
     def open_output_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

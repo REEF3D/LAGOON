@@ -135,6 +135,18 @@ class Session:
             self.set_time(first)
         return command.item_id
 
+    def new_case(self, path: str | Path, name: str | None = None) -> str:
+        """Start a case in a folder (made if needed): its control.txt and ctrl.txt are
+        started with a comment line if they are not there, and the case opens in the
+        set-up, ready for the commands. Returns the case id."""
+        folder = Path(path).expanduser()
+        folder.mkdir(parents=True, exist_ok=True)
+        for file, program in (("control.txt", "DIVEMesh"), ("ctrl.txt", "REEF3D")):
+            target = folder / file
+            if not target.exists():
+                target.write_text(f"// {program} input of {folder.name}, started in LAGOON\n")
+        return self.open_case(folder, name)
+
     def set_mode(self, mode: str) -> None:
         """Work on the results ("results") or on the set-up ("setup") of the cases.
 

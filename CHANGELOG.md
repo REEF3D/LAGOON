@@ -9,6 +9,8 @@
   The set-up leaves the results out and rests the timeline; set-up items keep a
   check box of their own in each mode. A case that has not run yet opens in the
   set-up. `session.set_mode("setup")` in scripts; saved with the session.
+- **File → New case…** starts a case in a folder (`control.txt` and `ctrl.txt`
+  begun with a comment line) and opens it in the set-up.
 - **A case that has not run yet** opens as its set-up from the input files
   (`control.txt`, `ctrl.txt`, `geo.dat`): DIVEMesh's solids as a structure and a
   *Case set-up* item ([Case set-up](guide/setup.md)).

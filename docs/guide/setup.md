@@ -22,6 +22,16 @@ forth shows each mode as you left it. A case that has not run yet opens in the
 set-up. The switch is a command like any other: it can be undone, and a script
 switches with `session.set_mode("setup")` or `session.set_mode("results")`.
 
+## Starting a case
+
+*File → Open case…* opens a folder that has input files or output. For a case
+that does not exist yet, *File → New case…* asks for a folder (make one in the
+dialog with *New Folder*), starts its `control.txt` and `ctrl.txt` with a comment
+line, and opens it in the set-up. Add DIVEMesh's commands in the Set-up panel's
+`control.txt` tab (the domain B 10, the cell size B 1, the sides C 11 – C 16),
+then REEF3D's in the `ctrl.txt` tab, and *Save*. In a script:
+`session.new_case("~/runs/flume")`.
+
 ## A case that has not run yet
 
 A case folder without output opens as its set-up:

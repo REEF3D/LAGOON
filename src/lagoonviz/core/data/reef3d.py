@@ -1231,7 +1231,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     if setup_only and not has_inputs(case_dir):
         raise ValueError(
             f"no REEF3D VTU/VTP output, time series or input files (control.txt, ctrl.txt) "
-            f"found in {path}"
+            f"found in {path}. To start a case there: File → New case… "
+            f"(session.new_case in a script)"
         )
     if not datasets and not series and not profiles and not setup_only:
         raise ValueError(f"no REEF3D VTU/VTP output or time series found in {path}")

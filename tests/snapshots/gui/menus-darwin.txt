@@ -1,5 +1,6 @@
 File
   Open case...  [Ctrl+Shift+O]
+  New case...
   Open output file...
   Reload case  [F5]
   [ ] Follow running simulation

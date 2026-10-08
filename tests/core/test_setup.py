@@ -124,8 +124,29 @@ def test_a_case_that_has_not_run_opens_as_its_set_up(basin):
 
 
 def test_a_folder_without_input_or_output_is_refused(tmp_path):
-    with pytest.raises(ValueError, match="input files"):
+    with pytest.raises(ValueError, match="New case"):
         Session().open_case(tmp_path)
+
+
+def test_a_new_case(tmp_path):
+    session = Session()
+    case_id = session.new_case(tmp_path / "flume")
+    assert session.mode == "setup"
+    assert (tmp_path / "flume" / "control.txt").read_text().startswith("// DIVEMesh input")
+    assert {i.kind for i in session.scene} == {"case", "setup", "grid"}
+    session.add_input("control.txt", "B 10", [0, 10, 0, 1, 0, 1])
+    session.set_input("control.txt", "B 1", [0.1])
+    session.add_input("ctrl.txt", "P 51", [5.0, 0.5])
+    assert session.data.case_setup(case_id).cells == (100, 10, 10)
+    grid = next(i.id for i in session.scene if i.kind == "grid")
+    assert session.data.grid(grid).cells == (100, 10, 10)
+    session.save_inputs()
+    text = (tmp_path / "flume" / "control.txt").read_text()
+    assert text.splitlines()[1:] == ["B 10 0.0 10.0 0.0 1.0 0.0 1.0", "B 1 0.1"]
+    # opened again later, the files are kept
+    again = Session()
+    again.new_case(tmp_path / "flume")
+    assert again.input_file("ctrl.txt").all("P 51") == [[5.0, 0.5]]
 
 
 def test_setup_item_on_a_case_with_output(reef3d_run):
