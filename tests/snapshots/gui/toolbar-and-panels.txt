@@ -2,6 +2,10 @@ TOOLBAR
 Open case...
 Reload case
 ----
+[ ] Set-up
+[x] Results
+Run DIVEMesh
+----
 Open session...
 Save session
 ----
@@ -18,7 +22,8 @@ Save screenshot...
 
 PANELS
 scene: 'Scene' in LeftDockWidgetArea
-properties: 'Properties' in RightDockWidgetArea
+properties: 'Properties' in RightDockWidgetArea tabbed with dock_setup
+setup: 'Set-up' in RightDockWidgetArea tabbed with dock_properties
 plots: 'Plots' in BottomDockWidgetArea tabbed with dock_profiles
 timeline: 'Timeline' in BottomDockWidgetArea
 console: 'Python console' in BottomDockWidgetArea

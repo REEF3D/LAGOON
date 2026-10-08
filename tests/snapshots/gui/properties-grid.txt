@@ -1,0 +1,9 @@
+QWidget
+  Name: text 'DIVEMesh grid'
+  Kind: label 'DIVEMesh grid'
+  Visible: checkbox '' on
+  Case: choice 'first case' of ['first case', 'run [case-1]']
+  Faces: choice 'bottom and back' of ['bottom and back', 'bottom', 'back', 'outside']
+  Every n-th line: number 0 in [0, 1000] decimals 0
+  MPI partition: checkbox '' on
+  label 'No grid: control.txt has no domain (B 10) and cells (B 1, B 2)' (disabled)

@@ -1,0 +1,21 @@
+QWidget
+  Name: text 'Case set-up'
+  Kind: label 'Case set-up'
+  Visible: checkbox '' on
+  Case: choice 'first case' of ['first case', 'run [case-1]']
+  Domain: checkbox '' on
+  Sides: checkbox '' on
+  Still water: checkbox '' on
+  Relaxation zones: checkbox '' on
+  Waves: checkbox '' on
+  Gauges: checkbox '' on
+  Probes: checkbox '' on
+  Sections: checkbox '' on
+  Forces: checkbox '' on
+  Floating bodies: checkbox '' on
+  Structures: checkbox '' on
+  Regions: checkbox '' on
+  Solids: checkbox '' off
+  Bed: checkbox '' on
+  Labels: checkbox '' on
+  label 'files: domain from the results / domain: x 0 .. 8, y 0 .. 4, z 0 .. 2.17894 m (from the results) / sides: x min wall, x max wall, y min wall, y max wall, bottom wall, top wall' (disabled)

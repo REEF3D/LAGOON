@@ -540,6 +540,9 @@ def test_diorama_stands_the_model_on_a_block(reef3d_run):
 
     session = Session()
     session.open_case(reef3d_run)
+    # plain water is see-through on the stand (coloured by a variable it stays opaque)
+    water_item = next(i.id for i in session.scene if i.kind == "free_surface")
+    session.set_property(water_item, "variable", "none")
     view = SceneRenderer("diorama")
     kinds = {}
     for item_id in session.data.data_items():

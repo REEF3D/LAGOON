@@ -4,6 +4,9 @@ File
   Reload case  [F5]
   [ ] Follow running simulation
   ----
+  Save input files
+  Run DIVEMesh (disabled)
+  ----
   New session  [Ctrl+N]
   Open session...  [Ctrl+O]
   Save session  [Ctrl+S]
@@ -42,10 +45,16 @@ Add
   DEM elements
   Ice floes
   Rod trees
+  Case set-up
+  DIVEMesh grid
   Particles
 View
+  [ ] Set-up  [Ctrl+Shift+U]
+  [x] Results  [Ctrl+Shift+R]
+  ----
   [x] Scene
   [x] Properties
+  [x] Set-up
   [x] Plots
   [x] Timeline
   [x] Python console
