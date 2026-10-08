@@ -23,6 +23,7 @@ from lagoonviz.core.commands import (
     AddItem,
     Command,
     CommandStack,
+    EditInput,
     OpenCase,
     RemoveItem,
     Rename,
@@ -101,14 +102,16 @@ class Session:
         for role, dataset in case.main_datasets().items():
             kind = ROLES[role]
             props: dict[str, Any] = {}
-            if sum(d.role == role for d in case.datasets.values()) > 1 or role == "solid":
-                props["dataset"] = dataset.key  # (solids: shown as a structure)
+            if sum(d.role == role for d in case.datasets.values()) > 1 or role in ("solid", "topo"):
+                props["dataset"] = dataset.key  # (solids: a structure; DIVEMesh's bed: a bed)
             variable = dataset.default_variable()
             if variable != KINDS[kind].properties["variable"].default:
                 props["variable"] = variable
             children.append(AddItem(kind, None, props))
         if case.setup_only:  # not run yet: domain, sides, zones, gauges of the input
             children.append(AddItem("setup", None, {}))
+            if (Path(case.path) / "control.txt").is_file():
+                children.append(AddItem("grid", None, {}))  # DIVEMesh's, or control.txt's
         elif has_inputs(case.path):  # results: the set-up is there, switched off
             children.append(AddItem("setup", None, {}, visible=False))
         for series in case.main_series():
@@ -142,13 +145,169 @@ class Session:
             raise ValueError(f"mode must be one of {', '.join(MODES)}, got {mode!r}")
         added = []
         if mode == "setup":
-            shown = {str(i.properties.get("case", "")) for i in self.scene if i.kind == "setup"}
-            cases = [i for i in self.scene if i.kind == "case"]
-            for case_item in cases:
-                named = case_item.id in shown or (len(cases) == 1 and "" in shown)
-                if not named and self.data.case_setup(case_item.id) is not None:
-                    added.append(AddItem("setup", None, {"case": case_item.id}))
+            for case_item in [i for i in self.scene if i.kind == "case"]:
+                added += self._missing_setup_items(case_item.id)
         self.stack.execute(SetMode(self.scene, mode, added))
+
+    def _missing_setup_items(self, case_id: str) -> list[AddItem]:
+        """A "Case set-up" item for a case with input files, and a "DIVEMesh grid" item
+        for one with control.txt, if it has none yet."""
+        cases = [i for i in self.scene if i.kind == "case"]
+        found = []
+        for kind in ("setup", "grid"):
+            named = {str(i.properties.get("case", "")) for i in self.scene if i.kind == kind}
+            if case_id in named or (len(cases) == 1 and "" in named):
+                continue
+            setup = self.data.case_setup(case_id)
+            if setup is None or (kind == "grid" and not setup.control.exists):
+                continue
+            found.append(AddItem(kind, None, {"case": case_id}))
+        return found
+
+    # ------------------------------------------------------------- input files
+    def input_file(self, file: str, case: str | None = None):
+        """A case's ``ctrl.txt`` or ``control.txt`` as it is being edited (a
+        :class:`~lagoonviz.core.data.controlfile.ControlFile`; empty if the file does
+        not exist yet). ``case``: the case item (default: the first)."""
+        case_id = self._case_id(case)
+        setup = self.data.case_setup(case_id, create=True)  # none yet: written on save
+        if setup is None:
+            raise ValueError(f"{case_id}: no case folder")
+        if file == "ctrl.txt":
+            return setup.ctrl
+        if file == "control.txt":
+            return setup.control
+        raise ValueError(f"file must be 'ctrl.txt' or 'control.txt', got {file!r}")
+
+    def _case_id(self, case: str | None) -> str:
+        if case:
+            if case not in self.scene or self.scene.get(case).kind != "case":
+                raise ValueError(f"{case!r} is not a case item")
+            return case
+        found = next((i.id for i in self.scene if i.kind == "case"), None)
+        if found is None:
+            raise ValueError("open a case first")
+        return found
+
+    def _edit_input(self, file: str, case: str | None, change, script: str, label: str) -> None:
+        case_id = self._case_id(case)
+        current = self.input_file(file, case_id)
+        changed = current.copy()
+        change(changed)
+        if changed.text() == current.text():
+            return
+        call = script + (f", case={case!r})" if case else ")")
+        self.stack.execute(
+            EditInput(lambda: self.input_file(file, case_id), case_id, changed.text(), call, label)
+        )
+
+    def set_input(
+        self, file: str, code: str, values, occurrence: int = 0, case: str | None = None
+    ) -> None:
+        """Give a command of an input file new values: its ``occurrence``-th line (a
+        new line if there are fewer), e.g. ``set_input("ctrl.txt", "P 51", [1.0, 0.5],
+        occurrence=1)`` moves the second wave gauge. Edits are kept until
+        :meth:`save_inputs`."""
+        values = [float(v) if not isinstance(v, str) else v for v in values]
+        script = f"session.set_input({file!r}, {code!r}, {values!r}"
+        if occurrence:
+            script += f", occurrence={occurrence}"
+        self._edit_input(
+            file,
+            case,
+            lambda f: f.set(code, values, occurrence),
+            script,
+            f"Set {code}",
+        )
+
+    def add_input(self, file: str, code: str, values, case: str | None = None) -> int:
+        """One more line of a command (another gauge, solid, ...); returns its
+        occurrence."""
+        values = [float(v) if not isinstance(v, str) else v for v in values]
+        self._edit_input(
+            file,
+            case,
+            lambda f: f.add(code, values),
+            f"session.add_input({file!r}, {code!r}, {values!r}",
+            f"Add {code}",
+        )
+        return len(self.input_file(file, case).entries(code)) - 1
+
+    def remove_input(
+        self, file: str, code: str, occurrence: int | None = None, case: str | None = None
+    ) -> None:
+        """Remove a command's line (all its lines with ``occurrence`` None)."""
+        script = f"session.remove_input({file!r}, {code!r}"
+        if occurrence is not None:
+            script += f", occurrence={occurrence}"
+        self._edit_input(file, case, lambda f: f.remove(code, occurrence), script, f"Remove {code}")
+
+    def set_input_text(self, file: str, text: str, case: str | None = None) -> None:
+        """Replace the whole text of an input file (the text editor)."""
+        self._edit_input(
+            file,
+            case,
+            lambda f: f.set_text(text),
+            f"session.set_input_text({file!r}, {text!r}",
+            f"Edit {file}",
+        )
+
+    def save_inputs(self, case: str | None = None) -> list[Path]:
+        """Write the edited input files of a case (the first by default); returns
+        the files written. Not an undo step."""
+        case_id = self._case_id(case)
+        written = []
+        for name in ("control.txt", "ctrl.txt"):
+            file = self.input_file(name, case_id)
+            if file.modified:
+                written.append(file.write())
+        if written:
+            self.scene.inputs_changed(case_id)
+        return written
+
+    def inputs_modified(self, case: str | None = None) -> list[str]:
+        """The input files of a case with edits not saved yet."""
+        case_id = self._case_id(case)
+        return [n for n in ("control.txt", "ctrl.txt") if self.input_file(n, case_id).modified]
+
+    def run_divemesh(
+        self,
+        case_id: str | None = None,
+        executable: str | Path | None = None,
+        on_line=None,
+    ) -> int:
+        """Run DIVEMesh on a case (the first by default) and show what it made: its
+        grid, solids and bed. Edits of control.txt not saved yet are written first
+        (DIVEMesh reads the file). Returns DIVEMesh's exit code."""
+        from lagoonviz.core.divemesh_run import run_divemesh
+
+        if case_id is None:
+            case_id = next((i.id for i in self.scene if i.kind == "case"), None)
+        if case_id is None:
+            raise ValueError("open a case first")
+        folder = self.data.case_folder(case_id)
+        if folder is None:
+            raise ValueError(f"{case_id}: no case folder")
+        setup = self.data.case_setup(case_id)
+        if setup is not None and setup.control.modified:
+            setup.control.write()
+        code = run_divemesh(folder, executable, on_line)
+        self.divemesh_done(case_id)
+        return code
+
+    def divemesh_done(self, case_id: str) -> None:
+        """After DIVEMesh has run on a case: read its outputs again and give the case a
+        grid item if it has none (the GUI runs DIVEMesh itself and calls this)."""
+        self.data.reload(case_id)
+        missing = [a for a in self._missing_setup_items(case_id) if a.kind == "grid"]
+        for add in missing:
+            self.add_item("grid", **add.overrides)
+        case = self.data.case(case_id)
+        topo = case.datasets.get("divemesh_topo") if case is not None else None
+        shown = {str(i.properties.get("dataset", "")) for i in self.scene if i.kind == "bathymetry"}
+        if topo is not None and topo.key not in shown and case.setup_only:
+            self.add_item("bathymetry", case=case_id, dataset=topo.key)  # DIVEMesh's bed
+        self.scene.data_changed()
 
     @property
     def mode(self) -> str:

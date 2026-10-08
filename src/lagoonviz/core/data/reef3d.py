@@ -68,6 +68,7 @@ ROLES = {
     "particles": "particles",
     "amr": "amr",
     "solid": "structure",  # DIVEMesh's solids (a monopile, the blocks under a beach)
+    "topo": "bathymetry",  # DIVEMesh's bed (its topo objects, geo.dat), before a run
 }
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
@@ -128,6 +129,7 @@ ROLE_LABELS = {
     "particles": "particles",
     "amr": "AMR surface",
     "solid": "solids",
+    "topo": "bed",
 }
 
 
@@ -592,7 +594,7 @@ class Case:
 
     def _shown_run(self) -> list[Dataset]:
         """The shown datasets the run wrote (DIVEMesh's solids were written before it)."""
-        return [d for d in self.main_datasets().values() if d.role != "solid"]
+        return [d for d in self.main_datasets().values() if d.role not in ("solid", "topo")]
 
     def main_profiles(self) -> list[ProfileSet]:
         """Wave profiles written during the shown run (as for :meth:`main_series`)."""
@@ -647,9 +649,13 @@ class Case:
             return {"amr": preferred(refined)}
         if not surfaces:
             volumes = [d for d in self.datasets.values() if d.role == "volume"]
-            if not volumes:  # not run yet: DIVEMesh's solids, if any
-                solids = [d for d in self.datasets.values() if d.role == "solid"]
-                return {"solid": solids[0]} if solids else {}
+            if not volumes:  # not run yet: DIVEMesh's bed and solids, if any
+                found = {}
+                for role in ("topo", "solid"):
+                    matches = [d for d in self.datasets.values() if d.role == role]
+                    if matches:
+                        found[role] = matches[0]
+                return found
             return {"volume": max(volumes, key=lambda d: d.written_span()[1])}
         free = [d for d in surfaces if d.role == "free_surface"]
         lead = preferred(free or surfaces)
@@ -760,12 +766,48 @@ class SolidDataset(Dataset):
         return written, written
 
 
+class TopoDataset(Dataset):
+    """DIVEMesh's bed of a case (``DIVEMesh_Paraview/REEF3D_Topo.vtp``: its topo objects
+    and the bed from geo.dat), one frame shown at any time: the bed of the set-up,
+    before REEF3D has run."""
+
+    def __init__(self, source: Path, case_dir: Path) -> None:
+        self.source = source
+        self._mesh: SurfaceMesh | None = None
+        super().__init__(
+            "divemesh_topo", "DIVEMesh", "topo", [Frame(0, source, [source])], case_dir
+        )
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        return "PolyData", {}
+
+    @property
+    def label(self) -> str:
+        return "DIVEMesh bed"
+
+    def read(self, index: int = 0, variables: list[str] | None = None) -> SurfaceMesh:
+        if self._mesh is None:
+            self._mesh = self._read_plain(self.frames[0], [], False)
+        return self._mesh
+
+    def written_span(self) -> tuple[float, float]:
+        try:
+            written = self.source.stat().st_mtime
+        except OSError:
+            written = 0.0
+        return written, written
+
+
 def solid_datasets(case_dir: Path) -> list[Dataset]:
-    """DIVEMesh's solids of a case folder, when it has any."""
+    """DIVEMesh's solids and bed of a case folder, when it has any."""
     from lagoonviz.core.data.divemesh import find_solids
+    from lagoonviz.core.data.divemesh_grid import TOPO
 
     source = find_solids(case_dir)
-    return [SolidDataset(source, case_dir)] if source is not None else []
+    found: list[Dataset] = [SolidDataset(source, case_dir)] if source is not None else []
+    if (case_dir / TOPO).is_file():
+        found.append(TopoDataset(case_dir / TOPO, case_dir))
+    return found
 
 
 # ----------------------------------------------------------------- discovery
@@ -1177,7 +1219,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
             )
     from lagoonviz.core.data.setup import has_inputs
 
-    run = [d for d in datasets if d.role != "solid"]
+    run = [d for d in datasets if d.role not in ("solid", "topo")]
     setup_only = not run and not series and not profiles and path == case_dir
     if setup_only and not has_inputs(case_dir):
         raise ValueError(

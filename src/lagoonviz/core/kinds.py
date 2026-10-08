@@ -129,6 +129,8 @@ SETUP_GROUPS = {
     "solids": "Solids",
     "bed": "Bed",
 }
+#: faces of the domain the "DIVEMesh grid" item draws its lines on
+GRID_FACES = ("bottom and back", "bottom", "back", "outside")
 #: groups the item starts with switched off (solids are drawn as a structure item)
 _SETUP_OFF = ("solids",)
 _SETUP_TIPS = {
@@ -386,6 +388,28 @@ KINDS: dict[str, KindSpec] = {
             },
             "labels": PropertySpec(
                 True, "Labels", tip="Numbers of gauges and probes, kinds of sides"
+            ),
+        },
+    ),
+    "grid": KindSpec(
+        "DIVEMesh grid",
+        {
+            "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
+            "faces": PropertySpec(
+                "bottom and back",
+                "Faces",
+                choices=GRID_FACES,
+                tip="The faces of the domain the grid lines are drawn on",
+            ),
+            "every": PropertySpec(
+                0,
+                "Every n-th line",
+                minimum=0,
+                maximum=1000,
+                tip="0: as many as read well (a few hundred per face); 1: every grid line",
+            ),
+            "partition": PropertySpec(
+                True, "MPI partition", tip="The planes between the MPI ranks (M 10)"
             ),
         },
     ),

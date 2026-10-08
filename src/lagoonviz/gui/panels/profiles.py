@@ -41,7 +41,9 @@ class ProfilesPanel(QWidget):
         if bridge is not None:
             bridge.timeChanged.connect(lambda _t: self.update())
             bridge.sceneChanged.connect(
-                lambda event, _item: None if event in VIEW_EVENTS else self.refresh()
+                lambda event, _item: (
+                    None if event in VIEW_EVENTS or event == "inputs" else self.refresh()
+                )
             )
         self.refresh()
 

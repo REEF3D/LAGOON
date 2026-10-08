@@ -566,3 +566,23 @@ def test_diorama_stands_the_model_on_a_block(reef3d_run):
     view.remove(bed)
     view.set_style("diorama")
     assert bed not in view._stand
+
+
+def test_render_the_set_up(tmp_path):
+    """A case that has not run: its domain, sides, zones, gauges and grid, labelled."""
+    (tmp_path / "control.txt").write_text(
+        "C 11 6\nC 14 7\nB 1 0.5\nB 10 0.0 20.0 0.0 4.0 0.0 1.5\nS 33 10.0 2.0 0.4\n"
+    )
+    (tmp_path / "ctrl.txt").write_text(
+        "A 10 5\nB 90 1\nB 96 4.0 6.0\nB 98 2\nB 99 1\nF 60 1.0\nP 51 2.0 2.0\nP 51 8.0 2.0\n"
+    )
+    session = Session()
+    session.open_case(tmp_path)
+    assert session.mode == "setup"
+    image = render_session(session, (640, 360))
+    _keep("render_setup.png", image)
+    assert _colours(image) > 40
+    # the wave gauges' amber is there
+    rgb = image[..., :3].astype(int)
+    amber = (abs(rgb[..., 0] - 0xF2) < 40) & (abs(rgb[..., 1] - 0xB1) < 40) & (rgb[..., 2] < 0x80)
+    assert amber.sum() > 20

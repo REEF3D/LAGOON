@@ -162,6 +162,10 @@ def _sun_direction(look: dict) -> np.ndarray:
     return direction
 
 
+#: the set-up editor's selected command in the 3D view
+HIGHLIGHT = "#ffd23f"
+
+
 def _label(text: str, where, color: str):
     """A label at a point: its size fixed on screen, drawn over everything, with a
     dark outline so it reads on water and on sand (None if pygfx cannot draw text)."""
@@ -917,6 +921,25 @@ class SceneRenderer:
             label = _label(text, where, color)
             if label is not None:
                 group.add(label)
+        if marks.highlight is not None:  # the command selected in the editor, on top
+            segments, points = marks.highlight
+            for name, positions in (("lines", segments), ("points", points)):
+                if not len(positions):
+                    continue
+                positions = np.ascontiguousarray(positions.reshape(-1, 3), np.float32)
+                corners.append(positions)
+                if name == "lines":
+                    material = gfx.LineSegmentMaterial(thickness=4.0, color=HIGHLIGHT)
+                    shape = gfx.Line(gfx.Geometry(positions=positions), material)
+                else:
+                    material = gfx.PointsMaterial(size=13, color=HIGHLIGHT)
+                    shape = gfx.Points(gfx.Geometry(positions=positions), material)
+                for key, value in (("depth_test", False), ("render_queue", 3900)):
+                    try:
+                        setattr(material, key, value)
+                    except (AttributeError, ValueError, TypeError):
+                        pass
+                group.add(shape)
         self.scene.add(group)
         self._setup[marks.item_id] = group
         if corners:

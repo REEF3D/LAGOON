@@ -22,6 +22,20 @@
   output files; each group can be switched off. Beside results, `ctrl.txt` may be
   REEF3D's copy in `REEF3D_Case`, and without `control.txt` the domain is the
   results' extent.
+- **Set-up panel**: `control.txt` and `ctrl.txt` edited command by command: the
+  commands by section, the selected one's values with what the user guide says
+  (default, modules, choices), its signs lit in the 3D view; *Add* by number or
+  words, *Remove*, the whole file as text. What REEF3D or DIVEMesh would stumble
+  over is marked. Each change is an undo step and a script line
+  (`session.set_input`, `add_input`, `remove_input`); *Save* writes the files,
+  comments and order kept.
+- **Run DIVEMesh** from LAGOON (`session.run_divemesh`): `control.txt` is saved,
+  DIVEMesh runs in the case folder with its output in the panel, and its grid,
+  solids and bed show in the set-up. The program is found as `LAGOON_DIVEMESH`,
+  on the PATH or in `~/Codelite/DIVEMesh/bin`, or asked for once.
+- **DIVEMesh grid** item: the grid lines on the faces of the domain (every n-th of
+  a fine grid), the MPI partition planes; before DIVEMesh has run, the uniform grid
+  of `control.txt`; cell counts and sizes in its properties.
 - **Set-up sketch**: *File → Export figure → Case set-up* and `lagoon-setup CASE
   [OUTPUT]` draw plan and side view with a legend; `--describe` prints the main
   facts of the input (domain, grid, sides, waves, what does not fit together).

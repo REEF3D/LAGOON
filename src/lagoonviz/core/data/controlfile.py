@@ -425,11 +425,11 @@ class Catalog:
         exact = text.strip().upper()
         found = []
         for info in self.commands.values():
-            if solver and not info.used_by(solver):
-                continue
             head = f"{info.code} {info.title}".lower()
             if info.code == exact or info.code.replace(" ", "") == exact.replace(" ", ""):
-                found.append((0, info))
+                found.append((0, info))  # the command asked for, used by the module or not
+            elif solver and not info.used_by(solver):
+                continue
             elif all(w in head for w in words):
                 found.append((1, info))
             elif all(w in (head + " " + info.text.lower()) for w in words):

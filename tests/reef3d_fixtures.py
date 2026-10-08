@@ -908,3 +908,39 @@ def make_amr(
         out.append("</Block>\n</vtkMultiBlockDataSet>\n</VTKFile>\n")
         (folder / f"REEF3D-{solver}-AMR-{stamp}.vtm").write_text("".join(out))
     return folder
+
+
+def write_grid_preview(case: Path, x, y, z) -> Path:
+    """DIVEMesh's grid preview (DIVEMesh_Paraview/DIVEMesh_grid-preview.vts) of the
+    grid with node coordinates x, y, z, as DIVEMesh writes it: appended raw arrays
+    topo, solid (float32 per node) and the points, each after its size (UInt32)."""
+    x, y, z = (np.asarray(a, np.float32) for a in (x, y, z))
+    nx, ny, nz = len(x), len(y), len(z)
+    n = nx * ny * nz
+    zz, yy, xx = np.meshgrid(z, y, x, indexing="ij")  # x fastest, then y, then z
+    points = np.stack([xx.ravel(), yy.ravel(), zz.ravel()], axis=1).astype(np.float32)
+    topo = np.ones(n, np.float32)
+    solid = np.ones(n, np.float32)
+    offsets = [0, 4 + topo.nbytes, 8 + topo.nbytes + solid.nbytes]
+    header = (
+        '<?xml version="1.0"?>\n'
+        '<VTKFile type="StructuredGrid" version="0.1" byte_order="LittleEndian">\n'
+        f'<StructuredGrid WholeExtent="0 {nx - 1} 0 {ny - 1} 0 {nz - 1}">\n'
+        f'<Piece Extent="0 {nx - 1} 0 {ny - 1} 0 {nz - 1}">\n<PointData>\n'
+        f'<DataArray type="Float32" Name="topo" format="appended" offset="{offsets[0]}"/>\n'
+        f'<DataArray type="Float32" Name="solid" format="appended" offset="{offsets[1]}"/>\n'
+        "</PointData>\n<Points>\n"
+        f'<DataArray type="Float32" NumberOfComponents="3" format="appended" '
+        f'offset="{offsets[2]}"/>\n'
+        "</Points>\n</Piece>\n</StructuredGrid>\n"
+        '<AppendedData encoding="raw">\n_'
+    )
+    path = case / "DIVEMesh_Paraview" / "DIVEMesh_grid-preview.vts"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as out:
+        out.write(header.encode())
+        for array in (topo, solid, points):
+            out.write(np.uint32(array.nbytes).tobytes())
+            out.write(array.tobytes())
+        out.write(b"\n</AppendedData>\n</VTKFile>\n")
+    return path

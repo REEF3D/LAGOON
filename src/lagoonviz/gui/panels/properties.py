@@ -221,6 +221,27 @@ class PropertiesPanel(QWidget):
             if case.series:
                 parts.append(f"{len(case.series)} gauge, 6DOF or force files")
             return "\n".join(parts)
+        if item.kind == "setup":
+            setup = data.case_setup(item_id)
+            if setup is None:
+                return "No input files (control.txt, ctrl.txt) in the case folder"
+            return setup.describe().split("\n", 1)[-1].replace("  ", "")
+        if item.kind == "grid":
+            grid = data.grid(item_id)
+            if grid is None:
+                setup = data.case_setup(item_id)
+                if setup is not None and setup.stretched:
+                    return "A stretched grid (B 101 - B 103): run DIVEMesh to see it"
+                return "No grid: control.txt has no domain (B 10) and cells (B 1, B 2)"
+            nx, ny, nz = grid.cells
+            sizes = ", ".join(
+                f"d{a} {lo:.4g}" + (f"–{hi:.4g}" if hi > lo * 1.0001 else "")
+                for a, (lo, hi) in zip("xyz", grid.spacing(), strict=True)
+            )
+            source = (
+                "DIVEMesh's grid" if grid.source == "DIVEMesh" else "from control.txt (not run)"
+            )
+            return f"{source}\n{nx} × {ny} × {nz} = {nx * ny * nz:,} cells\n{sizes} m"
         if item.kind == "series":
             found = data.series_file(item_id)
             table = data.series(item_id)
@@ -251,6 +272,9 @@ class PropertiesPanel(QWidget):
     def _on_scene(self, event: str, item_id: str) -> None:
         if event in ("removed", "reset") and self.item_id not in self.session.scene:
             self.show_item("")
+        elif event == "inputs" and self.item_id in self.session.scene:
+            if self.session.scene.get(self.item_id).kind in ("setup", "grid"):
+                self.info.setText(self._data_info(self.item_id))  # the set-up's facts
         elif event == "changed" and item_id == self.item_id:
             self._refresh()
         elif (

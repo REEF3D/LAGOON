@@ -107,7 +107,7 @@ def test_a_case_that_has_not_run_opens_as_its_set_up(basin):
     session = Session()
     case_id = session.open_case(basin)
     kinds = sorted(i.kind for i in session.scene)
-    assert kinds == ["case", "setup", "structure"]  # the monopile from control.txt
+    assert kinds == ["case", "grid", "setup", "structure"]  # the monopile from control.txt
     assert session.data.case(case_id).setup_only
     item = next(i for i in session.scene if i.kind == "setup")
     marks = session.data.setup_marks(item.id)
@@ -191,3 +191,55 @@ def test_lagoon_setup_describes(basin, capsys):
 
     assert main([str(basin), "--describe"]) == 0
     assert "domain: x 0 .. 20, y 0 .. 5, z 0 .. 1.5 m" in capsys.readouterr().out
+
+
+def test_editing_the_input_files(basin):
+    session = Session()
+    case_id = session.open_case(basin)
+    session.set_input("ctrl.txt", "P 51", [3.0, 2.5], occurrence=1)  # move gauge 2
+    session.add_input("ctrl.txt", "P 51", [12.0, 1.0])
+    session.set_input("control.txt", "B 1", [0.5])
+    session.remove_input("ctrl.txt", "X 311")
+    assert session.inputs_modified() == ["control.txt", "ctrl.txt"]
+    ctrl = session.input_file("ctrl.txt")
+    assert ctrl.all("P 51") == [[2.0, 2.5], [3.0, 2.5], [12.0, 1.0]] and "X 311" not in ctrl
+    setup = session.data.case_setup(case_id)
+    assert setup.cells == (40, 10, 3)
+    script = session.to_script()
+    assert "session.set_input('ctrl.txt', 'P 51', [3.0, 2.5], occurrence=1)" in script
+    assert "session.remove_input('ctrl.txt', 'X 311')" in script
+    for _ in range(4):
+        session.undo()
+    assert session.input_file("ctrl.txt").text() == CTRL and not session.inputs_modified()
+    session.redo()
+    written = session.save_inputs()
+    assert written == [basin / "ctrl.txt"] and (basin / "ctrl.txt").read_text().count("P 51") == 2
+    assert "P 51 3.0 2.5" in (basin / "ctrl.txt").read_text()
+    # the text editor: the whole file at once, undone as one step
+    session.set_input_text("control.txt", "B 10 0 10 0 5 0 1.5\nB 1 0.5\n")
+    assert session.data.case_setup(case_id).domain[1] == 10.0
+    session.undo()
+    assert session.data.case_setup(case_id).domain[1] == 20.0
+
+
+def test_a_case_without_input_files_starts_them(reef3d_run):
+    session = Session()
+    session.open_case(reef3d_run)
+    assert not (reef3d_run / "ctrl.txt").exists()
+    session.set_input("ctrl.txt", "P 51", [4.0, 2.0])
+    assert session.save_inputs() == [reef3d_run / "ctrl.txt"]
+    assert (reef3d_run / "ctrl.txt").read_text() == "P 51 4.0 2.0\n"
+
+
+def test_the_selected_command_is_highlighted(basin):
+    session = Session()
+    case_id = session.open_case(basin)
+    item = next(i for i in session.scene if i.kind == "setup")
+    assert session.data.setup_marks(item.id).highlight is None
+    session.data.set_highlight(case_id, "ctrl.txt", "P 51", 1)
+    segments, points = session.data.setup_marks(item.id).highlight
+    assert np.allclose(segments[0][:, :2], [[8.0, 2.5], [8.0, 2.5]])  # the second gauge
+    session.data.set_highlight(case_id, "control.txt", "B 10", 0)
+    assert len(session.data.setup_marks(item.id).highlight[0]) == 12  # the domain's box
+    session.data.set_highlight(case_id, "ctrl.txt", "")
+    assert session.data.setup_marks(item.id).highlight is None

@@ -85,6 +85,6 @@ def test_a_saved_session_keeps_its_mode(reef3d_run, tmp_path):
     again = Session()
     again.load(path)
     assert again.mode == "setup" and again.scene.get(setup.id).visible
-    assert again.scene.other_visibility == {setup.id: False}
+    assert again.scene.other_visibility == {setup.id: False, "grid-1": False}
     again.set_mode("results")
     assert not again.scene.get(setup.id).visible

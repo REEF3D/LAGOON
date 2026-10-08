@@ -76,6 +76,63 @@ set-up* adds another one. Each group can be switched off in its properties:
 Commands LAGOON cannot place (an unknown shape, too few values) are listed in the
 set-up's notes (`lagoon-setup CASE --describe`).
 
+## Editing the input files
+
+The **Set-up** panel (beside *Properties*; it comes forward in the set-up) edits a
+case's input files: one tab for `control.txt` (DIVEMesh), one for `ctrl.txt`
+(REEF3D). Each lists the commands of its file by section (*B · Boundary*,
+*P · Printer*, ...); a command given several times (gauges, solids) has a line
+for each, numbered as in the output files.
+
+- **Select** a command to see its values, ready to change, with what the user
+  guide says about it: its default, which REEF3D modules use it, whether it may be
+  given several times. Its signs light up in the 3D view (yellow), so a gauge or a
+  zone can be checked where it is. Choices (C 11 – C 16, A 10, ...) are picked
+  from a list.
+- **Add** finds any command of the program by its number (`P 61`) or by words
+  (`wave gauge`, `relaxation`); it is added with its default values, after the
+  other commands of its letter. *Add another* adds one more line of a command
+  that may be given several times.
+- **Remove** takes the selected line out.
+- **Text** edits the whole file as text (*Apply text*).
+
+Commands the program would stumble over are marked: red for what stops it or is
+misread (a missing value, text with a capital letter and no `//`), orange for what
+it ignores (an unknown command, one given twice, one the module does not use);
+the tooltip says why.
+
+Every change is an undo step and a line of the session's script
+(`session.set_input("ctrl.txt", "P 51", [3.0, 2.5], occurrence=1)`), and the 3D
+view follows at once. The files themselves are written with *Save* (or *File →
+Save input files*); a tab with edits not saved yet has a `*`, and LAGOON asks
+before closing. Comments, blank lines and the order of the file are kept: only
+the lines that changed are rewritten.
+
+## Running DIVEMesh
+
+*Run DIVEMesh* (in the Set-up panel, the toolbar in the set-up, *File → Run
+DIVEMesh*) saves `control.txt` and runs DIVEMesh in the case folder; its output
+shows in the panel's *DIVEMesh* tab and is kept in
+`DIVEMesh_Log/DIVEMesh-run.log`. When it has finished, the set-up shows what it
+made: its grid, the solids (`REEF3D_Solid.vtp`) and the bed (`REEF3D_Topo.vtp`,
+as a *Bed* item of the set-up).
+
+LAGOON looks for the program as `LAGOON_DIVEMESH`, `DiveMESH` on the PATH, then
+`~/Codelite/DIVEMesh/bin/DiveMESH`; if none is there, it asks for it once and
+remembers it.
+
+## DIVEMesh's grid
+
+The *DIVEMesh grid* item draws the grid lines on the faces of the domain: by
+default the bottom and the two faces at the back of the usual view (*Faces*:
+bottom and back, bottom, back, outside). A fine grid is drawn with every n-th
+line, so a face has a few hundred lines at most (*Every n-th line*: 0 for that,
+1 for every line); the planes between the MPI ranks of DIVEMesh's partition
+(M 10) are drawn in orange. Before DIVEMesh has run, the item shows the uniform
+grid `control.txt` sets up (B 10 with B 1 or B 2); a stretched grid (B 101 –
+B 103) shows once DIVEMesh has made it. The item's properties give the number of
+cells and the smallest and largest cell sizes along x, y and z.
+
 ## The set-up sketch
 
 *File → Export figure → Case set-up* draws the set-up as a paper figure: the plan
@@ -105,4 +162,17 @@ from lagoonviz.render.setup_sketch import setup_figure
 setup = read_setup("~/runs/flume")
 print(setup.describe())
 save_figure(setup_figure(setup, FigureSpec(width_mm=140)), "flume-setup.pdf")
+```
+
+A session edits the input files and runs DIVEMesh the same way the panel does:
+
+```python
+from lagoonviz.core import Session
+
+session = Session()
+session.open_case("~/runs/flume")                    # not run yet: the set-up
+session.set_input("control.txt", "B 1", [0.025])      # finer cells
+session.add_input("ctrl.txt", "P 51", [12.0, 0.5])    # one more wave gauge
+session.save_inputs()
+session.run_divemesh(on_line=print)                   # its grid, solids and bed
 ```

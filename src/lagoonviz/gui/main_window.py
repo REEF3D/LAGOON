@@ -43,6 +43,7 @@ from lagoonviz.gui.panels import (
     ProfilesPanel,
     PropertiesPanel,
     SceneTreePanel,
+    SetupPanel,
     TimelinePanel,
     create_viewport,
 )
@@ -52,7 +53,7 @@ from lagoonviz.gui.theme import DEFAULT_THEME, THEME_LOOKS, apply_theme
 SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 OUTPUT_FILTER = "REEF3D output (*.pvtu *.pvtp *.vtu *.vtp);;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
-LAYOUT_VERSION = 3
+LAYOUT_VERSION = 4
 #: how often "Follow running simulation" looks for new output
 FOLLOW_SECONDS = 5
 QWIDGETSIZE_MAX = (1 << 24) - 1  # Qt's "no maximum size"
@@ -101,10 +102,15 @@ class MainWindow(QMainWindow):
         self.plots = PlotsPanel(self.bridge)
         self.profiles = ProfilesPanel(self.bridge)
         self.console = ConsolePanel(self.bridge)
+        self.setup_panel = SetupPanel(self.bridge, self.settings)
 
         self.docks: dict[str, QDockWidget] = {}
         self._dock("scene", "Scene", self.scene_tree, Qt.LeftDockWidgetArea)
         self._dock("properties", "Properties", self.properties, Qt.RightDockWidgetArea)
+        # the set-up's input files beside the properties, as a tab next to them
+        self._dock("setup", "Set-up", self.setup_panel, Qt.RightDockWidgetArea)
+        self.tabifyDockWidget(self.docks["properties"], self.docks["setup"])
+        self.docks["properties"].raise_()
         self._dock("plots", "Plots", self.plots, Qt.BottomDockWidgetArea)
         self._dock("timeline", "Timeline", self.timeline, Qt.BottomDockWidgetArea)
         self._dock("console", "Python console", self.console, Qt.BottomDockWidgetArea)
@@ -186,6 +192,17 @@ class MainWindow(QMainWindow):
             lambda: self.set_mode("results"),
             "Ctrl+Shift+R",
             tip="Look at the results of the runs (the set-up only where ticked)",
+        )
+        self.act_run_divemesh = self._action(
+            "Run &DIVEMesh",
+            lambda: self.setup_panel.run_divemesh(),
+            tip="Save control.txt and run DIVEMesh in the case folder: its grid, solids and bed",
+        )
+        self.act_run_divemesh.setIconText("Run DIVEMesh")
+        self.act_save_inputs = self._action(
+            "Save &input files",
+            lambda: self.setup_panel.save(),
+            tip="Write the edited ctrl.txt and control.txt of the case shown in the Set-up panel",
         )
         self.mode_group = QActionGroup(self)
         self.mode_group.setExclusive(True)
@@ -326,6 +343,9 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_reload)
         file_menu.addAction(self.act_follow)
         file_menu.addSeparator()
+        file_menu.addAction(self.act_save_inputs)
+        file_menu.addAction(self.act_run_divemesh)
+        file_menu.addSeparator()
         for action in (self.act_new, self.act_open, self.act_save, self.act_save_as):
             file_menu.addAction(action)
         file_menu.addSeparator()
@@ -415,6 +435,8 @@ class MainWindow(QMainWindow):
         bar.addSeparator()
         bar.addAction(self.act_mode_setup)
         bar.addAction(self.act_mode_results)
+        # only in the set-up: QToolBar hides the action's button with the action
+        self.run_divemesh_button = bar.addAction(self.act_run_divemesh)
         bar.addSeparator()
         bar.addAction(self.act_open)
         bar.addAction(self.act_save)
@@ -501,12 +523,19 @@ class MainWindow(QMainWindow):
             self.timeline.play_button.setChecked(False)
         self.timeline.setEnabled(not setup)
         self.act_play.setEnabled(not setup)
-        self.statusBar().showMessage(
-            "Set-up: the input files and DIVEMesh's grid; the results are hidden"
-            if setup
-            else "Results",
-            6000,
-        )
+        self.act_run_divemesh.setVisible(setup)
+        if setup and not self.full_screen:
+            dock = self.docks["setup"]
+            dock.show()
+            dock.raise_()
+        if getattr(self, "_shown_mode", "results") != self.session.mode:
+            self.statusBar().showMessage(
+                "Set-up: the input files and DIVEMesh's grid; the results are hidden"
+                if setup
+                else "Results: what the runs wrote",
+                6000,
+            )
+        self._shown_mode = self.session.mode
 
     def add_item(self, kind: str) -> str:
         """Add an item from the menu or toolbar (slices start in the middle of the volume)."""
@@ -686,6 +715,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt naming)
         if not self.confirm_discard():
+            event.ignore()
+            return
+        if self.ask_before_discard and not self.setup_panel.ask_to_save(self):
             event.ignore()
             return
         if self.full_screen:

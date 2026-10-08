@@ -578,6 +578,10 @@ class Viewport3D(QWidget):
         self.redraw()
 
     def _on_scene(self, event: str, item_id: str) -> None:
+        if event == "highlight":  # a command selected in the set-up panel: light it
+            self._update_setup()
+            self.redraw()
+            return
         if event == "camera_keys":
             self.follow_path()
             return

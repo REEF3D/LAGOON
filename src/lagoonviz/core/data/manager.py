@@ -21,6 +21,14 @@ import numpy as np
 
 from lagoonviz.core.colormaps import SERIES_PALETTES, plain_color
 from lagoonviz.core.contours import contour_levels, contour_segments
+from lagoonviz.core.data.divemesh_grid import (
+    PREVIEW,
+    Grid,
+    grid_lines,
+    read_partition,
+    read_preview,
+    uniform_grid,
+)
 from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
@@ -31,7 +39,7 @@ from lagoonviz.core.scene import SETUP_KINDS, Scene, SceneItem
 from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
 
 #: item kinds that show a dataset, and the dataset role they use by default
-DATA_KINDS = {kind: role for role, kind in ROLES.items() if role != "solid"} | {
+DATA_KINDS = {kind: role for role, kind in ROLES.items() if role not in ("solid", "topo")} | {
     "slice": "volume",
     "iso_surface": "volume",
     "streamlines": "volume",
@@ -153,6 +161,9 @@ class SetupMarks:
     faces: list[tuple[str, np.ndarray]]  # (colour, (k, 3, 3) float32)
     labels: list[tuple[str, tuple[float, float, float], str]]
     visible: bool
+    #: the signs of the command selected in the set-up editor: (n, 2, 3) lines and
+    #: (m, 3) dots, drawn over the others
+    highlight: tuple[np.ndarray, np.ndarray] | None = None
 
 
 @dataclass
@@ -264,6 +275,8 @@ class DataManager:
         self._logged: tuple[tuple, np.ndarray | None] | None = None
         #: set-ups of case folders (their input files), by folder
         self._setups: dict[str, CaseSetup] = {}
+        #: the command selected in the set-up editor: (case item, file, code, occurrence)
+        self.highlight: tuple[str, str, str, int] | None = None
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------- cases
@@ -1339,16 +1352,16 @@ class DataManager:
         folder = Path(str(case_item.properties["path"])).expanduser()
         return folder.parent if folder.is_file() else folder
 
-    def case_setup(self, item_id: str) -> CaseSetup | None:
+    def case_setup(self, item_id: str, create: bool = False) -> CaseSetup | None:
         """The set-up of the case an item belongs to: what its input files say (None
-        if it has none)."""
+        if it has none, unless ``create``: then empty files, to be written)."""
         folder = self.case_folder(item_id)
         if folder is None:
             return None
         key = str(folder.resolve())
         setup = self._setups.get(key)
         if setup is None:
-            if not has_inputs(folder):
+            if not has_inputs(folder) and not create:
                 return None
             setup = read_setup(folder)
             case = self.case(item_id)
@@ -1357,35 +1370,95 @@ class DataManager:
                 if extent is not None:
                     setup.use_domain(*extent, "the results")
             self._setups[key] = setup
+        setup.refresh()  # after edits: the facts of the files as they are now
         return setup
 
     def setup_items(self) -> list[str]:
-        """Ids of the "Case set-up" items."""
-        return [item.id for item in self.scene if item.kind == "setup"]
+        """Ids of the set-up items: "Case set-up" and "DIVEMesh grid"."""
+        return [item.id for item in self.scene if item.kind in SETUP_KINDS]
+
+    def grid(self, item_id: str) -> Grid | None:
+        """DIVEMesh's grid of an item's case: the one DIVEMesh wrote, else the uniform
+        grid control.txt sets up (None: neither)."""
+        folder = self.case_folder(item_id)
+        if folder is None:
+            return None
+        grid = read_preview(folder)
+        if grid is not None:
+            return grid
+        setup = self.case_setup(item_id)
+        if setup is None or setup.stretched:
+            return None
+        setup.refresh()
+        return uniform_grid(setup.domain, setup.cells)
+
+    def _grid_marks(self, item_id: str) -> SetupMarks | None:
+        item = self.scene.get(item_id)
+        grid = self.grid(item_id)
+        if grid is None:
+            return None
+        props = item.properties
+        lines = [("#6f7d8f", grid_lines(grid, str(props.get("faces")), int(props.get("every", 0))))]
+        folder = self.case_folder(item_id)
+        if props.get("partition", True) and folder is not None and grid.source == "DIVEMesh":
+            planes = read_partition(folder)
+            if len(planes):
+                lines.append(("#d9822b", planes))
+        setup = self.case_setup(item_id)
+        level = self._setup_water_level(item_id, setup) if setup is not None else 0.0
+        placed = [(c, self._placed_marks(item_id, s, level)) for c, s in lines if len(s)]
+        return SetupMarks(item_id, placed, [], [], [], item.visible)
+
+    def _placed_marks(self, item_id: str, array: np.ndarray, level: float) -> np.ndarray:
+        """Set-up signs where the view draws them: exaggerated about the water level,
+        flat in 2D."""
+        out = np.array(array, np.float32, copy=True)
+        if not out.size:
+            return out
+        flat_view = out.reshape(-1, 3)
+        exaggeration = self.exaggeration(item_id)
+        if exaggeration != 1.0:
+            flat_view[:, 2] = level + exaggeration * (flat_view[:, 2] - level)
+        if self.scene.flat:
+            flat_view[:, 2] = PLAN_MARKS
+        return out
 
     def setup_signature(self, item_id: str) -> tuple | None:
         """What a "Case set-up" item's drawing depends on: when it changes, draw again."""
         item = self.scene.get(item_id)
         setup = self.case_setup(item_id)
-        if setup is None:
+        grid_file = None
+        if item.kind == "grid":
+            folder = self.case_folder(item_id)
+            preview = folder / PREVIEW if folder is not None else None
+            if preview is not None and preview.is_file():
+                grid_file = (preview.stat().st_mtime_ns, preview.stat().st_size)
+            if setup is None and grid_file is None:
+                return None
+        elif setup is None:
             return None
-        setup.refresh()
+        if setup is not None:
+            setup.refresh()
         return (
             tuple(sorted(item.properties.items())),
             item.visible,
+            grid_file,
             id(setup),
-            setup.control.revision,
-            setup.ctrl.revision,
-            setup.domain,
+            setup.control.revision if setup else None,
+            setup.ctrl.revision if setup else None,
+            setup.domain if setup else None,
             self.exaggeration(item_id),
-            self._setup_water_level(item_id, setup),
+            self._setup_water_level(item_id, setup) if setup else 0.0,
             self.scene.flat,
+            self.highlight,
         )
 
     def setup_marks(self, item_id: str) -> SetupMarks | None:
         """The signs a "Case set-up" item draws: the groups it has switched on, placed
         as the case's other items are (exaggerated, flat in 2D)."""
         item = self.scene.get(item_id)
+        if item.kind == "grid":
+            return self._grid_marks(item_id)
         setup = self.case_setup(item_id)
         if setup is None:
             return None
@@ -1396,21 +1469,15 @@ class DataManager:
         faces: dict[str, list[np.ndarray]] = {}
         labels = []
         level = self._setup_water_level(item_id, setup)
-        exaggeration = self.exaggeration(item_id)
         flat = self.scene.flat
 
         def place(array: np.ndarray) -> np.ndarray:
-            out = np.array(array, np.float32, copy=True)
-            if not out.size:
-                return out
-            flat_view = out.reshape(-1, 3)
-            if exaggeration != 1.0:
-                flat_view[:, 2] = level + exaggeration * (flat_view[:, 2] - level)
-            if flat:
-                flat_view[:, 2] = PLAN_MARKS
-            return out
+            return self._placed_marks(item_id, array, level)
 
+        chosen = self._highlighted(item_id, setup)
         for mark in shown:
+            if chosen is not None and mark is chosen:
+                continue  # drawn over the others, below
             if len(mark.segments):
                 lines.setdefault(mark.color, []).append(place(mark.segments))
             if len(mark.points):
@@ -1422,6 +1489,9 @@ class DataManager:
                     if text:
                         p = place(np.asarray([where], float))[0]
                         labels.append((text, (float(p[0]), float(p[1]), float(p[2])), mark.color))
+        highlight = None
+        if chosen is not None:
+            highlight = (place(chosen.segments), place(chosen.points))
         return SetupMarks(
             item_id,
             [(c, np.concatenate(v)) for c, v in lines.items()],
@@ -1429,7 +1499,29 @@ class DataManager:
             [(c, np.concatenate(v)) for c, v in faces.items()],
             labels,
             item.visible,
+            highlight,
         )
+
+    def _highlighted(self, item_id: str, setup: CaseSetup):
+        """The mark of the command selected in the set-up editor, if this item shows it."""
+        if self.highlight is None:
+            return None
+        case_id, file, code, occurrence = self.highlight
+        case_item = self.case_item(item_id)
+        if case_item is None or case_item.id != case_id:
+            return None
+        for mark in setup.marks():
+            if (mark.file, mark.code, mark.occurrence) == (file, code, occurrence):
+                return mark
+        return None
+
+    def set_highlight(self, case_id: str, file: str, code: str, occurrence: int = 0) -> None:
+        """Show which signs a command of an input file makes (the set-up editor's
+        selection); ``code`` "" for none. View state, not an undo step."""
+        chosen = (case_id, file, code, occurrence) if code else None
+        if chosen != self.highlight:
+            self.highlight = chosen
+            self.scene.highlight_changed(case_id)
 
     def _setup_water_level(self, item_id: str, setup: CaseSetup) -> float:
         """The level the set-up is exaggerated about: the results' (as the other items),

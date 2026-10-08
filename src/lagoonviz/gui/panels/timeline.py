@@ -361,7 +361,7 @@ class TimelinePanel(QWidget):
             self.show_play_range()
         elif event in ("camera_keys", "sun"):
             self.update_keys()
-        else:
+        elif event not in ("inputs", "highlight"):  # the input files: same outputs
             self.update_range()
 
     # ------------------------------------------------------------- range

@@ -28,6 +28,7 @@ def test_panels_exist(window):
         "profiles",
         "timeline",
         "console",
+        "setup",
     }
     assert window.centralWidget().objectName() == "viewports"
     assert window.viewport.objectName() == "viewport"

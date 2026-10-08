@@ -140,6 +140,8 @@ class Mark:
     occurrence: int = 0
     #: filled areas (relaxation zones, the still water): (k, 3, 3) triangles
     faces: np.ndarray | None = None
+    #: the file of the command: "control.txt" (DIVEMesh) or "ctrl.txt" (REEF3D)
+    file: str = "ctrl.txt"
 
 
 def _segments(points: list) -> np.ndarray:
@@ -425,11 +427,25 @@ class CaseSetup:
             spacing = self.spacing
             total = nx * ny * nz
             text = f"  grid: {nx} x {ny} x {nz} = {total:,} cells"
-            if spacing is not None:
-                text += f", dx {spacing[0]:.4g} m" + (" (2D)" if ny == 1 else "")
+            if spacing is not None and not self.stretched:
+                sizes = spacing if ny > 1 else (spacing[0], spacing[2])
+                text += " of " + " x ".join(f"{d:.4g}" for d in sizes) + " m"
+                text += " (2D)" if ny == 1 else ""
             if self.stretched:
                 text += ", stretched (B 101 - B 103)"
             lines.append(text)
+        from lagoonviz.core.data.divemesh_grid import read_preview
+
+        grid = read_preview(self.path)
+        if grid is not None:
+            nx, ny, nz = grid.cells
+            sizes = ", ".join(
+                f"d{axis} {low:.4g}" + (f" - {high:.4g}" if high > low * 1.0001 else "")
+                for axis, (low, high) in zip("xyz", grid.spacing(), strict=True)
+            )
+            lines.append(
+                f"  DIVEMesh's grid: {nx} x {ny} x {nz} = {nx * ny * nz:,} cells, {sizes} m"
+            )
         if self.sides:
             parts = []
             for side in (1, 4, 3, 2, 5, 6):
@@ -714,6 +730,7 @@ def _marks(setup: CaseSetup) -> list[Mark]:
                 COLORS["domain"],
                 segments=_box_edges(*box),
                 code="" if setup.domain_from else "B 10",
+                file=CONTROL,
                 occurrence=index,
             )
         )
@@ -759,6 +776,7 @@ def _marks(setup: CaseSetup) -> list[Mark]:
                     segments=segments,
                     labels=[(name, where)],
                     code=f"C 1{side}",
+                    file=CONTROL,
                 )
             )
         # ---- the still water
@@ -901,13 +919,21 @@ def _marks(setup: CaseSetup) -> list[Mark]:
                         segments=_feature_edges(np.asarray(triangles, float)),
                         code=code,
                         occurrence=occurrence,
+                        file=CONTROL,
                     )
                 )
     if (setup.path / GEO).is_file() and setup.control.int("G 10", 0) > 0:
         points = setup.geo_points()
         if len(points):
             marks.append(
-                Mark("bed", "geo.dat points (G 10)", COLORS["bed"], points=points, code="G 10")
+                Mark(
+                    "bed",
+                    "geo.dat points (G 10)",
+                    COLORS["bed"],
+                    points=points,
+                    code="G 10",
+                    file=CONTROL,
+                )
             )
     if skipped:
         setup.notes.append("not drawn: " + ", ".join(sorted(set(skipped))))

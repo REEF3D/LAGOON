@@ -270,6 +270,38 @@ class OpenCase(Command):
         return f"session.open_case({', '.join(args)})"
 
 
+class EditInput(Command):
+    """A change of a case's input file (ctrl.txt or control.txt), kept as the file's
+    text before and after, so undo puts back exactly what was there (comments and
+    all). ``resolve`` finds the file being edited each time (it is read again after
+    it was saved and reloaded)."""
+
+    def __init__(
+        self, resolve: Callable[[], Any], case_id: str, after: str, script: str, label: str
+    ):
+        self.resolve = resolve
+        self.case_id = case_id
+        self.after = after
+        self.before: str | None = None
+        self.script = script
+        self.label = label
+
+    def do(self, scene: Scene) -> None:
+        file = self.resolve()
+        if self.before is None:
+            self.before = file.text()
+        file.set_text(self.after)
+        scene.inputs_changed(self.case_id)
+
+    def undo(self, scene: Scene) -> None:
+        assert self.before is not None
+        self.resolve().set_text(self.before)
+        scene.inputs_changed(self.case_id)
+
+    def to_script(self) -> str:
+        return self.script
+
+
 class SetMode(Command):
     """Switch between the results of a run and its set-up (see ``scene.MODES``).
 
@@ -289,7 +321,9 @@ class SetMode(Command):
             child.do(scene)
         ids = [item.id for item in scene if item.kind in SETUP_KINDS]
         now = {i: scene.get(i).visible for i in ids}
-        self._before = (scene.mode, now, dict(scene.other_visibility))
+        self._before = (scene.mode, dict(now), dict(scene.other_visibility))
+        for child in self.added:  # added for the set-up: off over the results
+            now[child.item_id] = self.mode != "setup"
         if scene.mode == self.mode:
             scene.set_mode(self.mode, now, scene.other_visibility)
             return

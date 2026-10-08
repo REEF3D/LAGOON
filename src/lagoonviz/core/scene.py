@@ -29,7 +29,7 @@ PLAN_SIDES = ("top", "front", "back", "right", "left")
 
 
 #: events of view state, not of the items (panels that only show items skip them)
-VIEW_EVENTS = ("camera_keys", "sun", "play_range")
+VIEW_EVENTS = ("camera_keys", "sun", "play_range", "highlight")
 
 #: what the session works on: the results of a run, or its set-up (the input files,
 #: DIVEMesh's grid); each mode shows its own items
@@ -244,6 +244,16 @@ class Scene:
             play_range = (start, end)
         self.play_range = play_range
         self._notify("play_range", None)
+
+    def inputs_changed(self, case_id: str) -> None:
+        """A case's input files (ctrl.txt, control.txt) were edited: observers get
+        "inputs" (the set-up is drawn again)."""
+        self._notify("inputs", case_id)
+
+    def highlight_changed(self, case_id: str) -> None:
+        """Another command of the input files is selected: observers get "highlight"
+        (a view event: the 3D view lights its signs)."""
+        self._notify("highlight", case_id)
 
     def set_mode(self, mode: str, visible: dict[str, bool], other: dict[str, bool]) -> None:
         """Switch to a mode with the set-up items' visibility in it and in the other
