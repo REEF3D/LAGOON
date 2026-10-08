@@ -1156,6 +1156,13 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
         path = path.parent  # an AMR index: its folder (all outputs)
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
+    if path.is_dir() and path.suffix == ".lagoon" and not (path / "zarr.json").is_file():
+        # a store folder REEF3D made but has not written into (yet)
+        raise ValueError(
+            f"{path.name} is an empty LAGOON store: nothing has been written into it. "
+            f"REEF3D fills it while a run with P 18 goes on; open the case folder "
+            f"({path.parent}) to see its other output."
+        )
     datasets: list[Dataset] = []
     stored: list[Dataset] = []
     store_paths: list[Path] = []

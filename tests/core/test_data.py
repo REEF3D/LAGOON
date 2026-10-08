@@ -906,3 +906,13 @@ def test_probe_time_series(reef3d_run):
     expected = [eta(np.array([x]), np.array([y]), frame)[0] for frame in range(3)]
     np.testing.assert_allclose(trace.values, expected, atol=1e-5)
     np.testing.assert_allclose(trace.time, [0.0, 1.0, 2.0])
+
+
+def test_an_empty_store_folder_says_so(tmp_path):
+    """A .lagoon folder REEF3D has not written into: a message that says what it is."""
+    from lagoonviz.core.data.reef3d import open_case
+
+    store = tmp_path / "REEF3D_FNPF.lagoon"
+    store.mkdir()
+    with pytest.raises(ValueError, match="empty LAGOON store"):
+        open_case(store)
