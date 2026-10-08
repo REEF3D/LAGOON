@@ -11,7 +11,15 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QByteArray, QLocale, QPoint, QRect, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QIcon, QImage, QKeySequence, QPainter
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QCloseEvent,
+    QIcon,
+    QImage,
+    QKeySequence,
+    QPainter,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
@@ -111,12 +119,14 @@ class MainWindow(QMainWindow):
 
         self.scene_tree.selectionChanged.connect(self.properties.show_item)
         self.bridge.historyChanged.connect(self._on_history)
+        self.bridge.sceneChanged.connect(self._on_mode_event)
 
         self._build_actions()
         self._build_menus()
         self._build_toolbar()
         self._restore_layout()
         self._on_history()
+        self._apply_mode()
         self.dirty = False
         self._update_title()
         self.statusBar().showMessage("Ready", 3000)
@@ -164,6 +174,25 @@ class MainWindow(QMainWindow):
             tip="Reload by itself when the simulation writes new output, and stay at the end",
         )
         self.act_follow.setCheckable(True)
+        # the two modes: the set-up of a case (input files, DIVEMesh) and its results
+        self.act_mode_setup = self._action(
+            "Set-&up",
+            lambda: self.set_mode("setup"),
+            "Ctrl+Shift+U",
+            tip="Work on the set-up: the input files, DIVEMesh's grid (the results are hidden)",
+        )
+        self.act_mode_results = self._action(
+            "&Results",
+            lambda: self.set_mode("results"),
+            "Ctrl+Shift+R",
+            tip="Look at the results of the runs (the set-up only where ticked)",
+        )
+        self.mode_group = QActionGroup(self)
+        self.mode_group.setExclusive(True)
+        for action in (self.act_mode_setup, self.act_mode_results):
+            action.setCheckable(True)
+            self.mode_group.addAction(action)
+        self.act_mode_results.setChecked(True)
         self.act_new = self._action("&New session", self.new_session, QKeySequence.New)
         self.act_open = self._action(
             "&Open session...", self.open_session_dialog, QKeySequence.Open
@@ -322,6 +351,9 @@ class MainWindow(QMainWindow):
             add_menu.addAction(action)
 
         view_menu = bar.addMenu("&View")
+        view_menu.addAction(self.act_mode_setup)
+        view_menu.addAction(self.act_mode_results)
+        view_menu.addSeparator()
         for dock in self.docks.values():
             view_menu.addAction(dock.toggleViewAction())
         theme_menu = view_menu.addMenu("&Theme")
@@ -381,6 +413,9 @@ class MainWindow(QMainWindow):
         bar.addAction(self.act_open_case)
         bar.addAction(self.act_reload)
         bar.addSeparator()
+        bar.addAction(self.act_mode_setup)
+        bar.addAction(self.act_mode_results)
+        bar.addSeparator()
         bar.addAction(self.act_open)
         bar.addAction(self.act_save)
         bar.addSeparator()
@@ -423,6 +458,8 @@ class MainWindow(QMainWindow):
             (self.act_redo, "redo"),
             (self.act_screenshot, "screenshot"),
             (self.act_reload, "reload"),
+            (self.act_mode_setup, "setup"),
+            (self.act_mode_results, "results"),
         ):
             action.setIcon(icon(name))
         for kind in ("free_surface", "bathymetry", "volume", "slice", "series"):
@@ -443,6 +480,33 @@ class MainWindow(QMainWindow):
             if item.kind == "free_surface":
                 return {"lines_in": "free surface"}
         return {}
+
+    # ------------------------------------------------------------- modes
+    def set_mode(self, mode: str) -> None:
+        """Set-up or results (the toolbar's two buttons, View menu)."""
+        if mode != self.session.mode:
+            self.session.set_mode(mode)
+        self._apply_mode()
+
+    def _on_mode_event(self, event: str, _item_id: str) -> None:
+        if event in ("mode", "reset"):
+            self._apply_mode()
+
+    def _apply_mode(self) -> None:
+        """The window for the mode: the timeline rests in the set-up."""
+        setup = self.session.mode == "setup"
+        self.act_mode_setup.setChecked(setup)
+        self.act_mode_results.setChecked(not setup)
+        if setup and self.timeline.play_button.isChecked():
+            self.timeline.play_button.setChecked(False)
+        self.timeline.setEnabled(not setup)
+        self.act_play.setEnabled(not setup)
+        self.statusBar().showMessage(
+            "Set-up: the input files and DIVEMesh's grid; the results are hidden"
+            if setup
+            else "Results",
+            6000,
+        )
 
     def add_item(self, kind: str) -> str:
         """Add an item from the menu or toolbar (slices start in the middle of the volume)."""

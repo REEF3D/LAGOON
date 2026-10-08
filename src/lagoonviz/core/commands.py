@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from lagoonviz.core.kinds import default_properties, kind_spec, validate
-from lagoonviz.core.scene import Scene, SceneItem
+from lagoonviz.core.scene import SETUP_KINDS, Scene, SceneItem
 
 
 def _py(value: Any) -> str:
@@ -268,6 +268,44 @@ class OpenCase(Command):
         if self.name is not None:
             args.append(f"name={_py(self.name)}")
         return f"session.open_case({', '.join(args)})"
+
+
+class SetMode(Command):
+    """Switch between the results of a run and its set-up (see ``scene.MODES``).
+
+    Results items are not drawn in the set-up and the timeline rests; set-up items
+    ("Case set-up", the DIVEMesh grid) keep a check box of their own in each mode:
+    on in the set-up, off over the results until ticked there. ``added``: set-up
+    items to add first, for cases that have none yet."""
+
+    def __init__(self, scene: Scene, mode: str, added: list[AddItem] | None = None):
+        self.mode = mode
+        self.added = list(added or [])
+        self._before: tuple[str, dict[str, bool], dict[str, bool]] | None = None
+        self.label = "Set-up" if mode == "setup" else "Results"
+
+    def do(self, scene: Scene) -> None:
+        for child in self.added:
+            child.do(scene)
+        ids = [item.id for item in scene if item.kind in SETUP_KINDS]
+        now = {i: scene.get(i).visible for i in ids}
+        self._before = (scene.mode, now, dict(scene.other_visibility))
+        if scene.mode == self.mode:
+            scene.set_mode(self.mode, now, scene.other_visibility)
+            return
+        default = self.mode == "setup"  # set-up items: shown in the set-up
+        visible = {i: scene.other_visibility.get(i, default) for i in ids}
+        scene.set_mode(self.mode, visible, now)
+
+    def undo(self, scene: Scene) -> None:
+        assert self._before is not None
+        mode, visible, other = self._before
+        scene.set_mode(mode, visible, other)
+        for child in reversed(self.added):
+            child.undo(scene)
+
+    def to_script(self) -> str:
+        return f"session.set_mode({_py(self.mode)})"
 
 
 #: Listener signature: ``callback(kind, command)`` with kind ``"do"``, ``"merge"`` (folded

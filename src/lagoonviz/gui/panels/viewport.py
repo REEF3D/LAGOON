@@ -367,6 +367,8 @@ class Viewport3D(QWidget):
         return [i for i in ids if self._in_view(i)]
 
     def _in_view(self, item_id: str) -> bool:
+        if not self.session.data.drawn(item_id):
+            return False  # the set-up leaves the results out
         if not self.case_filter:
             return True
         case_item = self.session.data.case_item(item_id)

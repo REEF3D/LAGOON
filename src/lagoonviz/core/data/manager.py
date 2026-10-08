@@ -27,7 +27,7 @@ from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
 from lagoonviz.core.data.setup import CaseSetup, has_inputs, read_setup
 from lagoonviz.core.kinds import kind_spec
-from lagoonviz.core.scene import Scene, SceneItem
+from lagoonviz.core.scene import SETUP_KINDS, Scene, SceneItem
 from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
 
 #: item kinds that show a dataset, and the dataset role they use by default
@@ -1303,6 +1303,29 @@ class DataManager:
     def data_items(self) -> list[str]:
         """Ids of the scene items that show data."""
         return [item.id for item in self.scene if item.kind in DATA_KINDS]
+
+    # ------------------------------------------------------------- modes
+    def item_mode(self, item_id: str) -> str:
+        """Where an item belongs: "setup" (Case set-up, the DIVEMesh grid), "both"
+        (cases, DIVEMesh's solids and bed: the geometry of the set-up and of the
+        results) or "results" (what a run wrote)."""
+        item = self.scene.get(item_id)
+        if item.kind in SETUP_KINDS:
+            return "setup"
+        if item.kind == "case":
+            return "both"
+        if item.kind in DATA_KINDS:
+            dataset = self.dataset(item_id)
+            if dataset is not None and dataset.solver == "DIVEMesh":
+                return "both"
+        return "results"
+
+    def drawn(self, item_id: str) -> bool:
+        """Whether the current mode draws an item at all (its check box still decides):
+        the set-up leaves the results out; the results draw set-up items when ticked."""
+        if self.scene.mode != "setup":
+            return True
+        return self.item_mode(item_id) != "results"
 
     # ------------------------------------------------------------- the set-up
     def case_folder(self, item_id: str) -> Path | None:

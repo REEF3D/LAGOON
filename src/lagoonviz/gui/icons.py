@@ -227,7 +227,36 @@ def _repeat(p: QPainter) -> None:
     p.drawLine(QPointF(16, 46), QPointF(23, 53))
 
 
+def _setup(p: QPainter) -> None:
+    """The set-up: a domain with its grid lines."""
+    p.drawRect(QRectF(8, 14, 48, 36))
+    p.save()
+    p.setPen(QPen(QColor(COLORS["dim"]), 2, Qt.SolidLine, Qt.RoundCap))
+    for x in (20, 32, 44):
+        p.drawLine(QPointF(x, 14), QPointF(x, 50))
+    for y in (26, 38):
+        p.drawLine(QPointF(8, y), QPointF(56, y))
+    p.restore()
+    p.save()
+    p.setPen(QPen(QColor(COLORS["accent"]), 4, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(QPointF(26, 8), QPointF(26, 56))  # a gauge
+    p.restore()
+
+
+def _results(p: QPainter) -> None:
+    """The results: a wave over the bed."""
+    _wave(p, 26, 9)
+    p.save()
+    p.setPen(QPen(QColor(COLORS["accent"]), 4, Qt.SolidLine, Qt.RoundCap))
+    path = QPainterPath(QPointF(6, 54))
+    path.cubicTo(20, 54, 30, 44, 58, 44)
+    p.drawPath(path)
+    p.restore()
+
+
 DRAWINGS: dict[str, Draw] = {
+    "setup": _setup,
+    "results": _results,
     "open_case": _folder,
     "open": _open,
     "save": _save,

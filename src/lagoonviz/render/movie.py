@@ -92,6 +92,8 @@ class OffscreenView:
         self.scene = SceneRenderer(style)
         self.view = view
         self._camera_set = False
+        #: what each "Case set-up" item was last drawn from (DataManager.setup_signature)
+        self._setup_drawn: dict[str, tuple | None] = {}
 
     def show(self, time: float | None = None) -> None:
         """Bring the scene to a time: load the frames, update meshes and gauges."""
@@ -100,6 +102,9 @@ class OffscreenView:
             session.set_time(time)
         for item_id in session.data.data_items():
             item = session.scene.get(item_id)
+            if not session.data.drawn(item_id):  # results items in the set-up
+                self.scene.remove(item_id)
+                continue
             mesh = session.data.load(item_id)
             if mesh is None:
                 self.scene.remove(item_id)  # no output of this run at this time
@@ -120,10 +125,20 @@ class OffscreenView:
             marks = (
                 data.profile_marks(item_id) if item_id in profiles else data.gauge_marks(item_id)
             )
-            if marks is None:
+            if marks is None or not data.drawn(item_id):
                 self.scene.remove_gauges(item_id)
             else:
                 self.scene.update_gauges(marks)
+        for item_id in session.data.setup_items():  # the "Case set-up" items
+            signature = session.data.setup_signature(item_id)
+            if signature is not None and self._setup_drawn.get(item_id) == signature:
+                continue  # unchanged since the last frame
+            marks = session.data.setup_marks(item_id)
+            if marks is None:
+                self.scene.remove_setup(item_id)
+            else:
+                self.scene.update_setup(marks)
+            self._setup_drawn[item_id] = signature
         if not self._camera_set:
             plan = session.scene
             if plan.flat:

@@ -31,6 +31,12 @@ PLAN_SIDES = ("top", "front", "back", "right", "left")
 #: events of view state, not of the items (panels that only show items skip them)
 VIEW_EVENTS = ("camera_keys", "sun", "play_range")
 
+#: what the session works on: the results of a run, or its set-up (the input files,
+#: DIVEMesh's grid); each mode shows its own items
+MODES = ("results", "setup")
+#: kinds of items that belong to the set-up: hidden in the results unless ticked
+SETUP_KINDS = ("setup", "grid")
+
 
 @dataclass
 class SceneItem:
@@ -90,6 +96,11 @@ class Scene:
         self.sun: tuple[float, float] | None = None
         #: the part of the timeline that plays (start, end times); None: all of it
         self.play_range: tuple[float, float] | None = None
+        #: "results" or "setup" (see MODES); changed by the SetMode command
+        self.mode: str = "results"
+        #: whether each set-up item is shown in the other mode (it keeps its own
+        #: check box in each mode): item id -> visible
+        self.other_visibility: dict[str, bool] = {}
 
     # ------------------------------------------------------------- observers
     def subscribe(self, callback: Observer) -> None:
@@ -234,6 +245,18 @@ class Scene:
         self.play_range = play_range
         self._notify("play_range", None)
 
+    def set_mode(self, mode: str, visible: dict[str, bool], other: dict[str, bool]) -> None:
+        """Switch to a mode with the set-up items' visibility in it and in the other
+        mode; observers get "mode" (everything is drawn again)."""
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {', '.join(MODES)}, got {mode!r}")
+        self.mode = mode
+        for item_id, shown in visible.items():
+            if item_id in self._items:
+                self._items[item_id].visible = bool(shown)
+        self.other_visibility = {k: bool(v) for k, v in other.items() if k in self._items}
+        self._notify("mode", None)
+
     # ------------------------------------------------------------- files
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -246,6 +269,8 @@ class Scene:
             "camera_path": self.camera_path,
             "sun": list(self.sun) if self.sun is not None else None,
             "play_range": list(self.play_range) if self.play_range is not None else None,
+            "mode": self.mode,
+            "other_visibility": dict(self.other_visibility),
             "counters": dict(self._counters),
             "items": [item.to_dict() for item in self._items.values()],
         }
@@ -281,6 +306,14 @@ class Scene:
         played = data.get("play_range")
         self.play_range = (
             (float(played[0]), float(played[1])) if isinstance(played, list | tuple) else None
+        )
+        mode = str(data.get("mode", "results"))
+        self.mode = mode if mode in MODES else "results"
+        other = data.get("other_visibility", {})
+        self.other_visibility = (
+            {str(k): bool(v) for k, v in other.items() if k in self._items}
+            if isinstance(other, dict)
+            else {}
         )
         self._notify("reset", None)
 

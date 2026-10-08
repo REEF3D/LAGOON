@@ -7,7 +7,7 @@ Items that show data are listed under their case; hiding a case hides them all.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QTreeWidget,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from lagoonviz.core.kinds import KINDS
 from lagoonviz.core.scene import VIEW_EVENTS
 from lagoonviz.gui.bridge import SessionBridge
+from lagoonviz.gui.theme import COLORS
 
 ID_ROLE = Qt.UserRole
 
@@ -92,6 +93,11 @@ class SceneTreePanel(QWidget):
             entry.setFlags(entry.flags() | Qt.ItemIsEditable | Qt.ItemIsUserCheckable)
             entry.setCheckState(0, Qt.Checked if item.visible else Qt.Unchecked)
             entry.setToolTip(0, item.id)
+            if not self.session.data.drawn(item.id):
+                # results items in the set-up: listed, greyed out, not drawn
+                for column in (0, 1):
+                    entry.setForeground(column, QBrush(QColor(COLORS["dim"])))
+                entry.setToolTip(0, f"{item.id}: shown in Results (View → Results)")
             parent = None
             if item.kind != "case":
                 case_item = self.session.data.case_item(item.id)

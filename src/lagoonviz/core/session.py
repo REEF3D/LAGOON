@@ -27,6 +27,7 @@ from lagoonviz.core.commands import (
     RemoveItem,
     Rename,
     SetMany,
+    SetMode,
     SetProperties,
     SetProperty,
     SetVisible,
@@ -35,7 +36,7 @@ from lagoonviz.core.data.manager import DataManager
 from lagoonviz.core.data.reef3d import ROLES
 from lagoonviz.core.data.setup import has_inputs
 from lagoonviz.core.kinds import KINDS
-from lagoonviz.core.scene import Scene
+from lagoonviz.core.scene import MODES, Scene
 
 #: Suggested file extension for saved sessions.
 SESSION_EXTENSION = ".lagoon-session"
@@ -123,11 +124,36 @@ class Session:
             command.label = f"Open {command.case.name}"
         self.stack.execute(command)
         assert command.item_id is not None
+        if case.setup_only and self.scene.mode != "setup":
+            self.set_mode("setup")  # nothing has run: work on its set-up
         # a run restarted in the same folder may start later: begin where it has data
         first = self.data.first_time(command.item_id)
         if first is not None and self.scene.time < first:
             self.set_time(first)
         return command.item_id
+
+    def set_mode(self, mode: str) -> None:
+        """Work on the results ("results") or on the set-up ("setup") of the cases.
+
+        In the set-up, results items are not drawn and the timeline rests; each case
+        with input files gets a "Case set-up" item if it has none. Set-up items keep
+        a check box of their own in each mode."""
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {', '.join(MODES)}, got {mode!r}")
+        added = []
+        if mode == "setup":
+            shown = {str(i.properties.get("case", "")) for i in self.scene if i.kind == "setup"}
+            cases = [i for i in self.scene if i.kind == "case"]
+            for case_item in cases:
+                named = case_item.id in shown or (len(cases) == 1 and "" in shown)
+                if not named and self.data.case_setup(case_item.id) is not None:
+                    added.append(AddItem("setup", None, {"case": case_item.id}))
+        self.stack.execute(SetMode(self.scene, mode, added))
+
+    @property
+    def mode(self) -> str:
+        """ "results" or "setup" (see :meth:`set_mode`)."""
+        return self.scene.mode
 
     def add_slice(self, normal: str = "y", position: float | None = None, **properties: Any) -> str:
         """Add a slice through the volume; without a position it cuts the middle.

@@ -5,6 +5,23 @@ LAGOON shows a case before it has run: open a folder with DIVEMesh's
 set up. The same signs can be laid over the results of a run, and drawn as a
 paper figure in plan and side view.
 
+## Set-up and results
+
+LAGOON works in one of two modes, switched with the two buttons in the toolbar
+(*View → Set-up*, ++ctrl+shift+u++, and *View → Results*, ++ctrl+shift+r++):
+
+- **Set-up**: the input files of the cases. The *Case set-up* items and, once
+  DIVEMesh has run, its grid are shown; what the runs wrote is left out (listed
+  greyed in the scene) and the timeline rests. Each case with input files gets a
+  *Case set-up* item when it has none.
+- **Results**: what the runs wrote, as always. The *Case set-up* items are there
+  too, switched off: tick one to see where the gauges and zones were.
+
+Set-up items keep a check box of their own in each mode, so switching back and
+forth shows each mode as you left it. A case that has not run yet opens in the
+set-up. The switch is a command like any other: it can be undone, and a script
+switches with `session.set_mode("setup")` or `session.set_mode("results")`.
+
 ## A case that has not run yet
 
 A case folder without output opens as its set-up:
