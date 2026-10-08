@@ -25,9 +25,7 @@ Opening a case adds the case and its main items to the scene: the free surface
 (or the AMR surface, when the run wrote one) and the bed, the objects of the same
 run (bodies, mooring lines, structures, DEM elements, ice floes, rod trees,
 particles), and its time series and wave profiles. The run's volume is there too,
-switched off: tick it (or *Volume* in the toolbar) to show it. Without a bed from
-the run (a store whose bed REEF3D has not counted yet), DIVEMesh's bed is shown.
-When a folder holds the output of several runs, the run written last is shown.
+switched off: tick it (or *Volume* in the toolbar) to show it. When a folder holds the output of several runs, the run written last is shown.
 Slices, iso-surfaces and streamlines are in the *Add* menu.
 
 The solids of the case (a monopile, a breakwater, the blocks that shape a beach)

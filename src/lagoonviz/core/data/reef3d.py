@@ -697,14 +697,9 @@ class Case:
         solids = [d for d in self.datasets.values() if d.role == "solid"]
         if solids:
             chosen["solid"] = solids[0]
-        # no bed from the run (a store whose bed is not counted yet): DIVEMesh's bed
-        topo = [d for d in self.datasets.values() if d.role == "topo"]
-        if "bed" not in chosen and topo:
-            chosen["topo"] = topo[0]
         # beds are drawn first, so a transparent free surface shows them
         order = (
             "bed",
-            "topo",
             "solid",
             "structure",
             "body",

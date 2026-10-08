@@ -1,12 +1,9 @@
 """VTU/VTP to LAGOON store, and LAGOON stores opened as cases (phase 3)."""
 
-import json
-import shutil
-
 import numpy as np
 import pytest
 from lagoon_format.store import Store
-from reef3d_fixtures import DEPTH, eta, make_run, write_piece
+from reef3d_fixtures import DEPTH, eta, make_run
 
 from lagoonviz.core import Session
 from lagoonviz.core.convert import ConvertError, convert, level_offsets, main, nominal_sigma
@@ -136,22 +133,10 @@ def test_divemesh_solids_keep_the_stores_times(converted):
     assert session.data.frame_index(surface.id, 1.0) == 2
 
 
-def test_a_store_without_its_bed_shows_divemeshs(converted):
-    """A store whose bed REEF3D has not counted yet (written once, at the start):
-    DIVEMesh's bed stands in; the volume is there, switched off."""
+def test_the_volume_is_there_switched_off(converted):
     run, report = converted
-    shutil.rmtree(report.store / "bed")
-    root = json.loads((report.store / "zarr.json").read_text())
-    root["attributes"]["lagoon"]["outputs"].remove("bed")
-    (report.store / "zarr.json").write_text(json.dumps(root))
-    topo = run / "DIVEMesh_Paraview" / "REEF3D_Topo.vtp"
-    topo.parent.mkdir()
-    points = np.array([[0, 0, 0], [8, 0, 0], [8, 4, 0], [0, 4, 0]], np.float32)
-    write_piece(topo, "PolyData", points, {}, np.array([0, 1, 2, 0, 2, 3]), np.array([3, 6]))
     session = Session()
     session.open_case(report.store)
-    bed = next(i for i in session.scene if i.kind == "bathymetry")
-    assert bed.properties["dataset"] == "divemesh_topo"
     volume = next(i for i in session.scene if i.kind == "volume")
     assert not volume.visible and session.data.load(volume.id).points.shape[0] > 0
 
