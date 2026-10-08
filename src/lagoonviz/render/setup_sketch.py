@@ -36,7 +36,17 @@ def _setup_of(source, case: str | None) -> CaseSetup:
     if isinstance(source, CaseSetup):
         return source
     if isinstance(source, str | Path):
-        return read_setup(source)
+        setup = read_setup(source)
+        if setup.domain is None:  # no control.txt: the extent of the results, if any
+            from lagoonviz.core import Session
+
+            session = Session()
+            try:
+                case_id = session.open_case(setup.path)
+            except (OSError, ValueError):
+                return setup
+            return session.data.case_setup(case_id) or setup
+        return setup
     data = source.data  # a session
     ids = [case] if case else [i.id for i in source.scene if i.kind == "case"]
     for item_id in ids:

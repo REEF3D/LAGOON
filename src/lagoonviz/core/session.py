@@ -33,6 +33,7 @@ from lagoonviz.core.commands import (
 )
 from lagoonviz.core.data.manager import DataManager
 from lagoonviz.core.data.reef3d import ROLES
+from lagoonviz.core.data.setup import has_inputs
 from lagoonviz.core.kinds import KINDS
 from lagoonviz.core.scene import Scene
 
@@ -90,7 +91,8 @@ class Session:
         ``path`` is a case folder, one of its ``REEF3D_*`` output folders, or a file.
         A case folder without output yet shows its set-up from the input files
         (control.txt, ctrl.txt, geo.dat): DIVEMesh's solids and a "Case set-up" item
-        with the domain, the kinds of its sides, relaxation zones, gauges and probes.
+        with the domain, the kinds of its sides, relaxation zones, gauges and probes. A
+        case with results and input files gets that item too, switched off.
         """
         path = os.fspath(path)
         case = self.data.open(path)
@@ -106,6 +108,8 @@ class Session:
             children.append(AddItem(kind, None, props))
         if case.setup_only:  # not run yet: domain, sides, zones, gauges of the input
             children.append(AddItem("setup", None, {}))
+        elif has_inputs(case.path):  # results: the set-up is there, switched off
+            children.append(AddItem("setup", None, {}, visible=False))
         for series in case.main_series():
             children.append(AddItem("series", series.name, {"source": series.key}))
         for profiles in case.main_profiles():

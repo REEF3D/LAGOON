@@ -103,9 +103,20 @@ SOLVERS = {2: "SFLOW", 3: "FNPF", 5: "NHFLOW", 6: "CFD", 7: "SEASTATE"}
 
 # ======================================================================== files
 def has_inputs(case_dir: str | Path) -> bool:
-    """True if a folder holds REEF3D or DIVEMesh input (ctrl.txt or control.txt)."""
+    """True if a folder holds REEF3D or DIVEMesh input (ctrl.txt or control.txt, or
+    the copies of ctrl.txt REEF3D keeps in REEF3D_Case)."""
     case_dir = Path(case_dir)
-    return (case_dir / CTRL).is_file() or (case_dir / CONTROL).is_file()
+    return (case_dir / CONTROL).is_file() or ctrl_file(case_dir) is not None
+
+
+def ctrl_file(case_dir: str | Path) -> Path | None:
+    """The case's ctrl.txt; without one, the newest copy REEF3D kept of it in
+    REEF3D_Case (``ctrl-<run>.txt``, one per run)."""
+    case_dir = Path(case_dir)
+    if (case_dir / CTRL).is_file():
+        return case_dir / CTRL
+    copies = sorted((case_dir / "REEF3D_Case").glob("ctrl-*.txt"))
+    return copies[-1] if copies else None
 
 
 # ======================================================================== marks
@@ -280,6 +291,8 @@ class CaseSetup:
     water_level: float | None = None
     #: what could not be shown, for the user
     notes: list[str] = field(default_factory=list)
+    #: where the domain came from when control.txt does not give it ("the results")
+    domain_from: str = ""
     _bed: tuple | None = None
     _marks: list[Mark] | None = None
     _meshes: dict = field(default_factory=dict)
@@ -297,7 +310,12 @@ class CaseSetup:
     def files(self) -> list[str]:
         """The input files found in the case folder."""
         names = [CONTROL, CTRL, GEO, "solid.stl", "floating.stl"]
-        return [name for name in names if (self.path / name).is_file()]
+        found = [name for name in names if (self.path / name).is_file()]
+        if CTRL not in found and self.ctrl.path is not None and self.ctrl.path.is_file():
+            found.insert(1, f"{self.ctrl.path.parent.name}/{self.ctrl.path.name}")
+        if self.domain_from:
+            found.append(f"domain from {self.domain_from}")
+        return found
 
     @property
     def two_d(self) -> bool:
@@ -327,7 +345,10 @@ class CaseSetup:
         revisions = (self.control.revision, self.ctrl.revision)
         if revisions == self._revisions:
             return False
-        self.domain = _domain(self)
+        if not self.domain_from or "B 10" in self.control:  # the results' extent stays
+            self.domain = _domain(self)
+            if self.domain is not None:
+                self.domain_from = ""
         self.cells = _cells(self)
         self.sides = _sides(self)
         self.water_level = _water_level(self)
@@ -346,6 +367,25 @@ class CaseSetup:
             pick = np.random.default_rng(0).choice(len(points), limit, replace=False)
             points = points[np.sort(pick)]
         return points
+
+    def use_domain(self, low, high, source: str) -> None:
+        """Take the domain from elsewhere (the extent of a run's results) when the
+        input files do not give it: no control.txt, or no B 10 in it."""
+        if self.domain is not None:
+            return
+        self.domain = (
+            float(low[0]),
+            float(high[0]),
+            float(low[1]),
+            float(high[1]),
+            float(low[2]),
+            float(high[2]),
+        )
+        self.domain_from = source
+        self.cells = _cells(self)
+        self.sides = _sides(self)
+        self._marks = None
+        self._meshes.clear()
 
     # ------------------------------------------------------------- signs
     def marks(self) -> list[Mark]:
@@ -376,7 +416,10 @@ class CaseSetup:
             lines.append(f"  REEF3D module: {self.solver} (A 10)")
         if self.domain is not None:
             xs, xe, ys, ye, zs, ze = self.domain
-            lines.append(f"  domain: x {xs:g} .. {xe:g}, y {ys:g} .. {ye:g}, z {zs:g} .. {ze:g} m")
+            lines.append(
+                f"  domain: x {xs:g} .. {xe:g}, y {ys:g} .. {ye:g}, z {zs:g} .. {ze:g} m"
+                + (f" (from {self.domain_from})" if self.domain_from else "")
+            )
         if self.cells is not None:
             nx, ny, nz = self.cells
             spacing = self.spacing
@@ -431,7 +474,8 @@ def read_setup(case_dir: str | Path) -> CaseSetup:
     if case_dir.is_file():
         case_dir = case_dir.parent
     control = read_commands(case_dir / CONTROL)
-    ctrl = read_commands(case_dir / CTRL)
+    ctrl_path = ctrl_file(case_dir)
+    ctrl = read_commands(ctrl_path) if ctrl_path is not None else Commands(case_dir / CTRL)
     setup = CaseSetup(case_dir, control, ctrl)
     setup.domain = _domain(setup)
     setup.cells = _cells(setup)
@@ -666,10 +710,10 @@ def _marks(setup: CaseSetup) -> list[Mark]:
         marks.append(
             Mark(
                 "domain",
-                "domain (B 10)",
+                f"domain (from {setup.domain_from})" if setup.domain_from else "domain (B 10)",
                 COLORS["domain"],
                 segments=_box_edges(*box),
-                code="B 10",
+                code="" if setup.domain_from else "B 10",
                 occurrence=index,
             )
         )

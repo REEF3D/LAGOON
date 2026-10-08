@@ -133,10 +133,42 @@ def test_setup_item_on_a_case_with_output(reef3d_run):
     (reef3d_run / "ctrl.txt").write_text("A 10 5\nF 60 2.0\nP 51 4 2\n")
     session = Session()
     session.open_case(reef3d_run)
-    assert not any(i.kind == "setup" for i in session.scene)  # results: not by itself
-    item = session.add_item("setup")
-    marks = session.data.setup_marks(item)
-    assert any(text == "1" for text, _, _ in marks.labels)
+    # results with input files: the set-up is there, switched off
+    item = next(i for i in session.scene if i.kind == "setup")
+    assert not item.visible
+    marks = session.data.setup_marks(item.id)
+    assert not marks.visible and any(text == "1" for text, _, _ in marks.labels)
+    session.set_visible(item.id, True)
+    assert session.data.setup_marks(item.id).visible
+    # Add > Case set-up gives another one, shown
+    added = session.add_item("setup")
+    assert session.data.setup_marks(added).visible
+    # without input files: none
+    other = Session()
+    (reef3d_run / "control.txt").unlink()
+    (reef3d_run / "ctrl.txt").unlink()
+    other.open_case(reef3d_run)
+    assert not any(i.kind == "setup" for i in other.scene)
+
+
+def test_results_fill_in_what_the_inputs_lack(reef3d_run):
+    """No control.txt and no ctrl.txt beside the results: the domain comes from the
+    results, ctrl.txt from the copy REEF3D kept in REEF3D_Case."""
+    (reef3d_run / "REEF3D_Case").mkdir()
+    (reef3d_run / "REEF3D_Case" / "ctrl-20260101T000000Z-aaaa.txt").write_text("F 60 9\n")
+    (reef3d_run / "REEF3D_Case" / "ctrl-20261003T192135Z-8b14.txt").write_text(
+        "A 10 5\nF 60 2.0\nP 51 4 2\n"
+    )
+    session = Session()
+    session.open_case(reef3d_run)
+    item = next(i for i in session.scene if i.kind == "setup")
+    setup = session.data.case_setup(item.id)
+    assert setup.water_level == 2.0  # the newest copy
+    assert setup.domain_from == "the results"
+    xs, xe, ys, ye, _, _ = setup.domain
+    assert xs == pytest.approx(0.0, abs=0.5) and xe == pytest.approx(8.0, abs=0.5)
+    assert any(m.legend == "wave gauge (P 51)" for m in setup.marks())
+    assert "REEF3D_Case/ctrl-20261003T192135Z-8b14.txt" in setup.describe()
 
 
 def test_the_set_up_sketch(basin, tmp_path):

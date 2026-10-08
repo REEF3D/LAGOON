@@ -44,9 +44,14 @@ class Command(ABC):
 
 class AddItem(Command):
     def __init__(
-        self, kind: str, name: str | None = None, properties: dict[str, Any] | None = None
+        self,
+        kind: str,
+        name: str | None = None,
+        properties: dict[str, Any] | None = None,
+        visible: bool = True,
     ):
         spec = kind_spec(kind)
+        self.visible = bool(visible)
         self.kind = kind
         self.name = name if name is not None else spec.label
         props = default_properties(kind)
@@ -62,7 +67,9 @@ class AddItem(Command):
             self.item_id = scene.new_id(self.kind)
         else:
             scene.claim_id(self.item_id)
-        scene.insert(SceneItem(self.item_id, self.kind, self.name, True, dict(self.properties)))
+        scene.insert(
+            SceneItem(self.item_id, self.kind, self.name, self.visible, dict(self.properties))
+        )
 
     def undo(self, scene: Scene) -> None:
         assert self.item_id is not None

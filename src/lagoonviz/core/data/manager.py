@@ -1327,7 +1327,13 @@ class DataManager:
         if setup is None:
             if not has_inputs(folder):
                 return None
-            setup = self._setups[key] = read_setup(folder)
+            setup = read_setup(folder)
+            case = self.case(item_id)
+            if setup.domain is None and case is not None:
+                extent = _results_extent(case)
+                if extent is not None:
+                    setup.use_domain(*extent, "the results")
+            self._setups[key] = setup
         return setup
 
     def setup_items(self) -> list[str]:
@@ -1409,6 +1415,29 @@ class DataManager:
         if case is not None and not case.setup_only:
             return self.case_water_level(item_id)
         return setup.water_level if setup.water_level is not None else 0.0
+
+
+def _results_extent(case: Case) -> tuple[np.ndarray, np.ndarray] | None:
+    """The box the shown results fill (free surface, bed, volume: first output)."""
+    lows, highs = [], []
+    for role, dataset in case.main_datasets().items():
+        if role not in ("free_surface", "bed", "volume", "amr"):
+            continue
+        try:
+            low, high = dataset.bounds(0)
+        except (OSError, ValueError, KeyError, IndexError):
+            continue
+        lows.append(np.asarray(low, float))
+        highs.append(np.asarray(high, float))
+    if not lows:
+        return None
+    low, high = np.min(lows, axis=0), np.max(highs, axis=0)
+    if not (high[:2] > low[:2]).all():
+        return None
+    if high[2] <= low[2]:
+        high = high.copy()
+        high[2] = low[2] + 1e-3 * max(high[0] - low[0], high[1] - low[1])
+    return low, high
 
 
 def _wet_triangles(mesh: SurfaceMesh) -> np.ndarray:

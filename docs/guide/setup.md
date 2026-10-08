@@ -32,9 +32,11 @@ above. A long, flat domain such as a flume is easiest to read from the side
 
 ## The Case set-up item
 
-*Add → Case set-up* puts the same signs over a case that has run, e.g. to see
-where the gauges and zones were. Each group can be switched off in its
-properties:
+A case that has run gets the same item when its folder has input files, switched
+off: tick it in the scene to see where the gauges and zones were over the results.
+`ctrl.txt` may also be the copy REEF3D keeps in `REEF3D_Case`, and without
+`control.txt` (or B 10 in it) the domain is the extent of the results. *Add → Case
+set-up* adds another one. Each group can be switched off in its properties:
 
 | Property | Shows | Commands |
 | --- | --- | --- |
