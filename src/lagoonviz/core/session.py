@@ -88,7 +88,8 @@ class Session:
         return command.item_id
 
     def open_case(self, path: str | Path, name: str | None = None) -> str:
-        """Open a REEF3D case and show its free surface and bed. Returns the case id.
+        """Open a REEF3D case and show its free surface and bed (its volume is there,
+        switched off). Returns the case id.
 
         ``path`` is a case folder, one of its ``REEF3D_*`` output folders, or a file.
         A case folder without output yet shows its set-up from the input files
@@ -108,6 +109,12 @@ class Session:
             if variable != KINDS[kind].properties["variable"].default:
                 props["variable"] = variable
             children.append(AddItem(kind, None, props))
+        volume = case.main_volume()
+        if volume is not None:  # in the scene, switched off: a tick shows it
+            props = {}
+            if sum(d.role == "volume" for d in case.datasets.values()) > 1:
+                props["dataset"] = volume.key
+            children.append(AddItem("volume", None, props, visible=False))
         if case.setup_only:  # not run yet: domain, sides, zones, gauges of the input
             children.append(AddItem("setup", None, {}))
             if (Path(case.path) / "control.txt").is_file():

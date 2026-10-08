@@ -59,7 +59,8 @@ def test_full_screen_layout(window, snapshots):
 def test_properties_of_every_kind(window, reef3d_run, snapshots, kind):
     window.open_case(reef3d_run)
     session = window.session
-    item_id = next((i.id for i in session.scene if i.kind == kind), None)
+    # an item the case shows (the volume it opened with is switched off: a new one)
+    item_id = next((i.id for i in session.scene if i.kind == kind and i.visible), None)
     if item_id is None:
         item_id = session.add_item(kind)
     window.scene_tree.select(item_id)

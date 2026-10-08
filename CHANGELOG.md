@@ -48,6 +48,9 @@
   (`tools/command_catalog.py`); input files are read and written back line by
   line, comments and order kept.
 - Back in the results, the Set-up panel makes way for *Properties*.
+- **Opening a case** also adds its run's volume, switched off (*Volume* in the
+  toolbar shows it). Without a bed from the run (a LAGOON store whose bed REEF3D
+  has not counted yet), DIVEMesh's bed is shown.
 
 ### Fixes
 

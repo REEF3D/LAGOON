@@ -633,6 +633,20 @@ class Case:
             picked.append(item)
         return picked[:limit]
 
+    def main_volume(self) -> Dataset | None:
+        """The volume of the run :meth:`main_datasets` shows (None: it shows the
+        volume itself, or the run wrote none)."""
+        main = self.main_datasets()
+        if "volume" in main:
+            return None
+        lead = main.get("free_surface") or main.get("amr") or main.get("bed")
+        volumes = [
+            d
+            for d in self.datasets.values()
+            if d.role == "volume" and (lead is None or d.same_run_as(lead))
+        ]
+        return max(volumes, key=len) if volumes else None
+
     def main_datasets(self) -> dict[str, Dataset]:
         """What to show when the case is opened: the most recent run's surfaces.
 
@@ -683,9 +697,14 @@ class Case:
         solids = [d for d in self.datasets.values() if d.role == "solid"]
         if solids:
             chosen["solid"] = solids[0]
+        # no bed from the run (a store whose bed is not counted yet): DIVEMesh's bed
+        topo = [d for d in self.datasets.values() if d.role == "topo"]
+        if "bed" not in chosen and topo:
+            chosen["topo"] = topo[0]
         # beds are drawn first, so a transparent free surface shows them
         order = (
             "bed",
+            "topo",
             "solid",
             "structure",
             "body",

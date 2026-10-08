@@ -559,6 +559,11 @@ class MainWindow(QMainWindow):
             return self.session.add_iso_surface()
         if kind == "streamlines":
             return self.session.add_streamlines(**self._streamline_start())
+        if kind == "volume":  # the volume a case opened with, switched off: show it
+            hidden = [i for i in self.session.scene if i.kind == "volume" and not i.visible]
+            if hidden:
+                self.session.set_visible(hidden[0].id, True)
+                return hidden[0].id
         return self.session.add_item(kind)
 
     # ------------------------------------------------------------- compare

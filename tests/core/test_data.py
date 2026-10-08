@@ -208,14 +208,15 @@ def test_session_open_case_items_and_replay(reef3d_run):
     s = Session()
     case_id = s.open_case(reef3d_run)
     kinds = [item.kind for item in s.scene]
-    assert kinds == ["case", "bathymetry", "free_surface"]
+    assert kinds == ["case", "bathymetry", "free_surface", "volume"]
     assert s.scene.get("free_surface-1").properties["case"] == case_id
     assert s.scene.get("bathymetry-1").properties["variable"] == "none"  # plain sand
+    assert not s.scene.get("volume-1").visible  # there, switched off
     assert s.stack.undo_label == "Open run"
     s.undo()
     assert len(s.scene) == 0
     s.redo()
-    assert len(s.scene) == 3
+    assert len(s.scene) == 4
     replayed = Session.from_script(s.to_script())
     assert replayed.scene.to_dict() == s.scene.to_dict()
 

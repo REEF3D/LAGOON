@@ -194,12 +194,14 @@ def test_viewport_placeholder_without_screen(window):
 def test_open_case_fills_scene_and_timeline(window, reef3d_run):
     case_id = window.open_case(reef3d_run)
     assert case_id == "case-1"
-    assert [i.kind for i in window.session.scene] == ["case", "bathymetry", "free_surface"]
+    kinds = [i.kind for i in window.session.scene]
+    assert kinds == ["case", "bathymetry", "free_surface", "volume"]
     tree = window.scene_tree.tree
     assert tree.topLevelItemCount() == 1  # the case, with its items below it
-    assert [tree.topLevelItem(0).child(i).text(0) for i in range(2)] == [
+    assert [tree.topLevelItem(0).child(i).text(0) for i in range(3)] == [
         "Bed",
         "Free surface",
+        "Volume",
     ]
     timeline = window.timeline
     assert timeline.n_frames == 3 and not timeline.end.isVisibleTo(window)
@@ -211,6 +213,9 @@ def test_open_case_fills_scene_and_timeline(window, reef3d_run):
     timeline.slider.setValue(0)
     assert window.session.scene.time == 0
     assert "Open run" in window.act_undo.text()
+    # the volume is there, switched off: Volume in the toolbar shows it
+    volume = window.session.scene.get("volume-1")
+    assert not volume.visible and window.add_item("volume") == volume.id and volume.visible
 
 
 def test_timeline_in_seconds_with_print_interval(window, tmp_path):
