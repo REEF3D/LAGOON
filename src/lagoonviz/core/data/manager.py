@@ -505,7 +505,8 @@ class DataManager:
         datasets = []
         for item_id in self.data_items():
             dataset = self.dataset(item_id)
-            if dataset is not None and dataset.role != "bed":
+            # beds and DIVEMesh's solids and bed are shown at any time: not part of it
+            if dataset is not None and dataset.role not in ("bed", "solid", "topo"):
                 datasets.append(dataset)
         key = tuple((d.folder, d.key, len(d)) for d in datasets)
         if self._logged is not None and self._logged[0] == key:

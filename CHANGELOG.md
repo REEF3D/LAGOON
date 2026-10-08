@@ -54,6 +54,8 @@
 - **A LAGOON store opened on its own** (`REEF3D_FNPF.lagoon`) showed nothing when
   its folder also held other output that could not be read: its frames were read
   from the whole folder instead of the store.
+- With DIVEMesh's solids in a case, the timeline went by output numbers instead
+  of the run log's seconds (the free surface of a store showed the wrong output).
 - `.pvtp`/`.pvtu` files whose pieces are gone (an earlier run's, the pieces
   removed by a run with P 18 1) are left out instead of stopping the case.
 

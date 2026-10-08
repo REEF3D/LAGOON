@@ -118,6 +118,21 @@ def test_a_store_alone_reads_from_the_store(converted):
         assert session.data.load(item.id).points.shape[0] > 0
 
 
+def test_divemesh_solids_keep_the_stores_times(converted):
+    """DIVEMesh's solids (shown at any time) leave the timeline in the store's
+    seconds: the free surface at 1.0 s is its output at 1.0 s."""
+    run, report = converted
+    (run / "control.txt").write_text("B 10 0.0 8.0 0.0 4.0 0.0 1.0\nS 10 1.0 2.0 1.0 2.0 0.0 1.0\n")
+    session = Session()
+    session.open_case(report.store)
+    kinds = {i.kind for i in session.scene}
+    assert "structure" in kinds
+    times = session.data.logged_times()
+    assert times is not None and times.tolist() == [0.0, 0.5, 1.0, 1.5]
+    surface = next(i for i in session.scene if i.kind == "free_surface")
+    assert session.data.frame_index(surface.id, 1.0) == 2
+
+
 def test_index_files_without_pieces_are_left_out(tmp_path):
     run = make_run(tmp_path / "run", frames=3)
     for piece in (run / "REEF3D_NHFLOW_VTP_FSF").glob("REEF3D-NHFLOW-FSF-0000000[01]-*.vtp"):
