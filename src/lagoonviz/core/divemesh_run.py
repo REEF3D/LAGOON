@@ -9,7 +9,8 @@ LAGOON shows those as the set-up's grid, solids and bed.
 
 The program is found with :func:`find_divemesh`: ``LAGOON_DIVEMESH``, then
 ``DiveMESH`` on the PATH, then the usual places of a source build
-(``~/Codelite/DIVEMesh/bin/DiveMESH``)::
+(``~/Codelite/DIVEMesh/bin/DiveMESH`` from make, ``~/Codelite/DIVEMesh/src/Release/DIVEMesh``
+from CodeLite)::
 
     from lagoonviz.core.divemesh_run import run_divemesh
     code = run_divemesh("~/runs/flume", on_line=print)
@@ -28,7 +29,8 @@ from pathlib import Path
 NAMES = ("DiveMESH", "DIVEMesh", "divemesh")
 #: where a source build puts it, relative to the home folder
 BUILDS = (
-    "Codelite/DIVEMesh/bin",
+    "Codelite/DIVEMesh/bin",  # make
+    "Codelite/DIVEMesh/src/Release",  # CodeLite
     "Codelite/DIVEMesh/Release",
     "DIVEMesh/bin",
     "DIVEMesh",

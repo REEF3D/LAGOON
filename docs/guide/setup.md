@@ -118,8 +118,9 @@ made: its grid, the solids (`REEF3D_Solid.vtp`) and the bed (`REEF3D_Topo.vtp`,
 as a *Bed* item of the set-up).
 
 LAGOON looks for the program as `LAGOON_DIVEMESH`, `DiveMESH` on the PATH, then
-`~/Codelite/DIVEMesh/bin/DiveMESH`; if none is there, it asks for it once and
-remembers it.
+in a source build (`~/Codelite/DIVEMesh/bin/DiveMESH` from make,
+`~/Codelite/DIVEMesh/src/Release/DIVEMesh` from CodeLite); if none is there, it
+asks for it once and remembers it.
 
 ## DIVEMesh's grid
 
