@@ -1,0 +1,4545 @@
+{
+ "program": "DIVEMesh",
+ "file": "control.txt",
+ "source": "DIVEMesh_User_Guide/DIVEMesh-UserGuide.tex",
+ "sections": {
+  "B": "Boundary",
+  "C": "Channel",
+  "D": "Data Interpolation",
+  "G": "Geodat",
+  "H": "Hydrodynamic Coupling",
+  "M": "MPI",
+  "S": "Solid",
+  "T": "Topo"
+ },
+ "commands": {
+  "B 1": {
+   "title": "cell size dx",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "B 2": {
+   "title": "number of cells in x-, y- and z-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0",
+    "0",
+    "0"
+   ],
+   "text": "When activated, it will overwrite B 1."
+  },
+  "B 3": {
+   "title": "global grid origin delta for the coastal modeling system (CMS) Δ x, Δ y",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "B 4": {
+   "title": "global grid rotation for the coastal modeling system (CMS) α",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "B 5": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "B 6": {
+   "title": "turn on coastal modeling system (CMS) (grid rotation and translation)",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "B 10": {
+   "title": "rectangular domain",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "B 101": {
+   "title": "type of grid stretching function in x-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "center focus (sinh, using B111)",
+    "2": "wall focus (tanh, using B111)",
+    "5": "point focus using sinh (requires B 114)",
+    "6": "point focus using exponents (requires B 114)",
+    "8": "three zones with constant dx (requires B 121)",
+    "9": "three zones with stretching (requires B 124)",
+    "10": "input from file (requires x-spacing.dat file with grid points between 0 and 1)",
+    "11": "cell size based (requires B 127)"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "B 102": {
+   "title": "type of grid stretching function in y-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "center focus (sinh, using B112)",
+    "2": "wall focus (tanh, using B112)",
+    "5": "point focus using sinh (requires B 115)",
+    "6": "point focus using exponents (requires B 115)",
+    "8": "three zones with constant dx (requires B 122)",
+    "9": "three zones with stretching (requires B 125)",
+    "10": "input from file (requires y-spacing.dat file with grid points between 0 and 1)",
+    "11": "cell size based (requires B 128)"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "B 103": {
+   "title": "type of grid stretching function in z-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "center focus (sinh, using B113)",
+    "2": "wall focus (tanh, using B113)",
+    "3": "lid focus (expontential, using B113)",
+    "4": "lid focus (sinusoidal)",
+    "5": "point focus using sinh (requires B 116)",
+    "6": "point focus using exponents (requires B 116)",
+    "8": "three zones with constant dx (requires B 123)",
+    "9": "three zones with stretching (requires B 126)",
+    "10": "input from file (requires z-spacing.dat file with grid points between 0 and 1)",
+    "11": "cell size based (requires B 129)"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "B 111": {
+   "title": "stretching factor in x-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1.0"
+   ],
+   "text": ""
+  },
+  "B 112": {
+   "title": "stretching factor in y-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1.0"
+   ],
+   "text": ""
+  },
+  "B 113": {
+   "title": "stretching factor in z-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1.0"
+   ],
+   "text": ""
+  },
+  "B 114": {
+   "title": "focus point for x-direction stretching B 101 5",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "B 115": {
+   "title": "focus point for y-direction stretching B 102 5",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "B 116": {
+   "title": "focus point for z-direction stretching B 103 5",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "B 121": {
+   "title": "input for the three zones of B 101 8",
+   "repeat": false,
+   "params": [
+    {
+     "name": "N1",
+     "type": "int"
+    },
+    {
+     "name": "x1",
+     "type": "double"
+    },
+    {
+     "name": "N2",
+     "type": "int"
+    },
+    {
+     "name": "x2",
+     "type": "double"
+    },
+    {
+     "name": "N3",
+     "type": "int"
+    }
+   ],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "The sum of the given N1,N2,N3 result in the number of elements in x-direction.",
+   "default_text": "na"
+  },
+  "B 122": {
+   "title": "input for the three zones of B 101 8",
+   "repeat": false,
+   "params": [
+    {
+     "name": "N1",
+     "type": "int"
+    },
+    {
+     "name": "y1",
+     "type": "double"
+    },
+    {
+     "name": "N2",
+     "type": "int"
+    },
+    {
+     "name": "y2",
+     "type": "double"
+    },
+    {
+     "name": "N3",
+     "type": "int"
+    }
+   ],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "The sum of the given N1,N2,N3 result in the number of elements in y-direction.",
+   "default_text": "na"
+  },
+  "B 123": {
+   "title": "input for the three zones of B 101 8",
+   "repeat": false,
+   "params": [
+    {
+     "name": "N1",
+     "type": "int"
+    },
+    {
+     "name": "z1",
+     "type": "double"
+    },
+    {
+     "name": "N2",
+     "type": "int"
+    },
+    {
+     "name": "z2",
+     "type": "double"
+    },
+    {
+     "name": "N3",
+     "type": "int"
+    }
+   ],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "The sum of the given N1,N2,N3 result in the number of elements in z-direction.",
+   "default_text": "na"
+  },
+  "B 124": {
+   "title": "input for the three zones of B 101 9",
+   "repeat": false,
+   "params": [
+    {
+     "name": "N1",
+     "type": "int"
+    },
+    {
+     "name": "x1",
+     "type": "double"
+    },
+    {
+     "name": "f1",
+     "type": "double"
+    },
+    {
+     "name": "N2",
+     "type": "int"
+    },
+    {
+     "name": "xf",
+     "type": "double"
+    },
+    {
+     "name": "f2",
+     "type": "double"
+    },
+    {
+     "name": "N3",
+     "type": "int"
+    },
+    {
+     "name": "x2",
+     "type": "double"
+    },
+    {
+     "name": "f3",
+     "type": "double"
+    }
+   ],
+   "values": 9,
+   "options": {},
+   "default": [],
+   "text": "The sum of the given N1,N2,N3 result in the number of elements in x-direction. The factors f1 and f3 are the linear stretching factors for the layers. The parameter x1 gives the border between the first and second layer, x2 between second and third. The parameter xf gives the location of the stretching focus in the second layer, where sinh stretching based on the factor f2 is used.",
+   "default_text": "na"
+  },
+  "B 125": {
+   "title": "input for the three zones of B 102 9",
+   "repeat": false,
+   "params": [
+    {
+     "name": "N1",
+     "type": "int"
+    },
+    {
+     "name": "y1",
+     "type": "double"
+    },
+    {
+     "name": "f1",
+     "type": "double"
+    },
+    {
+     "name": "N2",
+     "type": "int"
+    },
+    {
+     "name": "yf",
+     "type": "double"
+    },
+    {
+     "name": "f2",
+     "type": "double"
+    },
+    {
+     "name": "N3",
+     "type": "int"
+    },
+    {
+     "name": "y2",
+     "type": "double"
+    },
+    {
+     "name": "f3",
+     "type": "double"
+    }
+   ],
+   "values": 9,
+   "options": {},
+   "default": [],
+   "text": "see B 124.",
+   "default_text": "na"
+  },
+  "B 126": {
+   "title": "input for the three zones of B 103 9",
+   "repeat": false,
+   "params": [
+    {
+     "name": "N1",
+     "type": "int"
+    },
+    {
+     "name": "z1",
+     "type": "double"
+    },
+    {
+     "name": "f1",
+     "type": "double"
+    },
+    {
+     "name": "N2",
+     "type": "int"
+    },
+    {
+     "name": "zf",
+     "type": "double"
+    },
+    {
+     "name": "f2",
+     "type": "double"
+    },
+    {
+     "name": "N3",
+     "type": "int"
+    },
+    {
+     "name": "z2",
+     "type": "double"
+    },
+    {
+     "name": "f3",
+     "type": "double"
+    }
+   ],
+   "values": 9,
+   "options": {},
+   "default": [],
+   "text": "see B 124.",
+   "default_text": "na"
+  },
+  "B 127": {
+   "title": "input for the cell size based stretching of B 101 11",
+   "repeat": false,
+   "params": [
+    {
+     "name": "Δ x_min",
+     "type": "double"
+    },
+    {
+     "name": "Δ x_max",
+     "type": "double"
+    },
+    {
+     "name": "x_f",
+     "type": "double"
+    },
+    {
+     "name": "δ_f",
+     "type": "double"
+    },
+    {
+     "name": "r",
+     "type": "double"
+    }
+   ],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "A constant cell size of Δ x_min is generated in the focus zone of length δ_f around x_f. The cells are stretched with the cell ratio r between the ends of the focus zone and the domain boundaries until the maximum cell size of Δ x_max is reached.",
+   "default_text": "na"
+  },
+  "B 128": {
+   "title": "input for the cell size based stretching of B 102 11",
+   "repeat": false,
+   "params": [
+    {
+     "name": "Δ y_min",
+     "type": "double"
+    },
+    {
+     "name": "Δ y_max",
+     "type": "double"
+    },
+    {
+     "name": "y_f",
+     "type": "double"
+    },
+    {
+     "name": "δ_f",
+     "type": "double"
+    },
+    {
+     "name": "r",
+     "type": "double"
+    }
+   ],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "see B 127",
+   "default_text": "na"
+  },
+  "B 129": {
+   "title": "input for the cell size based stretching of B 103 11",
+   "repeat": false,
+   "params": [
+    {
+     "name": "Δ z_min",
+     "type": "double"
+    },
+    {
+     "name": "Δ z_max",
+     "type": "double"
+    },
+    {
+     "name": "z_f",
+     "type": "double"
+    },
+    {
+     "name": "δ_f",
+     "type": "double"
+    },
+    {
+     "name": "r",
+     "type": "double"
+    }
+   ],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "see B 127",
+   "default_text": "na"
+  },
+  "B 130": {
+   "title": "print grid to \"gridSpacing.vtk\"",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "C 11": {
+   "title": "Boundary Condition on Surfside 1",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "1": "inflow",
+    "3": "symmetry plane",
+    "6": "wave generation",
+    "7": "numerical beach",
+    "21": "wall"
+   },
+   "default": [
+    "21"
+   ],
+   "text": ""
+  },
+  "C 12": {
+   "title": "Boundary Condition on Surfside 2",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "3": "symmetry plane",
+    "6": "wave generation",
+    "7": "numerical beach",
+    "21": "wall"
+   },
+   "default": [
+    "21"
+   ],
+   "text": "For 2D simulations, this is set to symmetry plane automatically."
+  },
+  "C 13": {
+   "title": "Boundary Condition on Surfside 3",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "3": "symmetry plane",
+    "6": "wave generation",
+    "7": "numerical beach",
+    "21": "wall"
+   },
+   "default": [
+    "21"
+   ],
+   "text": "For 2D simulations, this is set to symmetry plane automatically."
+  },
+  "C 14": {
+   "title": "Boundary Condition on Surfside 4",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "2": "outflow",
+    "3": "symmetry plane",
+    "6": "wave generation",
+    "7": "numerical beach",
+    "21": "wall"
+   },
+   "default": [
+    "21"
+   ],
+   "text": ""
+  },
+  "C 15": {
+   "title": "Boundary Condition on Surfside 5",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "3": "symmetry plane",
+    "21": "wall"
+   },
+   "default": [
+    "21"
+   ],
+   "text": ""
+  },
+  "C 16": {
+   "title": "Boundary Condition on Surfside 6",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "3": "symmetry plane",
+    "21": "wall"
+   },
+   "default": [
+    "21"
+   ],
+   "text": ""
+  },
+  "C 21": {
+   "title": "Periodic boundary conditions in x-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "C 22": {
+   "title": "Periodic boundary conditions in y-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "C 23": {
+   "title": "Periodic boundary conditions in z-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "D 10": {
+   "title": "turn data interpolation on/off",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "D 11": {
+   "title": "x, Δy, Δx",
+   "repeat": false,
+   "params": [
+    {
+     "name": "Δ",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "D 12": {
+   "title": "factor x-coordinate, factor y-coordinate, factor z-coordinate,",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "D 13": {
+   "title": "Read data every i^th iteration",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "D 14": {
+   "title": "Type of interpolation",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "1": "inverse distance",
+    "2": "kriging"
+   },
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "D 15": {
+   "title": "Number of smoothing iterations",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "D 16": {
+   "title": "Factor for data smoothing",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.5"
+   ],
+   "text": ""
+  },
+  "D 17": {
+   "title": "Factor for data inverse distance",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "16.0"
+   ],
+   "text": ""
+  },
+  "D 18": {
+   "title": "Range factor for kriging",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.3"
+   ],
+   "text": ""
+  },
+  "D 19": {
+   "title": "Read dummy letter in front of 3D coordinates",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "D 20": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "D 23": {
+   "title": "reverse sign of data variable in dmdata.dat",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "D 24": {
+   "title": "distance limiter for inverse distance",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "",
+   "default_text": "na"
+  },
+  "D 100": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "G 9": {
+   "title": "geodata for topo or solid",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "1": "topo",
+    "2": "solid"
+   },
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "G 10": {
+   "title": "turn geodat on/off",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "G 11": {
+   "title": "x, Δy, Δz",
+   "repeat": false,
+   "params": [
+    {
+     "name": "Δ",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 12": {
+   "title": "factor x-coordinate, factor y-coordinate, factor z-coordinate,",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 13": {
+   "title": "rotation angle of geo coordinates around vertical axis",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 14": {
+   "title": "x-coordinate and y-coordinate of origin for the rotation angle of geo coordinates around vertical axis",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 15": {
+   "title": "interpolation scheme",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "1": "global inverse distance interpolation",
+    "2": "local inverse distance interpolation",
+    "3": "kriging"
+   },
+   "default": [
+    "2"
+   ],
+   "text": "Global inverse distance interpolation requires long computation times for large geodat sets. The recommended interpolation scheme for relatively homogeneously spaced geodat points is local inverse distance interpolation. Kriging is recommended for inhomogeneously spaced geodat points, e.g. geodat points from digitized map contour lines. Kriging becomes unstable when geodat points are spaced too close to each other, so for this option G 36 is turned on automatically with the default value of 1.0 (that value can be changed). Kriging becomes inefficient for geodat sets larger than 10,000 points, thus G 37 is recommended for kringing."
+  },
+  "G 16": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "G 17": {
+   "title": "lower limit for local inverse distance interpolation",
+   "repeat": false,
+   "params": [
+    {
+     "name": "d_ij",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "2"
+   ],
+   "text": ""
+  },
+  "G 18": {
+   "title": "number of required points for local inverse distance interpolation",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "14"
+   ],
+   "text": ""
+  },
+  "G 19": {
+   "title": "read a letter in front of the coordinates in the geo.dat file",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "G 20": {
+   "title": "automatic grid size",
+   "repeat": false,
+   "params": [
+    {
+     "name": "use",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "G 21": {
+   "title": "Margins for automatic grid size x_start, y_start, z_start",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 22": {
+   "title": "Margins for automatic grid size x_end, y_end, z_end",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 23": {
+   "title": "reverse sign of vertical coordinate in geo.dat file",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "G 24": {
+   "title": "raise topography above the level h by dz",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 25": {
+   "title": "multiply topography above the level h by factor fz",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 26": {
+   "title": "remove all geodat points below the bed level h",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 27": {
+   "title": "remove all geodat points above the bed level h",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 31": {
+   "title": "Number of outer spatial filter iterations",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "G 32": {
+   "title": "Number of inner spatial filter iterations",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "G 34": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "G 35": {
+   "title": "Factor for data inverse distance",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "16.0"
+   ],
+   "text": ""
+  },
+  "G 36": {
+   "title": "sampling geodat points: factor times horizontal average mesh size for duplicate geodat point identification",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1.0"
+   ],
+   "text": ""
+  },
+  "G 37": {
+   "title": "sampling geodat points: maximum number of geodat after random removal",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1e8"
+   ],
+   "text": ""
+  },
+  "G 38": {
+   "title": "skip horizontal cells for geodat interpolation algorithm",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "G 39": {
+   "title": "remove out-of-bounds geodata points",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "G 41": {
+   "title": "print SWAN bottom file from interpolated geo points",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "G 51": {
+   "title": "automatic holecheck and holefill for incomplete geodata sets",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": "G 52 is used for elevation for areas without points."
+  },
+  "G 52": {
+   "title": "base topography value for local inverse distance interpolation",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 53": {
+   "title": "automatic search radius factor (times dx)",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "G 60": {
+   "title": "read ''geo_patch.dat'' file to patch/augment the ''geo.dat'' file.",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "G 61": {
+   "title": "the geo_patch points to the geo points",
+   "repeat": false,
+   "params": [
+    {
+     "name": "add",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "G 62": {
+   "title": "factor for geo_patch kernel radius (factor time horizontal mesh size)",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "3.0"
+   ],
+   "text": ""
+  },
+  "H 10": {
+   "title": "Turn on hydrodynamic coupling procedure",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "2": "SFLOW to CFD",
+    "4": "FNPF to CFD",
+    "5": "NHFLOW to CFD",
+    "44": "FNPF to FNPF"
+   },
+   "default": [
+    "0"
+   ],
+   "text": "This option requires the presence of the corresponding state files and state file folders."
+  },
+  "H 21": {
+   "title": "X-location in FNPF NWT which is origin in CFD NWT",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "H 22": {
+   "title": "Y-location in FNPF NWT which is origin in CFD NWT",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "H 23": {
+   "title": "Z-location in FNPF NWT which is origin in CFD NWT",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "H 31": {
+   "title": "start time coupling time series",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "",
+   "default_text": "-10.0^19"
+  },
+  "H 32": {
+   "title": "time coupling time series",
+   "repeat": false,
+   "params": [
+    {
+     "name": "end",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "",
+   "default_text": "10.0^19"
+  },
+  "H 33": {
+   "title": "start iteration coupling time series",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "",
+   "default_text": "-21^8"
+  },
+  "H 34": {
+   "title": "iteration coupling time series",
+   "repeat": false,
+   "params": [
+    {
+     "name": "end",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "",
+   "default_text": "21^8"
+  },
+  "M 10": {
+   "title": "Number of processes",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "M 11": {
+   "title": "Partition in x-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "M 12": {
+   "title": "Partition in y-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "M 13": {
+   "title": "Partition in z-direction",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "M 20": {
+   "title": "Decomposition method",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "1": "Standard rectangular base domain",
+    "2": "Improved rectangular base domain"
+   },
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "M 30": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 3,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "M 31": {
+   "title": "Variance parameter for decomposition method 2",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.1"
+   ],
+   "text": ""
+  },
+  "M 32": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "M 33": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "M 41": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "M 45": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "S 1": {
+   "title": "read STL file and generate solid. Name the file as `solid.stl'",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": "IMPORTANT: the STL file needs to be in ASCII format! Most CAD programs export to a binary STL file. It is possible to use e.g. Paraview for STL conversion from binary to ASCII."
+  },
+  "S 2": {
+   "title": "auto-generate mesh extend based on STL max/min coordinates",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "S 3": {
+   "title": "margins for auto-generated mesh xm_start, xm_end, ym_start, ym_end, zm_start, zm_end",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 4": {
+   "title": "Scale STL geometry",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1.0"
+   ],
+   "text": ""
+  },
+  "S 5": {
+   "title": "3D rotation",
+   "repeat": false,
+   "params": [
+    {
+     "name": "x_origin",
+     "type": "double"
+    },
+    {
+     "name": "y_origin",
+     "type": "double"
+    },
+    {
+     "name": "z_origin",
+     "type": "double"
+    },
+    {
+     "name": "φ",
+     "type": "double"
+    },
+    {
+     "name": "θ",
+     "type": "double"
+    },
+    {
+     "name": "ψ",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 6": {
+   "title": "print transformed STL model to ''REEF3D_Solid.stl''",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "S 7": {
+   "title": "translation / change origin of STL model dx, dy, dz",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 8": {
+   "title": "Turn STL geometry in horizontal xy-plane in degree ^o",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 9": {
+   "title": "Invert inside/outside for STL geometry",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "1": "regular",
+    "2": "invert"
+   },
+   "default": [
+    "1"
+   ],
+   "text": ""
+  },
+  "S 10": {
+   "title": "rectangular object",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 11": {
+   "title": "rectangular object array; x_origin, y_origin, z_origin, box length L, gap G, number of objects in each direction n_i, n_j, n_k",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double",
+     "count": 0
+    }
+   ],
+   "values": 8,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 12": {
+   "title": "beam with rectangular profile with flexible orientation",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "b",
+     "type": "double"
+    },
+    {
+     "name": "h",
+     "type": "double"
+    }
+   ],
+   "values": 8,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 15": {
+   "title": "rotate STL geometry together with the geo.dat points",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "OFF",
+    "1": "ON"
+   },
+   "default": [
+    "0"
+   ],
+   "text": ""
+  },
+  "S 18": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "S 19": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "S 31": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 6,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "S 32": {
+   "title": "cylinder in y-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "radius",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 33": {
+   "title": "cylinder in z-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "radius",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 37": {
+   "title": "cylinder with flexible orientation and front face orthogonal to the cylinder axis",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 8,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": "x_start, y_start, z_start, radius_start, x_end, y_end, z_end, radius_end"
+  },
+  "S 41": {
+   "title": "cone in x-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "radius_start",
+     "type": "double"
+    },
+    {
+     "name": "radius_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 42": {
+   "title": "cone in y-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "radius_start",
+     "type": "double"
+    },
+    {
+     "name": "radius_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 43": {
+   "title": "cone in z-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "radius_start",
+     "type": "double"
+    },
+    {
+     "name": "radius_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 51": {
+   "title": "sphere",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "radius",
+     "type": "double"
+    }
+   ],
+   "values": 4,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 52": {
+   "title": "ellipsoid",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "a_axis",
+     "type": "double"
+    },
+    {
+     "name": "b_axis",
+     "type": "double"
+    },
+    {
+     "name": "c_axis",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 53": {
+   "title": "semi ellipsoid with vertical base",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "a_axis",
+     "type": "double"
+    },
+    {
+     "name": "b_axis",
+     "type": "double"
+    },
+    {
+     "name": "c_axis",
+     "type": "double"
+    },
+    {
+     "name": "h_base",
+     "type": "double"
+    }
+   ],
+   "values": 7,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 54": {
+   "title": "semi ellipsoid with vertical base with rotation around the center;",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double",
+     "count": 0
+    }
+   ],
+   "values": 10,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": "x_center, y_center, z_center, a_axis, b_axis, c_axis, h_base, φ, θ, ψ"
+  },
+  "S 61": {
+   "title": "wedge object in x-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 62": {
+   "title": "wedge object in y-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 63": {
+   "title": "wedge object in z-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 81": {
+   "title": "tetrahedon object, each of the 4 points is given by the coordinates x_1, y_1, z_1, x_2, y_2, z_2, x_3, y_3, z_3, x_4, y_4, z_4",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 12,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 82": {
+   "title": "pyramid object, each of the 5 points is given by the coordinates x_1, y_1, z_1, x_2, y_2, z_2, x_3, y_3, z_3, x_4, y_4, z_4, x_5, y_5, z_5",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 15,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 83": {
+   "title": "wedge object, each of the 6 points is given by the coordinates x_1, y_1, z_1, x_2, y_2, z_2, x_3, y_3, z_3, x_4, y_4, z_4, x_5, y_5, z_5, x_6, y_6, z_6",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 18,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 84": {
+   "title": "hexahedron object, each of the 8 points is given by the coordinates x_1, y_1, z_1, x_2, y_2, z_2, x_3, y_3, z_3, x_4, y_4, z_4, x_5, y_5, z_5, x_6, y_6, z_6, x_7, y_7, z_7, x_8, y_8, z_8",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 24,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 90": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "S 91": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "S 121": {
+   "title": "vertical ogee weir, coordinates of upstream bottom corner, width, downstream height and hydraulic head x, y, z, b, P_d, H_0",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 122": {
+   "title": "vertical ogee weir, K, n, x_c and y_c",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 4,
+   "options": {},
+   "default": [
+    "0.5",
+    "1.85",
+    "0.22",
+    "0.075"
+   ],
+   "text": ""
+  },
+  "S 123": {
+   "title": "vertical ogee weir, R_1 and R_2",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.45",
+    "0.2"
+   ],
+   "text": ""
+  },
+  "S 131": {
+   "title": "semi-circular cylinder in y-direction, x_c, z_c, y_start, y_end, radius_start, radius_end",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 141": {
+   "title": "arch bridge",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "radius",
+     "type": "double"
+    }
+   ],
+   "values": 7,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 201": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "S 202": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "S 203": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "S 301": {
+   "title": "fluvial box geometry.",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "1": "regular",
+    "2": "inverted"
+   },
+   "default": [
+    "1"
+   ],
+   "text": "The inverted fluvial box geometry only works for special cases, where the inflow is on side 1 and the outflow is on side 4."
+  },
+  "S 305": {
+   "title": "fluvial box resolution, factor time dx results in ds (smaller values gives higher resolution)",
+   "repeat": false,
+   "params": [
+    {
+     "name": "factor",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.5"
+   ],
+   "text": ""
+  },
+  "S 306": {
+   "title": "fluvial box width",
+   "repeat": false,
+   "params": [
+    {
+     "name": "b",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1.0"
+   ],
+   "text": ""
+  },
+  "S 307": {
+   "title": "fluvial box flow heigth",
+   "repeat": false,
+   "params": [
+    {
+     "name": "fh",
+     "type": "double"
+    },
+    {
+     "name": "bed height bh",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.5",
+    "0.2"
+   ],
+   "text": ""
+  },
+  "S 308": {
+   "title": "fluvial box move origin",
+   "repeat": false,
+   "params": [
+    {
+     "name": "Δ x",
+     "type": "double"
+    },
+    {
+     "name": "Δ y",
+     "type": "double"
+    },
+    {
+     "name": "Δ z",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 309": {
+   "title": "fluvial box margins",
+   "repeat": false,
+   "params": [
+    {
+     "name": "Δ x",
+     "type": "double"
+    },
+    {
+     "name": "Δ y",
+     "type": "double"
+    },
+    {
+     "name": "Δ z",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 310": {
+   "title": "fluvial box: straight segment",
+   "repeat": true,
+   "params": [
+    {
+     "name": "length",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 320": {
+   "title": "fluvial box: left bend",
+   "repeat": true,
+   "params": [
+    {
+     "name": "radius",
+     "type": "double"
+    },
+    {
+     "name": "angle φ",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 330": {
+   "title": "fluvial box: right bend",
+   "repeat": true,
+   "params": [
+    {
+     "name": "radius",
+     "type": "double"
+    },
+    {
+     "name": "angle φ",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "S 340": {
+   "title": "fluvial box: meander (sine-generated curve)",
+   "repeat": true,
+   "params": [
+    {
+     "name": "θ",
+     "type": "double"
+    },
+    {
+     "name": "L",
+     "type": "double"
+    },
+    {
+     "name": "N",
+     "type": "double"
+    },
+    {
+     "name": "ds",
+     "type": "double"
+    }
+   ],
+   "values": 4,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 1": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 2": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 3": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 6,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 4": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 5": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 6,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 6": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 7": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 3,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 8": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 9": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 10": {
+   "title": "rectangular object",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 11": {
+   "title": "rectangular object array; x_origin, y_origin, z_origin, box length L, gap G, number of objects in each direction n_i, n_j, n_k",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double",
+     "count": 0
+    }
+   ],
+   "values": 8,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 15": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 18": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 19": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 31": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 6,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 32": {
+   "title": "cylinder in y-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "radius",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 33": {
+   "title": "cylinder in z-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "radius",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 37": {
+   "title": "cylinder with flexible orientation and front face orthogonal to the cylinder axis",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 8,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": "x_start, y_start, z_start, radius_start, x_end, y_end, z_end, radius_end"
+  },
+  "T 41": {
+   "title": "cone in x-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "radius_start",
+     "type": "double"
+    },
+    {
+     "name": "radius_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 42": {
+   "title": "cone in y-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "radius_start",
+     "type": "double"
+    },
+    {
+     "name": "radius_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 43": {
+   "title": "cone in z-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "radius_start",
+     "type": "double"
+    },
+    {
+     "name": "radius_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 51": {
+   "title": "sphere",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "radius",
+     "type": "double"
+    }
+   ],
+   "values": 4,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 52": {
+   "title": "ellipsoid",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "a_axis",
+     "type": "double"
+    },
+    {
+     "name": "b_axis",
+     "type": "double"
+    },
+    {
+     "name": "c_axis",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 53": {
+   "title": "semi ellipsoid with vertical base",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_center",
+     "type": "double"
+    },
+    {
+     "name": "a_axis",
+     "type": "double"
+    },
+    {
+     "name": "b_axis",
+     "type": "double"
+    },
+    {
+     "name": "c_axis",
+     "type": "double"
+    },
+    {
+     "name": "h_base",
+     "type": "double"
+    }
+   ],
+   "values": 7,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 54": {
+   "title": "semi ellipsoid with vertical base with rotation around the center;",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double",
+     "count": 0
+    }
+   ],
+   "values": 10,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": "x_center, y_center, z_center, a_axis, b_axis, c_axis, h_base, φ, θ, ψ"
+  },
+  "T 61": {
+   "title": "wedge object in x-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 62": {
+   "title": "wedge object in y-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 63": {
+   "title": "wedge object in z-direction",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 81": {
+   "title": "tetrahedon object, each of the 4 points is given by the coordinates x_1, y_1, z_1, x_2, y_2, z_2, x_3, y_3, z_3, x_4, y_4, z_4",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 12,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 82": {
+   "title": "pyramid object, each of the 5 points is given by the coordinates x_1, y_1, z_1, x_2, y_2, z_2, x_3, y_3, z_3, x_4, y_4, z_4, x_5, y_5, z_5",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 15,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 83": {
+   "title": "wedge object, each of the 6 points is given by the coordinates x_1, y_1, z_1, x_2, y_2, z_2, x_3, y_3, z_3, x_4, y_4, z_4, x_5, y_5, z_5, x_6, y_6, z_6",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 18,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 84": {
+   "title": "hexahedron object, each of the 8 points is given by the coordinates x_1, y_1, z_1, x_2, y_2, z_2, x_3, y_3, z_3, x_4, y_4, z_4, x_5, y_5, z_5, x_6, y_6, z_6, x_7, y_7, z_7, x_8, y_8, z_8",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 24,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 121": {
+   "title": "vertical ogee weir, coordinates of upstream bottom corner, width, downstream height and hydraulic head x, y, z, b, P_d, H_0",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 122": {
+   "title": "vertical ogee weir, K, n, x_c and y_c",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 4,
+   "options": {},
+   "default": [
+    "0.5",
+    "1.85",
+    "0.22",
+    "0.075"
+   ],
+   "text": ""
+  },
+  "T 123": {
+   "title": "vertical ogee weir, R_1 and R_2",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.45",
+    "0.2"
+   ],
+   "text": ""
+  },
+  "T 131": {
+   "title": "semi-circular cylinder in y-direction, x_c, z_c, y_start, y_end, radius_start, radius_end",
+   "repeat": true,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 6,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 141": {
+   "title": "arch bridge",
+   "repeat": true,
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "radius",
+     "type": "double"
+    }
+   ],
+   "values": 7,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 201": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 202": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 203": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 5,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "T 301": {
+   "title": "fluvial box geometry.",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "1": "regular",
+    "2": "inverted"
+   },
+   "default": [
+    "1"
+   ],
+   "text": "The inverted fluvial box geometry only works for special cases, where the inflow is on side 1 and the outflow is on side 4."
+  },
+  "T 305": {
+   "title": "fluvial box resolution, factor time dx results in ds (smaller values gives higher resolution)",
+   "repeat": false,
+   "params": [
+    {
+     "name": "factor",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.5"
+   ],
+   "text": ""
+  },
+  "T 306": {
+   "title": "fluvial box width",
+   "repeat": false,
+   "params": [
+    {
+     "name": "b",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "1.0"
+   ],
+   "text": ""
+  },
+  "T 307": {
+   "title": "fluvial box flow heigth",
+   "repeat": false,
+   "params": [
+    {
+     "name": "fh",
+     "type": "double"
+    },
+    {
+     "name": "bed height bh",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.5",
+    "0.2"
+   ],
+   "text": ""
+  },
+  "T 308": {
+   "title": "fluvial box move origin",
+   "repeat": false,
+   "params": [
+    {
+     "name": "Δ x",
+     "type": "double"
+    },
+    {
+     "name": "Δ y",
+     "type": "double"
+    },
+    {
+     "name": "Δ z",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 309": {
+   "title": "fluvial box margins",
+   "repeat": false,
+   "params": [
+    {
+     "name": "Δ x",
+     "type": "double"
+    },
+    {
+     "name": "Δ y",
+     "type": "double"
+    },
+    {
+     "name": "Δ z",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 310": {
+   "title": "fluvial box: straight segment",
+   "repeat": true,
+   "params": [
+    {
+     "name": "length",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 320": {
+   "title": "fluvial box: left bend",
+   "repeat": true,
+   "params": [
+    {
+     "name": "radius",
+     "type": "double"
+    },
+    {
+     "name": "angle φ",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 330": {
+   "title": "fluvial box: right bend",
+   "repeat": true,
+   "params": [
+    {
+     "name": "radius",
+     "type": "double"
+    },
+    {
+     "name": "angle φ",
+     "type": "double"
+    }
+   ],
+   "values": 2,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": ""
+  },
+  "T 340": {
+   "title": "fluvial box: meander (sine-generated curve)",
+   "repeat": true,
+   "params": [
+    {
+     "name": "θ",
+     "type": "double"
+    },
+    {
+     "name": "L",
+     "type": "double"
+    },
+    {
+     "name": "N",
+     "type": "double"
+    },
+    {
+     "name": "ds",
+     "type": "double"
+    }
+   ],
+   "values": 4,
+   "options": {},
+   "default": [
+    "0.0",
+    "0.0",
+    "0.0",
+    "0.0"
+   ],
+   "text": ""
+  },
+  "V 4": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 5": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 6,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 6": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 7": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 3,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 8": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 9": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 15": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 18": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 19": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 31": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 6,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  },
+  "V 131": {
+   "title": "",
+   "repeat": false,
+   "params": [],
+   "values": 1,
+   "options": {},
+   "default": [],
+   "text": "Not in the user guide yet.",
+   "documented": false
+  }
+ }
+}

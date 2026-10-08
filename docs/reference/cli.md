@@ -66,6 +66,30 @@ lagoon-convert CASE [options]
 | `--limit LIMIT` | convert at most this many outputs per stream |
 | `--shard-time SHARD_TIME` | outputs per shard file (default 16) |
 
+## lagoon-setup
+
+A case's set-up, from its input files, in plan and side view: the domain and its
+sides, relaxation zones, gauges, probes, bodies, structures, solids
+([Case set-up](../guide/setup.md)).
+
+```text
+lagoon-setup CASE [OUTPUT] [options]
+```
+
+| | |
+| --- | --- |
+| `CASE` | the case folder, with `control.txt` and/or `ctrl.txt` |
+| `OUTPUT` | the figure (default `<case>-setup.pdf` beside the case); PDF, SVG, EPS, PNG, TIFF |
+| `--width WIDTH` | width in mm (default 140) |
+| `--style STYLE` | `REEF3D` (default), `Journal (serif)`, `Presentation` |
+| `--describe` | print the main facts of the input instead |
+
+```bash
+lagoon-setup ~/runs/flume
+lagoon-setup ~/runs/flume flume.png --width 190 --style Presentation
+lagoon-setup ~/runs/flume --describe
+```
+
 ## Environment variables
 
 | | |

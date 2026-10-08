@@ -112,6 +112,43 @@ def _colouring(variable: str, colormap: str) -> dict[str, PropertySpec]:
     }
 
 
+#: groups of the "Case set-up" item (lagoonviz.core.data.setup.GROUPS)
+SETUP_GROUPS = {
+    "domain": "Domain",
+    "sides": "Sides",
+    "water": "Still water",
+    "zones": "Relaxation zones",
+    "waves": "Waves",
+    "gauges": "Gauges",
+    "probes": "Probes",
+    "sections": "Sections",
+    "forces": "Forces",
+    "bodies": "Floating bodies",
+    "structures": "Structures",
+    "regions": "Regions",
+    "solids": "Solids",
+    "bed": "Bed",
+}
+#: groups the item starts with switched off (solids are drawn as a structure item)
+_SETUP_OFF = ("solids",)
+_SETUP_TIPS = {
+    "domain": "The domain (B 10 of control.txt)",
+    "sides": "The kinds of the domain's sides (C 11 - C 16): inflow, outflow, waves, beach",
+    "water": "The still water level (F 60 of ctrl.txt)",
+    "zones": "Relaxation zones of wave generation and numerical beach (B 96, B 107, B 108)",
+    "waves": "Wave direction (B 105), focus point (B 81), wavemakers (X 170 - X 172)",
+    "gauges": "Wave gauges and lines (P 50 - P 58, P 121 - P 147)",
+    "probes": "Point, line and velocity probes (P 61 - P 67, P 88, P 144 - P 148)",
+    "sections": "Discharge sections and flow files (P 167, P 168, P 230, P 240)",
+    "forces": "Force boxes (P 81) and Morison cylinders (P 85)",
+    "bodies": "Floating bodies, centre of gravity, moorings (X 23, X 110 - X 164, X 311 - X 322)",
+    "structures": "Direct forcing (A 581 - A 589) and porous (B 210 - B 270) structures",
+    "regions": "Refinement boxes, wind areas and other regions (A 276, A 372, F 72, S 74)",
+    "solids": "Outlines of DIVEMesh's solids (S); the solids themselves are a structure item",
+    "bed": "The bed's topo objects (T) and the geo.dat points",
+}
+
+
 @dataclass(frozen=True)
 class KindSpec:
     label: str
@@ -335,6 +372,21 @@ KINDS: dict[str, KindSpec] = {
             **_data_source("rod tree"),
             "material": PropertySpec("wood", "Material", choices=MATERIALS),
             **_colouring("none", "viridis"),
+        },
+    ),
+    "setup": KindSpec(
+        "Case set-up",
+        {
+            "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
+            **{
+                f"show_{group}": PropertySpec(
+                    group not in _SETUP_OFF, label, tip=_SETUP_TIPS.get(group, "")
+                )
+                for group, label in SETUP_GROUPS.items()
+            },
+            "labels": PropertySpec(
+                True, "Labels", tip="Numbers of gauges and probes, kinds of sides"
+            ),
         },
     ),
     "particles": KindSpec(

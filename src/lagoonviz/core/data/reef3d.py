@@ -571,6 +571,8 @@ class Case:
     series: dict[str, SeriesFile] = field(default_factory=dict)
     #: wave profiles along lines (WSFLINE), by solver
     profiles: dict[str, ProfileSet] = field(default_factory=dict)
+    #: not run yet: only the input files (control.txt, ctrl.txt), their set-up is shown
+    setup_only: bool = False
 
     @property
     def solver(self) -> str:
@@ -645,8 +647,9 @@ class Case:
             return {"amr": preferred(refined)}
         if not surfaces:
             volumes = [d for d in self.datasets.values() if d.role == "volume"]
-            if not volumes:
-                return {}
+            if not volumes:  # not run yet: DIVEMesh's solids, if any
+                solids = [d for d in self.datasets.values() if d.role == "solid"]
+                return {"solid": solids[0]} if solids else {}
             return {"volume": max(volumes, key=lambda d: d.written_span()[1])}
         free = [d for d in surfaces if d.role == "free_surface"]
         lead = preferred(free or surfaces)
@@ -1172,13 +1175,23 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
                 "when it writes the next one, and the last when the run ends: open it "
                 "again (or File > Reload case) once the run has written more outputs."
             )
-    if not datasets and not series and not profiles:
+    from lagoonviz.core.data.setup import has_inputs
+
+    run = [d for d in datasets if d.role != "solid"]
+    setup_only = not run and not series and not profiles and path == case_dir
+    if setup_only and not has_inputs(case_dir):
+        raise ValueError(
+            f"no REEF3D VTU/VTP output, time series or input files (control.txt, ctrl.txt) "
+            f"found in {path}"
+        )
+    if not datasets and not series and not profiles and not setup_only:
         raise ValueError(f"no REEF3D VTU/VTP output or time series found in {path}")
     case = Case(
         case_dir,
         print_interval=read_print_interval(case_dir),
         series=series,
         profiles=profiles,
+        setup_only=setup_only,
     )
     for dataset in datasets:
         key = dataset.key

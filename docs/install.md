@@ -47,13 +47,14 @@ LAGOON runs on macOS, Linux and Windows with Python 3.11 to 3.13.
     On a Mac, `bash setup_lagoon.command` installs everything (uv, Python, LAGOON),
     runs the tests and makes a `LAGOON.app`.
 
-Three commands come with it:
+Four commands come with it:
 
 | Command | What it does |
 | --- | --- |
 | `lagoon` | the application (also `python -m lagoonviz`) |
 | `lagoon-render` | images and films without a screen, e.g. on a cluster |
 | `lagoon-convert` | REEF3D output to a LAGOON store |
+| `lagoon-setup` | a case's set-up (control.txt, ctrl.txt) as a figure, or its facts as text |
 
 See [Command line](reference/cli.md) for their options.
 

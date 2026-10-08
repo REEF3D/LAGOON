@@ -225,6 +225,8 @@ class Viewport3D(QWidget):
         self.loader = loader
         self._wanted: dict[str, FrameKey] = {}
         self._shown_keys: dict[str, FrameKey] = {}
+        #: what each "Case set-up" item was last drawn from (see DataManager.setup_signature)
+        self._setup_shown: dict[str, tuple] = {}
         #: compare mode: the case this view shows ("" = all), and the view whose camera
         #: moves with this one
         self.case_filter = ""
@@ -436,8 +438,40 @@ class Viewport3D(QWidget):
             else:
                 self.loader.request(key, self._loaded.emit, owner=owner)
         self._update_gauges()
+        self._update_setup()
         self._update_overlays()
         self.redraw()
+
+    def _update_setup(self) -> None:
+        """The "Case set-up" items: drawn again when what they show has changed."""
+        data = self.session.data
+        wanted = {i for i in data.setup_items() if self._in_view(i)}
+        for item_id in self.view.setup_ids:
+            if item_id not in wanted:
+                self.view.remove_setup(item_id)
+                self._setup_shown.pop(item_id, None)
+        framed = False
+        for item_id in wanted:
+            try:
+                signature = data.setup_signature(item_id)
+                if signature is None:
+                    self.view.remove_setup(item_id)
+                    self._setup_shown.pop(item_id, None)
+                    continue
+                if self._setup_shown.get(item_id) == signature:
+                    continue
+                marks = data.setup_marks(item_id)
+            except Exception:  # noqa: BLE001 (a bad input file must not take the window down)
+                log.error("set-up of %s:\n%s", item_id, traceback.format_exc())
+                self.statusMessage.emit(f"Could not draw the set-up of {item_id}; see the log")
+                continue
+            if marks is None:
+                continue
+            self.view.update_setup(marks)
+            self._setup_shown[item_id] = signature
+            framed = True
+        if framed and not self.session.scene.camera:
+            self.view.frame_once(self._home_view)
 
     def _update_gauges(self) -> None:
         with PERF.track("update gauges"):
@@ -560,6 +594,7 @@ class Viewport3D(QWidget):
             self.view.clear()
             self._wanted.clear()
             self._shown_keys.clear()
+            self._setup_shown.clear()
             self._apply_2d(*self._plan_state, frame=False)  # a loaded session's
             if self.session.scene.camera:
                 self.view.set_camera_state(self.session.scene.camera)

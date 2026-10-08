@@ -31,6 +31,8 @@ __pycache__/
 !tests/validation/cases/**/*.json
 # but keep the VS Code workspace settings
 !.vscode/*.json
+# the commands of ctrl.txt and control.txt (tools/command_catalog.py)
+!src/lagoonviz/core/data/catalog/*.json
 
 # LAGOON (Python)
 *.py[cod]

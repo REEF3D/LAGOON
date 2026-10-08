@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Case set-up
+
+- **A case that has not run yet** opens as its set-up from the input files
+  (`control.txt`, `ctrl.txt`, `geo.dat`): DIVEMesh's solids as a structure and a
+  *Case set-up* item ([Case set-up](guide/setup.md)).
+- **Case set-up item** (*Add → Case set-up*, also over a case with results): the
+  domain, the kinds of its sides (C 11 – C 16), the still water level (F 60),
+  relaxation zones (B 96, B 107, B 108), wave direction, focus point and
+  wavemakers, wave gauges and lines, probes, sections, force boxes, Morison
+  cylinders, floating bodies with their centre of gravity and moorings, direct
+  forcing and porous structures (A 581 – A 589, B 210 – B 270), regions, the
+  bed's topo objects and geo.dat points; gauges and probes numbered as in the
+  output files; each group can be switched off.
+- **Set-up sketch**: *File → Export figure → Case set-up* and `lagoon-setup CASE
+  [OUTPUT]` draw plan and side view with a legend; `--describe` prints the main
+  facts of the input (domain, grid, sides, waves, what does not fit together).
+  `lagoonviz.core.data.setup.read_setup` gives the same in a script.
+- **The commands of both programs** (`lagoonviz.core.data.controlfile`): every
+  command of `ctrl.txt` and `control.txt` with its title, values, choices and
+  default, from the REEF3D and DIVEMesh user guides and the programs' readers
+  (`tools/command_catalog.py`); input files are read and written back line by
+  line, comments and order kept.
+
 ## 1.0.0rc2 (second release candidate)
 
 The second candidate for 1.0: path traced pictures as ÆgirFrames renders them,

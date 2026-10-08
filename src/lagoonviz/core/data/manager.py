@@ -25,6 +25,7 @@ from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
+from lagoonviz.core.data.setup import CaseSetup, has_inputs, read_setup
 from lagoonviz.core.kinds import kind_spec
 from lagoonviz.core.scene import Scene, SceneItem
 from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
@@ -142,6 +143,19 @@ class GaugeMarks:
 
 
 @dataclass
+class SetupMarks:
+    """The signs of a "Case set-up" item in 3D, grouped by colour: lines, dots, filled
+    areas and labels (text, position, colour), where the view draws them."""
+
+    item_id: str
+    lines: list[tuple[str, np.ndarray]]  # (colour, (n, 2, 3) float32)
+    points: list[tuple[str, np.ndarray]]  # (colour, (m, 3) float32)
+    faces: list[tuple[str, np.ndarray]]  # (colour, (k, 3, 3) float32)
+    labels: list[tuple[str, tuple[float, float, float], str]]
+    visible: bool
+
+
+@dataclass
 class Probe:
     """Values at a point of an item's surface."""
 
@@ -248,6 +262,8 @@ class DataManager:
         self._still_water: dict[tuple, float] = {}
         self._wet: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # item -> (base, wet)
         self._logged: tuple[tuple, np.ndarray | None] | None = None
+        #: set-ups of case folders (their input files), by folder
+        self._setups: dict[str, CaseSetup] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------- cases
@@ -272,6 +288,9 @@ class DataManager:
         self._still_water.clear()
         self._wet.clear()
         self._logged = None
+        for key in [k for k in self._setups if not self._setups[k].control.modified]:
+            if not self._setups[key].ctrl.modified:
+                del self._setups[key]  # read again (edits not saved yet are kept)
         return paths
 
     def signature(self, case_item_id: str) -> tuple:
@@ -1284,6 +1303,112 @@ class DataManager:
     def data_items(self) -> list[str]:
         """Ids of the scene items that show data."""
         return [item.id for item in self.scene if item.kind in DATA_KINDS]
+
+    # ------------------------------------------------------------- the set-up
+    def case_folder(self, item_id: str) -> Path | None:
+        """The case folder of an item's case (also of a case with no outputs)."""
+        case = self.case(item_id)
+        if case is not None:
+            return Path(case.path)
+        case_item = self.case_item(item_id)
+        if case_item is None or not case_item.properties.get("path"):
+            return None
+        folder = Path(str(case_item.properties["path"])).expanduser()
+        return folder.parent if folder.is_file() else folder
+
+    def case_setup(self, item_id: str) -> CaseSetup | None:
+        """The set-up of the case an item belongs to: what its input files say (None
+        if it has none)."""
+        folder = self.case_folder(item_id)
+        if folder is None:
+            return None
+        key = str(folder.resolve())
+        setup = self._setups.get(key)
+        if setup is None:
+            if not has_inputs(folder):
+                return None
+            setup = self._setups[key] = read_setup(folder)
+        return setup
+
+    def setup_items(self) -> list[str]:
+        """Ids of the "Case set-up" items."""
+        return [item.id for item in self.scene if item.kind == "setup"]
+
+    def setup_signature(self, item_id: str) -> tuple | None:
+        """What a "Case set-up" item's drawing depends on: when it changes, draw again."""
+        item = self.scene.get(item_id)
+        setup = self.case_setup(item_id)
+        if setup is None:
+            return None
+        setup.refresh()
+        return (
+            tuple(sorted(item.properties.items())),
+            item.visible,
+            id(setup),
+            setup.control.revision,
+            setup.ctrl.revision,
+            setup.domain,
+            self.exaggeration(item_id),
+            self._setup_water_level(item_id, setup),
+            self.scene.flat,
+        )
+
+    def setup_marks(self, item_id: str) -> SetupMarks | None:
+        """The signs a "Case set-up" item draws: the groups it has switched on, placed
+        as the case's other items are (exaggerated, flat in 2D)."""
+        item = self.scene.get(item_id)
+        setup = self.case_setup(item_id)
+        if setup is None:
+            return None
+        props = item.properties
+        shown = [m for m in setup.marks() if props.get(f"show_{m.group}", True)]
+        lines: dict[str, list[np.ndarray]] = {}
+        points: dict[str, list[np.ndarray]] = {}
+        faces: dict[str, list[np.ndarray]] = {}
+        labels = []
+        level = self._setup_water_level(item_id, setup)
+        exaggeration = self.exaggeration(item_id)
+        flat = self.scene.flat
+
+        def place(array: np.ndarray) -> np.ndarray:
+            out = np.array(array, np.float32, copy=True)
+            if not out.size:
+                return out
+            flat_view = out.reshape(-1, 3)
+            if exaggeration != 1.0:
+                flat_view[:, 2] = level + exaggeration * (flat_view[:, 2] - level)
+            if flat:
+                flat_view[:, 2] = PLAN_MARKS
+            return out
+
+        for mark in shown:
+            if len(mark.segments):
+                lines.setdefault(mark.color, []).append(place(mark.segments))
+            if len(mark.points):
+                points.setdefault(mark.color, []).append(place(mark.points))
+            if mark.faces is not None and len(mark.faces) and not flat:
+                faces.setdefault(mark.color, []).append(place(mark.faces))
+            if props.get("labels", True):
+                for text, where in mark.labels:
+                    if text:
+                        p = place(np.asarray([where], float))[0]
+                        labels.append((text, (float(p[0]), float(p[1]), float(p[2])), mark.color))
+        return SetupMarks(
+            item_id,
+            [(c, np.concatenate(v)) for c, v in lines.items()],
+            [(c, np.concatenate(v)) for c, v in points.items()],
+            [(c, np.concatenate(v)) for c, v in faces.items()],
+            labels,
+            item.visible,
+        )
+
+    def _setup_water_level(self, item_id: str, setup: CaseSetup) -> float:
+        """The level the set-up is exaggerated about: the results' (as the other items),
+        else the still water level of ctrl.txt (F 60)."""
+        case = self.case(item_id)
+        if case is not None and not case.setup_only:
+            return self.case_water_level(item_id)
+        return setup.water_level if setup.water_level is not None else 0.0
 
 
 def _wet_triangles(mesh: SurfaceMesh) -> np.ndarray:

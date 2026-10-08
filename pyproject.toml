@@ -57,6 +57,7 @@ docs = [
 lagoon = "lagoonviz.gui.app:main"
 lagoon-render = "lagoonviz.render.offscreen:main"
 lagoon-convert = "lagoonviz.core.convert:main"
+lagoon-setup = "lagoonviz.render.setup_sketch:main"
 
 [project.urls]
 Homepage = "https://github.com/REEF3D/LAGOON"

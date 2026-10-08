@@ -9,6 +9,7 @@ and converts, so the app needs no Python of its own on the machine:
     /Applications/LAGOON.app/Contents/MacOS/LAGOON ~/runs/flume    # opens a case
     /Applications/LAGOON.app/Contents/MacOS/LAGOON render SOURCE OUTPUT [options]
     /Applications/LAGOON.app/Contents/MacOS/LAGOON convert CASE [options]
+    /Applications/LAGOON.app/Contents/MacOS/LAGOON setup CASE [OUTPUT] [options]
 
 Started from the Finder there is no terminal for its messages, so they go to
 ~/Library/Logs/LAGOON/lagoon.log (unless LAGOON_LOG says otherwise).
@@ -20,7 +21,7 @@ import os
 import sys
 from pathlib import Path
 
-COMMANDS = ("render", "convert")
+COMMANDS = ("render", "convert", "setup")
 
 
 def _log_file() -> None:
@@ -42,6 +43,8 @@ def main() -> int:
         sys.argv = [f"lagoon-{command}", *rest]
         if command == "render":
             from lagoonviz.render.offscreen import main as run
+        elif command == "setup":
+            from lagoonviz.render.setup_sketch import main as run
         else:
             from lagoonviz.core.convert import main as run
         return int(run(rest) or 0)

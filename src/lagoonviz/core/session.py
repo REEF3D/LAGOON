@@ -88,6 +88,9 @@ class Session:
         """Open a REEF3D case and show its free surface and bed. Returns the case id.
 
         ``path`` is a case folder, one of its ``REEF3D_*`` output folders, or a file.
+        A case folder without output yet shows its set-up from the input files
+        (control.txt, ctrl.txt, geo.dat): DIVEMesh's solids and a "Case set-up" item
+        with the domain, the kinds of its sides, relaxation zones, gauges and probes.
         """
         path = os.fspath(path)
         case = self.data.open(path)
@@ -101,6 +104,8 @@ class Session:
             if variable != KINDS[kind].properties["variable"].default:
                 props["variable"] = variable
             children.append(AddItem(kind, None, props))
+        if case.setup_only:  # not run yet: domain, sides, zones, gauges of the input
+            children.append(AddItem("setup", None, {}))
         for series in case.main_series():
             children.append(AddItem("series", series.name, {"source": series.key}))
         for profiles in case.main_profiles():

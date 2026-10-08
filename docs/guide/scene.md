@@ -16,6 +16,7 @@ script the session writes ([Scripting](../scripting.md)).
 | Item | Shows |
 | --- | --- |
 | Case | a REEF3D run; its *Vertical scale* applies to all its items |
+| Case set-up | the input files' domain, sides, relaxation zones, gauges, probes, bodies ([Case set-up](setup.md)) |
 | Free surface | the water surface, coloured by a variable or plain |
 | AMR surface | the surface of an adaptive-mesh run, finer patches over coarser ones, with the patch outlines |
 | Bed | the bathymetry (sand coloured by default) |

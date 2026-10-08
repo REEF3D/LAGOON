@@ -74,8 +74,10 @@ def test_package_files():
     assert (package / "render" / "blender_cycles.py").exists()  # run by Blender
     assert (package / "render" / "assets" / "sea_clear_sky.hdr").exists()  # Cycles' sky
     assert (package / "gui" / "resources" / "icon.png").exists()
+    for name in ("reef3d", "divemesh"):  # the commands of ctrl.txt and control.txt
+        assert (package / "core" / "data" / "catalog" / f"{name}.json").exists()
     scripts = _toml(ROOT / "pyproject.toml")["project"]["scripts"]
-    assert set(scripts) == {"lagoon", "lagoon-render", "lagoon-convert"}
+    assert set(scripts) == {"lagoon", "lagoon-render", "lagoon-convert", "lagoon-setup"}
 
 
 def test_conda_recipes_follow_the_versions():

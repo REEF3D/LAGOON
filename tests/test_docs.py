@@ -97,11 +97,16 @@ def _options(main) -> set[str]:
 def test_the_command_line_page_names_every_option():
     from lagoonviz.core.convert import main as convert
     from lagoonviz.render.offscreen import main as render
+    from lagoonviz.render.setup_sketch import main as setup
 
     page = (DOCS / "reference" / "cli.md").read_text(encoding="utf-8")
     sections = re.split(r"^## ", page, flags=re.M)
     section = {s.split("\n", 1)[0].strip(): s for s in sections[1:]}
-    for name, main in (("lagoon-render", render), ("lagoon-convert", convert)):
+    for name, main in (
+        ("lagoon-render", render),
+        ("lagoon-convert", convert),
+        ("lagoon-setup", setup),
+    ):
         missing = [o for o in sorted(_options(main)) if f"`{o}" not in section[name]]
         assert not missing, (name, missing)
 

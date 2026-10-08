@@ -44,6 +44,7 @@ CONTENTS = (
     ("validation", "Compare with measurements"),
     ("profiles", "Wave profiles"),
     ("view", "3D view"),
+    ("setup", "Case set-up (plan and side view)"),
 )
 #: contents drawn from the plotted time series
 FROM_SERIES = ("series", "spectra", "validation")
@@ -62,6 +63,10 @@ def available_contents(session: Session, has_rows: bool) -> list[tuple[str, str]
         ):
             continue
         if key == "view" and not data.data_items():
+            continue
+        if key == "setup" and not any(
+            data.case_setup(i.id) is not None for i in session.scene if i.kind == "case"
+        ):
             continue
         found.append((key, label))
     return found
@@ -364,6 +369,10 @@ def make_figure(window, settings: dict, dpi: int | None = None):
         ), spec
     if content == "profiles":
         return profile_figure(session, spec), spec
+    if content == "setup":
+        from lagoonviz.render.setup_sketch import setup_figure
+
+        return setup_figure(session, spec), spec
     viewport = window.viewport
     view = getattr(viewport, "view", None)
     if view is not None:

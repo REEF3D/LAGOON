@@ -99,7 +99,7 @@ def figure_code(
     style: str = "studio",
 ) -> str:
     """File → Export figure. ``content`` as the dialog ("series", "spectra",
-    "validation", "profiles", "view"); ``settings`` the dialog's (style, sizes,
+    "validation", "profiles", "view", "setup"); ``settings`` the dialog's (style, sizes,
     fonts, time window ``start``/``end``, ``measured``, ``measured_column``);
     ``items`` the plotted time-series items, ``window`` the plots' time range,
     ``line`` (item, column) of the validated line, ``camera``, ``plan`` and
@@ -159,6 +159,9 @@ def figure_code(
     elif content == "view":
         imports[0] = "from lagoonviz.render.figure import FigureSpec, save_figure, view_figure"
         body.append(f"figure = view_figure(session, spec, style={style!r})")
+    elif content == "setup":
+        imports.append("from lagoonviz.render.setup_sketch import setup_figure")
+        body.append("figure = setup_figure(session, spec)")
     else:
         raise ValueError(f"unknown figure content {content!r}")
     body += notes

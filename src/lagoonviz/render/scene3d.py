@@ -162,6 +162,29 @@ def _sun_direction(look: dict) -> np.ndarray:
     return direction
 
 
+def _label(text: str, where, color: str):
+    """A label at a point: its size fixed on screen, drawn over everything, with a
+    dark outline so it reads on water and on sand (None if pygfx cannot draw text)."""
+    try:
+        material = gfx.TextMaterial(color=color, outline_color="#10161d", outline_thickness=0.25)
+        label = gfx.Text(
+            material=material,
+            text=text,
+            font_size=13,
+            screen_space=True,
+            anchor="bottom-left",
+        )
+    except (AttributeError, TypeError, ValueError):  # an older pygfx
+        return None
+    for name, value in (("depth_test", False), ("render_queue", 4000)):
+        try:
+            setattr(material, name, value)
+        except (AttributeError, ValueError, TypeError):
+            pass
+    label.local.position = tuple(float(v) for v in where)
+    return label
+
+
 def _rgba(color: str) -> tuple[float, float, float, float]:
     color = color.lstrip("#")
     return tuple(int(color[i : i + 2], 16) / 255 for i in (0, 2, 4)) + (1.0,)  # type: ignore[return-value]
@@ -258,6 +281,9 @@ class SceneRenderer:
         #: the Diorama look's stand: the sides of the bed and of the water, per item
         self._stand: dict[str, gfx.Mesh] = {}
         self._rims: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # triangles -> open edges
+        #: "Case set-up" items: lines, dots, areas and labels, with their extent
+        self._setup: dict[str, gfx.Group] = {}
+        self._setup_bounds: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         self._bed_heights: tuple[np.ndarray, object] | None = None  # bed positions -> heights
 
     # ------------------------------------------------------------- items
@@ -856,6 +882,59 @@ class SceneRenderer:
         self.scene.add(group)
         self._gauges[marks.item_id] = group
 
+    def update_setup(self, marks) -> None:
+        """The signs of a "Case set-up" item (:class:`SetupMarks`): thin lines and dots in
+        their colours, faint areas (the still water, relaxation zones), and labels
+        that keep their size on screen. Drawn again whenever the set-up changes."""
+        self.remove_setup(marks.item_id)
+        group = gfx.Group()
+        group.visible = marks.visible
+        corners = []
+        for color, triangles in marks.faces:
+            positions = np.ascontiguousarray(triangles.reshape(-1, 3), np.float32)
+            indices = np.arange(len(positions), dtype=np.uint32).reshape(-1, 3)
+            material = gfx.MeshBasicMaterial(color=color, opacity=0.16, side="both")
+            for name, value in (("alpha_mode", "blend"), ("depth_write", False)):
+                try:
+                    setattr(material, name, value)
+                except (AttributeError, ValueError, TypeError):
+                    pass
+            group.add(gfx.Mesh(gfx.Geometry(positions=positions, indices=indices), material))
+        for color, segments in marks.lines:
+            positions = np.ascontiguousarray(segments.reshape(-1, 3), np.float32)
+            corners.append(positions)
+            material = gfx.LineSegmentMaterial(thickness=1.8, color=color)
+            group.add(gfx.Line(gfx.Geometry(positions=positions), material))
+        for color, points in marks.points:
+            positions = np.ascontiguousarray(points.reshape(-1, 3), np.float32)
+            corners.append(positions)
+            group.add(
+                gfx.Points(
+                    gfx.Geometry(positions=positions), gfx.PointsMaterial(size=7, color=color)
+                )
+            )
+        for text, where, color in marks.labels:
+            label = _label(text, where, color)
+            if label is not None:
+                group.add(label)
+        self.scene.add(group)
+        self._setup[marks.item_id] = group
+        if corners:
+            every = np.concatenate(corners)
+            every = every[np.isfinite(every).all(axis=1)]
+            if len(every):
+                self._setup_bounds[marks.item_id] = (every.min(axis=0), every.max(axis=0))
+
+    def remove_setup(self, item_id: str) -> None:
+        group = self._setup.pop(item_id, None)
+        self._setup_bounds.pop(item_id, None)
+        if group is not None:
+            self.scene.remove(group)
+
+    @property
+    def setup_ids(self) -> list[str]:
+        return list(self._setup)
+
     def remove_gauges(self, item_id: str) -> None:
         group = self._gauges.pop(item_id, None)
         if group is not None:
@@ -929,6 +1008,8 @@ class SceneRenderer:
             self.remove(item_id)
         for item_id in list(self._gauges):
             self.remove_gauges(item_id)
+        for item_id in list(self._setup):
+            self.remove_setup(item_id)
         for key in list(self._contours):
             self.scene.remove(self._contours.pop(key))
         self._framed = False
@@ -940,7 +1021,9 @@ class SceneRenderer:
 
     @property
     def is_empty(self) -> bool:
-        return not any(s.mesh.visible for s in self._shown.values())
+        return not any(s.mesh.visible for s in self._shown.values()) and not any(
+            g.visible for g in self._setup.values()
+        )
 
     # ------------------------------------------------------------- camera
     def bounds(self, visible_only: bool = True) -> tuple[np.ndarray, np.ndarray] | None:
@@ -958,6 +1041,11 @@ class SceneRenderer:
             if shown.low is not None:
                 lows.append(shown.low)
                 highs.append(shown.high)
+        for item_id, (low, high) in self._setup_bounds.items():
+            group = self._setup.get(item_id)
+            if group is not None and (group.visible or not visible_only):
+                lows.append(low)
+                highs.append(high)
         if not lows:
             return None
         return np.min(lows, axis=0).astype(float), np.max(highs, axis=0).astype(float)
@@ -1079,7 +1167,7 @@ class SceneRenderer:
 
     def frame_once(self, view: str = "perspective") -> None:
         """Frame the scene the first time something is shown."""
-        if not self._framed and self._shown:
+        if not self._framed and (self._shown or self._setup_bounds):
             self.frame(view)
 
     def set_plan(self, on: bool) -> None:
