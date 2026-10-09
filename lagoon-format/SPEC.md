@@ -6,7 +6,7 @@ surfaces (free surface, bed), time series (wave gauges, 6DOF, forces), wave
 profiles, floating bodies, particles (CPM, NHFLOW), objects (DEM elements, ice
 floes, rod trees, mooring lines) and adaptive mesh refinement surfaces (FNPF,
 NHFLOW, SFLOW) are specified and implemented: the reference reader and writer
-`lagoon_format` 0.3.0, the converter `lagoon-convert`, and REEF3D's own store
+`lagoon_format` 0.3.1, the converter `lagoon-convert`, and REEF3D's own store
 output (`P 18`) for volumes, surfaces, bodies, NHFLOW particles, DEM elements,
 ice floes and AMR surfaces. How to make and read stores: [GUIDE.md](GUIDE.md).
 

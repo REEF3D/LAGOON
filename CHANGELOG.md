@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.0.0rc3 (third release candidate)
+
+The third candidate for 1.0: the set-up of a case beside its results (the input
+files edited in LAGOON, DIVEMesh run from it, its grid shown), REEF3D's own
+LAGOON stores read as they grow, colours scaled as in ParaView.
 
 ### Case set-up
 
@@ -48,6 +52,9 @@
   (`tools/command_catalog.py`); input files are read and written back line by
   line, comments and order kept.
 - Back in the results, the Set-up panel makes way for *Properties*.
+
+### The 3D view and the scene
+
 - **The bed in the 3D view** is LAGOON's light sand again in the cinematic looks
   (the dark rock stays in path-traced renders); the sliders in *Properties*
   (vertical scale, arrow length) have no play-range stripes.
@@ -70,6 +77,9 @@
   of the run log's seconds (the free surface of a store showed the wrong output).
 - `.pvtp`/`.pvtu` files whose pieces are gone (an earlier run's, the pieces
   removed by a run with P 18 1) are left out instead of stopping the case.
+- An empty `.lagoon` folder (REEF3D has not written into it yet) says so.
+- `lagoon-format` 0.3.1: the run log check takes each output stream's times on
+  their own (a store counts its volume output only at the next one).
 
 ## 1.0.0rc2 (second release candidate)
 
