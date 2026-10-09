@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Case set-up
+
+- **Set-up sketch**: narrow figures take the facts and the legend in one column,
+  and the tables no longer overlap or squeeze the views; *Export figure* makes a
+  set-up at least a column and a half wide (140 mm). A geo.dat, bed or solid left
+  from another case in the folder is not drawn.
+
 ## 1.0.0rc3 (third release candidate)
 
 The third candidate for 1.0: the set-up of a case beside its results (the input

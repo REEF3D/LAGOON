@@ -32,6 +32,8 @@ from lagoonviz.render.figure import MM, FigureSpec, _context, _figure, colormap,
 FLAT = 8.0
 #: groups the sketch leaves out (the bed's points: the bed is drawn as a raster)
 QUIET = ("bed",)
+#: below this width (mm) the facts and the legend take one column
+WIDE = 150.0
 #: the colours of the filled areas
 SAND = "#d9c59a"
 WATER = "#cfe8fb"
@@ -95,14 +97,18 @@ def setup_figure(source, spec: FigureSpec | None = None, case: str | None = None
     low, high = bounds
     span = np.maximum(high - low, 1e-9)
     plan = not setup.two_d and span[1] > 1e-6
-    raster = None if setup.two_d else setup.bed_raster(bed_points)
+    bed_points = _fitting(bed_points if bed_points is not None else _geo(setup), setup)
+    raster = None if setup.two_d or bed_points is None else setup.bed_raster(bed_points)
     profile = _profile(setup, raster, bed_points)
-    solids = setup.solid_mesh()
+    solids = _solids_inside(setup.solid_mesh(), setup)
     refinement = setup.refinement()
     facts = setup.facts()
     # heights of the parts from the width and the domain's proportions
     width = spec.width_mm
-    plan_h = width * min(max(span[1] / span[0], 0.12), 1.0) if plan else 0.0
+    narrow = width < WIDE
+    # the plan's axes are about the width less the colour bar and the labels
+    plan_w = width - 32.0
+    plan_h = plan_w * min(max(span[1] / span[0], 0.12), 1.0) + 16.0 if plan else 0.0
     # the side view: the domain across, its heights (and the bed's, the solids')
     # with a margin, stretched by a round vertical scale when the domain is flat
     x_side = (low[0] - 0.02 * span[0], high[0] + 0.02 * span[0])
@@ -112,9 +118,10 @@ def setup_figure(source, spec: FigureSpec | None = None, case: str | None = None
     if span[0] / z_span > FLAT:
         scale = float(f"{span[0] / z_span / FLAT:.2g}")
     box = min(max(z_span * scale / (x_side[1] - x_side[0]), 0.08), 0.6)
-    side_h = 0.85 * width * box + 14.0
-    legend_h = 4.0 + 3.4 * ((len(_legend(marks, raster, solids, setup)) + 1) // 2)
-    table_h = 3.6 * ((len(facts) + 1) // 2) + 2.0
+    side_h = (width - 18.0) * box + 16.0
+    columns = 1 if narrow else 2
+    legend_h = 4.0 + 3.4 * -(-len(_legend(marks, raster, solids, setup)) // columns)
+    table_h = 3.6 * -(-len(facts) // columns) + 2.0
     levels_h = (
         3.6 * (len(refinement.levels) + 1 + bool(refinement.flagged)) + 2.0 if refinement else 0.0
     )
@@ -163,21 +170,70 @@ def setup_figure(source, spec: FigureSpec | None = None, case: str | None = None
         ax.set_xlabel("x [m]")
         ax.set_ylabel("z [m]")
         index += 1
-        _table(figure.add_subplot(grid[index]), facts)
+        _table(figure.add_subplot(grid[index]), facts, spec, columns)
         index += 1
         if refinement is not None:
-            _levels(figure.add_subplot(grid[index]), refinement)
+            _levels(figure.add_subplot(grid[index]), refinement, spec)
             index += 1
         legend_ax = figure.add_subplot(grid[index])
         legend_ax.axis("off")
         handles = _legend(marks, raster, solids, setup)
         if handles:
-            legend_ax.legend(handles=handles, loc="upper left", ncols=2, frameon=False)
+            legend_ax.legend(handles=handles, loc="upper left", ncols=columns, frameon=False)
         figure.suptitle(spec.title or f"Set-up of {setup.path.name}")
     return figure
 
 
 # ------------------------------------------------------------------ the bed
+def _geo(setup: CaseSetup) -> np.ndarray | None:
+    if not (setup.path / "geo.dat").is_file():
+        return None
+    setup.geo_points()
+    return setup._bed[0]
+
+
+def _fitting(points, setup: CaseSetup) -> np.ndarray | None:
+    """Bed points that belong to this domain: None when most of them lie outside it,
+    or far above or below it (a geo.dat or a bed left from another case)."""
+    if points is None or setup.domain is None:
+        return points
+    points = np.asarray(points, float)
+    if not len(points):
+        return None
+    xs, xe, ys, ye, zs, ze = setup.domain
+    margin = 0.01 * max(xe - xs, ye - ys)
+    inside = (points[:, 0] >= xs - margin) & (points[:, 0] <= xe + margin)
+    if not setup.two_d:
+        inside &= (points[:, 1] >= ys - margin) & (points[:, 1] <= ye + margin)
+    if inside.mean() < 0.2:
+        return None
+    height = max(ze - zs, 1e-6)
+    middle = float(np.median(points[inside, 2]))
+    if not zs - 2 * height <= middle <= ze + 2 * height:
+        return None
+    return points[inside]
+
+
+def _solids_inside(solids, setup: CaseSetup):
+    """The solid triangles that touch the domain (a REEF3D_Solid.vtp left from
+    another case does not)."""
+    if solids is None or setup.domain is None:
+        return solids
+    points, triangles = solids
+    xs, xe, ys, ye, zs, ze = setup.domain
+    pad = 0.01 * max(xe - xs, ye - ys, ze - zs)
+    low = np.array([xs, ys, zs]) - pad
+    high = np.array([xe, ye, ze]) + pad
+    if setup.two_d:  # the y of a 2D case's solids is not the domain's
+        low[1], high[1] = -np.inf, np.inf
+    inside = np.all((points >= low) & (points <= high), axis=1)
+    triangles = np.asarray(triangles)
+    keep = inside[triangles].any(axis=1)
+    if not keep.any():
+        return None
+    return points, triangles[keep]
+
+
 def _heights(setup: CaseSetup, low, high, profile, solids) -> tuple[float, float]:
     """The heights the side view shows: the domain's, the bed's and the solids'."""
     z0, z1 = float(low[2]), float(high[2])
@@ -187,8 +243,9 @@ def _heights(setup: CaseSetup, low, high, profile, solids) -> tuple[float, float
         z0 = min(z0, float(np.nanmin(profile[1])))
         z1 = max(z1, float(np.nanmax(profile[1])))
     if solids is not None:
-        z1 = max(z1, float(solids[0][:, 2].max()))
-        z0 = min(z0, float(solids[0][:, 2].min()))
+        used = solids[0][np.unique(np.asarray(solids[1]))]
+        z1 = max(z1, float(used[:, 2].max()))
+        z0 = min(z0, float(used[:, 2].min()))
     pad = 0.06 * max(z1 - z0, 1e-6)
     return z0 - pad, z1 + pad
 
@@ -203,13 +260,16 @@ def _profile(
         row = int(np.argmin(np.abs(y - middle)))
         return x, z[row], float(y[row])
     if points is None:
-        if not (setup.path / "geo.dat").is_file():
-            return None
-        points = setup.geo_points()
+        return None
     points = np.asarray(points, float)
     if len(points) < 2:
         return None
     x0, x1 = points[:, 0].min(), points[:, 0].max()
+    if setup.domain is not None:
+        x0, x1 = max(x0, setup.domain[0]), min(x1, setup.domain[1])
+        points = points[(points[:, 0] >= x0) & (points[:, 0] <= x1)]
+        if len(points) < 2:
+            return None
     bins = int(np.clip(len(points) ** 0.5 * 2, 20, 400))
     edges = np.linspace(x0, x1, bins + 1)
     index = np.clip(np.searchsorted(edges, points[:, 0]) - 1, 0, bins - 1)
@@ -425,28 +485,46 @@ def _outline(triangles: np.ndarray) -> np.ndarray:
 
 
 # ------------------------------------------------------------------ tables, legend
-def _table(ax, facts: list[tuple[str, str]]) -> None:
-    """The main facts in two columns of label and value."""
+def _char_pt(spec: FigureSpec) -> float:
+    """About how wide a character of the tables' x-small text is, in points."""
+    return 0.6 * 0.833 * spec.font_size
+
+
+def _cell(ax, x: float, y: float, text: str, offset_pt: float = 0.0, **style) -> None:
+    """A table cell: at x, y (axes fraction), moved right by ``offset_pt`` points."""
+    cell = ax.annotate(
+        text,
+        (x, y),
+        xycoords="axes fraction",
+        xytext=(offset_pt, 0),
+        textcoords="offset points",
+        fontsize="x-small",
+        va="center",
+        **style,
+    )
+    cell.set_in_layout(False)  # the tables do not narrow the views above them
+
+
+def _table(ax, facts: list[tuple[str, str]], spec: FigureSpec, columns: int = 2) -> None:
+    """The main facts in one or two columns of label and value; the values start
+    just after the longest label."""
     ax.axis("off")
-    half = (len(facts) + 1) // 2
-    for column, rows in enumerate((facts[:half], facts[half:])):
-        x = 0.0 if column == 0 else 0.53
+    if not facts:
+        return
+    per_column = -(-len(facts) // columns)
+    label_pt = _char_pt(spec) * (max(len(label) for label, _ in facts) + 2)
+    for column in range(columns):
+        rows = facts[column * per_column : (column + 1) * per_column]
+        x = column / columns
         for row, (label, value) in enumerate(rows):
-            y = 1.0 - (row + 0.5) / max(half, 1)
-            ax.text(
-                x,
-                y,
-                label + ":",
-                weight="bold",
-                fontsize="x-small",
-                va="center",
-                transform=ax.transAxes,
-            )
-            ax.text(x + 0.16, y, value, fontsize="x-small", va="center", transform=ax.transAxes)
+            y = 1.0 - (row + 0.5) / per_column
+            _cell(ax, x, y, label + ":", weight="bold")
+            _cell(ax, x, y, value, label_pt)
 
 
-def _levels(ax, refinement) -> None:
-    """The levels of a refined grid: cell size, where, about how many columns."""
+def _levels(ax, refinement, spec: FigureSpec) -> None:
+    """The levels of a refined grid: cell size, where, about how many columns,
+    against a uniform grid as fine as the finest level."""
     ax.axis("off")
     rows = []
     total = 0
@@ -454,37 +532,26 @@ def _levels(ax, refinement) -> None:
         total += level.columns
         rows.append(
             (
-                f"Level {level.level}",
-                f"{level.size:.3g} m",
-                f"{level.where}: ≈ {_millions(level.columns)} columns",
+                f"Level {level.level} · {level.size:.3g} m",
+                f"≈ {_millions(level.columns)} columns, {level.where}",
             )
         )
     ux, uy = refinement.uniform_cells
     fewer = refinement.uniform / max(total, 1)
     rows.append(
         (
-            "Uniform reference",
-            f"{refinement.levels[-1].size:.3g} m",
-            f"{ux} × {uy} = {_millions(refinement.uniform)} columns → refined ≈ {fewer:.2g}× fewer",
+            f"Uniform · {refinement.levels[-1].size:.3g} m",
+            f"{_millions(refinement.uniform)} columns ({ux} × {uy}): refined ≈ {fewer:.2g}× fewer",
         )
     )
     if refinement.flagged:
-        rows.append(("", "", "plus the cells the run flags: " + ", ".join(refinement.flagged)))
+        rows.append(("", "plus the cells the run flags: " + ", ".join(refinement.flagged)))
+    text_pt = _char_pt(spec) * (max(len(r[0]) for r in rows) + 2)
     n = len(rows)
-    for row, (name, size, text) in enumerate(rows):
+    for row, (name, text) in enumerate(rows):
         y = 1.0 - (row + 0.5) / n
-        ax.text(
-            0.0,
-            y,
-            name,
-            weight="bold",
-            color="#2c4a7a",
-            fontsize="small",
-            va="center",
-            transform=ax.transAxes,
-        )
-        ax.text(0.2, y, size, fontsize="small", va="center", transform=ax.transAxes)
-        ax.text(0.32, y, text, fontsize="small", color="0.35", va="center", transform=ax.transAxes)
+        _cell(ax, 0.0, y, name, weight="bold", color="#2c4a7a")
+        _cell(ax, 0.0, y, text, text_pt, color="0.3")
 
 
 def _millions(count: int) -> str:

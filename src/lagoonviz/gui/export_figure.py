@@ -234,6 +234,11 @@ class ExportFigureDialog(QDialog):
         for widget in (self.line, self.measured_row, self.measured_column):
             self.form.setRowVisible(widget, comparing)
         self.form.setRowVisible(self.window_row, content in ("spectra", "validation"))
+        if content == "setup" and self.width.value() < 140:
+            # plan, side view, tables and legend: a column and a half at least
+            index = self.width_choice.findData(140.0)
+            if index >= 0:
+                self.width_choice.setCurrentIndex(index)
 
     def _browse_measured(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

@@ -594,7 +594,7 @@ def _refinement(setup: CaseSetup) -> Refinement | None:
             for a, b, c, d in boxes
         ]
         area = _union_area(grown)
-        where = "inside the boxes" if level == levels else "the boxes and a nesting buffer"
+        where = "inside the boxes" if level == levels else "the boxes and a buffer"
         rows.append(Level(level, size, round(area / size**2), where))
     flagged = []
     if ctrl.int("G 12", 0) > 0:

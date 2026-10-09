@@ -302,7 +302,7 @@ def test_the_sketch_of_a_refined_river(river, tmp_path):
     side = figure.axes[2]
     assert "vertical scale" in side.get_title(loc="left")
     texts = [t.get_text() for t in figure.axes[4].texts]
-    assert "Level 2" in texts and "Uniform reference" in texts
+    assert "Level 2 · 0.5 m" in texts and "Uniform · 0.5 m" in texts
     plan_texts = [t.get_text() for t in figure.axes[0].texts]
     assert "inflow, W 10 400 m³/s" in plan_texts and "outflow" in plan_texts
     path = save_figure(figure, tmp_path / "river.png", FigureSpec(width_mm=150, dpi=80))
