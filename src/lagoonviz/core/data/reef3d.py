@@ -670,7 +670,12 @@ class Case:
                     if matches:
                         found[role] = matches[0]
                 return found
-            return {"volume": max(volumes, key=lambda d: d.written_span()[1])}
+            chosen = {"volume": max(volumes, key=lambda d: d.written_span()[1])}
+            # DIVEMesh's solids belong to the case, not to a run: always shown
+            solids = [d for d in self.datasets.values() if d.role == "solid"]
+            if solids:
+                chosen = {"solid": solids[0], **chosen}
+            return chosen
         free = [d for d in surfaces if d.role == "free_surface"]
         lead = preferred(free or surfaces)
         chosen = {lead.role: lead}

@@ -141,6 +141,25 @@ def test_the_volume_is_there_switched_off(converted):
     assert not volume.visible and session.data.load(volume.id).points.shape[0] > 0
 
 
+def test_a_volume_only_run_shows_divemeshs_solids(tmp_path):
+    """A CFD run that wrote only its volume (no free surface or bed): DIVEMesh's
+    solids are shown with it."""
+    run = make_run(tmp_path / "cfd", solver="CFD", frames=2)
+    for folder in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):
+        for f in (run / folder).iterdir():
+            f.unlink()
+        (run / folder).rmdir()
+    report = convert(run)
+    (run / "control.txt").write_text("B 10 0.0 8.0 0.0 4.0 0.0 1.0\nS 10 1.0 2.0 1.0 2.0 0.0 1.0\n")
+    for path in (run, report.store):
+        session = Session()
+        session.open_case(path)
+        kinds = [i.kind for i in session.scene if i.kind != "case"]
+        assert kinds[:2] == ["structure", "volume"], path
+        solid = next(i for i in session.scene if i.kind == "structure")
+        assert session.data.load(solid.id).points.shape[0] > 0
+
+
 def test_index_files_without_pieces_are_left_out(tmp_path):
     run = make_run(tmp_path / "run", frames=3)
     for piece in (run / "REEF3D_NHFLOW_VTP_FSF").glob("REEF3D-NHFLOW-FSF-0000000[01]-*.vtp"):
