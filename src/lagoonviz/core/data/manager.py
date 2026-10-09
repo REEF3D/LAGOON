@@ -725,10 +725,7 @@ class DataManager:
             values = mesh.scalar(variable).ravel()
             if _spread(values):
                 low, high = auto_range(values)
-                low, high = min(kept[0], low), max(kept[1], high)
-                if low < 0.0 < high:  # symmetric around zero, as auto_range
-                    low, high = -max(-low, high), max(-low, high)
-                self._auto_ranges[key] = (low, high)
+                self._auto_ranges[key] = (min(kept[0], low), max(kept[1], high))
         return self._auto_ranges[key]
 
     def vector_arrows(
@@ -1635,17 +1632,13 @@ def _spread(values: np.ndarray | None) -> bool:
 
 
 def auto_range(values: np.ndarray | None) -> tuple[float, float]:
-    """1st to 99th percentile; symmetric around zero when the values change sign."""
+    """The lowest to the highest finite value, as ParaView scales its colours."""
     if values is None or values.size == 0:
         return 0.0, 1.0
     finite = values[np.isfinite(values)]
     if finite.size == 0:
         return 0.0, 1.0
-    sample = finite if finite.size <= 200_000 else finite[:: finite.size // 200_000 + 1]
-    low, high = (float(v) for v in np.percentile(sample, [1.0, 99.0]))
-    if low < 0.0 < high:
-        bound = max(-low, high)
-        low, high = -bound, bound
+    low, high = float(finite.min()), float(finite.max())
     if high - low < 1e-12:
         low, high = low - 0.5, high + 0.5
     return low, high

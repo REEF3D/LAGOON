@@ -38,9 +38,10 @@ Surfaces, slices and objects share these properties:
   components, `velocity.x`), or `none` for a plain colour.
 - **Colour map**: `reef3d`, `ocean`, `tension`, `lagoon_blue`, `balance`,
   `viridis`, `rainbow` (Google's Turbo), `sand`, `greys`, `white`.
-- **Automatic range** spans the values over a sample of the outputs, so a colour
-  means the same value at every time; switched off, *Range min* and *Range max*
-  hold. *Fit range to this frame* sets them to the current output.
+- **Automatic range** spans the lowest to the highest value (as ParaView) over a
+  sample of the outputs, so a colour means the same value at every time; slices
+  and iso-surfaces widen it to each output shown. Switched off, *Range min* and
+  *Range max* hold. *Fit range to this frame* sets them to the current output.
 - **Opacity**: a transparent free surface shows the bed under it.
 - **Contour lines of** a variable, and how many.
 - **Vectors of** a vector field: arrows spread over the surface, how many, and

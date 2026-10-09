@@ -248,7 +248,8 @@ def test_display_exaggeration_and_range(reef3d_run):
     mesh = s.data.load("free_surface-1")
     shown = s.data.display("free_surface-1", mesh)
     assert shown.variable == "eta" and shown.colormap == "reef3d"
-    assert shown.vmin == pytest.approx(-shown.vmax)  # eta changes sign: symmetric
+    eta = mesh.scalar("eta")  # the range: lowest to highest over the run, as ParaView
+    assert shown.vmin <= np.nanmin(eta) and shown.vmax >= np.nanmax(eta)
     assert s.data.still_water_level("free_surface-1", mesh) == pytest.approx(DEPTH, abs=1e-5)
     s.set_property("case-1", "exaggeration", 10.0)  # synced: applies to every item
     big = s.data.display("free_surface-1", mesh)
@@ -343,7 +344,8 @@ def test_colormaps():
 def test_auto_range():
     assert auto_range(None) == (0.0, 1.0)
     low, high = auto_range(np.linspace(-2, 1, 1001))
-    assert low == -high
+    assert (low, high) == (-2.0, 1.0)  # lowest to highest, as ParaView
+    assert auto_range(np.array([np.nan, 0.5, np.inf, -0.123])) == (-0.123, 0.5)
     assert auto_range(np.full(10, 3.0)) == (2.5, 3.5)
 
 
@@ -654,10 +656,10 @@ def test_automatic_range_of_a_bed_that_scours():
     assert not data._auto_ranges  # not kept
     scoured = mesh(np.linspace(-0.1, 0.0, 200))
     low, high = data._range_of("iso", "elevation", scoured)
-    assert low == pytest.approx(-0.099, abs=1e-3) and high < 0.0
+    assert (low, high) == pytest.approx((-0.1, 0.0))
     deeper = mesh(np.linspace(-0.2, 0.05, 200))
-    low, high = data._range_of("iso", "elevation", deeper)  # wider, symmetric about 0
-    assert low == pytest.approx(-high) and low < -0.19
+    low, high = data._range_of("iso", "elevation", deeper)  # wider
+    assert (low, high) == pytest.approx((-0.2, 0.05))
     assert data._range_of("iso", "elevation", scoured) == (low, high)  # kept as widened
 
 
