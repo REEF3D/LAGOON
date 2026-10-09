@@ -703,14 +703,32 @@ class DataManager:
         return self._range_of(item_id, str(props.get("variable", "none")), mesh)
 
     def _range_of(self, item_id: str, variable: str, mesh: SurfaceMesh) -> tuple[float, float]:
-        """The automatic range of a variable of an item, found once and kept."""
+        """The automatic range of a variable of an item, found once and kept.
+
+        Values all alike (a flat bed at the start of a scour run) set no range: it is
+        found again in the next frame. Items cut from a volume (slices, iso-surfaces:
+        too costly to sample over the run) widen their range to the values of each
+        frame shown, so a bed that scours later does not run out of colours."""
         dataset = self.dataset(item_id)
         key = (item_id, dataset.key if dataset else "", variable)
-        if key not in self._auto_ranges:
+        kept = self._auto_ranges.get(key)
+        if kept is None:
             values = [mesh.scalar(variable)]
             if dataset is not None and dataset.surface_like and len(dataset) > 2:
                 values += self._sampled_values(dataset, variable)
-            self._auto_ranges[key] = auto_range(np.concatenate([v.ravel() for v in values]))
+            joined = np.concatenate([v.ravel() for v in values])
+            found = auto_range(joined)
+            if _spread(joined):
+                self._auto_ranges[key] = found
+            return found
+        if dataset is not None and not dataset.surface_like:
+            values = mesh.scalar(variable).ravel()
+            if _spread(values):
+                low, high = auto_range(values)
+                low, high = min(kept[0], low), max(kept[1], high)
+                if low < 0.0 < high:  # symmetric around zero, as auto_range
+                    low, high = -max(-low, high), max(-low, high)
+                self._auto_ranges[key] = (low, high)
         return self._auto_ranges[key]
 
     def vector_arrows(
@@ -826,11 +844,12 @@ class DataManager:
             auto = item.properties.get("auto_range", True)
             item.properties["auto_range"] = True  # the automatic range, whatever is set
             try:
-                self.value_range(item_id, mesh)
+                found = self.value_range(item_id, mesh)
             except KeyError:
                 return None
             finally:
                 item.properties["auto_range"] = auto
+            return self._auto_ranges.get(key, found)  # (values all alike: not kept)
         return self._auto_ranges.get(key)
 
     def forget_range(self, item_id: str) -> None:
@@ -1605,6 +1624,14 @@ def _dry_triangles(mesh: SurfaceMesh, level: float) -> np.ndarray:
     triangles = mesh.triangles.copy()
     triangles[gone] = 0
     return triangles
+
+
+def _spread(values: np.ndarray | None) -> bool:
+    """Whether the values differ (an automatic range can be found from them)."""
+    if values is None or values.size == 0:
+        return False
+    finite = values[np.isfinite(values)]
+    return bool(finite.size) and float(finite.max() - finite.min()) >= 1e-12
 
 
 def auto_range(values: np.ndarray | None) -> tuple[float, float]:

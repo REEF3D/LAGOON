@@ -631,6 +631,36 @@ def test_reload_picks_up_new_outputs(tmp_path):
     assert [i.kind for i in s.scene].count("free_surface") == 1  # items kept
 
 
+def test_automatic_range_of_a_bed_that_scours():
+    """A flat bed at the start sets no range; an item cut from a volume widens its
+    range to the frames shown (an iso-surface of a bed that scours later)."""
+    from lagoonviz.core.data.manager import DataManager
+    from lagoonviz.core.data.mesh import SurfaceMesh
+    from lagoonviz.core.scene import Scene
+
+    class Volume:  # stands in for a volume's dataset: not sampled over the run
+        key, surface_like = "cfd_volume", False
+
+    data = DataManager(Scene())
+    data.dataset = lambda item_id: Volume()
+
+    def mesh(z):
+        z = np.asarray(z, np.float32)
+        points = np.stack([np.arange(z.size), np.zeros(z.size), z], axis=1).astype(np.float32)
+        return SurfaceMesh(points, np.zeros((0, 3), np.uint32), {"elevation": z})
+
+    flat = mesh(np.zeros(50))
+    assert data._range_of("iso", "elevation", flat) == (-0.5, 0.5)
+    assert not data._auto_ranges  # not kept
+    scoured = mesh(np.linspace(-0.1, 0.0, 200))
+    low, high = data._range_of("iso", "elevation", scoured)
+    assert low == pytest.approx(-0.099, abs=1e-3) and high < 0.0
+    deeper = mesh(np.linspace(-0.2, 0.05, 200))
+    low, high = data._range_of("iso", "elevation", deeper)  # wider, symmetric about 0
+    assert low == pytest.approx(-high) and low < -0.19
+    assert data._range_of("iso", "elevation", scoured) == (low, high)  # kept as widened
+
+
 def test_switching_the_automatic_range_off_keeps_the_colours(reef3d_run):
     s = Session()
     s.open_case(reef3d_run)

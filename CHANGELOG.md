@@ -51,6 +51,10 @@
 - **The bed in the 3D view** is LAGOON's light sand again in the cinematic looks
   (the dark rock stays in path-traced renders); the sliders in *Properties*
   (vertical scale, arrow length) have no play-range stripes.
+- **Iso-surface** in the toolbar, beside *Slice*.
+- **Automatic colour range**: values all alike (a flat bed at the start of a
+  scour run) no longer fix it; slices and iso-surfaces widen it to the frames
+  shown, so a bed that scours later keeps its colours.
 - **Opening a case** also adds its run's volume, switched off (*Volume* in the
   toolbar shows it).
 

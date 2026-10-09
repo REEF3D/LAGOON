@@ -16,6 +16,7 @@ Free surface
 Bed
 Volume
 Slice
+Iso-surface
 Time series
 
 Save screenshot...

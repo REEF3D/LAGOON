@@ -119,6 +119,19 @@ def _slice(p: QPainter) -> None:
     p.restore()
 
 
+def _iso_surface(p: QPainter) -> None:
+    _volume(p)
+    p.save()
+    p.setPen(QPen(QColor(COLORS["cursor"]), 4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    path = QPainterPath(QPointF(18, 44))  # a closed, rounded surface inside the box
+    path.cubicTo(14, 32, 24, 22, 32, 26)
+    path.cubicTo(40, 18, 50, 26, 44, 36)
+    path.cubicTo(48, 46, 34, 50, 30, 46)
+    path.cubicTo(26, 50, 20, 48, 18, 44)
+    p.drawPath(path)
+    p.restore()
+
+
 def _series(p: QPainter) -> None:
     p.drawLine(QPointF(10, 8), QPointF(10, 54))
     p.drawLine(QPointF(10, 54), QPointF(58, 54))
@@ -266,6 +279,7 @@ DRAWINGS: dict[str, Draw] = {
     "bathymetry": _bathymetry,
     "volume": _volume,
     "slice": _slice,
+    "iso_surface": _iso_surface,
     "series": _series,
     "play": _play,
     "pause": _pause,

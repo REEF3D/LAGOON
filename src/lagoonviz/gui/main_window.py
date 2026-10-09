@@ -54,6 +54,8 @@ SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 OUTPUT_FILTER = "REEF3D output (*.pvtu *.pvtp *.vtu *.vtp);;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
 LAYOUT_VERSION = 4
+#: the items the toolbar adds (the Add menu has them all)
+TOOLBAR_KINDS = ("free_surface", "bathymetry", "volume", "slice", "iso_surface", "series")
 #: how often "Follow running simulation" looks for new output
 FOLLOW_SECONDS = 5
 QWIDGETSIZE_MAX = (1 << 24) - 1  # Qt's "no maximum size"
@@ -450,7 +452,7 @@ class MainWindow(QMainWindow):
         bar.addAction(self.act_undo)
         bar.addAction(self.act_redo)
         bar.addSeparator()
-        for kind in ("free_surface", "bathymetry", "volume", "slice", "series"):
+        for kind in TOOLBAR_KINDS:
             bar.addAction(self.add_actions[kind])
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -490,7 +492,7 @@ class MainWindow(QMainWindow):
             (self.act_mode_results, "results"),
         ):
             action.setIcon(icon(name))
-        for kind in ("free_surface", "bathymetry", "volume", "slice", "series"):
+        for kind in TOOLBAR_KINDS:
             self.add_actions[kind].setIcon(icon(kind))
 
     def _streamline_start(self) -> dict:
