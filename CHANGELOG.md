@@ -45,7 +45,15 @@ LAGOON stores read as they grow, colours scaled as in ParaView.
 - **Set-up sketch**: *File → Export figure → Case set-up* and `lagoon-setup CASE
   [OUTPUT]` draw plan and side view with a legend; `--describe` prints the main
   facts of the input (domain, grid, sides, waves, what does not fit together).
-  `lagoonviz.core.data.setup.read_setup` gives the same in a script.
+  `lagoonviz.core.data.setup.read_setup` gives the same in a script. The plan
+  shows the bed in colour (geo.dat or the results' bed) with the coastline, the
+  side view a section with the bed and the water; DIVEMesh's solids filled,
+  relaxation zones hatched, inflow and outflow written beside their sides; a
+  table of the main facts; for a refined grid (G 1) its boxes (G 10) and a table
+  of the levels with about how many columns each has, against a uniform grid.
+- **Mesh refinement boxes** (ctrl.txt G 10, G 11) in the *Case set-up* item; the
+  σ-grids of FNPF, NHFLOW and SFLOW reach from the bed to the still water when
+  B 10 gives placeholder heights.
 - **The commands of both programs** (`lagoonviz.core.data.controlfile`): every
   command of `ctrl.txt` and `control.txt` with its title, values, choices and
   default, from the REEF3D and DIVEMesh user guides and the programs' readers

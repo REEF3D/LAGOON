@@ -197,14 +197,116 @@ def test_the_set_up_sketch(basin, tmp_path):
     from lagoonviz.render.setup_sketch import main, setup_figure
 
     figure = setup_figure(basin, FigureSpec(width_mm=120))
-    assert len(figure.axes) == 3  # plan, side, legend
-    legend = figure.axes[2].get_legend()
+    assert len(figure.axes) == 4  # plan, side, the facts, legend
+    legend = figure.axes[-1].get_legend()
     labels = [t.get_text() for t in legend.get_texts()]
     assert "wave gauge (P 51)" in labels and "force box (P 81)" in labels
     path = save_figure(figure, tmp_path / "sketch.png", FigureSpec(width_mm=120, dpi=80))
     assert path.stat().st_size > 1000
     assert main([str(basin), str(tmp_path / "cli.pdf")]) == 0
     assert (tmp_path / "cli.pdf").stat().st_size > 1000
+
+
+RIVER_CONTROL = """C 11 1
+C 14 2
+B 1 2.0
+B 10 0.0 400.0 -200.0 0.0 0.0 1.0
+G 10 1
+S 10 190 200 -105 -95 0 12
+"""
+RIVER_CTRL = """A 10 5
+F 60 7.7
+G 1 2
+G 10 0 100 -150 -50
+G 10 100 400 -120 -20
+G 20 0.05
+W 10 400.0
+N 41 3600.0
+P 30 10.0
+M 10 8
+"""
+
+
+@pytest.fixture
+def river(tmp_path):
+    """An NHFLOW river with refinement (G 1, G 10), inflow (W 10), a bed in geo.dat
+    from 2 to 12 m below a still water of 7.7 m and a solid."""
+    case = tmp_path / "river"
+    case.mkdir()
+    (case / "control.txt").write_text(RIVER_CONTROL)
+    (case / "ctrl.txt").write_text(RIVER_CTRL)
+    x, y = np.meshgrid(np.arange(0.0, 401.0, 8.0), np.arange(-200.0, 1.0, 8.0))
+    z = np.clip(2.0 + ((y + 100.0) / 30.0) ** 2, 2.0, 12.0)
+    np.savetxt(case / "geo.dat", np.c_[x.ravel(), y.ravel(), z.ravel()], fmt="%.3f")
+    return case
+
+
+def test_a_sigma_grid_reaches_from_the_bed_to_the_still_water(river):
+    setup = read_setup(river)
+    xs, xe, ys, ye, zs, ze = setup.domain  # B 10 says 0 - 1 m, the bed is 2 - 12 m
+    assert (xs, xe, ys, ye) == (0.0, 400.0, -200.0, 0.0)
+    assert zs == pytest.approx(2.0, abs=0.05) and ze == 7.7
+    domain = next(m for m in setup.marks() if m.group == "domain")
+    assert domain.segments[:, :, 2].min() == pytest.approx(zs)
+
+
+def test_refinement_levels_and_columns(river):
+    refinement = read_setup(river).refinement()
+    sizes = [level.size for level in refinement.levels]
+    assert sizes == [2.0, 1.0, 0.5]
+    assert refinement.levels[0].columns == 200 * 100  # the whole domain at 2 m
+    # the finest level fills the boxes: 100 x 100 m and 300 x 100 m at 0.5 m
+    assert refinement.levels[2].columns == (100 * 100 + 300 * 100) / 0.25
+    assert refinement.levels[2].columns < refinement.levels[1].columns * 4
+    assert refinement.uniform == 800 * 400
+    assert refinement.flagged == ["surface jumps (G 20)"]
+    marks = [m for m in read_setup(river).marks() if m.code == "G 10" and m.file == "ctrl.txt"]
+    assert len(marks) == 2 and marks[0].group == "regions"
+
+
+def test_the_facts_table(river, basin):
+    facts = dict(read_setup(river).facts())
+    assert facts["Module"] == "REEF3D::NHFLOW (A 10)"
+    assert facts["Domain"] == "400 × 200 m, bed to free surface (σ grid)"
+    assert facts["Inflow"] == "400 m³/s (W 10)"
+    assert facts["Refinement"] == "2 levels (G 1), finest 0.5 m, 2 boxes (G 10)"
+    assert facts["Simulated time"] == "3600 s (N 41)" and facts["Processes"] == "8 (M 10)"
+    waves = dict(read_setup(basin).facts())
+    assert waves["Waves"] == "5th-order Stokes Waves (Fenton), H = 0.1 m, T = 2 s"
+
+
+def test_relaxation_zones_stay_inside_the_domain(basin):
+    (basin / "ctrl.txt").write_text(CTRL + "B 107 0.0 20.0 0.0 0.0 1.0\n")
+    zone = next(m for m in read_setup(basin).marks() if m.code == "B 107")
+    corners = zone.faces.reshape(-1, 3)
+    assert corners[:, 1].min() == pytest.approx(0.0) and corners[:, 1].max() == pytest.approx(1.0)
+
+
+def test_the_bed_raster_fills_the_domain(river):
+    x, y, z = read_setup(river).bed_raster()
+    assert np.isfinite(z).all()
+    assert x[0] > 0.0 and x[-1] < 400.0 and y[0] > -200.0
+    assert z.min() == pytest.approx(2.0, abs=0.5) and z.max() == pytest.approx(12.0, abs=0.5)
+
+
+def test_the_sketch_of_a_refined_river(river, tmp_path):
+    from lagoonviz.render.figure import FigureSpec, save_figure
+    from lagoonviz.render.setup_sketch import setup_figure
+
+    figure = setup_figure(river, FigureSpec(width_mm=150))
+    # plan, its colour bar, side, the facts, the levels, legend
+    assert len(figure.axes) == 6
+    labels = [t.get_text() for t in figure.axes[-1].get_legend().get_texts()]
+    assert "refinement box (G 10)" in labels and "DIVEMesh solids" in labels
+    assert "inflow side (C 11)" in labels
+    side = figure.axes[2]
+    assert "vertical scale" in side.get_title(loc="left")
+    texts = [t.get_text() for t in figure.axes[4].texts]
+    assert "Level 2" in texts and "Uniform reference" in texts
+    plan_texts = [t.get_text() for t in figure.axes[0].texts]
+    assert "inflow, W 10 400 m³/s" in plan_texts and "outflow" in plan_texts
+    path = save_figure(figure, tmp_path / "river.png", FigureSpec(width_mm=150, dpi=80))
+    assert path.stat().st_size > 1000
 
 
 def test_lagoon_setup_describes(basin, capsys):

@@ -45,7 +45,9 @@ __all__ = [
     "GROUPS",
     "CaseSetup",
     "Commands",
+    "Level",
     "Mark",
+    "Refinement",
     "has_inputs",
     "read_commands",
     "read_setup",
@@ -96,6 +98,7 @@ COLORS = {
     "regions": "#4fb3a9",
     "solids": "#a0a8b4",
     "bed": "#b08d57",
+    "refinement": "#e07b39",
 }
 
 SOLVERS = {2: "SFLOW", 3: "FNPF", 5: "NHFLOW", 6: "CFD", 7: "SEASTATE"}
@@ -389,6 +392,47 @@ class CaseSetup:
         self._marks = None
         self._meshes.clear()
 
+    # ------------------------------------------------------------- the sketch
+    def refinement(self) -> Refinement | None:
+        """The mesh refinement of SFLOW, FNPF and NHFLOW (G 1 levels, G 10 boxes),
+        with the columns each level has about; None without refinement."""
+        self.refresh()
+        return _refinement(self)
+
+    def facts(self) -> list[tuple[str, str]]:
+        """The main facts of the input as (label, value) rows, for the sketch's table."""
+        self.refresh()
+        return _facts(self)
+
+    def bed_raster(self, points: np.ndarray | None = None, size: int | None = None):
+        """The bed as a regular raster over the domain: (x, y, z), z (ny, nx), filled
+        between the points as DIVEMesh does. From ``points`` (the bed of the results)
+        or geo.dat; None without either."""
+        self.refresh()
+        if points is None:
+            if not (self.path / GEO).is_file():
+                return None
+            self.geo_points()
+            points = self._bed[0]
+        return _raster(np.asarray(points, float), self.domain, size)
+
+    def solid_mesh(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """DIVEMesh's solids as (points, triangles): REEF3D_Solid.vtp, or built from
+        control.txt; None without solids."""
+        from lagoonviz.core.data.divemesh import find_solids
+        from lagoonviz.core.data.reef3d import SolidDataset
+
+        source = find_solids(self.path)
+        if source is None:
+            return None
+        try:
+            mesh = SolidDataset(source, self.path).read(0)
+        except (OSError, ValueError, KeyError, IndexError):
+            return None
+        if not len(mesh.triangles):
+            return None
+        return mesh.points, mesh.triangles
+
     # ------------------------------------------------------------- signs
     def marks(self) -> list[Mark]:
         """The signs of the set-up: domain, sides, zones, waves, gauges and probes."""
@@ -484,6 +528,220 @@ class CaseSetup:
         return "\n".join(lines)
 
 
+@dataclass
+class Level:
+    """One level of a refined grid, for the sketch's table."""
+
+    level: int
+    size: float  # cell size [m]
+    columns: int  # about how many columns (cells in plan) it has
+    where: str  # "whole domain", "inside the boxes", ...
+
+
+@dataclass
+class Refinement:
+    """The mesh refinement of a case (ctrl.txt G 1, G 3, G 10, G 11)."""
+
+    levels: list[Level]
+    boxes: list[tuple[float, float, float, float]]  # G 10: xs, xe, ys, ye
+    #: the run refines more where it flags cells (G 12 body, G 20 - G 23 surface)
+    flagged: list[str]
+    #: columns of a uniform grid as fine as the finest level
+    uniform: int
+    uniform_cells: tuple[int, int]
+
+
+def _union_area(boxes: list[tuple[float, float, float, float]]) -> float:
+    """The area the boxes cover together (overlaps once)."""
+    boxes = [b for b in boxes if b[1] > b[0] and b[3] > b[2]]
+    if not boxes:
+        return 0.0
+    xs = np.unique([v for b in boxes for v in b[:2]])
+    ys = np.unique([v for b in boxes for v in b[2:]])
+    covered = np.zeros((len(ys) - 1, len(xs) - 1), bool)
+    for x0, x1, y0, y1 in boxes:
+        i0, i1 = np.searchsorted(xs, [x0, x1])
+        j0, j1 = np.searchsorted(ys, [y0, y1])
+        covered[j0:j1, i0:i1] = True
+    areas = np.outer(np.diff(ys), np.diff(xs))
+    return float(areas[covered].sum())
+
+
+def _refinement(setup: CaseSetup) -> Refinement | None:
+    ctrl = setup.ctrl
+    levels = ctrl.int("G 1", 0)
+    if levels <= 0 or setup.solver not in ("SFLOW", "FNPF", "NHFLOW"):
+        return None
+    if setup.domain is None or setup.cells is None:
+        return None
+    xs, xe, ys, ye, _, _ = setup.domain
+    nx, ny, _ = setup.cells
+    dx = (xe - xs) / max(nx, 1)
+    buffer = ctrl.int("G 3", 2)
+    boxes = []
+    for values in ctrl.all("G 10"):
+        if len(values) >= 4:
+            x0, x1, y0, y1 = (float(v) for v in values[:4])
+            boxes.append((max(x0, xs), min(x1, xe), max(y0, ys), min(y1, ye)))
+    rows = [Level(0, dx, nx * ny, "whole domain")]
+    for level in range(1, levels + 1):
+        size = dx / 2**level
+        # the finest level fills the boxes; a coarser one holds the next finer with a
+        # buffer of G 3 of its cells around it
+        margin = 0.0 if level == levels else (levels - level) * buffer * size
+        grown = [
+            (max(a - margin, xs), min(b + margin, xe), max(c - margin, ys), min(d + margin, ye))
+            for a, b, c, d in boxes
+        ]
+        area = _union_area(grown)
+        where = "inside the boxes" if level == levels else "the boxes and a nesting buffer"
+        rows.append(Level(level, size, round(area / size**2), where))
+    flagged = []
+    if ctrl.int("G 12", 0) > 0:
+        flagged.append("around the floating body (G 12)")
+    for code, what in (
+        ("G 20", "surface jumps"),
+        ("G 21", "surface curvature"),
+        ("G 22", "the shoreline"),
+        ("G 23", "breaking"),
+    ):
+        if (ctrl.value(code) or 0) > 0:
+            flagged.append(f"{what} ({code})")
+    finest = dx / 2**levels
+    ux, uy = round((xe - xs) / finest), round((ye - ys) / finest)
+    return Refinement(rows, boxes, flagged, ux * uy, (ux, uy))
+
+
+def _option(code: str, value: int) -> str:
+    from lagoonviz.core.data.controlfile import catalog_for
+
+    info = catalog_for(CTRL).get(code)
+    name = info.options.get(str(value), "") if info else ""
+    return name.rstrip(" *").replace('\\"', "")
+
+
+def _number(value: float) -> str:
+    """A number for the table: thin spaces between thousands, 4 significant digits."""
+    if abs(value) >= 1e4 and float(value).is_integer():
+        return f"{int(value):,}".replace(",", "\u2009")
+    return f"{value:.4g}"
+
+
+def _facts(setup: CaseSetup) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    ctrl, control = setup.ctrl, setup.control
+    if ctrl:
+        rows.append(("Module", f"REEF3D::{setup.solver} (A 10)"))
+    if setup.domain is not None:
+        xs, xe, ys, ye, zs, ze = setup.domain
+        plan = (
+            f"{_number(xe - xs)} × {_number(ye - ys)} m"
+            if not setup.two_d
+            else f"{_number(xe - xs)} m (2D)"
+        )
+        if setup.solver in ("FNPF", "NHFLOW", "SFLOW"):
+            rows.append(("Domain", f"{plan}, bed to free surface (σ grid)"))
+        else:
+            rows.append(("Domain", f"{plan}, z {zs:g} – {ze:g} m"))
+    if setup.cells is not None:
+        nx, ny, nz = setup.cells
+        text = f"{nx} × {ny} × {nz} = {_number(nx * ny * nz)}"
+        spacing = setup.spacing
+        if setup.stretched:
+            text += ", stretched"
+        elif spacing is not None:
+            text += f", dx = {spacing[0]:.4g} m"
+        rows.append(("Cells", text))
+    if setup.water_level is not None:
+        rows.append(("Still water", f"z = {setup.water_level:g} m"))
+    if setup.waves:
+        kind = ctrl.int("B 92", 0)
+        name = _option("B 92", kind) or f"type {kind}"
+        text = name[0].upper() + name[1:] if name else name
+        wave = ctrl.values("B 93") or ctrl.values("B 91")
+        if wave and len(wave) >= 2:
+            second = f"T = {wave[1]:g} s" if "B 93" in ctrl else f"L = {wave[1]:g} m"
+            text += f", H = {wave[0]:g} m, {second}"
+        rows.append(("Waves", text))
+        generation = ctrl.int("B 98", 0)
+        if generation:
+            rows.append(("Generation", f"{_option('B 98', generation) or generation} (B 98)"))
+        absorption = ctrl.int("B 99", 0)
+        if absorption:
+            rows.append(("Absorption", f"{_option('B 99', absorption) or absorption} (B 99)"))
+    if 1 in setup.sides.values() or ctrl.int("B 60", 0) > 0:
+        discharge = ctrl.value("W 10")
+        if discharge:
+            rows.append(("Inflow", f"{discharge:g} m³/s (W 10)"))
+    end = ctrl.value("N 41")
+    if end and end < 1e18:
+        rows.append(("Simulated time", f"{end:g} s (N 41)"))
+    every = ctrl.value("P 30")
+    if every and every > 0:
+        rows.append(("Output every", f"{every:g} s (P 30)"))
+    elif (ctrl.value("P 20") or 0) > 0:
+        rows.append(("Output every", f"{ctrl.int('P 20', 0)} iterations (P 20)"))
+    refinement = _refinement(setup)
+    if refinement is not None:
+        text = (
+            f"{len(refinement.levels) - 1} levels (G 1), finest {refinement.levels[-1].size:.3g} m"
+        )
+        if refinement.boxes:
+            text += f", {len(refinement.boxes)} boxes (G 10)"
+        rows.append(("Refinement", text))
+    processes = ctrl.int("M 10", 0) or control.int("M 10", 0)
+    if processes:
+        rows.append(("Processes", f"{processes} (M 10)"))
+    return rows
+
+
+def _raster(points: np.ndarray, domain, size: int | None = None):
+    """Bed points averaged into a regular raster over the domain (or the points'
+    box); cells without points are filled from their neighbours, as DIVEMesh
+    extends the bed over the whole domain."""
+    points = points[np.isfinite(points).all(axis=1)] if len(points) else points
+    if len(points) < 3:
+        return None
+    if domain is not None:
+        x0, x1, y0, y1 = domain[:4]
+    else:
+        (x0, y0), (x1, y1) = points[:, :2].min(axis=0), points[:, :2].max(axis=0)
+    lx, ly = max(x1 - x0, 1e-9), max(y1 - y0, 1e-9)
+    if size is None:  # about as many cells as points, 400 at most along the longer side
+        size = int(np.clip(math.sqrt(len(points)) * 1.2, 40, 400))
+    nx = max(2, round(size if lx >= ly else size * lx / ly))
+    ny = max(2, round(size if ly > lx else size * ly / lx))
+    i = np.clip(((points[:, 0] - x0) / lx * nx).astype(int), 0, nx - 1)
+    j = np.clip(((points[:, 1] - y0) / ly * ny).astype(int), 0, ny - 1)
+    inside = (
+        (points[:, 0] >= x0) & (points[:, 0] <= x1) & (points[:, 1] >= y0) & (points[:, 1] <= y1)
+    )
+    cell = (j * nx + i)[inside]
+    sums = np.bincount(cell, points[inside, 2], nx * ny)
+    counts = np.bincount(cell, None, nx * ny)
+    z = np.full(nx * ny, np.nan)
+    z[counts > 0] = sums[counts > 0] / counts[counts > 0]
+    z = z.reshape(ny, nx)
+    for _ in range(nx + ny):  # fill the gaps from the neighbours, as DIVEMesh extends the bed
+        missing = np.isnan(z)
+        if not missing.any():
+            break
+        padded = np.pad(z, 1, constant_values=np.nan)
+        near = np.stack(
+            [padded[1 + a : 1 + a + ny, 1 + b : 1 + b + nx] for a in (-1, 0, 1) for b in (-1, 0, 1)]
+        )
+        valid = np.isfinite(near)
+        total = np.where(valid, near, 0.0).sum(axis=0)
+        number = valid.sum(axis=0)
+        fill = missing & (number >= 1)
+        if not fill.any():
+            break
+        z[fill] = total[fill] / number[fill]
+    x = x0 + (np.arange(nx) + 0.5) * lx / nx
+    y = y0 + (np.arange(ny) + 0.5) * ly / ny
+    return x, y, z
+
+
 def read_setup(case_dir: str | Path) -> CaseSetup:
     """The set-up of a case folder (or of the folder of a file in it)."""
     case_dir = Path(case_dir).expanduser()
@@ -504,18 +762,33 @@ def read_setup(case_dir: str | Path) -> CaseSetup:
 # ------------------------------------------------------------------ facts
 def _domain(setup: CaseSetup) -> tuple | None:
     """B 10 (several boxes: the box around them); else from geo.dat (G 20 with its
-    margins G 21, G 22) or the STL (S 2 with S 3)."""
+    margins G 21, G 22) or the STL (S 2 with S 3).
+
+    FNPF, NHFLOW and SFLOW have σ-grids from the bed to the free surface: when B 10's
+    heights do not reach the still water (F 60, e.g. 0 - 1 m for a bed of geo.dat
+    from 50 to 300 m), the domain reaches from the bed's lowest point (geo.dat, else
+    B 10's bottom) to it."""
     boxes = [v[:6] for v in setup.control.all("B 10") if len(v) >= 6]
     if boxes:
         b = np.asarray(boxes, float)
-        return (
+        box = [
             float(b[:, 0].min()),
             float(b[:, 1].max()),
             float(b[:, 2].min()),
             float(b[:, 3].max()),
             float(b[:, 4].min()),
             float(b[:, 5].max()),
-        )
+        ]
+        water = setup.ctrl.value("F 60")
+        sigma = setup.ctrl.int("A 10", 6) in (2, 3, 5)
+        if sigma and water is not None and abs(water) < 1e18 and not box[4] <= water <= box[5]:
+            if (setup.path / GEO).is_file() and setup.control.int("G 10", 0) > 0:
+                points = setup.geo_points()
+                if len(points):
+                    box[4] = float(points[:, 2].min())
+            box[4] = min(box[4], water)
+            box[5] = max(water, box[4] + 1e-6)
+        return tuple(box)
     control = setup.control
     if control.int("G 20", 0) > 0 and (setup.path / GEO).is_file():
         points = setup.geo_points()
@@ -701,6 +974,9 @@ MARKS = {
     "F 72": ("regions", "rect_h", "prescribed water level region", COLORS["water"]),
     "S 74": ("regions", "rect", "non-erodible zone", COLORS["bed"]),
     "P 43": ("regions", "rect", "state file area", COLORS["regions"]),
+    # mesh refinement of SFLOW, FNPF and NHFLOW (G 1 levels)
+    "G 10": ("regions", "rect", "refinement box", COLORS["refinement"]),
+    "G 11": ("regions", "rect", "box without refinement", COLORS["domain"]),
 }
 
 #: control.txt topo objects (T) drawn as outlines of the bed: the S builders
@@ -722,6 +998,10 @@ def _marks(setup: CaseSetup) -> list[Mark]:
     boxes = [v[:6] for v in setup.control.all("B 10") if len(v) >= 6]
     if not boxes and domain is not None:
         boxes = [list(domain)]
+    if boxes and domain is not None:
+        raw = (min(b[4] for b in boxes), max(b[5] for b in boxes))
+        if raw != (domain[4], domain[5]):  # a σ-grid from the bed to the still water
+            boxes = [list(b[:4]) + [domain[4], domain[5]] for b in boxes]
     for index, box in enumerate(boxes):
         marks.append(
             Mark(
@@ -877,6 +1157,9 @@ def _marks(setup: CaseSetup) -> list[Mark]:
             )
             if code == "B 502" and values:
                 label = f"{int(values[0])}"
+            faces = None
+            if shape == "zone" and len(segments) > 3:  # the band, filled
+                faces = _fan(segments[1:, 0, :])
             marks.append(
                 Mark(
                     group,
@@ -887,6 +1170,7 @@ def _marks(setup: CaseSetup) -> list[Mark]:
                     labels=[(label, where)] if label else [],
                     code=code,
                     occurrence=occurrence,
+                    faces=faces,
                 )
             )
     # ---- control.txt: solids and the bed's topo objects
@@ -1016,10 +1300,15 @@ def _shaped(shape: str, v: list[float], span_x, span_y, span_z, water: float):
         normal = np.array([-line[1], line[0]]) / length * d
         a, b = np.array([xs, ys]), np.array([xe, ye])
         ring = [a + normal, b + normal, b - normal, a - normal]
+        if span_x is not None and span_y is not None:  # the zone acts inside the domain
+            ring = _clip_to_box(ring, span_x, span_y)
+            if len(ring) < 3:
+                return None
         corners = [(p[0], p[1], water) for p in ring]
         segments = [((xs, ys, water), (xe, ye, water))]
-        segments += [(corners[i], corners[(i + 1) % 4]) for i in range(4)]
-        return _segments(segments), none, (0.5 * (xs + xe), 0.5 * (ys + ye), water)
+        segments += [(corners[i], corners[(i + 1) % len(corners)]) for i in range(len(corners))]
+        centre = np.mean(ring, axis=0)
+        return _segments(segments), none, (float(centre[0]), float(centre[1]), water)
     if shape == "ycyl":  # xc, zc, ys, ye, r
         return _cylinder(1, (v[0], v[1]), v[2], v[3], v[4]), none, (v[0], v[3], v[1] + v[4])
     if shape == "zcyl":  # xc, yc, zs, ze, r
@@ -1043,6 +1332,38 @@ def _shaped(shape: str, v: list[float], span_x, span_y, span_z, water: float):
         diameter, length, x0, y0, z0 = v[:5]
         return _cylinder(2, (x0, y0), z0 - length, z0, 0.5 * diameter), none, (x0, y0, z0)
     raise ValueError(shape)
+
+
+def _clip_to_box(ring, span_x, span_y) -> list[np.ndarray]:
+    """A convex polygon (2D points) clipped to the box span_x x span_y."""
+    points = [np.asarray(p, float) for p in ring]
+    for axis, bound, keep_above in (
+        (0, span_x[0], True),
+        (0, span_x[1], False),
+        (1, span_y[0], True),
+        (1, span_y[1], False),
+    ):
+        if not points:
+            break
+
+        def inside(p, axis=axis, bound=bound, keep_above=keep_above):
+            return p[axis] >= bound - 1e-9 if keep_above else p[axis] <= bound + 1e-9
+
+        clipped = []
+        for i, current in enumerate(points):
+            previous = points[i - 1]
+            if inside(current) != inside(previous):
+                t = (bound - previous[axis]) / (current[axis] - previous[axis])
+                clipped.append(previous + t * (current - previous))
+            if inside(current):
+                clipped.append(current)
+        points = clipped
+    return points
+
+
+def _fan(ring: np.ndarray) -> np.ndarray:
+    """Triangles (k, 3, 3) of a convex polygon (m, 3)."""
+    return np.array([(ring[0], ring[i], ring[i + 1]) for i in range(1, len(ring) - 1)])
 
 
 def _rect_x(x, ys, ye, zs, ze) -> np.ndarray:

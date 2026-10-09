@@ -147,10 +147,29 @@ cells and the smallest and largest cell sizes along x, y and z.
 
 ## The set-up sketch
 
-*File → Export figure → Case set-up* draws the set-up as a paper figure: the plan
-view above, the side view below (only the side view for a 2D case), with a
-legend. The side view of a long, flat domain gets a vertical scale, given in its
-title. The same from the command line:
+*File → Export figure → Case set-up* draws the set-up as a paper figure:
+
+- the **plan view**: the bed in colour (geo.dat, or the bed of the results) with
+  its scale and the coastline at the still water level; the sides (inflow with its
+  discharge W 10, outflow written beside them), relaxation zones hatched, gauges
+  and probes numbered, DIVEMesh's solids filled; for a refined grid (G 1) the
+  refinement boxes (G 10) and faint lines of the level-0 grid;
+- the **side view**: a section through the middle of the domain, the bed filled
+  with sand and the water above it, the zones it crosses hatched; a long, flat
+  domain gets a vertical scale, given in the title (only the side view for a 2D
+  case);
+- a **table of the main facts**: module, domain, cells, still water, waves,
+  generation and absorption, inflow, simulated time, output interval, refinement,
+  processes;
+- for a refined grid, **the levels**: their cell size and about how many columns
+  each has (level 0 the whole domain, the finest the boxes, those between with a
+  nesting buffer of G 3 cells), against a uniform grid as fine as the finest
+  level; cells the run flags (G 12, G 20 - G 23) come on top;
+- the legend.
+
+For FNPF, NHFLOW and SFLOW, whose σ-grids reach from the bed to the free surface,
+the heights come from the bed (geo.dat) and the still water level when B 10 gives
+placeholder heights (0 - 1 m). The same from the command line:
 
 ```bash
 lagoon-setup ~/runs/flume                  # flume-setup.pdf beside the case
