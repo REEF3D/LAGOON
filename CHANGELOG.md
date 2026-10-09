@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.0.0rc4 (fourth release candidate)
+
+The fourth candidate for 1.0: the set-up sketch with room for its tables, also as
+a narrow figure, and without the files other cases left in the folder.
 
 ### Case set-up
 
