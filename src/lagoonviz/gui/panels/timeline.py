@@ -69,16 +69,18 @@ class ClickSlider(QSlider):
     #: a range stripe was let go
     rangeReleased = Signal()
 
-    def __init__(self, *args) -> None:
+    def __init__(self, *args, ranged: bool = True) -> None:
         super().__init__(*args)
+        #: a play range with its stripes (the timeline); False: a plain slider
+        self.ranged = ranged
         self._dragging = False
         #: slider values marked with a small diamond (the camera keyframes)
         self.markers: list[int] = []
         #: the play range in slider values (None: the whole slider)
         self.play_range: tuple[int, int] | None = None
         self._stripe: int | None = None  # 0 or 1 while a stripe is dragged
-        # twice a slider's usual height: room for tall range stripes, easy to grab
-        self.setMinimumHeight(2 * self.sizeHint().height())
+        if ranged:  # twice a slider's usual height: room for tall stripes, easy to grab
+            self.setMinimumHeight(2 * self.sizeHint().height())
 
     def bounds(self) -> tuple[int, int]:
         """The play range in slider values, within the slider."""
@@ -100,7 +102,7 @@ class ClickSlider(QSlider):
 
     def _inset(self) -> int:
         """How far the groove sits in from each end: a stripe's width beyond the handle."""
-        return int(self._gap()) + 4
+        return int(self._gap()) + 4 if self.ranged else 0
 
     def _gap(self) -> float:
         """How far a range stripe stands beyond the handle's centre: just clear of the
@@ -118,6 +120,8 @@ class ClickSlider(QSlider):
 
     def _stripe_at(self, x: float) -> int | None:
         """The range stripe under a horizontal position (the nearer one), or None."""
+        if not self.ranged:
+            return None
         distances = [abs(x - self.stripe_x(0)), abs(x - self.stripe_x(1))]
         nearest = (
             0
@@ -171,6 +175,8 @@ class ClickSlider(QSlider):
 
     def _paint_range(self, painter: QPainter) -> None:
         """The play range: outside it the slider is dimmed, at its ends thick stripes."""
+        if not self.ranged:
+            return
         low, high = self.bounds()
         x0, x1 = self.stripe_x(0), self.stripe_x(1)
         shade = QColor(COLORS["text"])

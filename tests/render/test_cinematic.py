@@ -238,6 +238,8 @@ def test_aegir_colours_for_default_colours():
 
     bed, structure = PLAIN_COLORS["bathymetry"], PLAIN_COLORS["structure"]
     assert look_colour(DIORAMA, "bathymetry", bed) == (AEGIR_ROCK, "rock")
+    assert look_colour(DIORAMA, "bathymetry", bed, view=True) is None  # 3D view: sand
+    assert look_colour(DIORAMA, "structure", structure, view=True) == (AEGIR_RED, "painted")
     assert look_colour(DIORAMA, "structure", structure) == (AEGIR_RED, "painted")
     assert look_colour(DIORAMA, "body", PLAIN_COLORS["body"]) == (AEGIR_RED, "painted")
     assert look_colour(OPEN_OCEAN, "bathymetry", bed) is None  # dressed as land instead

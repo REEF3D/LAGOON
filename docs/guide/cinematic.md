@@ -26,8 +26,8 @@ For showcase pictures rather than for reading values.
 
 === "Diorama"
 
-    The model on a stand in ÆgirFrames' sky picture: the bed a solid block of
-    dark rock, the water see-through with blue sides down to the bed (path traced:
+    The model on a stand in ÆgirFrames' sky picture: the bed a solid block (light
+    sand in the 3D view, dark rock path traced), the water see-through with blue sides down to the bed (path traced:
     a clear blue body of water).
 
     ![Diorama](../images/look-diorama.png)
@@ -74,8 +74,8 @@ sun's direction (*View → Sun...*); its sun's height is the picture's own, abou
 30°. A bed in its default colour is ÆgirFrames' dark rock in the Wave flume and
 Diorama looks, and structures and bodies in their default colours are
 ÆgirFrames' red (half metallic, matte); colours you choose are kept.
-The 3D view shows these three looks with the same sky picture, rock and red
-(the water stays a surface there, not a body of glass).
+The 3D view shows these three looks with the same sky picture and red, with the
+bed in LAGOON's light sand (the water stays a surface there, not a body of glass).
 
 In the **Open ocean** look a coast looks like one: the bed (coloured by nothing)
 is dressed by its height above the still water level and its slope, with sand

@@ -326,8 +326,9 @@ class SceneRenderer:
 
     def _surface(self, kind: str, shown: DisplaySurface) -> tuple[str, str]:
         """The colour and surface an item is drawn with in the look: the look's own
-        for an item in its kind's default colour (ÆgirFrames' rock, red), else its own."""
-        given = look_colour(self.preset, kind, shown.color, shown.material)
+        for an item in its kind's default colour (ÆgirFrames' red; the bed keeps its
+        light sand in the 3D view), else its own."""
+        given = look_colour(self.preset, kind, shown.color, shown.material, view=True)
         if given is not None and shown.values is None:
             return given
         return shown.color, surface_of(kind, shown.material)

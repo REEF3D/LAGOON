@@ -48,6 +48,9 @@
   (`tools/command_catalog.py`); input files are read and written back line by
   line, comments and order kept.
 - Back in the results, the Set-up panel makes way for *Properties*.
+- **The bed in the 3D view** is LAGOON's light sand again in the cinematic looks
+  (the dark rock stays in path-traced renders); the sliders in *Properties*
+  (vertical scale, arrow length) have no play-range stripes.
 - **Opening a case** also adds its run's volume, switched off (*Volume* in the
   toolbar shows it).
 

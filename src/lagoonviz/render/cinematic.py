@@ -225,17 +225,19 @@ def surface_of(kind: str, material: str = "") -> str:
     return KIND_SURFACES.get(kind, "plain")
 
 
-def look_colour(preset: Preset | None, kind: str, color, material: str = ""):
+def look_colour(preset: Preset | None, kind: str, color, material: str = "", view: bool = False):
     """The colour and surface a look gives an item shown in its kind's default colour
     (no colour, colour map or material of its own chosen): ÆgirFrames' dark rock for
-    a bed, its red for structures and bodies; None when the item keeps its own."""
+    a bed, its red for structures and bodies; None when the item keeps its own.
+    ``view``: for the 3D view, where the bed keeps LAGOON's light sand (the rock is
+    for path tracing)."""
     from lagoonviz.core.colormaps import PLAIN_COLORS
 
     if preset is None or material or not isinstance(color, str):
         return None
     if color.lower() != PLAIN_COLORS.get(kind, "").lower():
         return None
-    if kind == "bathymetry" and preset.bed:
+    if kind == "bathymetry" and preset.bed and not view:
         return preset.bed, "rock"
     if kind in ("structure", "body") and preset.structure:
         return preset.structure, "painted"

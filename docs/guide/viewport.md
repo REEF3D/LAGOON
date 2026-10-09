@@ -44,9 +44,9 @@ of the shapes.
   classic**: the cinematic looks, with physically based materials, reflections
   and, under water, fog. Open ocean, Wave flume and Diorama show what Blender
   renders: ÆgirFrames' sky picture around the model (lighting it and reflected by
-  the water, its sun where the look's sun is), the bed as dark rock and structures
-  in ÆgirFrames' red (in their default colours). Diorama classic keeps the earlier
-  Diorama: a blue backdrop and a block of sand. See
+  the water, its sun where the look's sun is) and structures in ÆgirFrames' red
+  (in their default colour); the bed stays LAGOON's light sand (path traced: dark
+  rock). Diorama classic keeps the earlier Diorama: a blue backdrop. See
   [Cinematic looks and path tracing](cinematic.md).
 
 ## The sun

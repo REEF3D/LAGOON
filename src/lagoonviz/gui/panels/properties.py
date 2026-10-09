@@ -446,7 +446,7 @@ class _LogSlider(QWidget):
         self.spin = spin
         self._low, self._high = math.log10(minimum), math.log10(maximum)
         # goes where it is clicked and follows the mouse, like the timeline
-        self.slider = ClickSlider(Qt.Horizontal)
+        self.slider = ClickSlider(Qt.Horizontal, ranged=False)  # no play range stripes
         self.slider.setRange(0, self.STEPS)
         self.slider.setFocusPolicy(Qt.StrongFocus)
         self._rows = QVBoxLayout(self)
