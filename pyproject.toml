@@ -31,16 +31,25 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
-    "lagoon-format>=0.3.0,<0.4",
+    "lagoon-format>=0.4.0,<0.5",
     "numpy>=1.24",
     "PySide6-Essentials>=6.7",
     "pygfx>=0.9",
     "rendercanvas>=1.0",
     "imageio-ffmpeg>=0.5",  # MP4 export; brings its own ffmpeg
     "matplotlib>=3.8",  # paper figures (File > Export figure)
+    "pillow>=9.5",  # map tiles, GeoTIFF without rasterio
+    "scipy>=1.10",  # bathymetry onto the grid (TIN, inverse distance)
 ]
 
 [project.optional-dependencies]
+# the Earth under a case: any CRS (pyproj), any GeoTIFF read in windows (rasterio);
+# without them LAGOON knows WGS 84, ETRS89, Web Mercator, UTM and NTM and reads
+# plain GeoTIFFs itself
+geo = [
+    "pyproj>=3.6",
+    "rasterio>=1.3",
+]
 dev = [
     "pytest>=8",
     "pytest-qt>=4.4",

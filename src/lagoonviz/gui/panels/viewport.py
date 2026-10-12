@@ -22,6 +22,7 @@ from __future__ import annotations
 import html
 import logging
 import os
+import threading
 import traceback
 
 import numpy as np
@@ -58,6 +59,16 @@ class ViewportPlaceholder(QWidget):
     statusMessage = Signal(str)
     #: the probe (orange dot) placed or moved: a Probe, or None when removed
     probeChanged = Signal(object)
+    #: the domain drawn in the 2D top view (x0, x1, y0, y1); never sent here
+    domainDrawn = Signal(object)
+    #: the model turned on the map (degrees, about the model point); never sent here
+    modelTurned = Signal(float, object)
+
+    def start_domain_drawing(self, case_id: str = "") -> None:
+        self.statusMessage.emit("Drawing the domain needs the 3D view (no GPU here)")
+
+    def stop_domain_drawing(self) -> None:
+        pass
 
     def __init__(self, parent: QWidget | None = None, reason: str = ""):
         super().__init__(parent)
@@ -203,6 +214,13 @@ class Viewport3D(QWidget):
     probeChanged = Signal(object)
     #: (key, mesh, error) from a loader thread, delivered on the GUI thread
     _loaded = Signal(object, object, object)
+    #: a background map item's map was made in a worker thread
+    _background_made = Signal(str)
+    #: the domain drawn in the 2D top view: (x0, x1, y0, y1) in model coordinates
+    domainDrawn = Signal(object)
+    #: the model turned on the map with Shift + drag: degrees (counter-clockwise),
+    #: about the model point (x, y)
+    modelTurned = Signal(float, object)
 
     def __init__(
         self,
@@ -227,6 +245,8 @@ class Viewport3D(QWidget):
         self._shown_keys: dict[str, FrameKey] = {}
         #: what each "Case set-up" item was last drawn from (see DataManager.setup_signature)
         self._setup_shown: dict[str, tuple] = {}
+        #: the errors of background maps told in the status bar
+        self._background_told: dict[str, str] = {}
         #: compare mode: the case this view shows ("" = all), and the view whose camera
         #: moves with this one
         self.case_filter = ""
@@ -249,6 +269,9 @@ class Viewport3D(QWidget):
         self.renderer.add_event_handler(self._on_interaction, "pointer_up", "wheel")
         self.renderer.add_event_handler(self._on_pointer, "pointer_down", "pointer_up")
         self._press: tuple[float, float, object, dict] | None = None
+        #: drawing the domain (start_domain_drawing): where the drag began, or None
+        self._drawing: dict | None = None
+        self.renderer.add_event_handler(self._on_move, "pointer_move")
         self._probe_at: tuple[str, int, tuple[float, ...]] | None = None
         #: the last probe (values where the user clicked), shown in the header
         self.probe = None
@@ -314,6 +337,15 @@ class Viewport3D(QWidget):
         layout.setSpacing(0)
         layout.addWidget(header)
         layout.addWidget(self.canvas, 1)
+        #: the attribution the background maps' sources ask for (© Kartverket, ...)
+        self.attribution = QLabel()
+        self.attribution.setObjectName("mapAttribution")
+        self.attribution.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.attribution.setWordWrap(True)
+        self.attribution.setContentsMargins(6, 0, 6, 0)
+        self.attribution.hide()
+        self.apply_theme_colors()
+        layout.addWidget(self.attribution)
         layout.addWidget(self.colorbars)
 
         self._save_camera = QTimer(self)
@@ -326,6 +358,7 @@ class Viewport3D(QWidget):
         self._sun_timer.timeout.connect(self._sun_rests)
 
         self._loaded.connect(self._on_loaded)
+        self._background_made.connect(self._on_background_made)
         bridge.sceneChanged.connect(self._on_scene)
         bridge.timeChanged.connect(lambda _t: self._on_time())
         self._apply_2d(*self._plan_state, frame=False)
@@ -441,8 +474,69 @@ class Viewport3D(QWidget):
                 self.loader.request(key, self._loaded.emit, owner=owner)
         self._update_gauges()
         self._update_setup()
+        self._update_backgrounds()
         self._update_overlays()
         self.redraw()
+
+    def _update_backgrounds(self) -> None:
+        """The background map items: drawn from the map made for them, which is made
+        in a worker thread (it may fetch map tiles) when what it shows changed."""
+        backgrounds = self.session.data.backgrounds
+        wanted = [i for i in backgrounds.items() if self._in_view(i)]
+        for item_id in self.view.background_ids:
+            if item_id not in wanted:
+                self.view.remove_background(item_id)
+        credits = []
+        for item_id in wanted:
+            item = self.session.scene.get(item_id)
+            try:
+                # a hidden map is made only once it is shown
+                job = backgrounds.job(item_id) if item.visible else None
+                if job is not None:
+                    # a daemon thread: closing LAGOON does not wait for the tile servers
+                    threading.Thread(
+                        target=self._make_background,
+                        args=(item_id, job),
+                        name="lagoon-map",
+                        daemon=True,
+                    ).start()
+                made = backgrounds.cached(item_id)
+                if made is None:
+                    self.view.remove_background(item_id)
+                else:
+                    shown = backgrounds.shown(item_id, made)
+                    self.view.update_background(shown)
+                    if shown.visible and made.attribution:
+                        credits.append(made.attribution)
+            except Exception:  # noqa: BLE001 (a bad file must not take the window down)
+                log.error("background map %s:\n%s", item_id, traceback.format_exc())
+                self.statusMessage.emit(f"Could not show {item.name}; see the log")
+                continue
+            error = backgrounds.error(item_id)
+            if error and self._background_told.get(item_id) != error:
+                if not backgrounds.making(item_id):
+                    self.statusMessage.emit(f"{item.name}: {error}")
+                    self._background_told[item_id] = error
+            elif not error:
+                self._background_told.pop(item_id, None)
+        text = " · ".join(dict.fromkeys(credits))
+        self.attribution.setText(text)
+        self.attribution.setVisible(bool(text))
+
+    def _make_background(self, item_id: str, job) -> None:
+        try:
+            job()
+        except Exception:  # noqa: BLE001 (the worker must always report back)
+            log.error("background map %s:\n%s", item_id, traceback.format_exc())
+        try:
+            self._background_made.emit(item_id)
+        except RuntimeError:  # the view was closed meanwhile
+            pass
+
+    def _on_background_made(self, item_id: str) -> None:
+        if item_id in self.session.scene:
+            self._update_backgrounds()
+            self.redraw()
 
     def _update_setup(self) -> None:
         """The "Case set-up" items: drawn again when what they show has changed."""
@@ -520,6 +614,10 @@ class Viewport3D(QWidget):
             f"QToolButton {{ color: {COLORS['text']}; padding: 3px 8px; }}"
         )
         self.info.setStyleSheet(f"color: {COLORS['dim']};")
+        if hasattr(self, "attribution"):
+            self.attribution.setStyleSheet(
+                f"color: {COLORS['dim']}; background: {COLORS['panel']}; font-size: 10px;"
+            )
         self.colorbars.update()
 
     def _show(self, item_id: str, key: FrameKey, mesh) -> None:
@@ -748,6 +846,8 @@ class Viewport3D(QWidget):
         if on == self.two_d and side == self.two_d_side:
             return
         self.two_d, self.two_d_side = on, side
+        if not (on and side == "top"):
+            self.stop_domain_drawing()  # the domain is drawn in the 2D top view only
         self.two_d_button.blockSignals(True)
         self.two_d_button.setChecked(on)
         self.two_d_button.blockSignals(False)
@@ -779,6 +879,10 @@ class Viewport3D(QWidget):
             key, modifiers = event.get("key", ""), event.get("modifiers", ())
         else:
             key, modifiers = getattr(event, "key", ""), getattr(event, "modifiers", ())
+        if key == "Escape" and self._drawing is not None:
+            self.stop_domain_drawing()
+            self.statusMessage.emit("Stopped drawing the domain")
+            return
         if key in KEY_VIEWS:
             view = KEY_VIEWS[key]
             if "Control" in modifiers and not (self.two_d and view == "top"):
@@ -801,9 +905,118 @@ class Viewport3D(QWidget):
             self._store_camera()
             self.redraw()
 
+    # ------------------------------------------------------------- drawing the domain
+    def start_domain_drawing(self, case_id: str = "") -> None:
+        """The next drag in the 2D top view draws the domain (domainDrawn); with Shift
+        it turns the model on the map about the domain's centre (modelTurned). Esc
+        stops."""
+        if not (self.two_d and self.two_d_side == "top"):
+            self.set_2d(True, "top")
+        self._drawing = {"start": None, "case": case_id}
+        try:
+            self.controller.enabled = False  # the drag draws, it does not pan
+        except AttributeError:
+            pass
+        self.canvas.setCursor(Qt.CrossCursor)
+        self.statusMessage.emit(
+            "Drag the domain in the 2D view · Shift + drag turns the model on the map · Esc stops"
+        )
+
+    def stop_domain_drawing(self) -> None:
+        if self._drawing is None:
+            return
+        self._drawing = None
+        try:
+            self.controller.enabled = True
+        except AttributeError:
+            pass
+        self.canvas.unsetCursor()
+        self.view.set_outline(None)
+        self.redraw()
+
+    def _plan_point(self, event) -> tuple[float, float] | None:
+        try:
+            size = tuple(self.canvas.get_logical_size())
+        except AttributeError:
+            size = (self.canvas.width(), self.canvas.height())
+        return self.view.plan_point(getattr(event, "x", 0.0), getattr(event, "y", 0.0), size)
+
+    def _domain_box(self, case_id: str = "") -> tuple[float, float, float, float] | None:
+        cases = [i.id for i in self.session.scene if i.kind == "case"]
+        if case_id and case_id in self.session.scene:
+            cases = [case_id]
+        elif self.case_filter:
+            cases = [self.case_filter]
+        domain = self.session.data.backgrounds.domain(cases[0]) if cases else None
+        return tuple(domain[:4]) if domain is not None else None
+
+    def _draw_domain(self, kind: str, event) -> None:
+        point = self._plan_point(event)
+        drawing = self._drawing
+        if point is None or drawing is None:
+            return
+        level = 4.0  # over everything in the flat 2D view (PLAN_MARKS)
+        if kind == "pointer_down":
+            if getattr(event, "button", 1) != 1:
+                return
+            modifiers = getattr(event, "modifiers", ()) or ()
+            box = self._domain_box(drawing.get("case", ""))
+            drawing["start"] = point
+            drawing["turn"] = "Shift" in modifiers and box is not None
+            drawing["box"] = box
+            return
+        start = drawing.get("start")
+        if start is None:
+            return
+        if drawing.get("turn"):
+            x0, x1, y0, y1 = drawing["box"]
+            centre = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
+            a = np.arctan2(*(np.asarray(start) - centre)[::-1])
+            b = np.arctan2(*(np.asarray(point) - centre)[::-1])
+            angle = float(np.degrees(b - a))
+            angle = (angle + 180.0) % 360.0 - 180.0
+            angle = round(angle * 2) / 2  # half degrees
+            corners = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]) - centre
+            c, s_ = np.cos(np.radians(angle)), np.sin(np.radians(angle))
+            turned = corners @ np.array([[c, s_], [-s_, c]]) + centre
+            outline = np.column_stack([turned, np.full(4, level)])
+            drawing["angle"] = angle
+            drawing["centre"] = (float(centre[0]), float(centre[1]))
+            self.statusMessage.emit(f"Turn the model by {angle:+.1f}°")
+        else:
+            (sx, sy), (px, py) = start, point
+            outline = np.array(
+                [[sx, sy, level], [px, sy, level], [px, py, level], [sx, py, level]], float
+            )
+            self.statusMessage.emit(
+                f"Domain x {min(sx, px):.1f} … {max(sx, px):.1f} m, "
+                f"y {min(sy, py):.1f} … {max(sy, py):.1f} m"
+            )
+        if kind == "pointer_move":
+            self.view.set_outline(outline)
+            self.redraw()
+            return
+        # released: the domain, or the turn
+        turn, angle, centre = drawing.get("turn"), drawing.get("angle", 0.0), drawing.get("centre")
+        self.stop_domain_drawing()
+        if turn:
+            if angle:
+                self.modelTurned.emit(angle, centre)
+            return
+        (sx, sy), (px, py) = start, point
+        if abs(px - sx) > 0 and abs(py - sy) > 0:
+            self.domainDrawn.emit((min(sx, px), max(sx, px), min(sy, py), max(sy, py)))
+
+    def _on_move(self, event) -> None:
+        if self._drawing is not None and self._drawing.get("start") is not None:
+            self._draw_domain("pointer_move", event)
+
     def _on_pointer(self, event) -> None:
         """A click (press and release without dragging) on a surface probes its values."""
         kind = getattr(event, "type", "")
+        if self._drawing is not None:
+            self._draw_domain(kind, event)
+            return
         x, y = getattr(event, "x", 0.0), getattr(event, "y", 0.0)
         if kind == "pointer_down":
             if getattr(event, "button", 0) == 1:

@@ -35,7 +35,7 @@ requirements:
     - pip
   run:
     - python >=${{ python_min }}
-    - lagoon-format >=0.3.0,<0.4
+    - lagoon-format >=0.4.0,<0.5
     - numpy >=1.24
     # conda-forge's pyside6 is the whole of PySide6; PyPI's lighter
     # PySide6-Essentials that pyproject.toml names is the same Qt for LAGOON
@@ -44,6 +44,8 @@ requirements:
     - rendercanvas >=1.0
     - imageio-ffmpeg >=0.5
     - matplotlib-base >=3.8
+    - pillow >=9.5
+    - scipy >=1.10
 
 tests:
   - python:

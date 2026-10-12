@@ -83,6 +83,7 @@ nav:
       - First steps: guide/first-steps.md
       - Opening runs: guide/runs.md
       - Case set-up: guide/setup.md
+      - Maps and the place of a case: guide/maps.md
       - Scene items: guide/scene.md
       - The 3D view: guide/viewport.md
       - Timeline and camera paths: guide/timeline.md

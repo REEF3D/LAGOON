@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Maps and the place of a case
+
+- **Georeference**: a case's `georef.json` (CRS, origin, rotation, vertical datum)
+  says where its model coordinates lie; *Set-up → Map* edits it (*Place at* a
+  latitude and longitude), `session.set_georef(...)`, `session.turn_model(...)`.
+  LAGOON transforms WGS 84, ETRS89, Web Mercator, UTM and NTM itself, any CRS with
+  pyproj (`pip install "lagoon-viz[geo]"`) ([Maps](guide/maps.md)).
+- **Background map** item: Kartverket's maps and nautical chart, Sentinel-2
+  cloudless (satellite), OpenStreetMap, a tile server or a GeoTIFF of yours, warped
+  into the model's frame and drawn under the results and the set-up in the 3D and
+  2D views, figures, films and the set-up sketch, with the credit its source asks
+  for. Tiles are cached on disk.
+- **The domain on the map**: drag it in the 2D view (B 10), Shift + drag turns the
+  model on the map.
+- **Bathymetry to geo.dat**: a GeoTIFF, ASCII grid or x y z soundings interpolated
+  (TIN, inverse distance, nearest) onto a grid over the domain and written as
+  geo.dat in model coordinates with G 10 1; `session.make_geo_dat(...)`.
+- LAGOON now needs SciPy and Pillow (both were there with Matplotlib's usual
+  installs).
+
+### LAGOON format 0.4
+
+- The root attribute `georef` (section 1.2) and the run record's `georef`
+  (RUN.md); `lagoon_format.geo` reads, writes and transforms it; `Store.georef`,
+  `StoreWriter.create(georef=...)`, `Run.georef`. `lagoon-convert` copies the
+  case's georeference into the stores it makes. lagoon-format 0.4.0.
+
 ## 1.0.0rc4 (fourth release candidate)
 
 The fourth candidate for 1.0: the set-up sketch with room for its tables, also as

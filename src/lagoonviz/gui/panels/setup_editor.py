@@ -9,7 +9,9 @@ in the 3D view. *Add* finds any command of the program by number or by words
 ("wave gauge"), *Remove* takes a line out, and *Text* edits the file as text.
 Every change is a command of the session (undo, script); the files are written
 with *Save*. *Run DIVEMesh* saves control.txt and runs DIVEMesh in the case folder,
-its output in the third tab; its grid, solids and bed then show in the set-up.
+its output in the last tab; its grid, solids and bed then show in the set-up.
+The *Map* tab places the case on the Earth: its georeference, the domain drawn on
+a background map, and geo.dat from a bathymetry file (``map_setup``).
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ from PySide6.QtWidgets import (
 from lagoonviz.core.data.controlfile import CommandInfo, catalog_for, format_value
 from lagoonviz.core.divemesh_run import LOG, divemesh_command, find_divemesh
 from lagoonviz.gui.bridge import SessionBridge
+from lagoonviz.gui.panels.map_setup import MapTab
 from lagoonviz.gui.theme import COLORS
 
 log = logging.getLogger(__name__)
@@ -447,6 +450,9 @@ class SetupPanel(QWidget):
         for name, editor in self.editors.items():
             self.tabs.addTab(editor, TITLES[name])
             editor.selected.connect(lambda code, n, f=name: self._highlight(f, code, n))
+        self.map_tab = MapTab(self)
+        self.map_tab.message.connect(self.status)
+        self.tabs.addTab(self.map_tab, "Map")
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
@@ -498,6 +504,8 @@ class SetupPanel(QWidget):
         for index, name in enumerate(FILES):
             self.tabs.setTabText(index, TITLES[name] + (" *" if name in modified else ""))
         self.save_button.setEnabled(bool(modified))
+        if hasattr(self, "map_tab"):
+            self.map_tab.refresh()
         running = self.process is not None
         self.run_button.setEnabled(has_case and not running)
         self.run_button.setText("DIVEMesh running…" if running else "Run DIVEMesh")

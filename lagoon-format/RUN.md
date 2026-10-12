@@ -77,6 +77,7 @@ register when they first write add their stream with a `stream` record.
 | `units` | optional | Default SI as shown |
 | `still_water_level` | recommended | z of the still water surface |
 | `domain` | optional | Bounding box of the domain |
+| `georef` | optional | Where the model coordinates lie on the Earth: the case's `georef.json`, copied unchanged (SPEC.md 1.2) |
 | `streams` | required | What the run writes, see below |
 
 ### `streams`: what the run writes

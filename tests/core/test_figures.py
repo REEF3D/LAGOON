@@ -120,3 +120,17 @@ def test_validation_figure(session, tmp_path):
     texts = [t.get_text() for t in figure.get_axes()[0].texts]
     assert any("RMSE" in text and "d =" in text for text in texts)
     save_figure(figure, tmp_path / "validation.pdf")
+
+
+def test_the_extent_of_the_2d_top_view():
+    """LAGOON's orthographic camera is a perspective camera with fov 0: from the top
+    the figure gets axes in metres."""
+    from types import SimpleNamespace
+
+    from lagoonviz.render.figure import view_extent
+
+    world = SimpleNamespace(forward=(0.0, 0.0, -1.0), position=(10.0, 5.0, 50.0))
+    camera = SimpleNamespace(fov=0, width=20.0, height=5.0, zoom=1.0, world=world)
+    assert view_extent(camera, (400, 200)) == pytest.approx((0.0, 20.0, 0.0, 10.0))
+    camera.fov = 45
+    assert view_extent(camera, (400, 200)) is None

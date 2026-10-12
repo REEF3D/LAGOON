@@ -153,3 +153,35 @@ def test_running_divemesh_from_the_panel(window, flume, tmp_path, qtbot, monkeyp
     grid = next(i for i in window.session.scene if i.kind == "grid")
     assert window.session.data.grid(grid.id).source == "DIVEMesh"
     assert panel.settings.value("divemesh/program") == str(program)
+
+
+def test_the_map_tab_places_the_case(window, flume, monkeypatch):
+    from lagoon_format.geo import Georef
+
+    window.open_case(flume)
+    panel = window.setup_panel
+    tab = panel.map_tab
+    assert panel.tabs.tabText(2) == "Map" and not tab.remove_button.isEnabled()
+    # the domain's centre at Trondheim: the UTM zone is chosen
+    tab.place.setText("63.44, 10.40")
+    tab.place_domain()
+    georef = window.session.georef()
+    assert georef is not None and georef.crs == "EPSG:25832"
+    assert Georef.from_json((flume / "georef.json").read_text()) == georef
+    assert tab.remove_button.isEnabled() and "UTM zone 32N" in tab.crs_name.text()
+    # the domain dragged in the 2D view, snapped to the cell size (B 1 0.5)
+    tab.domain_drawn((1.12, 20.3, -2.1, 4.9))
+    assert window.session.input_file("control.txt").values("B 10")[:4] == [1.0, 20.5, -2.0, 5.0]
+    # Shift + drag: the model turned on the map about the domain's centre
+    centre = georef.to_world(10.75, 1.5)
+    tab.model_turned(15.0, (10.75, 1.5))
+    assert window.session.georef().rotation_deg == pytest.approx(15.0)
+    assert window.session.georef().to_world(10.75, 1.5) == pytest.approx(centre)
+    # the background map: an item of the case
+    tab.source.setCurrentText("OpenStreetMap")
+    tab.show_map()
+    maps = [i for i in window.session.scene if i.kind == "basemap"]
+    assert len(maps) == 1 and maps[0].properties["source"] == "OpenStreetMap"
+    window.act_undo.trigger()  # the map
+    window.act_undo.trigger()  # the turn
+    assert window.session.georef().rotation_deg == 0.0

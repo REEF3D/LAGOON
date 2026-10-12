@@ -373,6 +373,13 @@ class CaseSetup:
             points = points[np.sort(pick)]
         return points
 
+    def geo_changed(self) -> None:
+        """geo.dat was written again: read it when next asked."""
+        self._bed = None
+        self._marks = None
+        self._meshes.clear()
+        self._revisions = None  # the domain of a σ-grid follows the bed
+
     def use_domain(self, low, high, source: str) -> None:
         """Take the domain from elsewhere (the extent of a run's results) when the
         input files do not give it: no control.txt, or no B 10 in it."""

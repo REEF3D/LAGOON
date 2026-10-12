@@ -383,8 +383,8 @@ def colour_bars(session: Session) -> list[ColourBar]:
 def view_extent(camera, size: tuple[int, int]) -> tuple[float, float, float, float] | None:
     """x and y range seen by an orthographic camera looking down (2D top view), or
     None for any other camera."""
-    if type(camera).__name__ != "OrthographicCamera":
-        return None
+    if float(getattr(camera, "fov", 0.0) or 0.0) > 0:
+        return None  # perspective (LAGOON's orthographic camera is fov 0)
     direction = np.asarray(camera.world.forward, dtype=float)
     if abs(abs(direction[2]) - 1.0) > 1e-6:
         return None  # not looking straight down
@@ -420,6 +420,7 @@ def view_figure(
 
         pixels = (round(width_in * spec.dpi), round(image_height_mm * MM * spec.dpi))
         offscreen = OffscreenView(session, pixels, style, view)
+        offscreen.credit = False  # in the axes, below
         image = offscreen.render(session.scene.time)
         if extent is None and session.scene.plan_view:
             extent = view_extent(offscreen.scene.camera, pixels)
@@ -437,6 +438,7 @@ def view_figure(
         else:
             ax.imshow(image, interpolation="lanczos")
             ax.set_axis_off()
+        map_credits(ax, session)
         when = session.scene.time
         seconds = session.data.time_in_seconds()
         ax.set_title(
@@ -720,6 +722,7 @@ def _view_panel(figure, cell, session: Session, panel, spec, width_mm, bars, ima
     else:
         ax.imshow(image, interpolation="lanczos")
         ax.set_axis_off()
+    map_credits(ax, session)
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
 
@@ -732,6 +735,25 @@ def _view_panel(figure, cell, session: Session, panel, spec, width_mm, bars, ima
         colourbar.outline.set_linewidth(0.5)
     seconds = session.data.time_in_seconds()
     return ax, (f"t = {when:.2f} s" if seconds else f"output {round(when)}")
+
+
+def map_credits(ax, session: Session) -> None:
+    """The credits the background maps' sources ask for, small in the lower right
+    corner of a view."""
+    credits = session.data.backgrounds.attributions()
+    if not credits:
+        return
+    ax.text(
+        0.995,
+        0.005,
+        " · ".join(credits),
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=4.5,
+        color="#1c2330",
+        bbox={"facecolor": "white", "alpha": 0.6, "edgecolor": "none", "pad": 0.6},
+    )
 
 
 def render_view(
@@ -757,6 +779,7 @@ def render_view(
         if top:
             session.set_plan_view(True, "top")
         offscreen = OffscreenView(session, pixels, look, None)
+        offscreen.credit = False  # the figure puts them in its axes
         image = offscreen.render(session.scene.time)
         extent = view_extent(offscreen.scene.camera, pixels) if session.scene.plan_view else None
         return image, extent

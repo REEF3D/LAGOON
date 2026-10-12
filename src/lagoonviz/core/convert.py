@@ -87,6 +87,20 @@ class PiecePlan:
         return picked
 
 
+def _case_georef(folder: Path, run: dict | None):
+    """The georeference of a case: its run record's (the run started with it), else
+    its georef.json; None without either or when the file does not read."""
+    from lagoon_format.geo import GeorefError, from_attributes, read
+
+    found = from_attributes(run or {})
+    if found is not None:
+        return found
+    try:
+        return read(folder)
+    except GeorefError:
+        return None
+
+
 def _grid_lines(pieces: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     """The distinct x and y of all points, to the millimetre (float32 coordinates of
     different MPI ranks differ in the last digits)."""
@@ -305,6 +319,9 @@ def convert(
         writer = StoreWriter.create(
             path, solver, run=run, created_by=f"lagoon-convert {__version__}", source="REEF3D VTK"
         )
+    georef = _case_georef(case.path, run)
+    if georef is not None and Store(path).georef is None:
+        writer.set_georef(georef)  # where the model lies (SPEC 1.2)
     added: dict[str, int] = {}
     skipped: dict[str, str] = {}
     vtk_bytes = 0

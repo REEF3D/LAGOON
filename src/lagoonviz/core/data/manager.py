@@ -21,6 +21,7 @@ import numpy as np
 
 from lagoonviz.core.colormaps import SERIES_PALETTES, plain_color
 from lagoonviz.core.contours import contour_levels, contour_segments
+from lagoonviz.core.data.background import Backgrounds
 from lagoonviz.core.data.divemesh_grid import (
     PREVIEW,
     Grid,
@@ -278,6 +279,8 @@ class DataManager:
         #: the command selected in the set-up editor: (case item, file, code, occurrence)
         self.highlight: tuple[str, str, str, int] | None = None
         self._lock = threading.Lock()
+        #: background maps and the georeference of cases
+        self.backgrounds = Backgrounds(self)
 
     # ------------------------------------------------------------- cases
     def reload(self, case_item_id: str | None = None) -> list[str]:
@@ -1351,7 +1354,7 @@ class DataManager:
         item = self.scene.get(item_id)
         if item.kind in SETUP_KINDS:
             return "setup"
-        if item.kind == "case":
+        if item.kind in ("case", "basemap"):
             return "both"
         if item.kind in DATA_KINDS:
             dataset = self.dataset(item_id)
@@ -1365,6 +1368,12 @@ class DataManager:
         if self.scene.mode != "setup":
             return True
         return self.item_mode(item_id) != "results"
+
+    # ------------------------------------------------------------- the Earth
+    def georef(self, item_id: str):
+        """The georeference of an item's case (a ``lagoon_format.geo.Georef``): its
+        georef.json, else its store's or run log's; None without one."""
+        return self.backgrounds.georef(item_id)
 
     # ------------------------------------------------------------- the set-up
     def case_folder(self, item_id: str) -> Path | None:

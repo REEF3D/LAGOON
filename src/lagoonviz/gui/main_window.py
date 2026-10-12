@@ -105,6 +105,10 @@ class MainWindow(QMainWindow):
         self.profiles = ProfilesPanel(self.bridge)
         self.console = ConsolePanel(self.bridge)
         self.setup_panel = SetupPanel(self.bridge, self.settings)
+        # the Map tab draws the domain in the 3D view's 2D top view
+        self.setup_panel.map_tab.drawDomain.connect(self.viewport.start_domain_drawing)
+        self.viewport.domainDrawn.connect(self.setup_panel.map_tab.domain_drawn)
+        self.viewport.modelTurned.connect(self.setup_panel.map_tab.model_turned)
 
         self.docks: dict[str, QDockWidget] = {}
         self._dock("scene", "Scene", self.scene_tree, Qt.LeftDockWidgetArea)

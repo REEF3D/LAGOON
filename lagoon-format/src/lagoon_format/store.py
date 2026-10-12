@@ -37,12 +37,14 @@ import numpy as np
 
 from lagoon_format.amr import AmrSet, AmrWriter
 from lagoon_format.bodies import BodySet, BodyWriter
+from lagoon_format.geo import KEY as GEOREF_KEY
+from lagoon_format.geo import Georef, from_attributes
 from lagoon_format.particles import ParticleSet, ParticleWriter
 from lagoon_format.series import ProfileSet, ProfileWriter, Table, write_table
 from lagoon_format.zarr3 import Array, Group, ZarrError, codecs_for, node_type
 
 FORMAT = "lagoon"
-VERSION = "0.3"
+VERSION = "0.4"
 GRIDS = ("sigma", "cartesian", "surface")
 #: per-output arrays of the grid itself, not variables
 GRID_ARRAYS = {"sigma": ("z_bed", "z_surface", "z_offset"), "cartesian": (), "surface": ("z",)}
@@ -370,6 +372,10 @@ class Store:
         self.info = info
         self.solver = str(info.get("solver", ""))
         self.run: dict[str, Any] | None = self.root.attrs.get("reef3d_run")
+        #: where the model coordinates lie (SPEC 1.2): the root's, else the run record's
+        self.georef: Georef | None = from_attributes(self.root.attrs) or from_attributes(
+            self.run or {}
+        )
         self.outputs: dict[str, Output] = {}
         for name in info.get("outputs", []):
             if name in self.root:
@@ -566,6 +572,7 @@ class StoreWriter:
         run: dict[str, Any] | None = None,
         created_by: str = "lagoon-format",
         source: str = "",
+        georef: Georef | None = None,
     ) -> StoreWriter:
         path = Path(path)
         if path.exists() and any(path.iterdir()):
@@ -587,8 +594,19 @@ class StoreWriter:
         attributes: dict[str, Any] = {"lagoon": info}
         if run:
             attributes["reef3d_run"] = run
+        if georef is not None:
+            attributes[GEOREF_KEY] = georef.to_dict()
         Group.create(path, attributes)
         return cls(path)
+
+    def set_georef(self, georef: Georef | None) -> None:
+        """Give the store a georeference (SPEC 1.2), or with None take it away."""
+        attrs = dict(self.root.attrs)
+        if georef is None:
+            attrs.pop(GEOREF_KEY, None)
+        else:
+            attrs[GEOREF_KEY] = georef.to_dict()
+        self.root.set_attrs(attrs)
 
     @classmethod
     def open(cls, path: str | Path) -> StoreWriter:

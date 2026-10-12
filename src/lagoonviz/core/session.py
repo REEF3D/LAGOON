@@ -27,6 +27,7 @@ from lagoonviz.core.commands import (
     OpenCase,
     RemoveItem,
     Rename,
+    SetGeoref,
     SetMany,
     SetMode,
     SetProperties,
@@ -327,6 +328,185 @@ class Session:
         if topo is not None and topo.key not in shown and case.setup_only:
             self.add_item("bathymetry", case=case_id, dataset=topo.key)  # DIVEMesh's bed
         self.scene.data_changed()
+
+    # ------------------------------------------------------------- the Earth
+    def georef(self, case: str | None = None):
+        """Where a case's model coordinates lie on the Earth (a
+        :class:`lagoon_format.geo.Georef`: CRS, origin, rotation, vertical datum), or
+        None. From its ``georef.json``, else its store or run log."""
+        return self.data.georef(self._case_id(case))
+
+    def set_georef(
+        self,
+        crs: str,
+        origin=(0.0, 0.0),
+        rotation_deg: float = 0.0,
+        vertical_datum: str = "",
+        z_offset: float = 0.0,
+        case: str | None = None,
+    ) -> None:
+        """Georeference a case: its model's (0, 0) lies at ``origin`` in ``crs``
+        ("EPSG:25833"), its x-axis turned ``rotation_deg`` counter-clockwise from east,
+        its z = 0 at ``z_offset`` in the vertical datum. Written to ``georef.json`` in
+        the case folder at once (REEF3D and DIVEMesh read it from there)."""
+        from lagoon_format.geo import Georef
+
+        from lagoonviz.core.geo.crs import is_geographic
+
+        if is_geographic(str(crs)):
+            raise ValueError(
+                f"{crs} is in degrees: the model needs a CRS in metres (UTM, NTM, ...)"
+            )
+        case_id = self._case_id(case)
+        current = self._georef_file(case_id)
+        georef = Georef(
+            str(crs),
+            (float(origin[0]), float(origin[1])),
+            float(rotation_deg),
+            str(vertical_datum or ""),
+            float(z_offset),
+            extra=dict(current.extra) if current is not None else {},
+        )
+        script = f"session.set_georef({str(crs)!r}, origin={[georef.origin[0], georef.origin[1]]!r}"
+        if georef.rotation_deg:
+            script += f", rotation_deg={georef.rotation_deg!r}"
+        if georef.vertical_datum:
+            script += f", vertical_datum={georef.vertical_datum!r}"
+        if georef.z_offset:
+            script += f", z_offset={georef.z_offset!r}"
+        script += f", case={case!r})" if case else ")"
+        self._set_georef(case_id, georef, script, "Set georeference")
+
+    def clear_georef(self, case: str | None = None) -> None:
+        """Remove a case's georef.json."""
+        case_id = self._case_id(case)
+        if self._georef_file(case_id) is None:
+            return
+        script = "session.clear_georef(" + (f"case={case!r})" if case else ")")
+        self._set_georef(case_id, None, script, "Remove georeference")
+
+    def turn_model(self, rotation_deg: float, about=None, case: str | None = None) -> None:
+        """Turn a case's model on the map to a new rotation (degrees counter-clockwise
+        from east), about a model point (default: the centre of its domain), which
+        stays where it is on the map. The domain keeps its model coordinates."""
+        case_id = self._case_id(case)
+        current = self.georef(case_id)
+        if current is None:
+            raise ValueError(f"{case_id}: set the georeference first (set_georef)")
+        if about is None:
+            domain = self.data.backgrounds.domain(case_id)
+            about = (
+                ((domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2)
+                if domain is not None
+                else (0.0, 0.0)
+            )
+        about = (float(about[0]), float(about[1]))
+        turned = current.rotated(float(rotation_deg), about)
+        if turned == current:
+            return
+        script = f"session.turn_model({float(rotation_deg)!r}, about={list(about)!r}"
+        script += f", case={case!r})" if case else ")"
+        self._set_georef(case_id, turned, script, "Turn the model")
+
+    def _georef_file(self, case_id: str):
+        from lagoon_format.geo import GeorefError
+        from lagoon_format.geo import read as read_georef
+
+        folder = self.data.case_folder(case_id)
+        if folder is None:
+            raise ValueError(f"{case_id}: no case folder")
+        try:
+            return read_georef(folder)
+        except GeorefError:
+            return None  # replaced by the new one
+
+    def _set_georef(self, case_id: str, georef, script: str, label: str) -> None:
+        folder = self.data.case_folder(case_id)
+        if folder is None:
+            raise ValueError(f"{case_id}: no case folder")
+        folder.mkdir(parents=True, exist_ok=True)
+        self.stack.execute(SetGeoref(folder, case_id, georef, script, label))
+
+    def set_domain(
+        self, x0: float, x1: float, y0: float, y1: float, case: str | None = None
+    ) -> None:
+        """The domain's horizontal extent (B 10 of control.txt, model coordinates);
+        its heights stay as they are (0 to 1 m if there are none)."""
+        if not (x1 > x0 and y1 > y0):
+            raise ValueError(f"the domain needs x0 < x1 and y0 < y1, got {x0, x1, y0, y1}")
+        case_id = self._case_id(case)
+        current = self.input_file("control.txt", case_id).values("B 10") or []
+        z0, z1 = (current[4], current[5]) if len(current) >= 6 else (0.0, 1.0)
+        values = [float(x0), float(x1), float(y0), float(y1), float(z0), float(z1)]
+        self.set_input("control.txt", "B 10", [round(v, 6) for v in values], case=case)
+
+    def make_geo_dat(
+        self,
+        source: str | Path,
+        crs: str | None = None,
+        method: str = "tin",
+        spacing: float | None = None,
+        depths: bool = False,
+        case: str | None = None,
+    ) -> int:
+        """Bathymetry for DIVEMesh: a GeoTIFF, ASCII grid or x y z file (in ``crs``,
+        or its own; ``"model"``: already in model coordinates) interpolated (``"tin"``,
+        ``"idw"``, ``"nearest"``) onto a grid over the domain and written as geo.dat
+        in model coordinates, every ``spacing`` metres (default: DIVEMesh's cell size,
+        B 1). ``depths``: the file gives depths (positive down). Turns G 10 on.
+        Returns the number of points written."""
+        from lagoon_format.geo import Georef
+
+        from lagoonviz.core.geo.bathy import geo_grid, grid_heights, load, write_geo_dat
+
+        case_id = self._case_id(case)
+        folder = self.data.case_folder(case_id)
+        if folder is None:
+            raise ValueError(f"{case_id}: no case folder")
+        if crs == "model":
+            georef = Georef("model")
+        else:
+            georef = self.georef(case_id)
+            if georef is None:
+                raise ValueError(
+                    "the case has no georeference: set it first (set_georef), or give "
+                    "crs='model' for a file in model coordinates"
+                )
+        domain = self.data.backgrounds.domain(case_id)
+        if domain is None:
+            raise ValueError("the domain is not known: set B 10 first (set_domain)")
+        if spacing is None:
+            spacing = self.input_file("control.txt", case_id).value("B 1") or 0.0
+        bathy = load(Path(source).expanduser(), "model" if crs == "model" else crs, depths)
+        if crs == "model":
+            bathy.crs = "model"
+            if bathy.raster is not None:
+                bathy.raster.crs = "model"
+        xs, ys = geo_grid(domain[:4], float(spacing or 0.0))
+        heights = grid_heights(bathy, georef, xs, ys, method)
+        count = write_geo_dat(folder / "geo.dat", xs, ys, heights)
+        setup = self.data.case_setup(case_id, create=True)
+        if setup is not None:
+            setup.geo_changed()
+        code = f"session.make_geo_dat({str(source)!r}"
+        for key, value, default in (
+            ("crs", crs, None),
+            ("method", method, "tin"),
+            ("spacing", spacing, None),
+            ("depths", depths, False),
+            ("case", case, None),
+        ):
+            if value != default:
+                code += f", {key}={value!r}"
+        self.record_output(code + ")")
+        self.set_input("control.txt", "G 10", [1], case=case)
+        self.scene.inputs_changed(case_id)
+        return count
+
+    def add_background_map(self, source: str = "Kartverket topo", **properties: Any) -> str:
+        """A background map round a georeferenced case: map tiles (``source``, see
+        ``kinds.BASEMAP_SOURCES``), or ``source="GeoTIFF file", file=...``."""
+        return self.add_item("basemap", source=source, **properties)
 
     @property
     def mode(self) -> str:

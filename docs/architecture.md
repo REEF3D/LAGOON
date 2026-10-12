@@ -11,6 +11,9 @@ lagoonviz.core     scene, kinds, commands, session -> no Qt, no GPU, no plotting
   core.data        VTK XML reader, REEF3D cases,
                    AMR, LAGOON stores, merging,
                    cache, loader                   -> NumPy only
+  core.geo         CRS transforms, map tiles,
+                   GeoTIFF, bathymetry -> geo.dat  -> NumPy, SciPy, Pillow
+                                                      (pyproj, rasterio if there)
 lagoonviz.plugins  readers for other codes (later) -> may import core, render
 lagoon_format      data format, MIT                -> never imports lagoonviz
 ```

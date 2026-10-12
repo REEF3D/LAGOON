@@ -119,6 +119,12 @@ Save input files*); a tab with edits not saved yet has a `*`, and LAGOON asks
 before closing. Comments, blank lines and the order of the file are kept: only
 the lines that changed are rewritten.
 
+## On the map
+
+The panel's *Map* tab places the case on the Earth: its georeference
+(`georef.json`), the domain drawn on a background map, and `geo.dat` made from a
+bathymetry survey ([Maps and the place of a case](maps.md)).
+
 ## Running DIVEMesh
 
 *Run DIVEMesh* (in the Set-up panel, the toolbar in the set-up, *File → Run

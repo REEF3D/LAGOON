@@ -289,6 +289,10 @@ class SceneRenderer:
         self._setup: dict[str, gfx.Group] = {}
         self._setup_bounds: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         self._bed_heights: tuple[np.ndarray, object] | None = None  # bed positions -> heights
+        #: background maps: a textured rectangle (or frame round the domain) per item,
+        #: outside ``content`` so they do not change the framed bounds
+        self._backgrounds: dict[str, tuple[gfx.Mesh, int]] = {}
+        self._outline: gfx.Line | None = None
 
     # ------------------------------------------------------------- items
     def _texture(self, colormap: str):
@@ -959,6 +963,122 @@ class SceneRenderer:
     def setup_ids(self) -> list[str]:
         return list(self._setup)
 
+    def update_background(self, shown) -> None:
+        """A background map item (:class:`BackgroundMap`): its image on a horizontal
+        rectangle in model coordinates, unlit, under the results."""
+        positions, triangles, uv = shown.mesh()
+        current = self._backgrounds.get(shown.item_id)
+        if current is not None and current[1] == id(shown.image):
+            mesh = current[0]
+            if (
+                _update_buffer(mesh.geometry, "positions", positions)
+                and _update_buffer(mesh.geometry, "texcoords", uv)
+                and _update_buffer(mesh.geometry, "indices", triangles)
+            ):
+                self._background_material(mesh.material, shown.opacity)
+                mesh.visible = shown.visible
+                return
+        self.remove_background(shown.item_id)
+        image = np.ascontiguousarray(shown.image, np.uint8)
+        try:
+            texture = gfx.Texture(image, dim=2, generate_mipmaps=True)
+        except TypeError:  # older pygfx
+            texture = gfx.Texture(image, dim=2)
+        try:
+            texture_map = gfx.TextureMap(
+                texture, filter="linear", mipmap_filter="linear", wrap="clamp"
+            )
+        except (AttributeError, TypeError):
+            texture_map = texture
+        material = gfx.MeshBasicMaterial(map=texture_map, side="both")
+        self._background_material(material, shown.opacity)
+        geometry = gfx.Geometry(
+            positions=np.array(positions, np.float32),
+            indices=np.array(triangles, np.uint32),
+            texcoords=np.array(uv, np.float32),
+        )
+        mesh = gfx.Mesh(geometry, material)
+        mesh.visible = shown.visible
+        mesh.receive_shadow = False
+        mesh.cast_shadow = False
+        self.scene.add(mesh)
+        self._backgrounds[shown.item_id] = (mesh, id(shown.image))
+
+    @staticmethod
+    def _background_material(material, opacity: float) -> None:
+        material.opacity = float(opacity)
+        for name, value in (("alpha_mode", "blend" if opacity < 1.0 else "solid"),):
+            try:
+                setattr(material, name, value)
+            except (AttributeError, ValueError, TypeError):
+                pass
+
+    def remove_background(self, item_id: str) -> None:
+        found = self._backgrounds.pop(item_id, None)
+        if found is not None:
+            self.scene.remove(found[0])
+
+    @property
+    def background_ids(self) -> list[str]:
+        return list(self._backgrounds)
+
+    def set_outline(self, corners: np.ndarray | None, color: str = HIGHLIGHT) -> None:
+        """A closed outline of four corners drawn over everything (the domain being
+        drawn in the set-up), or None for none."""
+        if corners is None or len(corners) < 2:
+            if self._outline is not None:
+                self.scene.remove(self._outline)
+                self._outline = None
+            return
+        ring = np.asarray(corners, np.float32).reshape(-1, 3)
+        ring = np.concatenate([ring, ring[:1]])
+        segments = np.ascontiguousarray(np.repeat(ring, 2, axis=0)[1:-1])  # a, b, b, c, ...
+        if self._outline is not None and _update_buffer(
+            self._outline.geometry, "positions", segments
+        ):
+            return
+        if self._outline is not None:
+            self.scene.remove(self._outline)
+        material = gfx.LineSegmentMaterial(thickness=2.5, color=color)
+        for name, value in (("depth_test", False), ("render_queue", 3950)):
+            try:
+                setattr(material, name, value)
+            except (AttributeError, ValueError, TypeError):
+                pass
+        self._outline = gfx.Line(gfx.Geometry(positions=segments), material)
+        self.scene.add(self._outline)
+
+    def plan_point(
+        self, x: float, y: float, size: tuple[float, float]
+    ) -> tuple[float, float] | None:
+        """The model point (x, y) under a point of the view (pixels from the top left)
+        in the 2D top view; None in any other view."""
+        camera = self.camera
+        if float(getattr(camera, "fov", 0.0) or 0.0) > 0:
+            return None  # perspective: no plan to map to (orthographic is fov 0)
+        direction = np.asarray(camera.world.forward, dtype=float)
+        if abs(abs(direction[2]) - 1.0) > 1e-6:
+            return None
+        width, height = float(camera.width), float(camera.height)
+        aspect = size[0] / max(size[1], 1)
+        if width / max(height, 1e-12) < aspect:
+            width = height * aspect
+        else:
+            height = width / aspect
+        zoom = float(getattr(camera, "zoom", 1.0) or 1.0)
+        width, height = width / zoom, height / zoom
+        # the camera's own right and up (a 2D view may be turned about the vertical)
+        try:
+            right = np.asarray(camera.world.right, dtype=float)[:2]
+            up = np.asarray(camera.world.up, dtype=float)[:2]
+        except AttributeError:  # older pygfx: the 2D top view is not turned
+            right, up = np.array([1.0, 0.0]), np.array([0.0, 1.0])
+        centre = np.asarray(camera.world.position, dtype=float)[:2]
+        u = (x / max(size[0], 1) - 0.5) * width
+        v = (0.5 - y / max(size[1], 1)) * height
+        point = centre + u * right + v * up
+        return float(point[0]), float(point[1])
+
     def remove_gauges(self, item_id: str) -> None:
         group = self._gauges.pop(item_id, None)
         if group is not None:
@@ -1034,6 +1154,9 @@ class SceneRenderer:
             self.remove_gauges(item_id)
         for item_id in list(self._setup):
             self.remove_setup(item_id)
+        for item_id in list(self._backgrounds):
+            self.remove_background(item_id)
+        self.set_outline(None)
         for key in list(self._contours):
             self.scene.remove(self._contours.pop(key))
         self._framed = False

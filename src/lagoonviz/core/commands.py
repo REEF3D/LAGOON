@@ -302,6 +302,49 @@ class EditInput(Command):
         return self.script
 
 
+class SetGeoref(Command):
+    """A case's georeference (its ``georef.json``) set or removed. The file is
+    written at once, as DIVEMesh and REEF3D read it from the case folder; undo puts
+    back what was there (or no file)."""
+
+    def __init__(self, folder: Any, case_id: str, after: Any, script: str, label: str):
+        from pathlib import Path
+
+        self.folder = Path(folder)
+        self.case_id = case_id
+        self.after = after  # a Georef, or None to remove it
+        self.before_text: str | None = None
+        self._read = False
+        self.script = script
+        self.label = label
+
+    def _path(self):
+        from lagoon_format.geo import FILE
+
+        return self.folder / FILE
+
+    def do(self, scene: Scene) -> None:
+        from lagoon_format.geo import write
+
+        if not self._read:
+            path = self._path()
+            self.before_text = path.read_text(encoding="utf-8") if path.is_file() else None
+            self._read = True
+        write(self.folder, self.after)
+        scene.inputs_changed(self.case_id)
+
+    def undo(self, scene: Scene) -> None:
+        path = self._path()
+        if self.before_text is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(self.before_text, encoding="utf-8")
+        scene.inputs_changed(self.case_id)
+
+    def to_script(self) -> str:
+        return self.script
+
+
 class SetMode(Command):
     """Switch between the results of a run and its set-up (see ``scene.MODES``).
 

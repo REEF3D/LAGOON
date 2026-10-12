@@ -94,6 +94,9 @@ class OffscreenView:
         self._camera_set = False
         #: what each "Case set-up" item was last drawn from (DataManager.setup_signature)
         self._setup_drawn: dict[str, tuple | None] = {}
+        #: the background maps' credits in the corner of the image (figures put
+        #: them in their axes instead)
+        self.credit = True
 
     def show(self, time: float | None = None) -> None:
         """Bring the scene to a time: load the frames, update meshes and gauges."""
@@ -139,6 +142,16 @@ class OffscreenView:
             else:
                 self.scene.update_setup(marks)
             self._setup_drawn[item_id] = signature
+        backgrounds = session.data.backgrounds
+        for item_id in self.scene.background_ids:
+            if item_id not in backgrounds.items():
+                self.scene.remove_background(item_id)
+        for item_id in backgrounds.items():  # background maps (made now if needed)
+            made = backgrounds.image(item_id) if session.data.drawn(item_id) else None
+            if made is None:
+                self.scene.remove_background(item_id)
+            else:
+                self.scene.update_background(backgrounds.shown(item_id, made))
         if not self._camera_set:
             plan = session.scene
             if plan.flat:
@@ -167,7 +180,34 @@ class OffscreenView:
         self.show(time)
         self.canvas.request_draw(lambda: self.scene.render(self.renderer))
         image = np.asarray(self.canvas.draw())
-        return image[..., :4].astype(np.uint8) if image.dtype != np.uint8 else image
+        image = image[..., :4].astype(np.uint8) if image.dtype != np.uint8 else image
+        if self.credit:
+            image = credit(image, self.session.data.backgrounds.attributions())
+        return image
+
+
+def credit(image: np.ndarray, credits: list[str]) -> np.ndarray:
+    """The credits of the background maps in the lower right corner of a frame
+    (their sources' terms ask for them)."""
+    if not credits:
+        return image
+    from PIL import Image, ImageDraw, ImageFont
+
+    picture = Image.fromarray(np.ascontiguousarray(image[..., :4]), "RGBA")
+    size = max(10, picture.height // 60)
+    try:
+        font = ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1
+        font = ImageFont.load_default()
+    draw = ImageDraw.Draw(picture, "RGBA")
+    text = " · ".join(credits)
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    pad = size // 3
+    x = picture.width - (right - left) - 2 * pad
+    y = picture.height - (bottom - top) - 2 * pad
+    draw.rectangle((x, y, picture.width, picture.height), fill=(255, 255, 255, 150))
+    draw.text((x + pad - left, y + pad - top), text, fill=(28, 35, 48, 255), font=font)
+    return np.asarray(picture, np.uint8)
 
 
 def write_movie(

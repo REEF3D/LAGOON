@@ -85,10 +85,56 @@ def _results_bed(session, case_id: str) -> np.ndarray | None:
     return None
 
 
+def _backdrop(source, case: str | None):
+    """The map of a session's (visible) background map item of the case, made now if
+    needed, or None."""
+    if isinstance(source, CaseSetup | str | Path):
+        return None
+    data = source.data
+    cases = [case] if case else [i.id for i in source.scene if i.kind == "case"]
+    if not cases:
+        return None
+    owner = data.case_item(cases[0])
+    for item_id in data.backgrounds.items():
+        item = source.scene.get(item_id)
+        found = data.case_item(item_id)
+        if item.visible and found is not None and owner is not None and found.id == owner.id:
+            return data.backgrounds.image(item_id)
+    return None
+
+
+def _backdrop_plan(ax, made) -> None:
+    """A background map under the plan view, the view keeping its extent, and the
+    credit its source asks for."""
+    if made is None:
+        return
+    x_limits, y_limits = ax.get_xlim(), ax.get_ylim()
+    x0, x1, y0, y1 = made.extent
+    ax.imshow(
+        made.image, origin="lower", extent=(x0, x1, y0, y1), zorder=-1, interpolation="bilinear"
+    )
+    ax.set_xlim(*x_limits)
+    ax.set_ylim(*y_limits)
+    if made.attribution:
+        ax.text(
+            0.995,
+            0.005,
+            made.attribution,
+            transform=ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=4.5,
+            color="#1c2330",
+            zorder=5,
+            bbox={"facecolor": "white", "alpha": 0.6, "edgecolor": "none", "pad": 0.6},
+        )
+
+
 def setup_figure(source, spec: FigureSpec | None = None, case: str | None = None):
     """The sketch of a case's set-up (``source``: a case folder, a CaseSetup or a
-    session)."""
+    session; a session's background map, when it has one, lies under the plan)."""
     setup, bed_points = _setup_of(source, case)
+    backdrop = _backdrop(source, case)
     spec = spec or FigureSpec.from_style("REEF3D")
     marks = [m for m in setup.marks() if m.group not in QUIET]
     bounds = setup.bounds()
@@ -140,7 +186,9 @@ def setup_figure(source, spec: FigureSpec | None = None, case: str | None = None
             _side_labels(ax, setup)
             if refinement is not None:
                 _level0_grid(ax, setup)
-            ax.set_aspect("equal", adjustable="datalim")
+            _backdrop_plan(ax, backdrop)
+            # with a map the limits stay the domain's: the box takes its proportions
+            ax.set_aspect("equal", adjustable="box" if backdrop is not None else "datalim")
             ax.set_xlabel("x [m]")
             ax.set_ylabel("y [m]")
             ax.set_title("Plan view", loc="left")

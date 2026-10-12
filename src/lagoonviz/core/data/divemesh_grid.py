@@ -219,3 +219,55 @@ def read_partition(case_dir: str | Path) -> np.ndarray:
 
     # the outlines of the planes, without the lines between their triangles
     return _feature_edges(points[np.asarray(triangles)])
+
+
+#: DIVEMesh's grid geometry (grid format v2): its sections, the georeference among them
+GEOMETRY = GRID_FOLDER / "grid-geometry.dat"
+
+
+def grid_sections(path: str | Path) -> dict[str, tuple[int, int]]:
+    """The sections of a DIVEMesh grid v2 file: tag -> (offset, size) of its payload.
+    Empty for a file that is not one (or not there)."""
+    import struct
+
+    found: dict[str, tuple[int, int]] = {}
+    try:
+        with open(path, "rb") as file:
+            head = file.read(16)
+            if len(head) < 16 or head[:6] not in (b"DMGRID", b"DMGEOM"):
+                return {}
+            if struct.unpack("<i", head[12:16])[0] != 0x01020304:
+                return {}  # written on a big-endian machine: not read here
+            while True:
+                tag = file.read(4)
+                size_bytes = file.read(8)
+                if len(tag) < 4 or len(size_bytes) < 8:
+                    break
+                size = struct.unpack("<q", size_bytes)[0]
+                name = tag.decode("ascii", "replace")
+                if name == "END " or size < 0:
+                    break
+                found[name] = (file.tell(), size)
+                file.seek(size, 1)
+    except OSError:
+        return {}
+    return found
+
+
+def read_grid_georef(case_dir: str | Path):
+    """The georeference DIVEMesh kept in its grid (the GREF section of
+    grid-geometry.dat, from the case's georef.json when DIVEMesh ran), or None."""
+    from lagoon_format.geo import Georef, GeorefError
+
+    path = Path(case_dir) / GEOMETRY
+    sections = grid_sections(path)
+    if "GREF" not in sections:
+        return None
+    offset, size = sections["GREF"]
+    try:
+        with open(path, "rb") as file:
+            file.seek(offset)
+            text = file.read(size).decode("utf-8")
+        return Georef.from_json(text)
+    except (OSError, UnicodeDecodeError, GeorefError):
+        return None

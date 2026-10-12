@@ -1,14 +1,17 @@
 # LAGOON data format specification
 
-Version: 0.3 (5 October 2026)
+Version: 0.4 (12 October 2026)
 Status: σ-grid volumes (FNPF, NHFLOW), Cartesian volumes (CFD), structured
 surfaces (free surface, bed), time series (wave gauges, 6DOF, forces), wave
 profiles, floating bodies, particles (CPM, NHFLOW), objects (DEM elements, ice
 floes, rod trees, mooring lines) and adaptive mesh refinement surfaces (FNPF,
 NHFLOW, SFLOW) are specified and implemented: the reference reader and writer
-`lagoon_format` 0.3.1, the converter `lagoon-convert`, and REEF3D's own store
+`lagoon_format` 0.4.0, the converter `lagoon-convert`, and REEF3D's own store
 output (`P 18`) for volumes, surfaces, bodies, NHFLOW particles, DEM elements,
 ice floes and AMR surfaces. How to make and read stores: [GUIDE.md](GUIDE.md).
+
+Changes in 0.4: the georeference of the model coordinates (section 1.2, root
+attribute `georef`). A 0.3 reader opens 0.4 stores and ignores it.
 
 Changes in 0.3: adaptive mesh refinement surfaces (section 11). A 0.2 reader
 opens 0.3 stores and ignores the new group.
@@ -88,7 +91,7 @@ Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
 {"zarr_format": 3, "node_type": "group",
  "attributes": {
    "lagoon": {
-     "format": "lagoon", "version": "0.3",
+     "format": "lagoon", "version": "0.4",
      "solver": "FNPF",
      "outputs": ["volume", "free_surface", "bed"],
      "created_by": "lagoon-convert 0.2.0 (lagoon-format 0.2.0)",
@@ -106,6 +109,42 @@ Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
   profile sets, body sets, particle sets and AMR sets (sections 7 to 11), optional.
 - `reef3d_run`: the `run` record of the run log (RUN.md), unchanged, when known.
 - `units`: optional, as in RUN.md (`{"length": "m", "time": "s", ...}`); SI if absent.
+- `georef`: optional, where the model coordinates lie on the Earth (section 1.2).
+
+### 1.2 Georeference
+
+REEF3D computes in model coordinates. The optional root attribute `georef` (the
+same block as the case's `georef.json` and the run record's `georef`, RUN.md)
+says where they lie:
+
+```json
+"georef": {"version": 1, "crs": "EPSG:25833", "origin": [270000.0, 7040000.0],
+           "rotation_deg": 30.0, "vertical_datum": "EPSG:5941", "z_offset": 0.0}
+```
+
+| key | meaning |
+|---|---|
+| `crs` | the horizontal coordinate reference system: `"EPSG:<code>"` or a WKT2 string; a projected CRS in metres for a georeferenced model |
+| `origin` | `[X0, Y0]`: the model's (0, 0) in the CRS |
+| `rotation_deg` | counter-clockwise angle from the CRS's x-axis (east) to the model's x-axis, in degrees; the compass bearing of the model's x-axis is `90 - rotation_deg` |
+| `vertical_datum` | optional: the vertical datum, `"EPSG:<code>"` (e.g. `EPSG:5941`, NN2000 height) or free text (e.g. `"LAT"`) |
+| `z_offset` | optional, default 0: the height of the model's z = 0 in the vertical datum [m] |
+| `version` | 1; a reader skips a block of a higher version |
+
+Model coordinates `(x, y, z)` to the CRS and the datum:
+
+```
+X = X0 + x cos(r) - y sin(r)
+Y = Y0 + x sin(r) + y cos(r)        r = rotation_deg
+Z = z + z_offset
+```
+
+The block is written by whoever sets up the case (LAGOON's set-up, by hand)
+into `georef.json` in the case folder; REEF3D copies it unchanged into the run
+record and into the root of the stores it writes, `lagoon-convert` into the
+stores it makes, and DIVEMesh into its grid (section `GREF` of
+`DIVEMesh_Grid/grid-geometry.dat`, grid format v2). Keys a reader does not know are kept.
+`lagoon_format.geo` reads and writes the block and transforms between the two.
 
 ## 2. Output groups
 

@@ -111,6 +111,6 @@ root["volume/blocks/b0000/velocity"][10]     # one MPI block at output 10
 `REEF3D_<SOLVER>.lagoon` instead of the VTU/VTP files of the volume, free
 surface, bed, 6DOF bodies, NHFLOW particles, DEM elements and FNPF ice floes,
 and of the AMR output (`.vtr`, `.vtm`) of FNPF, NHFLOW and SFLOW; 2: the store
-as well as these files. The store follows the LAGOON data format 0.3 (Zarr v3)
+as well as these files. The store follows the LAGOON data format 0.4 (Zarr v3)
 and opens in LAGOON, in ParaView with the LAGOON reader plugin and in Python with
 `lagoon-format` or `zarr`.

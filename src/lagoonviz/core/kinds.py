@@ -33,6 +33,19 @@ COLORMAPS = (
 )
 
 
+#: maps of the "Background map" item (lagoonviz.core.data.background.SOURCE_CHOICES)
+BASEMAP_SOURCES = (
+    "Kartverket topo",
+    "Kartverket grey",
+    "Kartverket nautical chart",
+    "Sentinel-2 2017 (satellite)",
+    "OpenStreetMap",
+    "GeoTIFF file",
+    "Tile server URL",
+)
+BASEMAP_PLACEMENTS = ("below the model", "at the still water level")
+
+
 @dataclass(frozen=True)
 class PropertySpec:
     default: Any
@@ -410,6 +423,43 @@ KINDS: dict[str, KindSpec] = {
             ),
             "partition": PropertySpec(
                 True, "MPI partition", tip="The planes between the MPI ranks (M 10)"
+            ),
+        },
+    ),
+    "basemap": KindSpec(
+        "Background map",
+        {
+            "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
+            "source": PropertySpec(
+                "Kartverket topo",
+                "Map",
+                choices=BASEMAP_SOURCES,
+                tip="Map tiles from a server (cached on disk), or a GeoTIFF of yours; the "
+                "case needs a georeference (Set-up, Map)",
+            ),
+            "file": PropertySpec(
+                "",
+                "File or URL",
+                tip="GeoTIFF file (an orthophoto, a chart), or a tile server URL with "
+                "{z}, {x} and {y}",
+            ),
+            "margin": PropertySpec(
+                0.5,
+                "Margin",
+                minimum=0.0,
+                maximum=10.0,
+                tip="How far the map reaches round the domain, in domain sizes",
+            ),
+            "placement": PropertySpec(
+                "below the model",
+                "Placed",
+                choices=BASEMAP_PLACEMENTS,
+                tip="Under the bed, or at the still water level round the domain (in 2D "
+                "it lies under everything)",
+            ),
+            "opacity": PropertySpec(1.0, "Opacity", minimum=0.0, maximum=1.0),
+            "pixels": PropertySpec(
+                2048, "Resolution [px]", minimum=256, maximum=8192, tip="Along the longer side"
             ),
         },
     ),

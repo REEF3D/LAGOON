@@ -43,6 +43,14 @@ class Run:
         return self.record.get("streams", {})
 
     @property
+    def georef(self):
+        """The case's georeference the run was started with (a
+        :class:`lagoon_format.geo.Georef`), or None."""
+        from lagoon_format.geo import from_attributes
+
+        return from_attributes(self.record)
+
+    @property
     def started(self) -> str:
         return str(self.record.get("started", ""))
 
