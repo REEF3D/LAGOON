@@ -61,6 +61,7 @@ PLAN_LAYERS = {
     "rods": 1.5,
     "particles": 2.2,
     "geodat": 3.5,  # over the water, under the set-up's marks
+    "seastate": 3.0,  # where the free surface would be
     "mooring": 2.0,
     "free_surface": 3.0,
     "amr": 3.0,
@@ -1056,6 +1057,10 @@ class DataManager:
         triangles = mesh.triangles
         if item.kind in WATER_KINDS and props.get("hide_dry", True):
             triangles = self._wet_triangles(item_id, mesh)
+        elif item.kind == "seastate" and props.get("hide_dry", True) and "wet" in mesh.point_data:
+            from lagoonviz.core.data.seastate import wet_triangles
+
+            triangles = wet_triangles(triangles, mesh.point_data["wet"])
         elif item.kind == "bathymetry" and props.get("hide_wet", False):
             level = self.still_water_level(item_id, mesh)
             triangles = self._kept(item_id, mesh, _dry_triangles(mesh, level))

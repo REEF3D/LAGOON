@@ -47,6 +47,12 @@
 
 ### Opening output
 
+- **SEASTATE**: its maps of the sea state (`REEF3D_SEASTATE_VTP`) open as a *Sea
+  state* item: Hs on the rainbow map, arrows of the mean wave direction, dry land
+  left out; every parameter it writes to colour by, and vectors made from them
+  (wave direction, Hs along it, wind, wave force, Stokes transport). Its AMR
+  output opens as an AMR surface coloured by Hs, with SEASTATE's levels and times
+  (its FieldData in the Piece, the time as TIME).
 - **Results opened from the set-up are shown**: opening a case that has results
   while LAGOON is in the set-up (a case set up in LAGOON, then run) switches to the
   results; before, its free surface and bed were opened but not drawn.

@@ -527,6 +527,19 @@ KINDS: dict[str, KindSpec] = {
             ),
         },
     ),
+    "seastate": KindSpec(
+        "Sea state",
+        {
+            **_data_source("sea state"),
+            **_colouring("Hs", "rainbow"),
+            **_grid_lines("of the map"),
+            **_contours(),
+            **_vectors(),
+            "hide_dry": PropertySpec(
+                True, "Hide dry land", tip="Leave out the map where SEASTATE has no water (wet)"
+            ),
+        },
+    ),
     "particles": KindSpec(
         "Particles",
         {

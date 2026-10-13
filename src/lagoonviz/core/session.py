@@ -112,6 +112,13 @@ class Session:
             variable = dataset.default_variable()
             if variable != KINDS[kind].properties["variable"].default:
                 props["variable"] = variable
+            if dataset.solver == "SEASTATE":  # Hs on Turbo, arrows where the waves go
+                from lagoonviz.core.data import seastate
+
+                if kind != "seastate" and variable == seastate.DEFAULT_VARIABLE:
+                    props["colormap"] = seastate.DEFAULT_COLORMAP
+                if kind == "seastate" and "wave_direction" in dataset.components:
+                    props["vectors_of"] = "wave_direction"
             children.append(AddItem(kind, None, props))
         volume = case.main_volume()
         if volume is not None:  # in the scene, switched off: a tick shows it

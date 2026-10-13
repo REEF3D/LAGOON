@@ -72,6 +72,7 @@ ROLES = {
     "solid": "structure",  # DIVEMesh's solids (a monopile, the blocks under a beach)
     "topo": "bathymetry",  # DIVEMesh's bed (its topo objects, geo.dat), before a run
     "geodat": "geodat",  # the points of geo.dat, as DIVEMesh reads them
+    "seastate": "seastate",  # SEASTATE's maps of the sea state (Hs, Tp, dir, ...)
 }
 #: roles of the case, not of a run: DIVEMesh's solids and bed, geo.dat's points
 CASE_ROLES = ("solid", "topo", "geodat")
@@ -111,6 +112,10 @@ _PIECE_STEP = re.compile(r"^(?P<stem>.+?)-(?P<piece>\d+)-(?P<step>\d+)$")
 _SERIAL_STEP = re.compile(r"^(?P<stem>.+?)-(?P<step>\d+)$")
 
 
+#: names of the vectors LAGOON makes from SEASTATE's scalars (not in the files)
+_DERIVED = ("wave_direction", "wave_vector", "wind", "wave_force", "stokes_transport")
+
+
 def _role(what: str, tag: str | None, kind: str) -> str:
     if tag in ("FSF", "FS"):
         return "free_surface"
@@ -136,6 +141,7 @@ ROLE_LABELS = {
     "solid": "solids",
     "topo": "bed",
     "geodat": "geo.dat points",
+    "seastate": "sea state",
 }
 
 
@@ -189,6 +195,10 @@ class Dataset:
         if self.role in CELL_DATA_ROLES:
             for name, info in header.cell_data.items():
                 components.setdefault(name, info.components)
+        if self.role == "seastate":  # vectors LAGOON makes from SEASTATE's scalars
+            from lagoonviz.core.data.seastate import derived_components
+
+            components.update(derived_components(components))
         return kind, components
 
     @property
@@ -202,7 +212,7 @@ class Dataset:
     @property
     def surface_like(self) -> bool:
         """2.5D surfaces whose points move only vertically."""
-        return self.role in ("free_surface", "bed")
+        return self.role in ("free_surface", "bed", "seastate")
 
     @property
     def steps(self) -> list[int]:
@@ -221,6 +231,7 @@ class Dataset:
             "bed": (),  # plain sand; elevation and sediment fields stay one click away
             "volume": ("velocity", "pressure", "elevation"),
             "particles": ("velocity", "age"),
+            "seastate": ("Hs",),
         }.get(self.role, ())
         if self.role in ("bed", "body", "structure", "dem", "ice", "rods"):
             return "none"  # drawn in their material colour, like sand or steel
@@ -291,6 +302,13 @@ class Dataset:
             arrays = [name for name in arrays if name in self.components]
             if self.role == "free_surface" and "eta" in self.components and "eta" not in arrays:
                 arrays.append("eta")  # needed for vertical exaggeration
+        if self.role == "seastate":  # derived vectors: read their scalars, and wet
+            from lagoonviz.core.data.seastate import sources
+
+            on_file = {n: c for n, c in self.components.items() if c == 1 or n not in _DERIVED}
+            arrays = sources(arrays, on_file)
+            if arrays is not None and "wet" in on_file and "wet" not in arrays:
+                arrays.append("wet")
         if self.role in PLAIN_ROLES:
             if self.role == "rods" and arrays is not None and "radius" in self.components:
                 arrays = sorted({*arrays, "radius"})
@@ -328,6 +346,10 @@ class Dataset:
                 triangles, edges = self._triangles, self._edges
             merged = plan.apply(light)
             points, data = merged.points, merged.point_data
+        if self.role == "seastate":
+            from lagoonviz.core.data.seastate import add_derived
+
+            data = add_derived(data)
         mesh = SurfaceMesh(
             points=np.ascontiguousarray(points, dtype=np.float32),
             triangles=triangles,
@@ -715,6 +737,15 @@ class Case:
         return max(volumes, key=len) if volumes else None
 
     def main_datasets(self) -> dict[str, Dataset]:
+        """What to show when the case is opened (see :meth:`_main_datasets`), and
+        SEASTATE's sea state map of the latest run, if it wrote one."""
+        chosen = self._main_datasets()
+        maps = [d for d in self.datasets.values() if d.role == "seastate"]
+        if maps:
+            chosen["seastate"] = preferred(maps)
+        return chosen
+
+    def _main_datasets(self) -> dict[str, Dataset]:
         """What to show when the case is opened: the most recent run's surfaces.
 
         A folder can hold output of several runs (REEF3D overwrites only the files it
@@ -1190,7 +1221,8 @@ def _dataset_from_folder(folder: Path) -> list[Dataset]:
             tag = match.group("tag") or tag
             what = "VTU" if match.group("what") == "VTU" else "VTP"
         kind = "UnstructuredGrid" if what == "VTU" else "PolyData"
-        role = _role(what, tag, kind)
+        # SEASTATE's maps (REEF3D_SEASTATE_VTP, no tag): the sea state, not a surface
+        role = "seastate" if solver == "SEASTATE" and what == "VTP" else _role(what, tag, kind)
         key = f"{solver.lower()}_{role}"
         datasets += _datasets_by_run(key, solver, role, frames, folder, owners)
     return datasets

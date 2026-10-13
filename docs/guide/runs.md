@@ -25,6 +25,18 @@ particles, and the text files of wave gauges (`WSF`), wave profiles (`WSFLINE`),
 6DOF motions and forces. Each MPI rank's piece is read and joined; the parallel
 files (`.pvtu`, `.pvtp`) say which pieces belong together.
 
+**SEASTATE**, REEF3D's spectral wave model, writes maps of the sea state
+(`REEF3D_SEASTATE_VTP`): they open as a *Sea state* item, coloured by the
+significant wave height `Hs` on the rainbow map (as SEASTATE's own maps), with
+arrows where the waves go and dry land left out. *Colour by* offers `Tm01`,
+`Tm-10`, `Tp`, `dir`, `spread`, `depth` and whatever the run wrote besides (the
+wind `U10x`, `U10y`; coupled to a flow solver, the wave forces `Fx`, `Fy` and the
+Stokes transport `MStx`, `MSty`; with rollers `roller`, `Dr`, `Dw`); *Vectors of*
+`wave_direction` (unit arrows), `wave_vector` (as long as Hs), `wind`,
+`wave_force` and `stokes_transport`, which LAGOON makes from them. SEASTATE's AMR
+output (`REEF3D_SEASTATE_AMR`) opens as an AMR surface coloured by Hs, its
+refined patches outlined, at the times SEASTATE wrote.
+
 Opening a case adds the case and its main items to the scene: the free surface
 (or the AMR surface, when the run wrote one) and the bed, the objects of the same
 run (bodies, mooring lines, structures, DEM elements, ice floes, rod trees,

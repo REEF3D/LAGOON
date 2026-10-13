@@ -944,3 +944,125 @@ def write_grid_preview(case: Path, x, y, z) -> Path:
             out.write(array.tobytes())
         out.write(b"\n</AppendedData>\n</VTKFile>\n")
     return path
+
+
+# ----------------------------------------------------------------- SEASTATE
+SEASTATE_WD = 3.0  # the still water level SEASTATE writes its map at
+SEASTATE_DIR = 30.0  # degrees, counter-clockwise from x: where the waves go
+
+
+def seastate_hs(x: np.ndarray, frame: int) -> np.ndarray:
+    """Waves growing along x, higher at later outputs."""
+    return (0.5 + 0.1 * x + 0.05 * frame).astype(np.float32)
+
+
+def write_seastate(root: Path, frames: int = 3, ranks: int = 2, wind: bool = True) -> Path:
+    """REEF3D::SEASTATE's maps, as seastate_vtp writes them: per output a .pvtp and a
+    VTP per rank (REEF3D_SEASTATE_VTP/REEF3D-SEASTATE-<output>-<rank>.vtp), a plane at
+    the still water level, triangles, the nodal sea state parameters. The last x
+    column is dry (wet 0)."""
+    folder = root / "REEF3D_SEASTATE_VTP"
+    folder.mkdir(parents=True, exist_ok=True)
+    cuts = np.linspace(0, NX - 1, ranks + 1).round().astype(int)
+    for frame in range(frames):
+        names = []
+        for rank in range(ranks):
+            points, data, conn, offs = _surface_piece(cuts[rank], cuts[rank + 1], frame, "bed")
+            x = points[:, 0]
+            points[:, 2] = SEASTATE_WD
+            hs = seastate_hs(x, frame)
+            wet = (x < (NX - 1) * DX - 1e-6).astype(np.float32)
+            data = {
+                "Hs": hs * wet,
+                "Tm01": np.full_like(x, 6.0),
+                "Tm-10": np.full_like(x, 7.0),
+                "Tp": np.full_like(x, 8.0),
+                "dir": np.full_like(x, SEASTATE_DIR),
+                "spread": np.full_like(x, 25.0),
+                "depth": (SEASTATE_WD - 0.1 * x).astype(np.float32),
+                "wet": wet,
+            }
+            if wind:
+                data["U10x"] = np.full_like(x, 10.0)
+                data["U10y"] = np.full_like(x, 0.0)
+            name = f"REEF3D-SEASTATE-{frame:08d}-{rank + 1:06d}.vtp"
+            write_piece(folder / name, "PolyData", points, data, conn, offs)
+            names.append(name)
+        write_parallel(
+            folder / f"REEF3D-SEASTATE-{frame:08d}.pvtp",
+            "PolyData",
+            names,
+            {n: 1 for n in data},
+        )
+    return root
+
+
+def write_seastate_amr(root: Path, frames: int = 2) -> Path:
+    """SEASTATE's AMR output, as seastate_amr writes it: ASCII rectilinear grids (a
+    coarse one and a refined patch at level 1) with cell data, and a .vtm per output
+    listing them."""
+    folder = root / "REEF3D_SEASTATE_AMR"
+    folder.mkdir(parents=True, exist_ok=True)
+
+    def grid(path: Path, xs, ys, level: int, t: float, frame: int) -> None:
+        nx, ny = len(xs) - 1, len(ys) - 1
+        cx = 0.5 * (np.asarray(xs[:-1]) + np.asarray(xs[1:]))
+        cells = np.tile(cx, ny)
+        arrays = {
+            "Hs": seastate_hs(cells, frame),
+            "Tm01": np.full(cells.size, 6.0),
+            "Tp": np.full(cells.size, 8.0),
+            "dir": np.full(cells.size, SEASTATE_DIR),
+            "spread": np.full(cells.size, 25.0),
+            "depth": np.full(cells.size, 2.0),
+        }
+        body = "".join(
+            f'<DataArray type="Float32" Name="{name}" format="ascii">'
+            + " ".join(f"{v:g}" for v in values)
+            + "</DataArray>\n"
+            for name, values in arrays.items()
+        )
+        ints = " ".join("1" for _ in range(cells.size))
+        body += f'<DataArray type="Int32" Name="wet" format="ascii"> {ints}</DataArray>\n'
+        zeros = " ".join("0" for _ in range(cells.size))
+        body += f'<DataArray type="Int32" Name="covered" format="ascii"> {zeros}</DataArray>\n'
+        path.write_text(
+            '<?xml version="1.0"?>\n'
+            '<VTKFile type="RectilinearGrid" version="0.1" byte_order="LittleEndian">\n'
+            f'<RectilinearGrid WholeExtent="0 {nx} 0 {ny} 0 0">\n'
+            f'<Piece Extent="0 {nx} 0 {ny} 0 0">\n'
+            f'<FieldData><DataArray type="Float64" Name="TIME" NumberOfTuples="1" '
+            f'format="ascii">{t}</DataArray><DataArray type="Int32" Name="level" '
+            f'NumberOfTuples="1" format="ascii">{level}</DataArray></FieldData>\n'
+            "<Coordinates>\n"
+            '<DataArray type="Float64" Name="x" format="ascii">'
+            + " ".join(f"{v:g}" for v in xs)
+            + "</DataArray>\n"
+            '<DataArray type="Float64" Name="y" format="ascii">'
+            + " ".join(f"{v:g}" for v in ys)
+            + "</DataArray>\n"
+            '<DataArray type="Float64" Name="z" format="ascii"> 0</DataArray>\n'
+            "</Coordinates>\n<CellData>\n" + body + "</CellData>\n</Piece>\n"
+            "</RectilinearGrid>\n</VTKFile>\n"
+        )
+
+    for frame in range(frames):
+        t = 10.0 * frame
+        files = []
+        for patch, (xs, ys, level) in enumerate(
+            (
+                (np.arange(0.0, 9.0, 1.0), np.arange(0.0, 5.0, 1.0), 0),
+                (np.arange(2.0, 4.01, 0.5), np.arange(1.0, 3.01, 0.5), 1),
+            )
+        ):
+            name = f"REEF3D-SEASTATE-AMR-{frame:08d}-00000-{patch:04d}.vtr"
+            grid(folder / name, xs, ys, level, t, frame)
+            files.append(name)
+        sets = "".join(f'<DataSet index="{i}" file="{f}"/>\n' for i, f in enumerate(files))
+        (folder / f"REEF3D-SEASTATE-AMR-{frame:08d}.vtm").write_text(
+            '<?xml version="1.0"?>\n<VTKFile type="vtkMultiBlockDataSet" version="1.0" '
+            'byte_order="LittleEndian">\n<vtkMultiBlockDataSet>\n'
+            + sets
+            + "</vtkMultiBlockDataSet>\n</VTKFile>\n"
+        )
+    return root

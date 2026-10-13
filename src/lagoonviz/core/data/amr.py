@@ -142,13 +142,17 @@ def _grid_header(path: Path) -> _GridHeader:
     for axis, element in zip("xyz", piece.findall("Coordinates/DataArray"), strict=False):
         coordinates[axis] = _array_info(element, byte_order)
     level, time = 0, None
-    for element in root.findall("RectilinearGrid/FieldData/DataArray"):
+    # (SEASTATE writes its FieldData in the Piece, with the time as TIME)
+    for element in [
+        *root.findall("RectilinearGrid/FieldData/DataArray"),
+        *root.findall("RectilinearGrid/Piece/FieldData/DataArray"),
+    ]:
         values = (element.text or "").split()
         if not values:
             continue
         if element.get("Name") == "level":
             level = int(float(values[0]))
-        elif element.get("Name") == "TimeValue":
+        elif element.get("Name") in ("TimeValue", "TIME"):
             time = float(values[0])
     return _GridHeader(header, extent, coordinates, level, time)
 
@@ -333,7 +337,7 @@ class AmrDataset(Dataset):
         return f"{self.solver} AMR surface"
 
     def default_variable(self) -> str:
-        for name in ("eta", "elevation"):
+        for name in ("eta", "elevation", "Hs"):  # (Hs: SEASTATE's AMR maps)
             if name in self.components:
                 return name
         return next(iter(self.components), "none")

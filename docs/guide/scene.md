@@ -26,6 +26,7 @@ script the session writes ([Scripting](../scripting.md)).
 | Volume | the outside of the volume output |
 | Slice | the volume cut by an x, y or z plane |
 | Iso-surface | where a variable of the volume has a given value |
+| Sea state | SEASTATE's map of the sea state: Hs, periods, direction, with arrows where the waves go ([Opening runs](runs.md)) |
 | Iso-volume | the part of the volume where a variable lies in a range (the water of a CFD run: phi from 0 up) |
 | Streamlines | lines along a vector field, through the volume, in a plane or on the free surface |
 | Time series | wave gauges, 6DOF motions or forces, plotted under the 3D view |

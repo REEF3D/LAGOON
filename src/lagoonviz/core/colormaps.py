@@ -168,6 +168,7 @@ PLAIN_COLORS = {
     "rods": "#9c7a4f",
     "particles": "#d0a050",  # sand grains
     "geodat": "#2b4c7e",
+    "seastate": "#4f8fcf",
     "iso_surface": "#8fb3d1",
     "iso_volume": "#4f8fcf",
     "streamlines": "#2b4c7e",
