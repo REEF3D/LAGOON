@@ -12,6 +12,7 @@ QWidget
   Range max: number 0.179 in [-1e+09, 1e+09] decimals 3
   Range [%]: number 100 in [1, 500] decimals 3
   Opacity: number 1 in [0, 1] decimals 3
+  Grid lines: choice 'off' of ['off', 'dark', 'white']
   Contour lines of: choice 'none' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'eta']
   Contour lines: number 10 in [2, 100] decimals 0
   Vectors of: choice 'none' of ['none', 'velocity']

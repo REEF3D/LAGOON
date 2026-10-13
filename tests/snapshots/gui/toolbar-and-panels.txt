@@ -17,6 +17,7 @@ Bed
 Volume
 Slice
 Iso-surface
+Iso-volume
 Time series
 
 Save screenshot...

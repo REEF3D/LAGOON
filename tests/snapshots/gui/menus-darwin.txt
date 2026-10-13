@@ -38,6 +38,7 @@ Add
   Time series
   Slice
   Iso-surface
+  Iso-volume
   Streamlines
   Wave profile
   Gauge
