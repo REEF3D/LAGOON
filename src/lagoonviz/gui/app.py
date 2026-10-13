@@ -102,6 +102,28 @@ def setup_logging() -> None:
         force=True,
     )
     logging.getLogger("lagoon").info("LAGOON %s, Python %s", lagoonviz.__version__, sys.version)
+    trace_crashes(target)
+
+
+def trace_crashes(target: str | None) -> None:
+    """Leave a trace of a crash in the log: Python errors no window caught (Qt only
+    prints them), and the threads' stacks when the process itself dies (a segfault
+    in a library, an abort)."""
+    import faulthandler
+
+    log = logging.getLogger("lagoon")
+
+    def logged(kind, value, tb) -> None:
+        log.error("unexpected error", exc_info=(kind, value, tb))
+
+    sys.excepthook = logged
+    try:
+        # kept open for as long as LAGOON runs: faulthandler writes to it at the end
+        stream = open(target, "a", encoding="utf-8") if target else sys.stderr  # noqa: SIM115
+        faulthandler.enable(stream, all_threads=True)
+        trace_crashes.stream = stream
+    except (OSError, ValueError, AttributeError):
+        pass
 
 
 if __name__ == "__main__":
