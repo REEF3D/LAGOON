@@ -259,11 +259,14 @@ class Session:
             return False
         return True
 
-    def create_case(self, folder: str | Path, case: str | None = None) -> Path:
+    def create_case(
+        self, folder: str | Path, case: str | None = None, overwrite: bool = False
+    ) -> Path:
         """Put a case (a draft started on the map) in its folder: its input files
         (edits saved first), georef.json, geo.dat and what DIVEMesh made are copied
         there, and the case is that folder from now on (named after it). The folder
-        is made if needed and must be empty. Returns the folder."""
+        is made if needed; files of the same names already in it are kept unless
+        ``overwrite`` (then an error says which). Returns the folder."""
         import shutil
 
         case_id = self._case_id(case)
@@ -271,16 +274,29 @@ class Session:
         if source is None:
             raise ValueError(f"{case_id}: no case folder")
         target = Path(folder).expanduser()
-        if target.exists() and any(target.iterdir()):
-            raise ValueError(f"{target} is not empty: choose a new or empty folder")
         if target.resolve() == source.resolve():
             return target
+        clashes = self.case_file_clashes(target, case_id)
+        if clashes and not overwrite:
+            raise FileExistsError(
+                f"{target} already has {', '.join(clashes)}: choose another folder, or "
+                "overwrite them"
+            )
         self.save_inputs(case_id)
         shutil.copytree(source, target, dirs_exist_ok=True)
         self.set_property(case_id, "path", str(target))
         self.rename(case_id, target.name)
         self.scene.inputs_changed(case_id)
         return target
+
+    def case_file_clashes(self, folder: str | Path, case: str | None = None) -> list[str]:
+        """The files and folders of a case that a folder already has (what
+        :meth:`create_case` would overwrite there)."""
+        source = self.data.case_folder(self._case_id(case))
+        target = Path(folder).expanduser()
+        if source is None or not target.is_dir():
+            return []
+        return sorted(p.name for p in source.iterdir() if (target / p.name).exists())
 
     def set_mode(self, mode: str) -> None:
         """Work on the results ("results") or on the set-up ("setup") of the cases.

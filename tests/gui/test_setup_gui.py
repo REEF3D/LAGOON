@@ -214,3 +214,37 @@ def test_a_case_from_the_map(window, tmp_path, monkeypatch):
     tab.create_case()
     assert not session.is_draft(case_id) and (target / "georef.json").is_file()
     assert tab.draft.text() == ""
+
+
+def test_make_geo_dat_asks_where_and_moves_a_draft_there(window, tmp_path, monkeypatch):
+    import numpy as np
+    from PySide6.QtWidgets import QFileDialog
+
+    sys.path.insert(0, str(TESTS / "core"))
+    from test_geo import plane, write_geotiff
+
+    x0, y0, size, n = 269000.0, 7042000.0, 10.0, 300
+    cols, rows = np.meshgrid(np.arange(n) + 0.5, np.arange(n) + 0.5)
+    terrain = tmp_path / "terrain.tif"
+    write_geotiff(terrain, plane(x0 + cols * size, y0 - rows * size), x0, y0, size)
+    session = window.session
+    case_id = session.new_case_from_map((63.425, 10.40), length=400.0)
+    window.setup_panel.refresh()
+    tab = window.setup_panel.map_tab
+    tab.bathy_source.setCurrentIndex(tab.bathy_source.findData("file"))
+    tab._bathymetry = terrain
+    target = tmp_path / "nidelva"
+    target.mkdir()
+    (target / "notes.txt").write_text("mine")  # other files may be there
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName", lambda *a, **k: (str(target / "geo.dat"), "")
+    )
+    tab.make_geo_dat()
+    assert not session.is_draft(case_id) and session.data.case_folder(case_id) == target
+    assert (target / "geo.dat").is_file() and (target / "georef.json").is_file()
+    assert (target / "notes.txt").read_text() == "mine"
+    assert str(target) in panel_message(window)
+
+
+def panel_message(window) -> str:
+    return window.setup_panel.message.text()

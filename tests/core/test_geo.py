@@ -570,9 +570,10 @@ def test_a_case_started_on_the_map(tmp_path):
     # into its folder
     session.set_domain(0.0, 1500.0, 0.0, 600.0, case=case)
     target = tmp_path / "bergen"
-    with pytest.raises(ValueError, match="not empty"):
-        (tmp_path / "full").mkdir()
-        (tmp_path / "full" / "x").write_text("x")
+    (tmp_path / "full").mkdir()
+    (tmp_path / "full" / "control.txt").write_text("B 1 1\n")
+    assert session.case_file_clashes(tmp_path / "full", case) == ["control.txt"]
+    with pytest.raises(FileExistsError, match="control.txt"):
         session.create_case(tmp_path / "full", case=case)
     session.create_case(target, case=case)
     assert not session.is_draft(case) and session.scene.get(case).name == "bergen"

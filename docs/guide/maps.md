@@ -82,9 +82,13 @@ GeoTIFF and only the part of a large one that is needed).
   (`.asc`) or an x y z text file (soundings: spaces, tabs, commas or semicolons;
   a header line is skipped). Give its CRS if the file does not name one
   (`EPSG:4326` for longitude and latitude, `model` for model coordinates) and
-  tick *depths* when the values are positive down. *Make geo.dat* carries it onto
-  a grid over the domain (every B 1 metres, two cells beyond the domain) and
-  writes `geo.dat` in model coordinates, with `G 10 1` in `control.txt`. A raster
+  tick *depths* when the values are positive down. *Make geo.dat* asks where to
+  store `geo.dat` (a draft case started on the map goes to that folder, with its
+  input files and `georef.json`; for a case in its own folder the dialog starts
+  there, and a place elsewhere gets a copy: DIVEMesh reads the one in the case
+  folder), carries the bathymetry onto a grid over the domain (every B 1 metres,
+  two cells beyond the domain) and writes it in model coordinates, with `G 10 1`
+  in `control.txt`. A raster
   is sampled bilinearly; scattered points are interpolated linearly on their
   triangulation (*TIN*), by inverse distance or from the nearest point; outside
   the data the nearest height is taken. Downloads are kept in the cache.

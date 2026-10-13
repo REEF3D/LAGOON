@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -667,21 +668,21 @@ class MapTab(QWidget):
         self.refresh()
 
     def make_geo_dat(self) -> None:
+        """Ask where geo.dat is stored (a draft case moves to that folder), then make
+        it: downloaded for the domain, or from the file chosen."""
         key = self.bathy_source.currentData()
-        if key != "file":
-            self._download_geo_dat(key)
+        if key == "file" and self._bathymetry is None:
             return
-        if self._bathymetry is None:
+        chosen = self._where_geo_dat()
+        if chosen is None:
             return
-        crs = self.file_crs.text().strip() or None
-        method = METHODS[self.method.currentText()]
         spacing = self.spacing.value() or None
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            count = [0]
+        if key == "file":
+            crs = self.file_crs.text().strip() or None
+            method = METHODS[self.method.currentText()]
 
             def make():
-                count[0] = self.session.make_geo_dat(
+                return self.session.make_geo_dat(
                     self._bathymetry,
                     crs=crs,
                     method=method,
@@ -690,33 +691,79 @@ class MapTab(QWidget):
                     case=self.case_id,
                 )
 
-            ok = self._run(make)
-        finally:
-            QApplication.restoreOverrideCursor()
-        if ok:
-            self.message.emit(
-                f"geo.dat: {count[0]:,} points in model coordinates, G 10 1; now Run DIVEMesh",
-                False,
-            )
+        else:
+            self.message.emit("Downloading the bathymetry for the domain…", False)
 
-    def _download_geo_dat(self, key: str) -> None:
-        """geo.dat from the bathymetry on the web, for the domain."""
-        spacing = self.spacing.value() or None
+            def make():
+                return self.session.make_geo_dat(key, spacing=spacing, case=self.case_id)
+
         count = [0]
-
-        def make():
-            count[0] = self.session.make_geo_dat(key, spacing=spacing, case=self.case_id)
-
-        self.message.emit("Downloading the bathymetry for the domain…", False)
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            ok = self._run(make)
+            ok = self._run(lambda: count.__setitem__(0, make()))
         finally:
             QApplication.restoreOverrideCursor()
-        if ok:
-            sources = " and ".join(self.session.geo_sources) or "the web"
-            self.message.emit(
-                f"geo.dat: {count[0]:,} points from {sources}, in model coordinates, G 10 1; "
-                "now Run DIVEMesh",
-                False,
-            )
+        if not ok:
+            return
+        folder = self.session.data.case_folder(self.case_id)
+        stored = folder / "geo.dat"
+        note = ""
+        if chosen.resolve() != stored.resolve():  # elsewhere, or another name: a copy
+            import shutil
+
+            try:
+                shutil.copyfile(stored, chosen)
+                note = f", a copy as {chosen}"
+            except OSError as error:
+                note = f" (the copy as {chosen} failed: {error})"
+        sources = " and ".join(self.session.geo_sources) or "the file"
+        self.message.emit(
+            f"geo.dat: {count[0]:,} points from {sources}, stored in {folder}{note}; "
+            "G 10 1 in control.txt. Now Run DIVEMesh",
+            False,
+        )
+
+    def _where_geo_dat(self) -> Path | None:
+        """Where geo.dat is stored, asked in a save dialog; None: cancelled.
+
+        DIVEMesh reads geo.dat in the case folder: a draft case (started on the map)
+        moves to the folder chosen, with its input files and georef.json; for a case
+        with its own folder the dialog starts there, and a place elsewhere (or another
+        name) gets a copy."""
+        folder = self.session.data.case_folder(self.case_id)
+        if folder is None:
+            return None
+        draft = self.session.is_draft(self.case_id)
+        start = Path.home() / "geo.dat" if draft else folder / "geo.dat"
+        title = (
+            "Store geo.dat: the case goes to this folder (with control.txt, ctrl.txt, georef.json)"
+            if draft
+            else "Store geo.dat (DIVEMesh reads the one in the case folder)"
+        )
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, title, str(start), "geo.dat (*.dat);;All files (*)"
+        )
+        if not chosen:
+            return None
+        chosen = Path(chosen)
+        target = chosen.parent
+        if draft:
+            clashes = self.session.case_file_clashes(target, self.case_id)
+            clashes = [c for c in clashes if c != "geo.dat"]  # the dialog asked already
+            if clashes:
+                answer = QMessageBox.question(
+                    self,
+                    "Store geo.dat",
+                    f"{target} already has {', '.join(clashes)}. Put this case there and "
+                    "overwrite them?",
+                    QMessageBox.Yes | QMessageBox.Cancel,
+                    QMessageBox.Cancel,
+                )
+                if answer != QMessageBox.Yes:
+                    return None
+            if not self._run(
+                lambda: self.session.create_case(target, case=self.case_id, overwrite=True),
+                f"The case is in {target} now",
+            ):
+                return None
+        return chosen
