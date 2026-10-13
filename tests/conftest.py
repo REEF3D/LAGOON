@@ -4,6 +4,11 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # tests never fetch map tiles from the servers (they give their own fetch)
 os.environ.setdefault("LAGOON_OFFLINE", "1")
+# cases started on the map go to a folder of the test run, not the user's drafts
+if "LAGOON_DRAFTS" not in os.environ:
+    import tempfile
+
+    os.environ["LAGOON_DRAFTS"] = tempfile.mkdtemp(prefix="lagoon-drafts-")
 
 import pytest  # noqa: E402
 from reef3d_fixtures import make_run  # noqa: E402

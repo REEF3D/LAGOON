@@ -473,3 +473,120 @@ def test_a_model_needs_a_crs_in_metres(fjord):
     session.open_case(fjord)
     with pytest.raises(ValueError, match="metres"):
         session.set_georef("EPSG:4326", origin=(10.4, 63.4))
+
+
+# ------------------------------------------------------------------ a case from the map
+def test_coordinates_typed_in_many_ways():
+    from lagoonviz.core.geo.places import parse_coordinates
+
+    for text in (
+        "63.44, 10.40",
+        "63.44,10.40",
+        "63.44N 10.4E",
+        "10.4E 63.44N",
+        "lat 63.44 lon 10.40",
+        "lon=10.4, lat=63.44",
+        "63,44 10,40",
+    ):
+        place = parse_coordinates(text)
+        assert place is not None and (place.lat, place.lon) == pytest.approx((63.44, 10.4)), text
+    assert parse_coordinates("33.9S 18.4E").lat == pytest.approx(-33.9)
+    for text in ("Nidelva", "Trondheim 2", "63.44 10.40 5", "95 10"):
+        assert parse_coordinates(text) is None, text
+
+
+def test_place_names_from_kartverket_and_openstreetmap():
+    import json
+
+    from lagoonviz.core.geo.places import search
+
+    def fetch(url):
+        if "geonorge" in url:
+            assert "sok=Nidelva" in url
+            return json.dumps(
+                {
+                    "navn": [
+                        {
+                            "skrivemåte": "Nidelva",
+                            "navneobjekttype": "Elv",
+                            "kommuner": [{"kommunenavn": "Trondheim"}],
+                            "representasjonspunkt": {"øst": 10.40, "nord": 63.43},
+                        }
+                    ]
+                }
+            ).encode()
+        return json.dumps(
+            [
+                {
+                    "name": "Nidelva",
+                    "lat": "63.4301",
+                    "lon": "10.4003",
+                    "type": "river",
+                    "display_name": "Nidelva, Trondheim, Trøndelag, Norge",
+                },
+                {
+                    "name": "Nidelva",
+                    "lat": "58.4",
+                    "lon": "8.7",
+                    "type": "river",
+                    "display_name": "Nidelva, Arendal, Agder, Norge",
+                },
+            ]
+        ).encode()
+
+    found = search("Nidelva", fetch)
+    assert [p.source for p in found] == ["Kartverket", "OpenStreetMap"]  # the same once
+    assert found[0].where == "Trondheim" and "Elv" in found[0].label()
+    assert search("63.44, 10.40", fetch)[0].kind == "coordinates"
+
+    def down(url):
+        raise OSError("no network")
+
+    with pytest.raises(OSError, match="place search"):
+        search("Nidelva", down)
+
+
+def test_a_case_started_on_the_map(tmp_path):
+    from lagoonviz.core.session import drafts_folder
+
+    session = Session()
+    case = session.new_case_from_map((63.44, 10.40), length=2000.0)
+    assert session.is_draft(case) and session.mode == "setup" and session.scene.plan_view
+    folder = session.data.case_folder(case)
+    assert folder.parent == drafts_folder() and folder.name.startswith("untitled-")
+    georef = session.georef(case)
+    assert georef.crs == "EPSG:25832"
+    lon, lat = transformer("EPSG:25832", "EPSG:4326")(*georef.to_world(1000.0, 500.0))
+    assert (lat, lon) == pytest.approx((63.44, 10.40), abs=1e-7)  # the domain's centre
+    maps = [i for i in session.scene if i.kind == "basemap"]
+    assert len(maps) == 1 and maps[0].properties["source"] == "Kartverket topo"
+    assert session.input_file("control.txt", case).values("B 10") == [0, 2000, 0, 1000, 0, 1]
+    # moved somewhere else: the same domain there, the map kept
+    session.place_case((60.39, 5.32), case=case)
+    assert session.georef(case).crs == "EPSG:25832"
+    assert len([i for i in session.scene if i.kind == "basemap"]) == 1
+    # into its folder
+    session.set_domain(0.0, 1500.0, 0.0, 600.0, case=case)
+    target = tmp_path / "bergen"
+    with pytest.raises(ValueError, match="not empty"):
+        (tmp_path / "full").mkdir()
+        (tmp_path / "full" / "x").write_text("x")
+        session.create_case(tmp_path / "full", case=case)
+    session.create_case(target, case=case)
+    assert not session.is_draft(case) and session.scene.get(case).name == "bergen"
+    assert session.data.case_folder(case) == target
+    assert "B 10 0 1500 0 600 0 1" in (target / "control.txt").read_text().replace(".0 ", " ")
+    assert Georef.from_json((target / FILE).read_text()) == session.georef(case)
+    session.undo()
+    session.undo()
+    assert session.is_draft(case)
+
+
+def test_a_place_outside_norway_gets_openstreetmap():
+    session = Session()
+    case = session.new_case_from_map((-33.9, 18.4), length=500.0)
+    assert session.georef(case).crs == "EPSG:32734"
+    assert (
+        next(i for i in session.scene if i.kind == "basemap").properties["source"]
+        == "OpenStreetMap"
+    )

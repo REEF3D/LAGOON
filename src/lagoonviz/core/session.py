@@ -14,6 +14,7 @@ a script, and the GUI's history can be saved as a script::
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -154,6 +155,127 @@ class Session:
             if not target.exists():
                 target.write_text(f"// {program} input of {folder.name}, started in LAGOON\n")
         return self.open_case(folder, name)
+
+    # ------------------------------------------------------------- a case from the map
+    def new_case_from_map(
+        self,
+        place=None,
+        length: float = 1000.0,
+        width: float | None = None,
+        name: str | None = None,
+    ) -> str:
+        """Start a case on the map: a draft case (in LAGOON's drafts folder, see
+        :func:`drafts_folder`) with a domain ``length`` x ``width`` metres (B 10, cells
+        of a hundredth of the length, B 1) centred on ``place`` (a name or
+        "lat, lon" to search, a :class:`~lagoonviz.core.geo.places.Place`, or (lat,
+        lon)), a background map round it, in the set-up's 2D view. Draw the domain,
+        add the bathymetry, then :meth:`create_case` puts it in its folder. Returns
+        the case id."""
+        width = length / 2 if width is None else float(width)
+        folder = _new_draft()
+        cell = float(f"{length / 100:.2g}")
+        (folder / "control.txt").write_text(
+            "// DIVEMesh input, started on the map in LAGOON\n"
+            f"B 1 {cell:g}\n"
+            f"B 10 0.0 {float(length):g} 0.0 {float(width):g} 0.0 1.0\n"
+        )
+        (folder / "ctrl.txt").write_text("// REEF3D input, started on the map in LAGOON\n")
+        case_id = self.open_case(folder, name)
+        if place is not None:
+            self.place_case(place, case=case_id)
+        if self.scene.mode != "setup":
+            self.set_mode("setup")
+        self.set_plan_view(True, "top")
+        return case_id
+
+    def place_case(self, place, case: str | None = None, crs: str | None = None):
+        """Put the centre of a case's domain at a place on the Earth (a name or "lat,
+        lon" searched for, the first place found; a Place; or (lat, lon)): its
+        georeference, in its CRS (the UTM zone of the place when it has none yet),
+        the rotation kept; ``crs``: another CRS in metres to use. Gives the case a
+        background map if it has none. Returns the place."""
+        from lagoonviz.core.geo.crs import is_geographic, transformer, utm_for
+        from lagoonviz.core.geo.places import Place, search
+
+        if isinstance(place, str):
+            found = search(place)
+            if not found:
+                raise ValueError(f"no place found for {place!r}")
+            place = found[0]
+        elif not isinstance(place, Place):
+            lat, lon = (float(v) for v in place)
+            place = Place(f"{lat:.5f}, {lon:.5f}", lat, lon, "coordinates")
+        case_id = self._case_id(case)
+        current = self.georef(case_id)
+        if crs is None or is_geographic(crs):  # given: a CRS in metres, else the case's
+            crs = current.crs if current is not None else None
+        if crs is None or is_geographic(crs):
+            crs = utm_for(place.lon, place.lat)
+        rotation = current.rotation_deg if current is not None else 0.0
+        big_x, big_y = transformer("EPSG:4326", crs)(place.lon, place.lat)
+        domain = self.data.backgrounds.domain(case_id)
+        cx, cy = ((domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2) if domain else (0, 0)
+        r = math.radians(rotation)
+        origin = (
+            round(float(big_x) - (cx * math.cos(r) - cy * math.sin(r)), 3),
+            round(float(big_y) - (cx * math.sin(r) + cy * math.cos(r)), 3),
+        )
+        self.set_georef(
+            crs,
+            origin=origin,
+            rotation_deg=rotation,
+            vertical_datum=current.vertical_datum if current is not None else "",
+            z_offset=current.z_offset if current is not None else 0.0,
+            case=case,
+        )
+        owner = self.data.case_item(case_id)
+        has_map = any(
+            i.kind == "basemap" and (c := self.data.case_item(i.id)) is not None and c is owner
+            for i in self.scene
+        )
+        if not has_map:
+            from lagoonviz.core.data.background import SOURCE_CHOICES
+            from lagoonviz.core.geo.tiles import source_for
+
+            key = source_for(place.lon, place.lat).key
+            source = next(label for label, k in SOURCE_CHOICES.items() if k == key)
+            self.add_background_map(source, case=case_id)
+        return place
+
+    def is_draft(self, case: str | None = None) -> bool:
+        """Whether a case is a draft started on the map, not yet in a folder of its
+        own (:meth:`create_case`)."""
+        folder = self.data.case_folder(self._case_id(case))
+        if folder is None:
+            return False
+        try:
+            folder.resolve().relative_to(drafts_folder().resolve())
+        except ValueError:
+            return False
+        return True
+
+    def create_case(self, folder: str | Path, case: str | None = None) -> Path:
+        """Put a case (a draft started on the map) in its folder: its input files
+        (edits saved first), georef.json, geo.dat and what DIVEMesh made are copied
+        there, and the case is that folder from now on (named after it). The folder
+        is made if needed and must be empty. Returns the folder."""
+        import shutil
+
+        case_id = self._case_id(case)
+        source = self.data.case_folder(case_id)
+        if source is None:
+            raise ValueError(f"{case_id}: no case folder")
+        target = Path(folder).expanduser()
+        if target.exists() and any(target.iterdir()):
+            raise ValueError(f"{target} is not empty: choose a new or empty folder")
+        if target.resolve() == source.resolve():
+            return target
+        self.save_inputs(case_id)
+        shutil.copytree(source, target, dirs_exist_ok=True)
+        self.set_property(case_id, "path", str(target))
+        self.rename(case_id, target.name)
+        self.scene.inputs_changed(case_id)
+        return target
 
     def set_mode(self, mode: str) -> None:
         """Work on the results ("results") or on the set-up ("setup") of the cases.
@@ -906,6 +1028,35 @@ class Session:
         namespace: dict[str, Any] = {}
         exec(compile(source, "<lagoon script>", "exec"), namespace)
         return namespace["session"]
+
+
+def drafts_folder() -> Path:
+    """Where cases started on the map wait for their folder: ``LAGOON_DRAFTS``, else
+    the user's application data (``~/Library/Application Support/LAGOON/Drafts`` on
+    a Mac)."""
+    import sys
+
+    given = os.environ.get("LAGOON_DRAFTS")
+    if given:
+        return Path(given).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "LAGOON" / "Drafts"
+    if sys.platform.startswith("win"):
+        return Path(os.environ.get("APPDATA", Path.home())) / "LAGOON" / "Drafts"
+    base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return base / "lagoon" / "drafts"
+
+
+def _new_draft() -> Path:
+    """A new, empty draft folder: untitled-1, untitled-2, ..."""
+    root = drafts_folder()
+    root.mkdir(parents=True, exist_ok=True)
+    n = 1
+    while (root / f"untitled-{n}").exists():
+        n += 1
+    folder = root / f"untitled-{n}"
+    folder.mkdir()
+    return folder
 
 
 def direction_of(azimuth: float, elevation: float) -> tuple[float, float, float]:

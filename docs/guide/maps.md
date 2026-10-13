@@ -5,6 +5,31 @@ the Earth; with it LAGOON lays a map or a satellite image under the results and
 the set-up, the domain can be drawn on the map, and a bathymetry survey becomes
 DIVEMesh's `geo.dat`.
 
+## Starting a case on the map
+
+*File → New case from map…* asks where: a place name (*Nidelva*, *Trondheim
+havn*: Kartverket's place names in Norway, OpenStreetMap's elsewhere) or a
+latitude and longitude (`63.44, 10.40`). LAGOON starts a draft case there: a
+domain of 1000 × 500 m centred on the place, in its UTM zone, with a background
+map, in the set-up's 2D view and the *Map* tab. Then
+
+1. drag the domain where it belongs (*Draw on the map*; Shift + drag turns it),
+2. add the bathymetry (*Make geo.dat*) and the commands of `control.txt` and
+   `ctrl.txt`,
+3. *Create case…* asks for a folder (new or empty) and puts the case there: its
+   input files, `georef.json`, `geo.dat` and what DIVEMesh made. From then on the
+   case is that folder.
+
+Until then the draft lives in LAGOON's drafts folder
+(`~/Library/Application Support/LAGOON/Drafts` on a Mac; `LAGOON_DRAFTS` moves
+it), so nothing is lost when LAGOON closes: open it again from there. In a script:
+
+```python
+case = session.new_case_from_map("Nidelva", length=2000.0)
+session.place_case((63.44, 10.40))   # move it
+session.create_case("~/runs/nidelva")
+```
+
 ## The georeference
 
 A case keeps it in `georef.json` in its folder:
@@ -36,10 +61,12 @@ GeoTIFF and only the part of a large one that is needed).
 
 *Set-up → Map*:
 
+- **Find the place**: a place name or a latitude and longitude, then *Find*: the
+  centre of the domain goes there (in the place's UTM zone when the case has no
+  CRS yet), and the case gets a background map. When several places have the
+  name, the list under the field offers the others.
 - **Georeference**: the CRS, the origin, the rotation, the vertical datum;
-  *Apply* writes `georef.json`, *Remove* takes it away. *Place at* puts the
-  centre of the domain at a latitude and longitude (`63.44, 10.40`), choosing the
-  UTM zone when no CRS is set yet: the quickest way to start.
+  *Apply* writes `georef.json`, *Remove* takes it away.
 - **Domain**: *Draw on the map* turns the view to 2D from the top; drag the
   domain's rectangle there (B 10, snapped to the cell size B 1). **Shift + drag**
   turns the model on the map about the domain's centre: the domain stays

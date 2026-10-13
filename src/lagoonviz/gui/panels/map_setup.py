@@ -3,10 +3,12 @@
 """The Map tab of the set-up: where a case lies on the Earth, its domain on the map,
 and its bathymetry.
 
+- *Find the place*: a place name (Kartverket, OpenStreetMap) or latitude, longitude;
+  the domain's centre goes there (in the place's UTM zone when the case has no CRS
+  yet), with a background map. A case started on the map (File → New case from
+  map) is a draft until *Create case…* puts it in a folder of its own.
 - *Georeference*: the CRS (EPSG code, or WKT with pyproj), the model's origin in it,
-  its rotation and vertical datum; *Apply* writes ``georef.json``. *Place* puts the
-  domain's centre at a longitude and latitude (and picks the UTM zone when no CRS is
-  set yet).
+  its rotation and vertical datum; *Apply* writes ``georef.json``.
 - *Domain*: *Draw on the map* — drag the domain's rectangle in the 2D top view
   (B 10), Shift + drag turns the model on the map about the domain's centre; or type
   the extent and the rotation.
@@ -20,7 +22,6 @@ and its bathymetry.
 from __future__ import annotations
 
 import logging
-import math
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -46,11 +47,9 @@ from lagoonviz.core.geo.crs import (
     COMMON,
     CrsError,
     describe,
-    is_geographic,
     is_known,
-    transformer,
-    utm_for,
 )
+from lagoonviz.core.geo.places import search
 from lagoonviz.core.kinds import BASEMAP_SOURCES
 
 log = logging.getLogger(__name__)
@@ -75,6 +74,8 @@ class MapTab(QWidget):
     drawDomain = Signal(str)
     #: a message for the panel's status line: (text, error)
     message = Signal(str, bool)
+    #: the user wants to start a case on the map (the main window asks where)
+    newCase = Signal()
 
     def __init__(self, panel, parent=None) -> None:
         super().__init__(parent)
@@ -116,13 +117,28 @@ class MapTab(QWidget):
         self.remove_button.setToolTip("Take georef.json away")
         self.remove_button.clicked.connect(self.remove)
         self.place = QLineEdit()
-        self.place.setPlaceholderText("63.4400, 10.4000  (latitude, longitude)")
+        self.place.setPlaceholderText("Nidelva, Trondheim havn … or 63.44, 10.40")
         self.place.setToolTip(
-            "Put the centre of the domain here (degrees); the UTM zone is chosen when no "
-            "CRS is set yet"
+            "A place name (Kartverket in Norway, OpenStreetMap elsewhere) or latitude, "
+            "longitude: the centre of the domain goes there (in its UTM zone when the case "
+            "has no CRS yet)"
         )
-        self.place_button = QPushButton("Place")
+        self.place.returnPressed.connect(self.place_domain)
+        self.place_button = QPushButton("Find")
         self.place_button.clicked.connect(self.place_domain)
+        self.results = QComboBox()
+        self.results.setToolTip("The places found: choose one to put the domain there")
+        self.results.activated.connect(self._result_chosen)
+        self.results.hide()
+        # a case started on the map lives in the drafts folder until it gets its own
+        self.draft = QLabel()
+        self.draft.setWordWrap(True)
+        self.create_button = QPushButton("Create case…")
+        self.create_button.setToolTip(
+            "Put the case in a folder of its own: input files, georef.json, geo.dat and "
+            "DIVEMesh's grid are copied there"
+        )
+        self.create_button.clicked.connect(self.create_case)
         georef = QGroupBox("Georeference")
         form = QFormLayout(georef)
         form.addRow("CRS", self.crs)
@@ -139,10 +155,6 @@ class MapTab(QWidget):
         form.addRow("Rotation", turn)
         form.addRow("Vertical datum", self.datum)
         form.addRow("z = 0 at", self.z_offset)
-        place = QHBoxLayout()
-        place.addWidget(self.place, 1)
-        place.addWidget(self.place_button)
-        form.addRow("Place at", place)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         buttons.addWidget(self.remove_button)
@@ -250,6 +262,27 @@ class MapTab(QWidget):
         layout = QVBoxLayout(inner)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.addWidget(self.hint)
+        self.start_button = QPushButton("New case from map…")
+        self.start_button.setToolTip(
+            "Find a place, start a case there with a domain and a map (File → New case "
+            "from map)"
+        )
+        self.start_button.clicked.connect(lambda: self.newCase.emit())
+        layout.addWidget(self.start_button)
+        find = QGroupBox("Find the place")
+        rows = QVBoxLayout(find)
+        row = QHBoxLayout()
+        row.addWidget(self.place, 1)
+        row.addWidget(self.place_button)
+        rows.addLayout(row)
+        rows.addWidget(self.results)
+        self.draft_box = QWidget()
+        row = QHBoxLayout(self.draft_box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.draft, 1)
+        row.addWidget(self.create_button)
+        layout.addWidget(self.draft_box)
+        layout.addWidget(find)
         for group in (georef, domain, background, bathymetry):
             layout.addWidget(group)
         layout.addStretch(1)
@@ -302,18 +335,27 @@ class MapTab(QWidget):
         self.turn_button.setEnabled(georef is not None)
         if not has_case:
             hint = (
-                "Open a case first (File → Open case…), or start one with File → New "
-                "case…: the map works on a case's folder."
+                "Start a case on the map with File → New case from map…, or open one "
+                "(File → Open case…): the map works on a case."
             )
         elif georef is None:
             hint = (
-                "Place the case on the Earth first: type a latitude and longitude under "
-                "Place at and press Place (or choose the CRS and origin, then Apply)."
+                "Find the place first: a place name or latitude, longitude, then Find "
+                "(or choose the CRS and origin under Georeference, then Apply)."
             )
         else:
             hint = ""
         self.hint.setText(hint)
         self.hint.setVisible(bool(hint))
+        self.start_button.setVisible(not has_case)
+        draft = has_case and self.session.is_draft(self.case_id)
+        self.draft.setText(
+            "A draft started on the map (not in a folder of its own yet): find the place, "
+            "draw the domain, add the bathymetry, then"
+            if draft
+            else ""
+        )
+        self.draft_box.setVisible(draft)
         self.geo_button.setEnabled(has_case and self._bathymetry is not None)
         # the fields follow the files when those change, not while being typed in
         shown = (self.case_id, georef)
@@ -385,38 +427,58 @@ class MapTab(QWidget):
         self._run(lambda: self.session.clear_georef(case=self.case_id), "georef.json removed")
 
     def place_domain(self) -> None:
-        """The domain's centre at a latitude and longitude."""
-        parts = self.place.text().replace(";", ",").replace(",", " ").split()
+        """Find the place typed (a name, or latitude, longitude) and put the domain's
+        centre there; with several places found, the list offers the others."""
+        text = self.place.text().strip()
+        if not text or not self.case_id:
+            self.message.emit("Type a place name, or latitude, longitude", True)
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            lat, lon = float(parts[0]), float(parts[1])
-        except (IndexError, ValueError):
-            self.message.emit("Give the place as latitude, longitude (degrees)", True)
+            found = search(text)
+        except OSError as error:
+            self.message.emit(f"{error} (offline? type latitude, longitude)", True)
             return
-        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-            self.message.emit("Latitude -90 … 90, longitude -180 … 180", True)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not found:
+            self.message.emit(f"Nothing found for {text!r}", True)
             return
-        crs = self._crs_text()
-        if not crs or is_geographic(crs):
-            crs = utm_for(lon, lat)  # a CRS in metres
-        try:
-            big_x, big_y = transformer("EPSG:4326", crs)(lon, lat)
-        except CrsError as error:
-            self.message.emit(str(error), True)
+        self.results.blockSignals(True)
+        self.results.clear()
+        for place in found:
+            self.results.addItem(place.label(), place)
+        self.results.setCurrentIndex(0)
+        self.results.blockSignals(False)
+        self.results.setVisible(len(found) > 1)
+        self._place(found[0])
+
+    def _result_chosen(self, index: int) -> None:
+        place = self.results.itemData(index)
+        if place is not None:
+            self._place(place)
+
+    def _place(self, place) -> None:
+        has_georef = self.session.data.georef(self.case_id) is not None
+        crs = None if has_georef else (self._crs_text() or None)
+        self._run(
+            lambda: self.session.place_case(place, case=self.case_id, crs=crs),
+            f"{place.name}: the domain's centre is there",
+        )
+
+    def create_case(self) -> None:
+        """The draft case into a folder of its own."""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Folder of the case (make one with New Folder; it must be empty)",
+            str(Path.home()),
+        )
+        if not folder:
             return
-        domain = self.session.data.backgrounds.domain(self.case_id)
-        cx, cy = ((domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2) if domain else (0, 0)
-        r = math.radians(self.rotation.value())
-        # the origin that puts the model's (cx, cy) at the place
-        x0 = float(big_x) - (cx * math.cos(r) - cy * math.sin(r))
-        y0 = float(big_y) - (cx * math.sin(r) + cy * math.cos(r))
-        index = self.crs.findData(crs)
-        if index >= 0:
-            self.crs.setCurrentIndex(index)
-        else:
-            self.crs.setEditText(crs)
-        self.x0.setValue(x0)
-        self.y0.setValue(y0)
-        self.apply()
+        self._run(
+            lambda: self.session.create_case(folder, case=self.case_id),
+            f"The case is in {folder} now",
+        )
 
     def set_extent(self) -> None:
         x0, x1, y0, y1 = (box.value() for box in self.extent)

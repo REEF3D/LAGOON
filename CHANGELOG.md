@@ -4,9 +4,14 @@
 
 ### Maps and the place of a case
 
+- **A case started on the map**: *File → New case from map…* finds the place (a
+  name from Kartverket or OpenStreetMap, or latitude, longitude), starts a draft
+  case there with a domain and a map; *Create case…* puts it in its folder when
+  it is ready. `session.new_case_from_map(...)`, `place_case(...)`,
+  `create_case(...)`.
 - **Georeference**: a case's `georef.json` (CRS, origin, rotation, vertical datum)
-  says where its model coordinates lie; *Set-up → Map* edits it (*Place at* a
-  latitude and longitude), `session.set_georef(...)`, `session.turn_model(...)`.
+  says where its model coordinates lie; *Set-up → Map* edits it (*Find* a place
+  by name or latitude, longitude), `session.set_georef(...)`, `session.turn_model(...)`.
   LAGOON transforms WGS 84, ETRS89, Web Mercator, UTM and NTM itself, any CRS with
   pyproj (`pip install "lagoon-viz[geo]"`) ([Maps](guide/maps.md)).
 - **Background map** item: Kartverket's maps and nautical chart, Sentinel-2

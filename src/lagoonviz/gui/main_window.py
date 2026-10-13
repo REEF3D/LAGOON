@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
     QFileDialog,
+    QInputDialog,
     QMainWindow,
     QMessageBox,
     QSizePolicy,
@@ -109,6 +110,7 @@ class MainWindow(QMainWindow):
         self.setup_panel.map_tab.drawDomain.connect(self.viewport.start_domain_drawing)
         self.viewport.domainDrawn.connect(self.setup_panel.map_tab.domain_drawn)
         self.viewport.modelTurned.connect(self.setup_panel.map_tab.model_turned)
+        self.setup_panel.map_tab.newCase.connect(self.new_case_from_map_dialog)
 
         self.docks: dict[str, QDockWidget] = {}
         self._dock("scene", "Scene", self.scene_tree, Qt.LeftDockWidgetArea)
@@ -172,6 +174,12 @@ class MainWindow(QMainWindow):
             "&New case...",
             self.new_case_dialog,
             tip="Start a case in a folder: control.txt and ctrl.txt, edited in the Set-up panel",
+        )
+        self.act_new_case_map = self._action(
+            "New case from &map...",
+            self.new_case_from_map_dialog,
+            tip="Start a case on the map: find the place, draw the domain, add the "
+            "bathymetry, then Create case puts it in a folder",
         )
         self.act_open_file = self._action(
             "Open output &file...",
@@ -351,6 +359,7 @@ class MainWindow(QMainWindow):
         file_menu = bar.addMenu("&File")
         file_menu.addAction(self.act_open_case)
         file_menu.addAction(self.act_new_case)
+        file_menu.addAction(self.act_new_case_map)
         file_menu.addAction(self.act_open_file)
         file_menu.addAction(self.act_reload)
         file_menu.addAction(self.act_follow)
@@ -821,6 +830,57 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"New case {Path(path).name}: add DIVEMesh's commands (control.txt: domain B 10, "
             "cells B 1) and REEF3D's (ctrl.txt) in the Set-up panel, then Save",
+            15000,
+        )
+        return case_id
+
+    def new_case_from_map_dialog(self) -> str | None:
+        """File → New case from map: where (a place name or latitude, longitude), then
+        a draft case there, with a map, in the set-up's 2D view and the Map tab."""
+        from lagoonviz.core.geo.places import search
+
+        text, ok = QInputDialog.getText(
+            self,
+            "New case from map",
+            "Where? A place name (Nidelva, Trondheim havn) or latitude, longitude "
+            "(63.44, 10.40). Leave it empty to find the place later in the Map tab.",
+        )
+        if not ok:
+            return None
+        place = None
+        if text.strip():
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                found = search(text)
+            except OSError as error:
+                found = []
+                QMessageBox.warning(self, "Place search", f"{error}\nType latitude, longitude.")
+            finally:
+                QApplication.restoreOverrideCursor()
+            if len(found) > 1:
+                labels = [p.label() for p in found]
+                chosen, ok = QInputDialog.getItem(
+                    self, "New case from map", "Which one?", labels, 0, False
+                )
+                if not ok:
+                    return None
+                found = [found[labels.index(chosen)]]
+            place = found[0] if found else None
+            if place is None:
+                self.statusBar().showMessage(f"Nothing found for {text!r}", 8000)
+        try:
+            case_id = self.session.new_case_from_map(place)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, "Could not start the case", str(error))
+            return None
+        self.setup_panel.refresh()
+        dock = self.docks["setup"]
+        dock.show()
+        dock.raise_()
+        self.setup_panel.tabs.setCurrentWidget(self.setup_panel.map_tab)
+        self.statusBar().showMessage(
+            "A draft case on the map: Draw on the map (the domain), Bathymetry (geo.dat), "
+            "then Create case… puts it in a folder",
             15000,
         )
         return case_id

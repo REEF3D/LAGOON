@@ -162,7 +162,8 @@ def test_the_map_tab_places_the_case(window, flume, monkeypatch):
     panel = window.setup_panel
     tab = panel.map_tab
     assert panel.tabs.tabText(2) == "Map" and not tab.remove_button.isEnabled()
-    assert tab.place_button.isEnabled() and "Place at" in tab.hint.text()
+    assert tab.place_button.isEnabled() and "Find the place" in tab.hint.text()
+    assert not tab.session.is_draft()
     # the domain's centre at Trondheim: the UTM zone is chosen
     tab.place.setText("63.44, 10.40")
     tab.place_domain()
@@ -192,4 +193,22 @@ def test_the_map_tab_places_the_case(window, flume, monkeypatch):
 def test_the_map_tab_says_to_open_a_case_first(window):
     tab = window.setup_panel.map_tab
     assert not tab.place_button.isEnabled() and not tab.map_button.isEnabled()
-    assert "Open a case first" in tab.hint.text()
+    assert "New case from map" in tab.hint.text()
+
+
+def test_a_case_from_the_map(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("63.44, 10.40", True))
+    case_id = window.new_case_from_map_dialog()
+    session = window.session
+    assert case_id and session.is_draft(case_id) and session.mode == "setup"
+    tab = window.setup_panel.map_tab
+    assert window.setup_panel.tabs.currentWidget() is tab
+    assert session.georef(case_id).crs == "EPSG:25832"
+    assert tab.create_button.isEnabled() and "draft" in tab.draft.text()
+    target = tmp_path / "nidelva"
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(target))
+    tab.create_case()
+    assert not session.is_draft(case_id) and (target / "georef.json").is_file()
+    assert tab.draft.text() == ""
