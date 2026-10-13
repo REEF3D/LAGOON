@@ -1,0 +1,19 @@
+QWidget
+  Name: text 'Iso-volume'
+  Kind: label 'Iso-volume'
+  Visible: checkbox '' on
+  Case: choice 'first case' of ['first case', 'run [case-1]']
+  Dataset: choice 'automatic (NHFLOW volume)' of ['automatic (NHFLOW volume)', 'NHFLOW bed [nhflow_bed]', 'NHFLOW free surface [nhflow_free_surface]', 'NHFLOW volume [nhflow_volume]']
+  Iso-volume of: choice 'none' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
+  From: number 0 in [-1e+09, 1e+09] decimals 3
+  To: number 1 in [-1e+09, 1e+09] decimals 3
+  Colour by: choice 'none' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
+  Colour map: choice 'ocean' of ['reef3d', 'ocean', 'tension', 'lagoon_blue', 'balance', 'viridis', 'rainbow', 'sand', 'greys', 'white']
+  Automatic range: checkbox '' on (disabled)
+  Range from: choice '1st - 99th percentile' of ['1st - 99th percentile', 'lowest to highest'] (disabled)
+  Range min: number 0 in [-1e+09, 1e+09] decimals 3 (disabled)
+  Range max: number 1 in [-1e+09, 1e+09] decimals 3 (disabled)
+  Range [%]: number 100 in [1, 500] decimals 3 (disabled)
+  Opacity: number 1 in [0, 1] decimals 3
+  button 'Fit range to this frame' tip='Fix the colour range to the values of the current frame' (disabled)
+  label 'NHFLOW volume · 3 frames · REEF3D_NHFLOW_VTU' (disabled)

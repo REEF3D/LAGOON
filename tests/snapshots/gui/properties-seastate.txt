@@ -1,0 +1,25 @@
+QWidget
+  Name: text 'Sea state'
+  Kind: label 'Sea state'
+  Visible: checkbox '' on
+  Case: choice 'first case' of ['first case', 'run [case-1]']
+  Dataset: choice 'automatic' of ['automatic', 'NHFLOW bed [nhflow_bed]', 'NHFLOW free surface [nhflow_free_surface]', 'NHFLOW volume [nhflow_volume]']
+  Colour by: choice 'Hs' of ['none', 'Hs']
+  Colour map: choice 'rainbow' of ['reef3d', 'ocean', 'tension', 'lagoon_blue', 'balance', 'viridis', 'rainbow', 'sand', 'greys', 'white']
+  Automatic range: checkbox '' on
+  Range from: choice '1st - 99th percentile' of ['1st - 99th percentile', 'lowest to highest']
+  Range min: number 0 in [-1e+09, 1e+09] decimals 3
+  Range max: number 1 in [-1e+09, 1e+09] decimals 3
+  Range [%]: number 100 in [1, 500] decimals 3
+  Opacity: number 1 in [0, 1] decimals 3
+  Grid lines: choice 'off' of ['off', 'dark', 'white']
+  Contour lines of: choice 'none' of ['none']
+  Contour lines: number 10 in [2, 100] decimals 0
+  Vectors of: choice 'none' of ['none']
+  Arrows: number 400 in [10, 20000] decimals 0
+  Arrow length: _LogSlider
+      slider in [0, 1000]
+      number 1 in [0.1, 10] decimals 3
+  Hide dry land: checkbox '' on
+  button 'Fit range to this frame' tip='Fix the colour range to the values of the current frame'
+  label '' (disabled)
