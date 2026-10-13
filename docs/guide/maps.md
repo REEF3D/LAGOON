@@ -139,7 +139,8 @@ again in finer detail, zoom out or pan and it covers the new area (once the view
 rests; the map before stays until the new one is there). In 3D it covers the
 domain and its margin.
 
-Map tiles are fetched once and kept in a cache (`~/Library/Caches/LAGOON/tiles`
+While a map is fetched, a bar above the view counts its tiles. Map tiles are
+fetched once and kept in a cache (`~/Library/Caches/LAGOON/tiles`
 on a Mac; `LAGOON_CACHE` moves it). LAGOON asks the servers with its own name and
 only for the tiles over the area shown, as their terms ask.
 

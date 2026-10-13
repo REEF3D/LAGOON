@@ -24,7 +24,7 @@ import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -275,9 +275,11 @@ def mosaic(
     zoom: int,
     cache: TileCache | None = None,
     threads: int = 6,
+    progress=None,
 ) -> Mosaic:
     """The tiles of a source over Web Mercator bounds at a zoom level (lowered while
-    more than :data:`MAX_TILES` would be needed), as one image."""
+    more than :data:`MAX_TILES` would be needed), as one image. ``progress(done,
+    total)`` hears of every tile had."""
     cache = cache or TileCache()
     zoom = min(zoom, source.max_zoom)
     while zoom > 0:
@@ -289,8 +291,15 @@ def mosaic(
     ncol, nrow = col1 - col0 + 1, row1 - row0 + 1
     image = np.zeros((nrow * TILE, ncol * TILE, 4), np.uint8)
     jobs = [(c, r) for r in range(row0, row1 + 1) for c in range(col0, col1 + 1)]
+    tiles: list = [None] * len(jobs)
+    if progress is not None:
+        progress(0, len(jobs))
     with ThreadPoolExecutor(max(1, threads)) as pool:
-        tiles = list(pool.map(lambda cr: cache.tile(source, zoom, cr[0], cr[1]), jobs))
+        futures = {pool.submit(cache.tile, source, zoom, c, r): n for n, (c, r) in enumerate(jobs)}
+        for done, future in enumerate(as_completed(futures), start=1):
+            tiles[futures[future]] = future.result()
+            if progress is not None:
+                progress(done, len(jobs))
     missing = 0
     for (c, r), tile in zip(jobs, tiles, strict=True):
         if tile is None or tile.shape[:2] != (TILE, TILE):

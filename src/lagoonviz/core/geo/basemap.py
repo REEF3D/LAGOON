@@ -97,10 +97,12 @@ def background(
     pixels: int = 2048,
     cache: TileCache | None = None,
     attribution: str = "",
+    progress=None,
 ) -> ModelImage:
     """A background map over a model rectangle (x0, x1, y0, y1): tiles of a tile
     source (fetched or from the cache), or a GeoTIFF image, warped into the model's
-    frame, at most ``pixels`` along the longer side."""
+    frame, at most ``pixels`` along the longer side. ``progress(done, total)``
+    hears of the tiles had."""
     xs, ys, size = model_grid(extent, pixels)
     zoom = None
     missing = 0
@@ -123,7 +125,7 @@ def background(
         _, lat = transformer("EPSG:3857", "EPSG:4326")(np.mean(merc_x), np.mean(merc_y))
         scale = 1.0 / max(math.cos(math.radians(float(lat))), 1e-6)
         zoom = zoom_for(size * scale, source.max_zoom)
-        tiles = mosaic(source, bounds, zoom, cache)
+        tiles = mosaic(source, bounds, zoom, cache, progress=progress)
         zoom, missing = tiles.zoom, tiles.missing
         res = resolution(tiles.zoom)
         b = tiles.bounds

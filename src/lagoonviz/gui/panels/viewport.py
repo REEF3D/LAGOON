@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -216,6 +217,8 @@ class Viewport3D(QWidget):
     _loaded = Signal(object, object, object)
     #: a background map item's map was made in a worker thread
     _background_made = Signal(str)
+    #: its tiles: (item, had, of)
+    _background_progress = Signal(str, int, int)
     #: the domain drawn in the 2D top view: (x0, x1, y0, y1) in model coordinates
     domainDrawn = Signal(object)
     #: the model turned on the map with Shift + drag: degrees (counter-clockwise),
@@ -337,6 +340,15 @@ class Viewport3D(QWidget):
         bar.addSpacing(8)
         bar.addWidget(self.case_box)
         bar.addStretch(1)
+        #: the background map's tiles being fetched
+        self.map_progress = QProgressBar()
+        self.map_progress.setMaximumWidth(170)
+        self.map_progress.setMaximumHeight(16)
+        self.map_progress.setTextVisible(True)
+        self.map_progress.setFormat("Map: %v of %m tiles")
+        self.map_progress.setToolTip("The background map's tiles (fetched once, then cached)")
+        self.map_progress.hide()
+        bar.addWidget(self.map_progress)
         bar.addWidget(self.info)
         header = QWidget()
         header.setLayout(bar)
@@ -375,6 +387,7 @@ class Viewport3D(QWidget):
 
         self._loaded.connect(self._on_loaded)
         self._background_made.connect(self._on_background_made)
+        self._background_progress.connect(self._on_background_progress)
         bridge.sceneChanged.connect(self._on_scene)
         bridge.timeChanged.connect(lambda _t: self._on_time())
         self._apply_2d(*self._plan_state, frame=False)
@@ -510,6 +523,9 @@ class Viewport3D(QWidget):
                 # a hidden map is made only once it is shown
                 job = backgrounds.job(item_id) if item.visible else None
                 if job is not None:
+                    self.map_progress.setRange(0, 0)  # busy until the tiles are counted
+                    self.map_progress.setFormat("Map: %v of %m tiles")
+                    self.map_progress.show()
                     # a daemon thread: closing LAGOON does not wait for the tile servers
                     threading.Thread(
                         target=self._make_background,
@@ -542,8 +558,14 @@ class Viewport3D(QWidget):
         self.attribution.setVisible(bool(text))
 
     def _make_background(self, item_id: str, job) -> None:
+        def progress(done: int, total: int) -> None:
+            try:
+                self._background_progress.emit(item_id, done, total)
+            except RuntimeError:  # the view was closed meanwhile
+                pass
+
         try:
-            job()
+            job(progress)
         except Exception:  # noqa: BLE001 (the worker must always report back)
             log.error("background map %s:\n%s", item_id, traceback.format_exc())
         try:
@@ -551,7 +573,16 @@ class Viewport3D(QWidget):
         except RuntimeError:  # the view was closed meanwhile
             pass
 
+    def _on_background_progress(self, _item_id: str, done: int, total: int) -> None:
+        bar = self.map_progress
+        bar.setRange(0, max(total, 1))
+        bar.setValue(done)
+        bar.setVisible(done < total)
+
     def _on_background_made(self, item_id: str) -> None:
+        backgrounds = self.session.data.backgrounds
+        if not any(backgrounds.making(i) for i in backgrounds.items()):
+            self.map_progress.hide()
         if item_id in self.session.scene:
             self._update_backgrounds()
             self.redraw()

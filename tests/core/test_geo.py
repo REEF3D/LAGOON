@@ -801,3 +801,19 @@ def test_geo_dat_from_the_world_outside_europe(tmp_path, monkeypatch):
     assert np.allclose(points[land, 2], (lon[land] - 18.40) * 1000.0, atol=0.5)
     assert np.allclose(points[sea, 2], -20.0)
     assert sum("copernicus" in u for u in server.asked) == 1  # the one tile there
+
+
+def test_the_map_tells_how_many_tiles_it_has(tmp_path):
+    heard = []
+    box = expanded((0.0, 1000.0, 0.0, 500.0), 0.25)
+    made = background(
+        GEOREF,
+        box,
+        SOURCE,
+        512,
+        TileCache(tmp_path, FakeServer()),
+        progress=lambda d, t: heard.append((d, t)),
+    )
+    total = heard[-1][1]
+    assert heard[0] == (0, total) and heard[-1] == (total, total) and made.missing == 0
+    assert [d for d, _ in heard] == list(range(total + 1))

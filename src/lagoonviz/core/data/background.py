@@ -280,7 +280,7 @@ class Backgrounds:
         with self._lock:
             self._making.add(item_id)
 
-        def make():
+        def make(progress=None):
             try:
                 if choice == "file":
                     if not file:
@@ -292,7 +292,7 @@ class Backgrounds:
                     source = custom_source(file)
                 else:
                     source = SOURCES[choice]
-                result = background(georef, box, source, pixels, cache)
+                result = background(georef, box, source, pixels, cache, progress=progress)
             except Exception as error:  # noqa: BLE001 (a bad file or server: say why)
                 self._errors[item_id] = str(error) or type(error).__name__
                 with self._lock:
