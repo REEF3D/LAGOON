@@ -739,3 +739,65 @@ def test_making_geo_dat_tells_its_progress_and_can_be_cancelled(fjord, terrain):
         job.run(stop)
     assert (fjord / "geo.dat").read_text() == before  # the one there was
     assert not (fjord / "geo.dat.part").exists()
+
+
+class FakeWorld:
+    """Copernicus tiles (land east of 18.40 E rising 1 m per 0.001°, sea 0 west of it)
+    and ETOPO's CSV (the sea 20 m deep everywhere)."""
+
+    def __init__(self, tmp_path):
+        self.tmp = tmp_path
+        self.asked = []
+
+    def __call__(self, url):
+        import re
+
+        self.asked.append(url)
+        if "copernicus" in url:
+            name = url.rsplit("/", 1)[-1]
+            lat = int(name[23:25]) * (-1 if name[22] == "S" else 1)
+            lon = int(name[30:33]) * (-1 if name[29] == "W" else 1)
+            if lon != 18:
+                raise OSError("HTTP Error 404: Not Found")
+            n = 360
+            cols, rows = np.meshgrid(np.arange(n) + 0.5, np.arange(n) + 0.5)
+            lons, lats = lon + cols / n, lat + 1 - rows / n
+            data = np.where(lons > 18.40, (lons - 18.40) * 1000.0, 0.0)
+            path = self.tmp / "cop.tif"
+            write_geotiff(path, data, lon, lat + 1, 1.0 / n, 4326)
+            return path.read_bytes()
+        assert "erddap" in url
+        from urllib.parse import unquote
+
+        q = unquote(url)
+        lat0, stride, lat1 = re.search(r"z\[\(([^)]+)\):(\d+):\(([^)]+)\)\]", q).groups()
+        lon0, _, lon1 = re.search(r"\]\[\(([^)]+)\):(\d+):\(([^)]+)\)\]", q).groups()
+        lats = np.arange(float(lat0), float(lat1), 1 / 240 * int(stride))
+        lons = np.arange(float(lon0), float(lon1), 1 / 240 * int(stride))
+        rows = ["latitude,longitude,z", "degrees_north,degrees_east,"]
+        rows += [f"{a},{o},-20.0" for a in lats for o in lons]
+        return ("\n".join(rows) + "\n").encode()
+
+
+def test_geo_dat_from_the_world_outside_europe(tmp_path, monkeypatch):
+    from lagoonviz.core.geo import download
+
+    monkeypatch.setenv("LAGOON_CACHE", str(tmp_path / "cache"))
+    server = FakeWorld(tmp_path)
+    monkeypatch.setattr(download, "http_fetch", server)
+    session = Session()
+    case = session.new_case_from_map((-33.9, 18.40), length=2000.0)
+    count = session.make_geo_dat("best", spacing=50.0)
+    assert session.geo_sources == [
+        "Copernicus DEM GLO-30 (land, world)",
+        "NOAA ETOPO 2022 (land and sea, world)",
+    ]
+    points = np.loadtxt(session.data.case_folder(case) / "geo.dat")
+    assert count == len(points)
+    georef = session.georef(case)
+    lon, lat = transformer(georef.crs, "EPSG:4326")(*georef.to_world(points[:, 0], points[:, 1]))
+    land = lon > 18.405
+    sea = lon < 18.395
+    assert np.allclose(points[land, 2], (lon[land] - 18.40) * 1000.0, atol=0.5)
+    assert np.allclose(points[sea, 2], -20.0)
+    assert sum("copernicus" in u for u in server.asked) == 1  # the one tile there

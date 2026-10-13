@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QInputDialog,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QSizePolicy,
@@ -873,6 +874,8 @@ class MainWindow(QMainWindow):
             "New case from map",
             "Where? A place name (Nidelva, Trondheim havn) or latitude, longitude "
             "(63.44, 10.40). Leave it empty to find the place later in the Map tab.",
+            QLineEdit.EchoMode.Normal,
+            "Trondheim",
         )
         if not ok:
             return None

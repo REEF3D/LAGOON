@@ -262,3 +262,13 @@ def test_the_results_leave_the_map(window):
     assert session.scene.get(basemap.id).visible  # the map stays under the results
     window.act_mode_setup.trigger()
     assert session.scene.get(basemap.id).visible
+
+
+def test_the_map_tab_starts_at_trondheim(window):
+    panel = window.setup_panel
+    panel.tabs.setCurrentWidget(panel.map_tab)
+    session = window.session
+    case = next(i.id for i in session.scene if i.kind == "case")
+    assert session.is_draft(case) and session.georef(case).crs == "EPSG:25832"
+    basemap = next(i for i in session.scene if i.kind == "basemap")
+    assert basemap.properties["source"] == "Kartverket topo"

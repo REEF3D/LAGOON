@@ -175,9 +175,11 @@ def grid_heights(
 
 #: bathymetry from the web: the choice -> the sources asked, the finest first
 WEB = {
-    "best": ("kartverket", "emodnet"),
+    "best": ("kartverket", "emodnet", "copernicus", "etopo"),
     "kartverket": ("kartverket",),
     "emodnet": ("emodnet",),
+    "copernicus": ("copernicus",),
+    "etopo": ("etopo",),
 }
 
 
@@ -194,7 +196,7 @@ def web_heights(
     sources of a choice in turn, each filling what the ones before had no data for,
     the rest from the nearest data. Returns the heights (model z) and the labels of
     the sources used."""
-    from lagoonviz.core.geo.download import SOURCES, covers, download
+    from lagoonviz.core.geo.download import SOURCES, covers, download_all
 
     if choice not in WEB:
         raise ValueError(f"choose one of {', '.join(WEB)}, got {choice!r}")
@@ -214,16 +216,18 @@ def web_heights(
             errors.append(f"{SOURCES[key].label}: not here")
             continue
         try:
-            raster = download(key, georef, box, spacing, fetch)
+            rasters = download_all(key, georef, box, spacing, fetch)
         except (OSError, RasterError) as error:
             errors.append(str(error))
             continue
         progress((n + 0.8) / len(keys), f"Onto the grid: {SOURCES[key].label}")
-        found = warp(raster, georef, xs, ys)  # model z (z_offset taken away)
-        missing = ~np.isfinite(heights) & np.isfinite(found)
-        if missing.any():
-            heights[missing] = found[missing]
-            used.append(SOURCES[key].label)
+        for raster in rasters:  # (Copernicus: one per 1° tile)
+            found = warp(raster, georef, xs, ys)  # model z (z_offset taken away)
+            missing = ~np.isfinite(heights) & np.isfinite(found)
+            if missing.any():
+                heights[missing] = found[missing]
+                if SOURCES[key].label not in used:
+                    used.append(SOURCES[key].label)
     if not np.isfinite(heights).any():
         raise RasterError("no bathymetry for the domain: " + "; ".join(errors or ["no data"]))
     return fill_holes(heights, xs, ys), used

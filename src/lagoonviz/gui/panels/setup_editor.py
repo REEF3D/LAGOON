@@ -545,6 +545,8 @@ class SetupPanel(QWidget):
     def _tab_changed(self, index: int) -> None:
         if index >= len(FILES) and self.case_id:
             self.session.data.set_highlight(self.case_id, "", "")
+        if self.tabs.widget(index) is self.map_tab and not self.case_id:
+            self.map_tab.start_default()  # no case: start at Trondheim, on the map
 
     # ------------------------------------------------------------- saving
     def save(self) -> list[Path]:

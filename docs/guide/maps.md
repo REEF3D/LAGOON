@@ -7,6 +7,9 @@ DIVEMesh's `geo.dat`.
 
 ## Starting a case on the map
 
+With no case open, the *Map* tab starts one at Trondheim on Kartverket's map:
+*Find* takes it anywhere else.
+
 *File → New case from map…* asks where: a place name (*Nidelva*, *Trondheim
 havn*: Kartverket's place names in Norway, OpenStreetMap's elsewhere) or a
 latitude and longitude (`63.44, 10.40`). LAGOON starts a draft case there: a
@@ -74,11 +77,16 @@ GeoTIFF and only the part of a large one that is needed).
   Or type the extent (*Set B 10*) or the rotation (*Turn*).
 - **Background map**: *Show map* adds a *Background map* item for the case.
 - **Bathymetry**: *From* **Download** needs no file: LAGOON asks the web for the
-  bathymetry of the domain and its margin. *Best available* takes Kartverket's
+  bathymetry of the domain and its margin. *Best available* takes, the finest
+  first, each filling what the ones before had no data for: Kartverket's
   national topobathy terrain model in Norway (land and sea in one model, 1 m
-  where surveyed, else 50 m; heights in NN2000), and EMODnet's Digital Terrain
-  Model (about 115 m, heights to LAT) for what Kartverket does not cover; one of
-  them can be chosen too. Or *A file of mine…*: a GeoTIFF, an Esri ASCII grid
+  where surveyed, else 50 m; heights in NN2000), EMODnet's Digital Terrain Model
+  at sea in Europe (about 115 m, heights to LAT), the Copernicus DEM GLO-30 on
+  land anywhere (30 m, heights to EGM2008; its 1° tiles are some 30 MB each,
+  fetched once) and NOAA's ETOPO 2022 for the rest of the world, land and sea
+  (15 arc-seconds, about 450 m, EGM2008). Each can be chosen alone too. Land
+  below sea level (polders) is taken from ETOPO, as Copernicus' heights at or
+  below 0 are read as the sea. Or *A file of mine…*: a GeoTIFF, an Esri ASCII grid
   (`.asc`) or an x y z text file (soundings: spaces, tabs, commas or semicolons;
   a header line is skipped). Give its CRS if the file does not name one
   (`EPSG:4326` for longitude and latitude, `model` for model coordinates) and

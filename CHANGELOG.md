@@ -30,9 +30,11 @@
 - **The domain on the map**: drag it in the 2D view (B 10), Shift + drag turns the
   model on the map.
 - **Bathymetry from the web**: *Make geo.dat* needs no file: Kartverket's
-  national topobathy model (Norway, land and sea) and EMODnet's terrain model
-  (European seas) are downloaded for the domain, the finest first;
-  `session.make_geo_dat("best")`.
+  national topobathy model (Norway, land and sea), EMODnet's terrain model
+  (European seas), the Copernicus DEM GLO-30 (land, the world, 30 m) and NOAA's
+  ETOPO 2022 (the world, 450 m) are downloaded for the domain, the finest first;
+  `session.make_geo_dat("best")`. With no case open the Map tab starts at
+  Trondheim on Kartverket's map.
 - **Bathymetry to geo.dat**: a GeoTIFF, ASCII grid or x y z soundings interpolated
   (TIN, inverse distance, nearest) onto a grid over the domain and written as
   geo.dat in model coordinates with G 10 1; `session.make_geo_dat(...)`.

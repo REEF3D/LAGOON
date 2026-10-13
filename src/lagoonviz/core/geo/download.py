@@ -7,6 +7,10 @@
   50 m), heights in NN2000; open data. A WCS in EPSG:25832, 25833 and 25835.
 - **EMODnet** (European seas): the EMODnet Digital Terrain Model, about 115 m,
   heights (negative below the sea) relative to LAT; CC BY 4.0.
+- **Copernicus DEM GLO-30** (land, the world): 30 m, from the open archive on AWS
+  (1° tiles), heights to EGM2008; the sea is left to the other sources.
+- **NOAA ETOPO 2022** (land and sea, the world): 15 arc-seconds (about 450 m),
+  from NOAA's ERDDAP, heights to EGM2008; the last fallback.
 
 :func:`download` asks the service for the area round a model rectangle, at the
 spacing wanted, and returns it as a :class:`~lagoonviz.core.geo.raster.GeoImage`
@@ -68,6 +72,26 @@ SOURCES = {
             115.0,
             (-36.0, 15.0, 43.0, 90.0),
         ),
+        BathymetrySource(
+            "copernicus",
+            "Copernicus DEM GLO-30 (land, world)",
+            "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space "
+            "GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA",
+            "free (Copernicus DEM licence)",
+            "EGM2008",
+            30.0,
+            (-180.0, -90.0, 180.0, 90.0),
+        ),
+        BathymetrySource(
+            "etopo",
+            "NOAA ETOPO 2022 (land and sea, world)",
+            "NOAA National Centers for Environmental Information, ETOPO 2022 15 Arc-Second "
+            "Global Relief Model (doi:10.25921/fd45-gt74)",
+            "free (NOAA)",
+            "EGM2008",
+            450.0,
+            (-180.0, -90.0, 180.0, 90.0),
+        ),
     )
 }
 #: the choice that takes the finest source with data, the others for the gaps
@@ -75,6 +99,10 @@ BEST = "best"
 
 KARTVERKET_WCS = "https://wcs.geonorge.no/skwms1/wcs.hoyde-dtm-nhm-topobathy-{zone}"
 EMODNET_WCS = "https://ows.emodnet-bathymetry.eu/wcs"
+COPERNICUS_TILE = "https://copernicus-dem-30m.s3.amazonaws.com/{name}/{name}.tif"  # 1° x 1° COGs
+ETOPO_ERDDAP = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/ETOPO_2022_v1_15s.csv"
+#: at most this many Copernicus tiles (1° x 1°, some 30 MB each) for one domain
+MOST_TILES = 9
 
 
 def _world_box(georef: Georef, box, crs: str, pad: float = 0.05):
@@ -150,44 +178,151 @@ def covers(source: BathymetrySource, georef: Georef, box) -> bool:
     return lon1 >= r[0] and lon0 <= r[2] and lat1 >= r[1] and lat0 <= r[3]
 
 
+def copernicus_names(bounds) -> list[str]:
+    """The Copernicus DEM tiles (named by their south-west corner) over bounds in
+    longitude and latitude (x0, y0, x1, y1)."""
+    lon0, lat0, lon1, lat1 = bounds
+    names = []
+    for lat in range(math.floor(lat0), math.floor(lat1) + 1):
+        for lon in range(math.floor(lon0), math.floor(lon1) + 1):
+            ns = f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}_00"
+            ew = f"{'E' if lon >= 0 else 'W'}{abs(lon):03d}_00"
+            names.append(f"Copernicus_DSM_COG_10_{ns}_{ew}_DEM")
+    return names
+
+
+def etopo_url(bounds, spacing: float) -> str:
+    """ERDDAP query of ETOPO 2022 (15 arc-seconds) over bounds in longitude and
+    latitude, every n-th value for a coarser spacing [m], as CSV."""
+    lon0, lat0, lon1, lat1 = bounds
+    step = 1.0 / 240.0
+    cells = max((lon1 - lon0), (lat1 - lat0)) / step
+    stride = max(1, int(spacing // 450.0), math.ceil(cells / MOST_PIXELS))
+    query = f"z[({lat0:.6f}):{stride}:({lat1:.6f})][({lon0:.6f}):{stride}:({lon1:.6f})]"
+    return ETOPO_ERDDAP + "?" + urllib.parse.quote(query, safe="():")
+
+
+def _cached(url: str, suffix: str, fetch, label: str, check=None) -> Path | None:
+    """The answer to a URL from the disk cache, else fetched and kept; None for a
+    tile the server does not have (404: Copernicus has no tiles over the sea)."""
+    folder = cache_folder().parent / "bathymetry"
+    path = folder / (hashlib.sha1(url.encode()).hexdigest()[:20] + suffix)
+    if path.is_file():
+        return path if path.stat().st_size else None
+    try:
+        data = fetch(url)
+    except OSError as error:
+        if "404" in str(error) or "Not Found" in str(error):
+            data = b""  # nothing there: remembered as an empty file
+        else:
+            raise OSError(f"{label}: {error}") from None
+    if data and check is not None:
+        check(data)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    except OSError:  # no cache: a temporary file
+        path = Path(tempfile.mkdtemp()) / ("answer" + suffix)
+        path.write_bytes(data)
+    return path if data else None
+
+
+def _tiff_check(label: str):
+    def check(data: bytes) -> None:
+        if data[:4] not in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"):
+            text = data[:400].decode("utf-8", "replace")
+            raise RasterError(f"{label} sent no GeoTIFF: {text.strip()[:300]}")
+
+    return check
+
+
+def _heights(image: GeoImage, label: str, low: float = -11000.0) -> GeoImage:
+    if image.is_image:
+        raise RasterError(f"{label} sent a picture, not heights")
+    values = np.asarray(image.values() if image.nodata is not None else image.data, float)
+    # no data: the services' fill values (-32767, -9999, -3.4e38)
+    image.data = np.where((values < low) | (values > 9000), np.nan, values)
+    image.nodata = None
+    image.name = label
+    return image
+
+
 def download(key: str, georef: Georef, box, spacing: float, fetch=None) -> GeoImage:
     """The bathymetry of a source over a model rectangle (x0, x1, y0, y1) and a
-    margin, at about ``spacing`` metres (no finer than the source has), as a
+    margin, at about ``spacing`` metres (no finer than the source has), as one
     GeoImage in the service's CRS; fetched once, then from the cache."""
+    images = download_all(key, georef, box, spacing, fetch)
+    if not images:
+        raise RasterError(f"{SOURCES[key].label}: no data here")
+    return images[0]
+
+
+def download_all(key: str, georef: Georef, box, spacing: float, fetch=None) -> list[GeoImage]:
+    """As :func:`download`, as the GeoImages the source sends (Copernicus: one per
+    1° tile; none where it has no data)."""
     fetch = fetch or http_fetch
+    if key not in SOURCES:
+        raise ValueError(f"unknown bathymetry source {key!r}; known: {', '.join(SOURCES)}")
     source = SOURCES[key]
+    label = source.label
     spacing = max(float(spacing), source.finest)
     if key == "kartverket":
         crs = kartverket_crs(georef)
         url = kartverket_url(_world_box(georef, box, crs), crs, spacing)
-    elif key == "emodnet":
+        path = _cached(url, ".tif", fetch, label, _tiff_check(label))
+        image = read_raster(path)
+        image.crs = image.crs or crs
+        return [_heights(image, label)]
+    if key == "emodnet":
         url = emodnet_url(_world_box(georef, box, "EPSG:4326"))
-    else:
-        raise ValueError(f"unknown bathymetry source {key!r}; known: {', '.join(SOURCES)}")
-    folder = cache_folder().parent / "bathymetry"
-    path = folder / (hashlib.sha1(url.encode()).hexdigest()[:20] + ".tif")
-    if not path.is_file():
-        try:
-            data = fetch(url)
-        except OSError as error:
-            raise OSError(f"{source.label}: {error}") from None
-        if data[:4] not in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"):
-            text = data[:400].decode("utf-8", "replace")
-            raise RasterError(f"{source.label} sent no GeoTIFF: {text.strip()[:300]}")
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-        except OSError:  # no cache: read it from a temporary file
-            path = Path(tempfile.mkdtemp()) / "bathymetry.tif"
-            path.write_bytes(data)
-    image = read_raster(path)
-    if image.crs is None:
-        image.crs = kartverket_crs(georef) if key == "kartverket" else "EPSG:4326"
-    if image.is_image:
-        raise RasterError(f"{source.label} sent a picture, not heights")
-    values = np.asarray(image.data, float)
-    # no data: the services' fill values (-32767, -9999, -3.4e38)
-    image.data = np.where((values < -11000) | (values > 9000), np.nan, values)
-    image.nodata = None
-    image.name = source.label
-    return image
+        path = _cached(url, ".tif", fetch, label, _tiff_check(label))
+        image = read_raster(path)
+        image.crs = image.crs or "EPSG:4326"
+        return [_heights(image, label)]
+    bounds = _world_box(georef, box, "EPSG:4326")
+    if key == "copernicus":
+        names = copernicus_names(bounds)
+        if len(names) > MOST_TILES:
+            raise RasterError(
+                f"{label}: the domain spans {len(names)} tiles of 1°; at most {MOST_TILES}"
+            )
+        images = []
+        for name in names:
+            path = _cached(
+                COPERNICUS_TILE.format(name=name), ".tif", fetch, label, _tiff_check(label)
+            )
+            if path is None:
+                continue  # sea: no tile
+            image = read_raster(path, window=bounds)
+            image.crs = image.crs or "EPSG:4326"
+            # land only: the sea is 0 in the model (left to the sea's sources)
+            image = _heights(image, label)
+            image.data = np.where(image.data <= 0.0, np.nan, image.data)
+            images.append(image)
+        return images
+    # etopo: CSV of latitude, longitude, z from ERDDAP
+    path = _cached(etopo_url(bounds, spacing), ".csv", fetch, label)
+    if path is None:
+        return []
+    return [_heights(_grid_from_csv(path, label), label)]
+
+
+def _grid_from_csv(path: Path, label: str) -> GeoImage:
+    """ERDDAP's griddap CSV (latitude, longitude, z; a header and a units line) as a
+    north-up raster in longitude and latitude."""
+    try:
+        values = np.loadtxt(path, delimiter=",", skiprows=2, usecols=(0, 1, 2), ndmin=2)
+    except ValueError:
+        text = path.read_text(encoding="utf-8", errors="replace")[:300]
+        raise RasterError(f"{label} sent no heights: {text.strip()}") from None
+    lats = np.unique(values[:, 0])
+    lons = np.unique(values[:, 1])
+    if len(lats) < 2 or len(lons) < 2:
+        raise RasterError(f"{label}: too few values for the area")
+    grid = np.full((len(lats), len(lons)), np.nan)
+    i = np.searchsorted(lats, values[:, 0])
+    j = np.searchsorted(lons, values[:, 1])
+    grid[i, j] = values[:, 2]
+    dlat, dlon = float(lats[1] - lats[0]), float(lons[1] - lons[0])
+    transform = (float(lons[0]) - dlon / 2, dlon, 0.0, float(lats[-1]) + dlat / 2, 0.0, -dlat)
+    return GeoImage(grid[::-1], transform, "EPSG:4326", None, label)

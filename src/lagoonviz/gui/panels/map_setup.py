@@ -55,7 +55,7 @@ from lagoonviz.core.geo.crs import (
     describe,
     is_known,
 )
-from lagoonviz.core.geo.places import search
+from lagoonviz.core.geo.places import Place, search
 from lagoonviz.core.kinds import BASEMAP_SOURCES
 from lagoonviz.gui.theme import COLORS
 
@@ -66,8 +66,12 @@ BATHYMETRY_CHOICES = {
     "Download: best available": "best",
     "Download: Kartverket, land and sea (Norway)": "kartverket",
     "Download: EMODnet (European seas)": "emodnet",
+    "Download: Copernicus DEM 30 m (land, world)": "copernicus",
+    "Download: NOAA ETOPO 2022 (land and sea, world)": "etopo",
     "A file of mine…": "file",
 }
+#: where the Map tab starts when no case is open: Trondheim, its harbour and Nidelva
+DEFAULT_PLACE = Place("Trondheim", 63.4365, 10.3980, "town", "Trøndelag", "default")
 METHODS = {"Linear (TIN)": "tin", "Inverse distance": "idw", "Nearest point": "nearest"}
 
 
@@ -291,8 +295,10 @@ class MapTab(QWidget):
         for label, key in BATHYMETRY_CHOICES.items():
             self.bathy_source.addItem(label, key)
         self.bathy_source.setToolTip(
-            "Download the bathymetry for the domain (no file needed): Kartverket's land "
-            "and sea model in Norway, EMODnet in European seas; or a file of yours"
+            "Download the bathymetry for the domain (no file needed). Best available: "
+            "Kartverket in Norway (land and sea, to 1 m), EMODnet at sea in Europe "
+            "(115 m), Copernicus on land (30 m, the world), NOAA ETOPO 2022 for the rest "
+            "(450 m, the world). Or a file of yours"
         )
         self.bathy_source.currentIndexChanged.connect(lambda _i: self._source_changed())
         self.file_label = QLabel("No file chosen")
@@ -403,6 +409,22 @@ class MapTab(QWidget):
 
     def _describe_bearing(self, value: float) -> None:
         self.bearing.setText(f"x-axis to {(90.0 - value) % 360.0:.1f}° (compass)")
+
+    def start_default(self) -> None:
+        """No case yet: a case started on the map at Trondheim, on Kartverket's map
+        (find another place with Find)."""
+        if self.case_id or any(i.kind == "case" for i in self.session.scene):
+            return
+        try:
+            self.session.new_case_from_map(DEFAULT_PLACE, length=2000.0)
+        except (OSError, ValueError) as error:
+            self.message.emit(str(error), True)
+            return
+        self.message.emit(
+            "A case on the map at Trondheim: Find takes it elsewhere; Draw on the map, "
+            "Make geo.dat, Run DIVEMesh",
+            False,
+        )
 
     def refresh(self) -> None:
         """The fields from the case's georef.json and B 10."""
