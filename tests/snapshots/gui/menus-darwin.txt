@@ -50,6 +50,7 @@ Add
   Case set-up
   DIVEMesh grid
   Background map
+  geo.dat points
   Particles
 View
   [ ] Set-up  [Ctrl+Shift+U]
