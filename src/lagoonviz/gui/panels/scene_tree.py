@@ -28,6 +28,8 @@ ID_ROLE = Qt.UserRole
 class SceneTreePanel(QWidget):
     #: selected item id, or "" for none
     selectionChanged = Signal(str)
+    #: an item clicked by the user (not selected by the program, e.g. when added)
+    itemPicked = Signal(str)
 
     def __init__(self, bridge: SessionBridge, parent: QWidget | None = None):
         super().__init__(parent)
@@ -46,6 +48,9 @@ class SceneTreePanel(QWidget):
         self.tree.setContextMenuPolicy(Qt.ActionsContextMenu)
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.itemSelectionChanged.connect(self._on_selection)
+        self.tree.itemClicked.connect(
+            lambda entry, _column: self.itemPicked.emit(entry.data(0, ID_ROLE))
+        )
 
         self.remove_action = QAction("Remove", self.tree)
         self.remove_action.setShortcut(QKeySequence.Delete)

@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
         self._sized = False
 
         self.scene_tree.selectionChanged.connect(self.properties.show_item)
+        self.scene_tree.itemPicked.connect(self._item_picked)
         self.bridge.historyChanged.connect(self._on_history)
         self.bridge.sceneChanged.connect(self._on_mode_event)
 
@@ -537,6 +538,19 @@ class MainWindow(QMainWindow):
     def _on_mode_event(self, event: str, _item_id: str) -> None:
         if event in ("mode", "reset"):
             self._apply_mode()
+
+    def _item_picked(self, item_id: str) -> None:
+        """An item clicked in the scene: its properties come to the front (the Set-up
+        panel shares their place). In the set-up, a case and its set-up items stay
+        with the Set-up panel, which edits them."""
+        if not item_id or item_id not in self.session.scene or self.full_screen:
+            return
+        kind = self.session.scene.get(item_id).kind
+        if self.session.mode == "setup" and kind in ("case", "setup", "grid"):
+            return
+        dock = self.docks["properties"]
+        dock.show()
+        dock.raise_()
 
     def _apply_mode(self) -> None:
         """The window for the mode: the timeline rests in the set-up."""

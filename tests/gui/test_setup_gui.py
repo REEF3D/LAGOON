@@ -268,6 +268,31 @@ def test_the_results_leave_the_map(window):
     assert session.scene.get(basemap.id).visible
 
 
+def test_a_clicked_item_brings_its_properties(window):
+    session = window.session
+    case = session.new_case_from_map((63.44, 10.40))
+    window._apply_mode()
+    basemap = next(i for i in session.scene if i.kind == "basemap")
+    setup_dock, properties = window.docks["setup"], window.docks["properties"]
+    tree = window.scene_tree
+
+    def click(item_id):
+        tree.select(item_id)
+        tree.itemClicked.emit(tree._entry(item_id), 0)
+
+    # the set-up: the case stays with the Set-up panel, the map shows its properties
+    click(case)
+    assert setup_dock.widget().isVisible() and not properties.widget().isVisible()
+    click(basemap.id)
+    assert properties.widget().isVisible() and window.properties.item_id == basemap.id
+    # the results, with the Set-up panel brought back over the properties
+    window.act_mode_results.trigger()
+    setup_dock.show()
+    setup_dock.raise_()
+    click(case)
+    assert properties.widget().isVisible() and window.properties.item_id == case
+
+
 def test_the_map_tab_starts_at_trondheim(window):
     panel = window.setup_panel
     panel.tabs.setCurrentWidget(panel.map_tab)
