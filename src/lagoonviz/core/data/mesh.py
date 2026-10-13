@@ -455,24 +455,6 @@ class CutPlan:
         return SurfaceMesh(cut.astype(np.float32), self.triangles, data, outlines=outlines)
 
 
-#: the faces of linear cells (VTK node order), for the grid lines of a slice
-CELL_FACES: dict[int, tuple[int, tuple[tuple[int, ...], ...]]] = {
-    VTK_HEXAHEDRON: (
-        8,
-        (
-            (0, 1, 2, 3),
-            (4, 5, 6, 7),
-            (0, 1, 5, 4),
-            (1, 2, 6, 5),
-            (2, 3, 7, 6),
-            (3, 0, 4, 7),
-        ),
-    ),
-    VTK_WEDGE: (6, ((0, 1, 2), (3, 4, 5), (0, 1, 4, 3), (1, 2, 5, 4), (2, 0, 3, 5))),
-    VTK_TETRA: (4, ((0, 1, 2), (0, 1, 3), (1, 2, 3), (0, 2, 3))),
-}
-
-
 def plan_cell_edges(
     distance: np.ndarray, connectivity: np.ndarray, offsets: np.ndarray, types: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -483,9 +465,9 @@ def plan_cell_edges(
     starts = np.concatenate(([0], offsets[:-1])).astype(np.int64)
     by_size: dict[int, list[np.ndarray]] = {}
     for cell_type in np.unique(types):
-        if int(cell_type) not in CELL_FACES:
+        if int(cell_type) not in CELL_FACES or int(cell_type) in (VTK_QUAD, VTK_TRIANGLE):
             continue
-        n_nodes, faces = CELL_FACES[int(cell_type)]
+        n_nodes, faces = CELL_FACES[int(cell_type)]  # (the cells' faces, as above)
         first = starts[types == cell_type]
         nodes = connectivity[first[:, None] + np.arange(n_nodes)]
         signs = distance[nodes]

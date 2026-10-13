@@ -645,6 +645,7 @@ def test_automatic_range_of_a_bed_that_scours():
 
     data = DataManager(Scene())
     data.dataset = lambda item_id: Volume()
+    data._range_mode = lambda item_id: "lowest to highest"  # as ParaView
 
     def mesh(z):
         z = np.asarray(z, np.float32)
@@ -954,6 +955,7 @@ def test_an_empty_store_folder_says_so(tmp_path):
 def test_a_range_of_a_percentage_of_the_min_and_max(reef3d_run):
     s = Session()
     s.open_case(reef3d_run)
+    s.set_property("free_surface-1", "range_from", "lowest to highest")
     full = s.data.automatic_range("free_surface-1")
     s.set_property("free_surface-1", "range_percent", 95.0)
     low, high = s.data.automatic_range("free_surface-1")
@@ -970,3 +972,13 @@ def test_a_range_of_a_percentage_of_the_min_and_max(reef3d_run):
     fitted = s.fit_range("free_surface-1")
     assert fitted == pytest.approx((0.5 * np.nanmin(eta), 0.5 * np.nanmax(eta)))
     assert "session.set_property('free_surface-1', 'range_percent', 50.0)" in s.to_script()
+
+
+def test_the_automatic_range_from_percentiles_or_the_extremes():
+    from lagoonviz.core.data.manager import auto_range
+
+    values = np.concatenate([np.linspace(-1.0, 2.0, 1000), [9.0]])  # one spike
+    low, high = auto_range(values, "1st - 99th percentile")
+    assert low == -high and high < 2.0  # symmetric, the spike left out: strong colours
+    assert auto_range(values, "lowest to highest") == (-1.0, 9.0)
+    assert auto_range(np.linspace(1.0, 2.0, 100), "1st - 99th percentile")[0] > 1.0

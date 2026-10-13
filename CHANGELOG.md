@@ -11,6 +11,9 @@
 
 ### Rendering
 
+- **North in 3D**: with *North up*, turning a georeferenced model (*Turn*, Shift +
+  drag) turns the 3D view with it about the model's middle, so the background map
+  stays where it is and the model and its grid turn, as in the 2D view.
 - **White water in Cycles**: *View → White water in Cycles* (none, light, medium,
   heavy) and the export dialog choose how much foam, spray and bubbles path-traced
   stills and films show; medium, the new default, is about half the white water
@@ -21,11 +24,17 @@
 
 ### Slices
 
+- **The outer surface of volumes faces outwards again** (the grid lines of slices
+  had replaced the cell faces it is made from: two of a hexahedron's faces turned
+  inwards, shading them dark).
 - **Grid lines** on slices: the edges of the cells the slice cuts (dark or white),
   from the VTU cells or straight from a LAGOON store's grid.
 
 ### Colours
 
+- **Strong colours again**: the automatic range is again the 1st to the 99th
+  percentile, symmetric around zero when the values change sign (as before 9
+  October); *Range from → lowest to highest* gives ParaView's range.
 - **Range [%]** in the properties of every coloured item: the automatic range's
   min and max times a percentage (95 %: 0.95 × min to 0.95 × max); *Fit range to
   this frame* uses it too. `session.set_property(item, "range_percent", 95)`.

@@ -709,6 +709,12 @@ class DataManager:
         low, high = self._range_of(item_id, str(props.get("variable", "none")), mesh)
         return scaled_range(low, high, props)
 
+    def _range_mode(self, item_id: str) -> str:
+        """How an item's automatic range is found (RANGE_FROM)."""
+        if item_id not in self.scene:
+            return RANGE_FROM[0]
+        return str(self.scene.get(item_id).properties.get("range_from", RANGE_FROM[0]))
+
     def _range_of(self, item_id: str, variable: str, mesh: SurfaceMesh) -> tuple[float, float]:
         """The automatic range of a variable of an item, found once and kept.
 
@@ -717,22 +723,26 @@ class DataManager:
         too costly to sample over the run) widen their range to the values of each
         frame shown, so a bed that scours later does not run out of colours."""
         dataset = self.dataset(item_id)
-        key = (item_id, dataset.key if dataset else "", variable)
+        mode = self._range_mode(item_id)
+        key = (item_id, dataset.key if dataset else "", variable, mode)
         kept = self._auto_ranges.get(key)
         if kept is None:
             values = [mesh.scalar(variable)]
             if dataset is not None and dataset.surface_like and len(dataset) > 2:
                 values += self._sampled_values(dataset, variable)
             joined = np.concatenate([v.ravel() for v in values])
-            found = auto_range(joined)
+            found = auto_range(joined, mode)
             if _spread(joined):
                 self._auto_ranges[key] = found
             return found
         if dataset is not None and not dataset.surface_like:
             values = mesh.scalar(variable).ravel()
             if _spread(values):
-                low, high = auto_range(values)
-                self._auto_ranges[key] = (min(kept[0], low), max(kept[1], high))
+                low, high = auto_range(values, mode)
+                low, high = min(kept[0], low), max(kept[1], high)
+                if mode == RANGE_FROM[0] and low < 0.0 < high:  # symmetric, as auto_range
+                    low, high = -max(-low, high), max(-low, high)
+                self._auto_ranges[key] = (low, high)
         return self._auto_ranges[key]
 
     def vector_arrows(
@@ -854,7 +864,7 @@ class DataManager:
         if variable == "none":
             return None
         dataset = self.dataset(item_id)
-        key = (item_id, dataset.key if dataset else "", variable)
+        key = (item_id, dataset.key if dataset else "", variable, self._range_mode(item_id))
         if key not in self._auto_ranges:
             mesh = self.load(item_id)
             if mesh is None:
@@ -1668,14 +1678,28 @@ def scaled_range(low: float, high: float, props: dict) -> tuple[float, float]:
     return low * factor, high * factor
 
 
-def auto_range(values: np.ndarray | None) -> tuple[float, float]:
-    """The lowest to the highest finite value, as ParaView scales its colours."""
+#: how the automatic colour range is found: the 1st to the 99th percentile (symmetric
+#: around zero when the values change sign: still water white in the diverging maps,
+#: the colours strong), or the lowest to the highest value (as ParaView)
+RANGE_FROM = ("1st - 99th percentile", "lowest to highest")
+
+
+def auto_range(values: np.ndarray | None, mode: str = RANGE_FROM[1]) -> tuple[float, float]:
+    """The automatic range of values (see RANGE_FROM): by default the lowest to the
+    highest finite value, as ParaView scales its colours."""
     if values is None or values.size == 0:
         return 0.0, 1.0
     finite = values[np.isfinite(values)]
     if finite.size == 0:
         return 0.0, 1.0
-    low, high = float(finite.min()), float(finite.max())
+    if mode == RANGE_FROM[0]:
+        sample = finite if finite.size <= 200_000 else finite[:: finite.size // 200_000 + 1]
+        low, high = (float(v) for v in np.percentile(sample, [1.0, 99.0]))
+        if low < 0.0 < high:
+            bound = max(-low, high)
+            low, high = -bound, bound
+    else:
+        low, high = float(finite.min()), float(finite.max())
     if high - low < 1e-12:
         low, high = low - 0.5, high + 0.5
     return low, high

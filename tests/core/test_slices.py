@@ -128,3 +128,16 @@ def test_a_slice_shows_its_grid_lines(reef3d_run):
     vertical = np.isclose(ends[:, 0, 0], ends[:, 1, 0])
     xs = np.unique(np.round(ends[vertical, 0, 0], 4))
     np.testing.assert_allclose(xs, np.arange(NX), atol=1e-4)
+
+
+def test_the_outer_surface_of_a_volume_faces_outwards():
+    """(The grid lines of slices once replaced the face table the outer surface uses,
+    turning half its faces inwards.)"""
+    from lagoonviz.core.data.mesh import boundary_faces
+
+    triangles = boundary_faces(np.arange(8), np.array([8]), np.array([12])).astype(np.int64)
+    assert len(triangles) == 12
+    p = CUBE[triangles]
+    normal = np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0])
+    outwards = p.mean(axis=1) - CUBE.mean(axis=0)
+    assert ((normal * outwards).sum(axis=1) > 0).all()

@@ -107,3 +107,44 @@ def test_an_empty_surface_shows_nothing(reef3d_run):
     assert mesh.triangles.size == 0
     view.update("iso_surface", session.data.display(iso, mesh))
     assert iso not in view.item_ids
+
+
+def test_north_turns_the_3d_view_about_the_model(reef3d_run):
+    """A georeferenced model turned on the map: in 3D the camera turns with north
+    about the middle of the model, so the map stays where it was on the screen."""
+    import math
+
+    from lagoonviz.core import Session
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        if mesh is not None:
+            view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+    view.frame("perspective")
+    low, high = view.bounds()
+    pivot = (low + high) / 2
+    view.set_north(None)  # what the camera knows
+    before = np.asarray(view.camera.local.position, float)
+    forward = np.asarray(view.camera.world.forward, float)
+    angle = math.radians(30.0)
+    view.set_north((math.sin(angle), math.cos(angle)))  # the model turned 30° on the map
+    after = np.asarray(view.camera.local.position, float)
+    # about the vertical through the middle: the same height and distance from it
+    assert after[2] == pytest.approx(before[2])
+    assert np.linalg.norm((after - pivot)[:2]) == pytest.approx(
+        np.linalg.norm((before - pivot)[:2])
+    )
+    turned = np.asarray(view.camera.world.forward, float)
+    assert turned[2] == pytest.approx(forward[2], abs=1e-6)
+    heading = math.atan2(turned[1], turned[0]) - math.atan2(forward[1], forward[0])
+    # the map turned back by those 30° in the model's frame: the camera turns with it
+    assert math.remainder(heading + angle, 2 * math.pi) == pytest.approx(0.0, abs=1e-6)
+    # a camera set from a saved session already holds its north: nothing turns
+    state = view.camera_state()
+    view.set_camera_state(state)
+    view.set_north((0.5, math.sqrt(0.75)))
+    assert np.asarray(view.camera.local.position, float) == pytest.approx(after)

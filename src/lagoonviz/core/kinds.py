@@ -119,6 +119,14 @@ def _colouring(variable: str, colormap: str) -> dict[str, PropertySpec]:
         "variable": PropertySpec(variable, "Colour by", provider="variables"),
         "colormap": PropertySpec(colormap, "Colour map", choices=COLORMAPS),
         "auto_range": PropertySpec(True, "Automatic range"),
+        "range_from": PropertySpec(
+            "1st - 99th percentile",
+            "Range from",
+            choices=("1st - 99th percentile", "lowest to highest"),
+            tip="The automatic range: the 1st to the 99th percentile, symmetric around zero "
+            "when the values change sign (strong colours, still water white), or the "
+            "lowest to the highest value, as ParaView (every extreme in range)",
+        ),
         "vmin": PropertySpec(0.0, "Range min"),
         "vmax": PropertySpec(1.0, "Range max"),
         "range_percent": PropertySpec(

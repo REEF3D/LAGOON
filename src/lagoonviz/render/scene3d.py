@@ -241,6 +241,26 @@ class _Shown:
     display: DisplaySurface | None = None
 
 
+def _north_angle(north) -> float:
+    """The angle about z that turns the model's y to north (None: 0)."""
+    nx, ny = north if north is not None else (0.0, 1.0)
+    return math.atan2(-nx, ny)
+
+
+def _quaternion_product(a, b) -> np.ndarray:
+    """a * b of two (x, y, z, w) quaternions: b, then a."""
+    ax, ay, az, aw = (float(v) for v in a)
+    bx, by, bz, bw = (float(v) for v in b)
+    return np.array(
+        [
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz,
+        ]
+    )
+
+
 class SceneRenderer:
     """Keeps a pygfx scene in sync with the display data of LAGOON items."""
 
@@ -296,6 +316,9 @@ class SceneRenderer:
         self._outline: gfx.Line | None = None
         #: north in model coordinates (set_north), None: the model's y
         self.north: tuple[float, float] | None = None
+        #: whether the camera has seen north (a camera set from a session has not: the
+        #: first north then turns nothing)
+        self._north_known = False
 
     # ------------------------------------------------------------- items
     def _texture(self, colormap: str):
@@ -1332,14 +1355,33 @@ class SceneRenderer:
         if north is not None and abs(north[0]) < 1e-9 and north[1] > 0:
             north = None  # the model's y is north: as without
         if north == self.north:
+            self._north_known = True
             return False
+        before = _north_angle(self.north)
         self.north = north
         forward = np.asarray(self.camera.world.forward, dtype=float)
         if abs(abs(forward[2]) - 1.0) < 1e-6:  # looking straight down: turn about z
-            nx, ny = north if north is not None else (0.0, 1.0)
-            angle = math.atan2(-nx, ny)
+            angle = _north_angle(north)
             self.camera.local.rotation = (0.0, 0.0, math.sin(angle / 2), math.cos(angle / 2))
+        elif self._north_known:
+            # in 3D the camera turns with north about the vertical through the middle of
+            # the model: the map stays where it was, a turned model turns
+            self._turn_camera(_north_angle(north) - before)
+        self._north_known = True
         return True
+
+    def _turn_camera(self, angle: float) -> None:
+        """Turn the camera about the vertical through the middle of what is shown."""
+        if abs(angle) < 1e-12:
+            return
+        corners = self.bounds() or self.bounds(visible_only=False)
+        pivot = (corners[0] + corners[1]) / 2 if corners is not None else np.zeros(3)
+        c, s = math.cos(angle), math.sin(angle)
+        position = np.asarray(self.camera.local.position, dtype=float) - pivot
+        position[:2] = (c * position[0] - s * position[1], s * position[0] + c * position[1])
+        self.camera.local.position = tuple(position + pivot)
+        turn = np.array([0.0, 0.0, math.sin(angle / 2), math.cos(angle / 2)])
+        self.camera.local.rotation = tuple(_quaternion_product(turn, self.camera.local.rotation))
 
     def set_plan(self, on: bool) -> None:
         """2D: the items are flat layers seen from above; the sun's shadows would only
@@ -1383,6 +1425,7 @@ class SceneRenderer:
 
     def set_camera_state(self, state: dict) -> None:
         clean = {k: (tuple(v) if isinstance(v, list) else v) for k, v in state.items()}
+        self._north_known = False  # the camera as it was saved, north and all
         try:
             self.camera.set_state(clean)
             self._keep_z_up()

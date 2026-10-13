@@ -40,9 +40,12 @@ Surfaces, slices and objects share these properties:
   components, `velocity.x`), or `none` for a plain colour.
 - **Colour map**: `reef3d`, `ocean`, `tension`, `lagoon_blue`, `balance`,
   `viridis`, `rainbow` (Google's Turbo), `sand`, `greys`, `white`.
-- **Automatic range** spans the lowest to the highest value (as ParaView) over a
-  sample of the outputs, so a colour means the same value at every time; slices
-  and iso-surfaces widen it to each output shown. Switched off, *Range min* and
+- **Automatic range** is found over a sample of the outputs, so a colour means the
+  same value at every time (slices and iso-surfaces widen it to each output
+  shown). *Range from*: the 1st to the 99th percentile, symmetric around zero
+  when the values change sign (the default: strong colours, still water white in
+  the diverging maps, a single spike does not wash them out), or the lowest to the
+  highest value, as ParaView (every extreme in range, e.g. the deepest scour). Switched off, *Range min* and
   *Range max* hold. *Fit range to this frame* sets them to the current output.
 - **Range [%]** scales the automatic range: 100 % runs from the lowest to the
   highest value, 95 % from 0.95 × min to 0.95 × max (values beyond take the colours
