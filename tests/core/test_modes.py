@@ -88,3 +88,24 @@ def test_a_saved_session_keeps_its_mode(reef3d_run, tmp_path):
     assert again.scene.other_visibility == {setup.id: False, "grid-1": False}
     again.set_mode("results")
     assert not again.scene.get(setup.id).visible
+
+
+def test_results_opened_from_the_set_up_are_shown(reef3d_run, tmp_path):
+    session = Session()
+    session.new_case(tmp_path / "draft")  # working on a set-up
+    assert session.mode == "setup"
+    session.open_case(reef3d_run)  # then a case with results
+    assert session.mode == "results"
+    surface = next(i for i in session.scene if i.kind == "free_surface")
+    assert session.data.drawn(surface.id)
+
+
+def test_a_new_case_is_not_started_in_a_lagoon_store(tmp_path):
+    import pytest
+
+    store = tmp_path / "REEF3D_FNPF.lagoon"
+    store.mkdir()
+    (store / "zarr.json").write_text("{}")
+    with pytest.raises(ValueError, match="LAGOON store"):
+        Session().new_case(store)
+    assert not (store / "control.txt").exists() and not (store / "ctrl.txt").exists()

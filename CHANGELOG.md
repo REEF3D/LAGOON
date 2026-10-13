@@ -4,6 +4,11 @@
 
 ### Opening output
 
+- **Results opened from the set-up are shown**: opening a case that has results
+  while LAGOON is in the set-up (a case set up in LAGOON, then run) switches to the
+  results; before, its free surface and bed were opened but not drawn.
+- **File → New case** in a LAGOON store (`REEF3D_*.lagoon`) is refused: it wrote
+  `control.txt` and `ctrl.txt` into the store.
 - **File → Open output file** lists a folder's files grouped into series, as
   ParaView does (`REEF3D-NHFLOW-FSF-..pvtp`, with the number of files, their
   numbers and size); the pieces of parallel output are left out. Opening a series

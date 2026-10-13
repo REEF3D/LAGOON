@@ -142,6 +142,10 @@ class Session:
         assert command.item_id is not None
         if case.setup_only and self.scene.mode != "setup":
             self.set_mode("setup")  # nothing has run: work on its set-up
+        elif not case.setup_only and self.scene.mode == "setup":
+            # results opened while working on a set-up (e.g. the case set up in LAGOON,
+            # then run): the set-up leaves results out, so show them
+            self.set_mode("results")
         # a run restarted in the same folder may start later: begin where it has data
         first = self.data.first_time(command.item_id)
         if first is not None and self.scene.time < first:
@@ -153,6 +157,11 @@ class Session:
         started with a comment line if they are not there, and the case opens in the
         set-up, ready for the commands. Returns the case id."""
         folder = Path(path).expanduser()
+        if folder.suffix == ".lagoon" or (folder / "zarr.json").is_file():
+            raise ValueError(
+                f"{folder.name} is a LAGOON store (a run's output), not a case folder: "
+                f"open it with File → Open case, or start the case in {folder.parent}"
+            )
         folder.mkdir(parents=True, exist_ok=True)
         for file, program in (("control.txt", "DIVEMesh"), ("ctrl.txt", "REEF3D")):
             target = folder / file
