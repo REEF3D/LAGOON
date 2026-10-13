@@ -7,6 +7,8 @@ timeline and Python console along the bottom.
 
 from __future__ import annotations
 
+import logging
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +53,7 @@ from lagoonviz.gui.panels import (
 from lagoonviz.gui.resources import resource_path
 from lagoonviz.gui.theme import DEFAULT_THEME, THEME_LOOKS, apply_theme
 
+log = logging.getLogger(__name__)
 SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 OUTPUT_FILTER = "REEF3D output (*.pvtu *.pvtp *.vtu *.vtp);;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
@@ -558,6 +561,7 @@ class MainWindow(QMainWindow):
             dock.show()
             dock.raise_()
         if switched:
+            self._switch_view(getattr(self, "_shown_mode", "results"), self.session.mode)
             self.statusBar().showMessage(
                 "Set-up: the input files and DIVEMesh's grid; the results are hidden"
                 if setup
@@ -565,6 +569,32 @@ class MainWindow(QMainWindow):
                 6000,
             )
         self._shown_mode = self.session.mode
+
+    def _switch_view(self, old: str, new: str) -> None:
+        """Each mode keeps its own view: the set-up its 2D map, the results their 3D
+        view. The view of the mode left is kept; the one of the mode entered comes
+        back (the results start in 3D, framed)."""
+        import copy
+
+        scene = self.session.scene
+        views = self.__dict__.setdefault("_mode_views", {})
+        views[old] = (scene.plan_view, scene.plan_side, copy.deepcopy(scene.camera))
+        saved = views.get(new)
+        try:
+            if saved is not None:
+                plan, side, camera = saved
+                self.viewport.set_2d(plan, side if plan else None)
+                if camera:
+                    self.session.set_camera(camera)
+                    view = getattr(self.viewport, "view", None)
+                    if view is not None:
+                        view.set_camera_state(camera)
+                        self.viewport.redraw()
+            elif new == "results" and scene.plan_view:
+                self.viewport.set_2d(False)  # the 3D view, framed
+                self.viewport.frame("perspective")
+        except Exception:  # noqa: BLE001 (the mode switches all the same)
+            log.warning("view of the %s:\n%s", new, traceback.format_exc())
 
     def add_item(self, kind: str) -> str:
         """Add an item from the menu or toolbar (slices start in the middle of the volume)."""

@@ -216,7 +216,7 @@ def test_a_case_from_the_map(window, tmp_path, monkeypatch):
     assert tab.draft.text() == ""
 
 
-def test_make_geo_dat_asks_where_and_moves_a_draft_there(window, tmp_path, monkeypatch):
+def test_make_geo_dat_asks_where_and_moves_a_draft_there(window, tmp_path, monkeypatch, qtbot):
     import numpy as np
     from PySide6.QtWidgets import QFileDialog
 
@@ -241,6 +241,8 @@ def test_make_geo_dat_asks_where_and_moves_a_draft_there(window, tmp_path, monke
     )
     tab.make_geo_dat()
     assert not session.is_draft(case_id) and session.data.case_folder(case_id) == target
+    # made in a worker thread, a progress bar showing
+    qtbot.waitUntil(lambda: "points from" in panel_message(window), timeout=20000)
     assert (target / "geo.dat").is_file() and (target / "georef.json").is_file()
     assert (target / "notes.txt").read_text() == "mine"
     assert str(target) in panel_message(window)
@@ -248,3 +250,15 @@ def test_make_geo_dat_asks_where_and_moves_a_draft_there(window, tmp_path, monke
 
 def panel_message(window) -> str:
     return window.setup_panel.message.text()
+
+
+def test_the_results_leave_the_map(window):
+    session = window.session
+    session.new_case_from_map((63.44, 10.40))
+    window._apply_mode()
+    basemap = next(i for i in session.scene if i.kind == "basemap")
+    assert session.mode == "setup" and basemap.visible
+    window.act_mode_results.trigger()
+    assert not session.scene.get(basemap.id).visible  # ticked off over the results
+    window.act_mode_setup.trigger()
+    assert session.scene.get(basemap.id).visible

@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from lagoonviz.core.kinds import default_properties, kind_spec, validate
-from lagoonviz.core.scene import SETUP_KINDS, Scene, SceneItem
+from lagoonviz.core.scene import MODE_KINDS, Scene, SceneItem
 
 
 def _py(value: Any) -> str:
@@ -362,7 +362,7 @@ class SetMode(Command):
     def do(self, scene: Scene) -> None:
         for child in self.added:
             child.do(scene)
-        ids = [item.id for item in scene if item.kind in SETUP_KINDS]
+        ids = [item.id for item in scene if item.kind in MODE_KINDS]
         now = {i: scene.get(i).visible for i in ids}
         self._before = (scene.mode, dict(now), dict(scene.other_visibility))
         for child in self.added:  # added for the set-up: off over the results

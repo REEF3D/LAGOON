@@ -24,9 +24,10 @@ and its bathymetry.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
-from PySide6.QtCore import QLocale, Qt, Signal
+from PySide6.QtCore import QLocale, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QDoubleValidator, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -39,6 +40,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -46,6 +48,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from lagoonviz.core.geo.bathy import Cancelled
 from lagoonviz.core.geo.crs import (
     COMMON,
     CrsError,
@@ -66,6 +69,13 @@ BATHYMETRY_CHOICES = {
     "A file of mine…": "file",
 }
 METHODS = {"Linear (TIN)": "tin", "Inverse distance": "idw", "Nearest point": "nearest"}
+
+
+class _Runner(QObject):
+    """Carries a worker thread's progress and end to the window's thread."""
+
+    progressed = Signal(int, str)
+    done = Signal(object)
 
 
 class NumberField(QLineEdit):
@@ -669,7 +679,8 @@ class MapTab(QWidget):
 
     def make_geo_dat(self) -> None:
         """Ask where geo.dat is stored (a draft case moves to that folder), then make
-        it: downloaded for the domain, or from the file chosen."""
+        it, downloaded for the domain or from the file chosen, in a worker thread with
+        a progress bar (Cancel keeps the geo.dat there was)."""
         key = self.bathy_source.currentData()
         if key == "file" and self._bathymetry is None:
             return
@@ -677,34 +688,69 @@ class MapTab(QWidget):
         if chosen is None:
             return
         spacing = self.spacing.value() or None
-        if key == "file":
-            crs = self.file_crs.text().strip() or None
-            method = METHODS[self.method.currentText()]
-
-            def make():
-                return self.session.make_geo_dat(
+        try:
+            if key == "file":
+                job = self.session.geo_dat_job(
                     self._bathymetry,
-                    crs=crs,
-                    method=method,
+                    crs=self.file_crs.text().strip() or None,
+                    method=METHODS[self.method.currentText()],
                     spacing=spacing,
                     depths=self.depths.isChecked(),
                     case=self.case_id,
                 )
-
-        else:
-            self.message.emit("Downloading the bathymetry for the domain…", False)
-
-            def make():
-                return self.session.make_geo_dat(key, spacing=spacing, case=self.case_id)
-
-        count = [0]
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            ok = self._run(lambda: count.__setitem__(0, make()))
-        finally:
-            QApplication.restoreOverrideCursor()
-        if not ok:
+            else:
+                job = self.session.geo_dat_job(key, spacing=spacing, case=self.case_id)
+        except (ValueError, OSError, CrsError) as error:
+            self.message.emit(str(error), True)
             return
+        dialog = QProgressDialog("Making geo.dat…", "Cancel", 0, 1000, self)
+        dialog.setWindowTitle("geo.dat")
+        dialog.setWindowModality(Qt.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setValue(0)
+        stop = threading.Event()
+        runner = _Runner(self)
+        runner.progressed.connect(
+            lambda value, text: (dialog.setValue(value), dialog.setLabelText(text))
+        )
+        runner.done.connect(lambda error: self._geo_dat_done(job, error, dialog, chosen))
+        dialog.canceled.connect(stop.set)
+
+        def progress(fraction: float, text: str) -> None:
+            if stop.is_set():
+                raise Cancelled()
+            runner.progressed.emit(int(round(1000 * fraction)), text)
+
+        def work() -> None:
+            try:
+                job.run(progress)
+            except BaseException as error:  # noqa: BLE001 (reported in the window)
+                runner.done.emit(error)
+                return
+            runner.done.emit(None)
+
+        self._geo_runner = runner  # kept until done
+        threading.Thread(target=work, name="lagoon-geo.dat", daemon=True).start()
+
+    def _geo_dat_done(self, job, error, dialog, chosen: Path) -> None:
+        """Back in the window's thread: G 10 1 and the message, or why not."""
+        dialog.close()
+        self._geo_runner = None
+        if isinstance(error, Cancelled):
+            self.message.emit("Cancelled: geo.dat is as it was", False)
+            return
+        if error is not None:
+            log.warning("geo.dat: %s", error)
+            self.message.emit(str(error) or type(error).__name__, True)
+            return
+        try:
+            count = job.finish()
+        except (ValueError, OSError) as failed:
+            self.message.emit(str(failed), True)
+            return
+        self.refresh()
         folder = self.session.data.case_folder(self.case_id)
         stored = folder / "geo.dat"
         note = ""
@@ -714,11 +760,11 @@ class MapTab(QWidget):
             try:
                 shutil.copyfile(stored, chosen)
                 note = f", a copy as {chosen}"
-            except OSError as error:
-                note = f" (the copy as {chosen} failed: {error})"
+            except OSError as failed:
+                note = f" (the copy as {chosen} failed: {failed})"
         sources = " and ".join(self.session.geo_sources) or "the file"
         self.message.emit(
-            f"geo.dat: {count[0]:,} points from {sources}, stored in {folder}{note}; "
+            f"geo.dat: {count:,} points from {sources}, stored in {folder}{note}; "
             "G 10 1 in control.txt. Now Run DIVEMesh",
             False,
         )

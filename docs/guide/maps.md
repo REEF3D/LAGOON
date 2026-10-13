@@ -88,7 +88,8 @@ GeoTIFF and only the part of a large one that is needed).
   there, and a place elsewhere gets a copy: DIVEMesh reads the one in the case
   folder), carries the bathymetry onto a grid over the domain (every B 1 metres,
   two cells beyond the domain) and writes it in model coordinates, with `G 10 1`
-  in `control.txt`. A raster
+  in `control.txt`. A progress bar shows how far it is; *Cancel* keeps the
+  geo.dat there was. A raster
   is sampled bilinearly; scattered points are interpolated linearly on their
   triangulation (*TIN*), by inverse distance or from the nearest point; outside
   the data the nearest height is taken. Downloads are kept in the cache.
@@ -108,7 +109,9 @@ session.add_background_map("Sentinel-2 2017 (satellite)", margin=1.0)
 ## Background maps
 
 A *Background map* item shows a map round its case's domain, under the results
-and the set-up, in the 3D view, the 2D view, paper figures, films and the set-up
+and the set-up (like the set-up items it has a check box of its own in each mode:
+on in the set-up, off over the results until you tick it there; each mode keeps
+its own view, the set-up its 2D map, the results their 3D view), in the 3D view, the 2D view, paper figures, films and the set-up
 sketch. Its properties:
 
 | property | |

@@ -391,7 +391,7 @@ def test_a_background_map_item(fjord, tmp_path):
     assert uv.min() == 0.0 and uv.max() == 1.0
     session.turn_model(10.0)
     assert backgrounds.cached(item) is None  # turned: made again
-    assert session.data.item_mode(item) == "both"
+    assert session.data.item_mode(item) == "setup"
 
 
 def test_a_store_converted_keeps_the_case_georeference(tmp_path):
@@ -705,3 +705,41 @@ def test_north_in_model_coordinates(fjord):
     # the model point north of the origin lies due north on the map
     big_x, big_y = GEOREF.to_world(100 * north[0], 100 * north[1])
     assert big_x == pytest.approx(270000.0) and big_y == pytest.approx(7040100.0)
+
+
+def test_the_map_has_a_check_box_of_its_own_in_each_mode(fjord):
+    session = Session()
+    session.open_case(fjord)
+    item = session.add_background_map("OpenStreetMap")
+    assert session.mode == "setup" and session.scene.get(item).visible
+    session.set_mode("results")
+    assert not session.scene.get(item).visible
+    session.set_visible(item, True)  # ticked over the results
+    session.set_mode("setup")
+    session.set_mode("results")
+    assert session.scene.get(item).visible
+
+
+def test_making_geo_dat_tells_its_progress_and_can_be_cancelled(fjord, terrain):
+    from lagoonviz.core.geo.bathy import Cancelled
+
+    session = Session()
+    session.open_case(fjord)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=30.0)
+    session.set_domain(100.0, 900.0, -300.0, 400.0)
+    heard = []
+    session.make_geo_dat(terrain, spacing=2.0, progress=lambda f, t: heard.append((f, t)))
+    fractions = [f for f, _ in heard]
+    assert fractions == sorted(fractions) and fractions[0] == 0.0 and fractions[-1] == 1.0
+    assert any("Writing geo.dat" in t for _, t in heard)
+    before = (fjord / "geo.dat").read_text()
+
+    def stop(fraction, text):
+        if "Writing" in text and fraction > 0.85:
+            raise Cancelled()
+
+    job = session.geo_dat_job(terrain, spacing=1.0)
+    with pytest.raises(Cancelled):
+        job.run(stop)
+    assert (fjord / "geo.dat").read_text() == before  # the one there was
+    assert not (fjord / "geo.dat.part").exists()

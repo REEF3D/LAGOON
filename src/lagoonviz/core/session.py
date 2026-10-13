@@ -591,6 +591,7 @@ class Session:
         spacing: float | None = None,
         depths: bool = False,
         case: str | None = None,
+        progress=None,
     ) -> int:
         """Bathymetry for DIVEMesh: a GeoTIFF, ASCII grid or x y z file (in ``crs``,
         or its own; ``"model"``: already in model coordinates) interpolated (``"tin"``,
@@ -601,17 +602,28 @@ class Session:
         No file: ``source="best"`` downloads the bathymetry for the domain
         (Kartverket's land and sea model in Norway, EMODnet for the rest of
         European seas), ``"kartverket"`` or ``"emodnet"`` one of them.
-        Returns the number of points written."""
+        ``progress(fraction, text)`` hears how far it is (and may raise
+        ``bathy.Cancelled``). Returns the number of points written."""
+        job = self.geo_dat_job(source, crs, method, spacing, depths, case)
+        job.run(progress)
+        return job.finish()
+
+    def geo_dat_job(
+        self,
+        source: str | Path,
+        crs: str | None = None,
+        method: str = "tin",
+        spacing: float | None = None,
+        depths: bool = False,
+        case: str | None = None,
+    ) -> GeoDatJob:
+        """:meth:`make_geo_dat` in two parts, for a GUI: ``job.run(progress)`` does
+        the work (reading, downloading, writing geo.dat) and may run in a worker
+        thread; ``job.finish()`` then, in the thread of the session, turns G 10 on
+        and records it. Checks what it can at once (raises ValueError)."""
         from lagoon_format.geo import Georef
 
-        from lagoonviz.core.geo.bathy import (
-            WEB,
-            geo_grid,
-            grid_heights,
-            load,
-            web_heights,
-            write_geo_dat,
-        )
+        from lagoonviz.core.geo.bathy import WEB, geo_grid
 
         case_id = self._case_id(case)
         folder = self.data.case_folder(case_id)
@@ -629,41 +641,38 @@ class Session:
         domain = self.data.backgrounds.domain(case_id)
         if domain is None:
             raise ValueError("the domain is not known: set B 10 first (set_domain)")
+        given_spacing = spacing
         if spacing is None:
             spacing = self.input_file("control.txt", case_id).value("B 1") or 0.0
         xs, ys = geo_grid(domain[:4], float(spacing or 0.0))
         web = isinstance(source, str) and source in WEB and not Path(source).exists()
-        if web:
-            if crs == "model":
-                raise ValueError("bathymetry from the web needs the case's georeference")
-            heights, used = web_heights(source, georef, xs, ys, float(xs[1] - xs[0]))
-            self.geo_sources = used
-        else:
-            bathy = load(Path(source).expanduser(), "model" if crs == "model" else crs, depths)
-            if crs == "model":
-                bathy.crs = "model"
-                if bathy.raster is not None:
-                    bathy.raster.crs = "model"
-            heights = grid_heights(bathy, georef, xs, ys, method)
-            self.geo_sources = [Path(source).name]
-        count = write_geo_dat(folder / "geo.dat", xs, ys, heights)
-        setup = self.data.case_setup(case_id, create=True)
-        if setup is not None:
-            setup.geo_changed()
+        if web and crs == "model":
+            raise ValueError("bathymetry from the web needs the case's georeference")
         code = f"session.make_geo_dat({str(source)!r}"
         for key, value, default in (
             ("crs", crs, None),
             ("method", method, "tin"),
-            ("spacing", spacing, None),
+            ("spacing", given_spacing if given_spacing is not None else spacing, None),
             ("depths", depths, False),
             ("case", case, None),
         ):
             if value != default:
                 code += f", {key}={value!r}"
-        self.record_output(code + ")")
-        self.set_input("control.txt", "G 10", [1], case=case)
-        self.scene.inputs_changed(case_id)
-        return count
+        return GeoDatJob(
+            self,
+            case_id,
+            case,
+            folder,
+            georef,
+            xs,
+            ys,
+            source,
+            web,
+            crs,
+            method,
+            depths,
+            code + ")",
+        )
 
     def add_background_map(self, source: str = "Kartverket topo", **properties: Any) -> str:
         """A background map round a georeferenced case: map tiles (``source``, see
@@ -1068,6 +1077,86 @@ class Session:
         namespace: dict[str, Any] = {}
         exec(compile(source, "<lagoon script>", "exec"), namespace)
         return namespace["session"]
+
+
+class GeoDatJob:
+    """Making geo.dat (:meth:`Session.geo_dat_job`): ``run`` the work, then
+    ``finish`` in the session's thread."""
+
+    def __init__(
+        self,
+        session,
+        case_id,
+        case,
+        folder,
+        georef,
+        xs,
+        ys,
+        source,
+        web,
+        crs,
+        method,
+        depths,
+        code,
+    ):
+        self.session = session
+        self.case_id, self.case, self.folder = case_id, case, folder
+        self.georef, self.xs, self.ys = georef, xs, ys
+        self.source, self.web, self.crs = source, web, crs
+        self.method, self.depths, self.code = method, depths, code
+        self.count = 0
+        self.sources: list[str] = []
+
+    def run(self, progress=None) -> int:
+        """Read or download the bathymetry, carry it onto the grid, write geo.dat
+        (any thread). Returns the number of points."""
+        from lagoonviz.core.geo.bathy import grid_heights, load, web_heights, write_geo_dat
+
+        def tell(fraction: float, text: str) -> None:
+            if progress is not None:
+                progress(max(0.0, min(1.0, fraction)), text)
+
+        if self.web:
+            heights, self.sources = web_heights(
+                self.source,
+                self.georef,
+                self.xs,
+                self.ys,
+                float(self.xs[1] - self.xs[0]),
+                progress=lambda f, t: tell(0.8 * f, t),
+            )
+        else:
+            tell(0.0, f"Reading {Path(self.source).name}…")
+            crs = "model" if self.crs == "model" else self.crs
+            bathy = load(Path(self.source).expanduser(), crs, self.depths)
+            if self.crs == "model":
+                bathy.crs = "model"
+                if bathy.raster is not None:
+                    bathy.raster.crs = "model"
+            tell(0.3, "Onto the grid…")
+            heights = grid_heights(bathy, self.georef, self.xs, self.ys, self.method)
+            self.sources = [Path(self.source).name]
+        self.count = write_geo_dat(
+            self.folder / "geo.dat",
+            self.xs,
+            self.ys,
+            heights,
+            progress=lambda f, t: tell(0.8 + 0.2 * f, t),
+        )
+        return self.count
+
+    def finish(self) -> int:
+        """After run, in the session's thread: G 10 1, the set-up reads geo.dat
+        again, the script line. Returns the number of points."""
+        session = self.session
+        session.geo_sources = list(self.sources)
+        setup = session.data.case_setup(self.case_id, create=True)
+        if setup is not None:
+            setup.geo_changed()
+        session.record_output(self.code)
+        session.set_input("control.txt", "G 10", [1], case=self.case)
+        session.scene.inputs_changed(self.case_id)
+        return self.count
 
 
 def drafts_folder() -> Path:

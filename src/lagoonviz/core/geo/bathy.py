@@ -18,6 +18,7 @@ carries them onto its cells.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +38,21 @@ from lagoonviz.core.geo.raster import (
 )
 
 METHODS = ("tin", "idw", "nearest")
+
+
+class Cancelled(Exception):
+    """Making geo.dat was cancelled (by the progress callback)."""
+
+
+#: Progress signature: ``progress(fraction 0..1, what is being done)``; it may raise
+#: :class:`Cancelled` to stop
+Progress = Callable[[float, str], None]
+
+
+def _no_progress(_fraction: float, _text: str) -> None:
+    pass
+
+
 #: at most this many geo.dat points (the spacing grows to stay under it)
 MOST_POINTS = 4_000_000
 
@@ -166,7 +182,13 @@ WEB = {
 
 
 def web_heights(
-    choice: str, georef: Georef, xs: np.ndarray, ys: np.ndarray, spacing: float, fetch=None
+    choice: str,
+    georef: Georef,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    spacing: float,
+    fetch=None,
+    progress: Progress | None = None,
 ) -> tuple[np.ndarray, list[str]]:
     """Bed heights on a model grid from the web (lagoonviz.core.geo.download): the
     sources of a choice in turn, each filling what the ones before had no data for,
@@ -182,9 +204,12 @@ def web_heights(
     heights = np.full((len(ys), len(xs)), np.nan)
     used: list[str] = []
     errors: list[str] = []
-    for key in WEB[choice]:
+    progress = progress or _no_progress
+    keys = WEB[choice]
+    for n, key in enumerate(keys):
         if np.isfinite(heights).all():
             break
+        progress(n / len(keys), f"Downloading from {SOURCES[key].label}…")
         if not covers(SOURCES[key], georef, box):
             errors.append(f"{SOURCES[key].label}: not here")
             continue
@@ -193,6 +218,7 @@ def web_heights(
         except (OSError, RasterError) as error:
             errors.append(str(error))
             continue
+        progress((n + 0.8) / len(keys), f"Onto the grid: {SOURCES[key].label}")
         found = warp(raster, georef, xs, ys)  # model z (z_offset taken away)
         missing = ~np.isfinite(heights) & np.isfinite(found)
         if missing.any():
@@ -224,17 +250,31 @@ def geo_grid(
     return xs, ys
 
 
-def write_geo_dat(path: str | Path, xs: np.ndarray, ys: np.ndarray, heights: np.ndarray) -> int:
+def write_geo_dat(
+    path: str | Path,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    heights: np.ndarray,
+    progress: Progress | None = None,
+) -> int:
     """Write a grid of heights as geo.dat (x y z per line, model coordinates); NaN
-    cells are left out. Returns the number of points."""
+    cells are left out. Returns the number of points. A cancel (``progress``
+    raising Cancelled) leaves the geo.dat there was."""
+    progress = progress or _no_progress
     gx, gy = np.meshgrid(xs, ys)
     points = np.column_stack([gx.ravel(), gy.ravel(), np.asarray(heights, float).ravel()])
     points = points[np.isfinite(points).all(axis=1)]
     path = Path(path)
     temporary = path.with_suffix(path.suffix + ".part")
-    with temporary.open("w", encoding="ascii") as file:
-        for start in range(0, len(points), 200_000):  # C formatting, in parts
-            part = points[start : start + 200_000]
-            file.write(("%.4f %.4f %.4f\n" * len(part)) % tuple(part.ravel()))
+    try:
+        with temporary.open("w", encoding="ascii") as file:
+            for start in range(0, len(points), 100_000):  # C formatting, in parts
+                progress(start / max(len(points), 1), f"Writing geo.dat: {start:,} points")
+                part = points[start : start + 100_000]
+                file.write(("%.4f %.4f %.4f\n" * len(part)) % tuple(part.ravel()))
+    except Cancelled:
+        temporary.unlink(missing_ok=True)
+        raise
     temporary.replace(path)
+    progress(1.0, f"geo.dat: {len(points):,} points")
     return len(points)
