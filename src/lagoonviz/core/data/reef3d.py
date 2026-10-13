@@ -617,7 +617,11 @@ class Dataset:
         return _lines_mesh(lines, grid)
 
     def _piece_cells(self, number: int, path: Path, piece) -> tuple:
-        """The cells of one MPI piece, read once (the grid does not change)."""
+        """The cells of one MPI piece, read once (the grid does not change); with
+        memory use "low memory", read again every time instead of kept."""
+        from lagoonviz.core import memory
+
+        keep = memory.current().keep_cells
         with self._lock:
             cells = self._cells.get(number)
             if cells is None or cells[0] != piece.points.shape[0]:
@@ -628,7 +632,10 @@ class Dataset:
                     full.offsets.astype(np.int64),
                     full.types,
                 )
-                self._cells[number] = cells
+                if keep:
+                    self._cells[number] = cells
+            if not keep and self._cells:
+                self._cells.clear()  # kept before the mode changed
         return cells
 
     def _piece(self, path: Path, point_arrays: list[str] | None = None, with_cells: bool = True):

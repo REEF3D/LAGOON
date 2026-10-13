@@ -8,6 +8,7 @@ timeline and Python console along the bottom.
 from __future__ import annotations
 
 import logging
+import os
 import traceback
 from pathlib import Path
 
@@ -59,6 +60,8 @@ SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
 LAYOUT_VERSION = 4
 #: the items the toolbar adds (the Add menu has them all)
+#: the window setting of the memory use mode (lagoonviz.core.memory)
+MEMORY_KEY = "performance/memory"
 TOOLBAR_KINDS = (
     "free_surface",
     "bathymetry",
@@ -93,7 +96,12 @@ class MainWindow(QMainWindow):
         self.resize(1400, 860)
 
         # frames are read in background threads and kept in the session's cache
-        self.loader = BackgroundLoader(self.session.data, workers=4)
+        from lagoonviz.core import memory
+
+        if not os.environ.get("LAGOON_MEMORY"):  # (the environment wins: scripts, tests)
+            saved = str(self.settings.value(MEMORY_KEY, memory.DEFAULT_MODE))
+            memory.set_mode(saved if saved in memory.MODES else memory.DEFAULT_MODE)
+        self.loader = BackgroundLoader(self.session.data, workers=memory.current().loader_workers)
 
         # panels
         self.viewport = create_viewport(
@@ -435,6 +443,17 @@ class MainWindow(QMainWindow):
             action.setChecked(name == current_look)
             action.triggered.connect(lambda _=False, n=name: self.set_viewport_look(n))
             self.look_actions[name] = action
+        memory_menu = view_menu.addMenu("&Memory use")
+        from lagoonviz.core import memory
+
+        self.memory_actions = {}
+        for name in memory.MODES:
+            action = memory_menu.addAction(name.capitalize())
+            action.setCheckable(True)
+            action.setChecked(name == memory.mode())
+            action.setToolTip(memory.profile(name).describe())
+            action.triggered.connect(lambda _=False, n=name: self.set_memory_use(n))
+            self.memory_actions[name] = action
         water_menu = view_menu.addMenu("&White water in Cycles")
         from lagoonviz.gui.export_movie import set_white_water, white_water_setting
 
@@ -629,6 +648,19 @@ class MainWindow(QMainWindow):
                 self.viewport.frame("perspective")
         except Exception:  # noqa: BLE001 (the mode switches all the same)
             log.warning("view of the %s:\n%s", new, traceback.format_exc())
+
+    def set_memory_use(self, name: str) -> None:
+        """View → Memory use: performance (fast, more memory), balanced, or low memory
+        (large cases fit, slower); kept for the next start."""
+        from lagoonviz.core import memory
+
+        use = memory.set_mode(name)
+        self.settings.setValue(MEMORY_KEY, name)
+        self.session.data.cache.trim()
+        self.loader.set_workers(use.loader_workers)
+        for key, action in self.memory_actions.items():
+            action.setChecked(key == name)
+        self.statusBar().showMessage(f"Memory use {use.describe()}", 8000)
 
     def add_item(self, kind: str) -> str:
         """Add an item from the menu or toolbar (slices start in the middle of the volume)."""

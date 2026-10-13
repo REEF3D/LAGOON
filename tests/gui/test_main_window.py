@@ -1007,3 +1007,18 @@ def test_figure_editor_paper_figure(window, tmp_path, qtbot):
     assert Path(written).stat().st_size > 2000
     saved = editor.save_template(str(tmp_path / "paper"))
     assert FigureTemplate.load(saved).panels[2].kind == "view"
+
+
+def test_memory_use_from_the_view_menu(window):
+    from lagoonviz.core import memory
+
+    before = memory.mode()
+    try:
+        window.memory_actions["low memory"].trigger()
+        assert memory.mode() == "low memory" and window.loader.workers == 2
+        assert window.memory_actions["low memory"].isChecked()
+        assert not window.memory_actions["balanced"].isChecked()
+        assert window.settings.value("performance/memory") == "low memory"
+        assert window.session.data.cache.max_bytes == 256 << 20
+    finally:
+        window.set_memory_use(before)

@@ -45,6 +45,14 @@
   min and max times a percentage (95 %: 0.95 × min to 0.95 × max); *Fit range to
   this frame* uses it too. `session.set_property(item, "range_percent", 95)`.
 
+### Speed or memory
+
+- **View → Memory use**: *Performance* (frames kept up to a quarter of the
+  computer's memory, more read ahead, more threads), *Balanced* (as before) or *Low
+  memory* (256 MB of frames, little read ahead, a volume's cells not kept: large
+  cases fit). Kept for the next start; `LAGOON_MEMORY` for scripts and
+  `lagoon-render`.
+
 ### Opening output
 
 - **SEASTATE**: its maps of the sea state (`REEF3D_SEASTATE_VTP`) open as a *Sea

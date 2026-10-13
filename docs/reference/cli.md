@@ -98,4 +98,5 @@ lagoon-setup ~/runs/flume --describe
 | `LAGOON_BLENDER` | the Blender executable for path tracing |
 | `LAGOON_DIVEMESH` | the DIVEMesh program (`DiveMESH`) the set-up runs |
 | `LAGOON_LOG` | also write the application's log to this file |
+| `LAGOON_MEMORY` | memory use: `performance`, `balanced` (the default) or `low` (see [The 3D view](../guide/viewport.md#speed-or-memory)) |
 | `LAGOON_NO_GPU` | start the window without the 3D view (e.g. over a remote desktop) |

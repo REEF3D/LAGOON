@@ -31,7 +31,8 @@ Overlay = Callable[[np.ndarray, float], np.ndarray]
 Progress = Callable[[int, int], bool]
 
 MOVIE_SUFFIXES = (".mp4", ".mov", ".m4v")
-#: frames read ahead while one is drawn, and the threads reading them
+#: frames read ahead while one is drawn, and the threads reading them (balanced
+#: memory use; lagoonviz.core.memory sets them for each mode)
 READ_AHEAD = 6
 READERS = 3
 
@@ -242,7 +243,11 @@ def write_movie(
     data = session.data
     # reading several frames ahead, and encoding beside the drawing: the three used to
     # take turns, and reading one frame at a time was most of an export
-    readers = ThreadPoolExecutor(READERS, thread_name_prefix="lagoon-movie-read")
+    from lagoonviz.core import memory
+
+    use = memory.current()
+    read_ahead = use.film_read_ahead
+    readers = ThreadPoolExecutor(use.film_readers, thread_name_prefix="lagoon-movie-read")
     writer = ThreadPoolExecutor(1, thread_name_prefix="lagoon-movie-write")
     spent = {"waiting for data": 0.0, "drawing": 0.0, "overlay": 0.0, "encoding": 0.0}
     started = time_module.perf_counter()
@@ -260,14 +265,14 @@ def write_movie(
 
             write_png(folder / f"frame_{number:05d}.png", image)
 
-    ahead = {i: readers.submit(preload, times[i]) for i in range(min(READ_AHEAD, len(times)))}
+    ahead = {i: readers.submit(preload, times[i]) for i in range(min(read_ahead, len(times)))}
     written = None
     done = 0
     try:
         for number, time in enumerate(times):
             clock = time_module.perf_counter()
             ahead.pop(number).result()  # this frame's data is read
-            following = number + READ_AHEAD
+            following = number + read_ahead
             if following < len(times):
                 ahead[following] = readers.submit(preload, times[following])
             spent["waiting for data"] += time_module.perf_counter() - clock

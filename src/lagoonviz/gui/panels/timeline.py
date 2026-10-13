@@ -603,7 +603,7 @@ class TimelinePanel(QWidget):
                 self.loader.prefetch(
                     self.session.data.data_items(),
                     self.session.scene.time,
-                    frames_ahead=max(8, self.fps.value() // 4),  # a quarter second
+                    frames_ahead=_frames_ahead(self.fps.value()),
                     times=self.times,
                 )
             return
@@ -615,3 +615,12 @@ class TimelinePanel(QWidget):
                 return
             time = self.time_of(low)
         self.session.set_time(time)
+
+
+def _frames_ahead(fps: int) -> int:
+    """Frames to read ahead while playing: a quarter second at least, as many as the
+    memory use mode asks for (low memory: only those)."""
+    from lagoonviz.core import memory
+
+    use = memory.current()
+    return use.play_ahead if use.mode == "low memory" else max(use.play_ahead, fps // 4)

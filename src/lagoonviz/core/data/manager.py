@@ -204,10 +204,11 @@ class FrameKey:
 
 
 class FrameCache:
-    """Least-recently-used cache of meshes with a memory budget."""
+    """Least-recently-used cache of meshes with a memory budget: ``max_bytes``, or
+    the memory use mode's (:mod:`lagoonviz.core.memory`) when not given."""
 
-    def __init__(self, max_bytes: int = 1 << 30):
-        self.max_bytes = max_bytes
+    def __init__(self, max_bytes: int | None = None):
+        self._max_bytes = max_bytes
         self._items: OrderedDict[FrameKey, SurfaceMesh] = OrderedDict()
         self._bytes = 0
         self._lock = threading.Lock()
@@ -230,15 +231,37 @@ class FrameCache:
             self.hits += 1
             return mesh
 
+    @property
+    def max_bytes(self) -> int:
+        if self._max_bytes is not None:
+            return self._max_bytes
+        from lagoonviz.core import memory
+
+        return memory.current().cache_bytes
+
+    @max_bytes.setter
+    def max_bytes(self, value: int | None) -> None:
+        self._max_bytes = value
+        self.trim()
+
     def put(self, key: FrameKey, mesh: SurfaceMesh) -> None:
         with self._lock:
             if key in self._items:
                 self._bytes -= self.size_of(self._items.pop(key))
             self._items[key] = mesh
             self._bytes += self.size_of(mesh)
-            while self._bytes > self.max_bytes and len(self._items) > 1:
-                _, old = self._items.popitem(last=False)
-                self._bytes -= self.size_of(old)
+            self._evict(1)
+
+    def trim(self) -> None:
+        """Down to the budget (after the memory use mode changed)."""
+        with self._lock:
+            self._evict(0)
+
+    def _evict(self, keep: int) -> None:
+        budget = self.max_bytes
+        while self._bytes > budget and len(self._items) > keep:
+            _, old = self._items.popitem(last=False)
+            self._bytes -= self.size_of(old)
 
     def __contains__(self, key: object) -> bool:
         with self._lock:
@@ -1774,11 +1797,22 @@ class BackgroundLoader:
 
     def __init__(self, manager: DataManager, workers: int = 2):
         self.manager = manager
+        self.workers = workers
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="lagoon-io")
         self._pending: dict[FrameKey, Future] = {}
         self._wants: dict[object, FrameKey] = {}  # owner -> the frame it waits for
         self._holders: dict[FrameKey, set] = {}  # frame -> owners waiting for it
         self._lock = threading.Lock()
+
+    def set_workers(self, workers: int) -> None:
+        """Read with this many threads from now on (frames being read finish)."""
+        if workers == self.workers:
+            return
+        old = self._pool
+        with self._lock:
+            self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="lagoon-io")
+            self.workers = workers
+        old.shutdown(wait=False)
 
     def want(self, owner: object, key: FrameKey | None) -> None:
         """``owner`` now needs ``key`` (None: nothing). Its earlier frame is dropped

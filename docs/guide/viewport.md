@@ -95,3 +95,19 @@ player on the whole screen, for presentations; ++escape++ goes back.
 Without a usable GPU (or over a remote desktop without one), the window opens
 with a note in place of the 3D view; plots, figures and scripts still work, and
 `lagoon-render` can draw with Mesa's software driver on Linux.
+
+## Speed or memory
+
+*View → Memory use* chooses how much LAGOON keeps in memory to be fast:
+
+| | Frames kept | Read ahead while playing | |
+| --- | --- | --- | --- |
+| **Performance** | a quarter of the computer's memory (2 – 16 GB) | 16 frames, 6 threads | a volume's cells kept for slices and iso-surfaces |
+| **Balanced** (the default) | 1 GB | 8 frames, 4 threads | as LAGOON always did |
+| **Low memory** | 256 MB | 2 frames, 2 threads | the cells read again for every slice: large volumes fit, playing is slower |
+
+Frames played once come back from memory without reading the files again, as
+long as they fit; films read ahead in the same measure. The choice is kept for the
+next start and applies at once (frames beyond the new budget are let go). For
+`lagoon-render` and scripts, `LAGOON_MEMORY=low` (or `performance`) does the same.
+
