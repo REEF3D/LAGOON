@@ -22,8 +22,14 @@
   what does not change with time (the bed, solids, geo.dat's points, the set-up,
   the background maps).
 
-### Slices
+### Slices, iso-volumes and grid lines
 
+- **Iso-volume** (*Add → Iso-volume*, a button in the toolbar): the part of the
+  volume where a variable lies in a range, drawn closed (the iso-surfaces at both
+  bounds and the volume's outside clipped to the range); a CFD run starts with
+  phi ≥ 0, its water. `session.add_iso_volume("phi", 0.0, 1.0)`.
+- **Grid lines** on the free surface, the bed and the volume (*Grid lines*: off,
+  dark, white): the edges of their cells, from the VTP/VTU files or a store's grid.
 - **The outer surface of volumes faces outwards again** (the grid lines of slices
   had replaced the cell faces it is made from: two of a hexahedron's faces turned
   inwards, shading them dark).

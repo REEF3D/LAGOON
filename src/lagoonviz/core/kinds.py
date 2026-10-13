@@ -114,6 +114,17 @@ def _exaggeration(tip: str) -> dict[str, PropertySpec]:
     }
 
 
+def _grid_lines(what: str) -> dict[str, PropertySpec]:
+    return {
+        "grid_lines": PropertySpec(
+            "off",
+            "Grid lines",
+            choices=("off", "dark", "white"),
+            tip=f"The edges of the cells {what}: the grid the solver computed on",
+        )
+    }
+
+
 def _colouring(variable: str, colormap: str) -> dict[str, PropertySpec]:
     return {
         "variable": PropertySpec(variable, "Colour by", provider="variables"),
@@ -219,6 +230,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("free surface"),
             **_colouring("eta", "reef3d"),
+            **_grid_lines("of the surface"),
             **_contours(),
             **_vectors(),
             **_exaggeration("Scales the surface elevation about the still water level"),
@@ -251,6 +263,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("bed"),
             **_colouring("none", "sand"),
+            **_grid_lines("of the bed"),
             **_contours(),
             **_exaggeration("Scales the bed height about the still water level"),
             "hide_wet": PropertySpec(
@@ -262,7 +275,11 @@ KINDS: dict[str, KindSpec] = {
     ),
     "volume": KindSpec(
         "Volume",
-        {**_data_source("volume"), **_colouring("velocity", "ocean")},
+        {
+            **_data_source("volume"),
+            **_colouring("velocity", "ocean"),
+            **_grid_lines("on the volume's outside"),
+        },
     ),
     "series": KindSpec(
         "Time series",
@@ -286,12 +303,7 @@ KINDS: dict[str, KindSpec] = {
             "normal": PropertySpec("y", "Normal", choices=("x", "y", "z")),
             "position": PropertySpec(0.0, "Position [m]", tip="Where the plane cuts the axis"),
             **_colouring("velocity", "ocean"),
-            "grid_lines": PropertySpec(
-                "off",
-                "Grid lines",
-                choices=("off", "dark", "white"),
-                tip="The edges of the cells the slice cuts: the grid the solver computed on",
-            ),
+            **_grid_lines("the slice cuts"),
             **_contours(),
             **_vectors(),
         },
@@ -307,6 +319,21 @@ KINDS: dict[str, KindSpec] = {
                 tip="The variable whose surface of equal value is drawn",
             ),
             "iso_value": PropertySpec(0.0, "Value", tip="Where the surface lies"),
+            **_colouring("none", "ocean"),
+        },
+    ),
+    "iso_volume": KindSpec(
+        "Iso-volume",
+        {
+            **_data_source("volume"),
+            "iso_by": PropertySpec(
+                "none",
+                "Iso-volume of",
+                provider="variables",
+                tip="The variable whose range is drawn (phi from 0 up: the water of a CFD run)",
+            ),
+            "iso_min": PropertySpec(0.0, "From", tip="The part of the volume from this value"),
+            "iso_max": PropertySpec(1.0, "To", tip="… up to this value"),
             **_colouring("none", "ocean"),
         },
     ),

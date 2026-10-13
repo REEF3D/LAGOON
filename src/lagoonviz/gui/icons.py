@@ -132,6 +132,25 @@ def _iso_surface(p: QPainter) -> None:
     p.restore()
 
 
+def _iso_volume(p: QPainter) -> None:
+    """The box with a filled body of water in its lower part, a wavy top."""
+    _volume(p)
+    p.save()
+    colour = QColor(COLORS["cursor"])
+    p.setPen(QPen(colour, 3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    fill = QColor(colour)
+    fill.setAlpha(110)
+    p.setBrush(fill)
+    path = QPainterPath(QPointF(12, 36))
+    path.cubicTo(18, 30, 24, 40, 30, 34)
+    path.cubicTo(34, 30, 38, 38, 40, 34)
+    path.lineTo(40, 52)
+    path.lineTo(12, 52)
+    path.closeSubpath()
+    p.drawPath(path)
+    p.restore()
+
+
 def _series(p: QPainter) -> None:
     p.drawLine(QPointF(10, 8), QPointF(10, 54))
     p.drawLine(QPointF(10, 54), QPointF(58, 54))
@@ -280,6 +299,7 @@ DRAWINGS: dict[str, Draw] = {
     "volume": _volume,
     "slice": _slice,
     "iso_surface": _iso_surface,
+    "iso_volume": _iso_volume,
     "series": _series,
     "play": _play,
     "pause": _pause,

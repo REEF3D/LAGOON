@@ -21,7 +21,7 @@ from lagoon_format.series import ProfileSet as StoredProfiles
 from lagoon_format.series import Table
 from lagoon_format.store import Output, Store, is_store, sigma_heights
 
-from lagoonviz.core.data.mesh import SurfaceMesh
+from lagoonviz.core.data.mesh import SurfaceMesh, face_edges
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import CELL_DATA_ROLES, Dataset, Frame, _joined
 from lagoonviz.core.data.series import SeriesFile, TimeSeries
@@ -84,7 +84,7 @@ def _face(points: np.ndarray, data: dict[str, np.ndarray], flip: bool) -> Surfac
         name: v.reshape(rows * cols, -1) if v.ndim == 3 else v.reshape(-1)
         for name, v in data.items()
     }
-    return SurfaceMesh(flat, triangles, values)
+    return SurfaceMesh(flat, triangles, values, outlines=face_edges(quads))  # grid lines
 
 
 class StoreDataset(Dataset):
@@ -238,13 +238,16 @@ class StoreDataset(Dataset):
         data = {name: output.read(name, index) for name in names}
         points = np.stack([gx, gy, z], axis=-1)
         with self._cells_lock:
-            mesh = self._cells_cache.get("surface")
-            if mesh is None:
-                mesh = self._cells_cache["surface"] = _face(points, {}, False).triangles
+            cells = self._cells_cache.get("surface")
+            if cells is None:
+                face = _face(points, {}, False)
+                cells = self._cells_cache["surface"] = (face.triangles, face.outlines)
+        triangles, edges = cells
         values = {
             n: v.reshape(z.size, -1) if v.ndim == 3 else v.reshape(-1) for n, v in data.items()
         }
-        return SurfaceMesh(points.reshape(-1, 3).astype(np.float32), mesh, values).with_normals()
+        flat = points.reshape(-1, 3).astype(np.float32)
+        return SurfaceMesh(flat, triangles, values, outlines=edges).with_normals()
 
     def _side(self, t: int, axis: int, line: int, names: list[str]):
         """Heights (nz, n) and fields (nz, n[, 3]) on grid line ``line`` across ``axis``

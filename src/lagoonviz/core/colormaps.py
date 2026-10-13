@@ -169,6 +169,7 @@ PLAIN_COLORS = {
     "particles": "#d0a050",  # sand grains
     "geodat": "#2b4c7e",
     "iso_surface": "#8fb3d1",
+    "iso_volume": "#4f8fcf",
     "streamlines": "#2b4c7e",
 }
 #: colours of the materials of bodies and structures

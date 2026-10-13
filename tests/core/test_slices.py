@@ -141,3 +141,70 @@ def test_the_outer_surface_of_a_volume_faces_outwards():
     normal = np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0])
     outwards = p.mean(axis=1) - CUBE.mean(axis=0)
     assert ((normal * outwards).sum(axis=1) > 0).all()
+
+
+@pytest.mark.parametrize("kind", ["free_surface", "bathymetry", "volume"])
+def test_surfaces_and_volumes_show_their_grid_lines(reef3d_run, tmp_path, kind):
+    from lagoonviz.core.convert import convert
+
+    s = Session()
+    s.open_case(reef3d_run)
+    item = next((i.id for i in s.scene if i.kind == kind), None) or s.add_item(kind)
+    mesh = s.data.load(item)
+    shown = s.data.display(item, mesh)
+    assert s.data.patch_outlines(item, mesh, shown) is None  # off by default
+    s.set_property(item, "grid_lines", "white")
+    lines = s.data.patch_outlines(item, mesh, shown)
+    assert lines is not None and lines.color == "#ffffff"
+    lengths = np.linalg.norm(lines.segments[:, 1] - lines.segments[:, 0], axis=1)
+    # the grid of the fixture: 1 m cells across, so no edge is longer than a cell's
+    # diagonal (no triangle diagonals either for the quads of the surfaces)
+    assert len(lengths) and lengths.max() < 1.5 + 1e-3
+    # the same lines from a LAGOON store of the run
+    convert(reef3d_run)
+    stored = Session()
+    stored.open_case(next(reef3d_run.glob("*.lagoon")))
+    other = next((i.id for i in stored.scene if i.kind == kind), None) or stored.add_item(kind)
+    stored.set_property(other, "grid_lines", "dark")
+    store_mesh = stored.data.load(other)
+    shown_there = stored.data.display(other, store_mesh)
+    assert stored.data.patch_outlines(other, store_mesh, shown_there) is not None
+
+    def edges(found):  # each edge once (a store's volume draws the box's corners twice)
+        ends = np.round(found.points[found.outlines.astype(np.int64)].astype(float), 3)
+        return {tuple(sorted(map(tuple, pair))) for pair in ends}
+
+    assert edges(store_mesh) == edges(mesh)
+
+
+def test_an_iso_volume_is_the_part_of_the_volume_in_a_range(reef3d_run):
+    s = Session()
+    s.open_case(reef3d_run)
+    pressure = lambda z: 1000 * 9.81 * (DEPTH - z)  # noqa: E731 (linear in z in the fixture)
+    item = s.add_iso_volume("pressure", pressure(1.5), pressure(0.5))
+    assert "session.add_item('iso_volume', iso_by='pressure'" in s.to_script()
+    mesh = s.data.load(item)
+    z = mesh.points[:, 2]
+    assert z.min() == pytest.approx(0.5, abs=1e-4) and z.max() == pytest.approx(1.5, abs=1e-4)
+    # a closed box 1 m high: the two levels and the four sides
+    width, length = NY - 1, NX - 1
+    expected = 2 * width * length + 2 * (width + length) * 1.0
+    assert area(mesh) == pytest.approx(expected, rel=1e-3)
+    # its faces point out of the part: down at the bottom, up at the top
+    p = mesh.points.astype(float)
+    t = mesh.triangles.astype(np.int64)
+    normal = np.cross(p[t[:, 1]] - p[t[:, 0]], p[t[:, 2]] - p[t[:, 0]])
+    middle = p[t].mean(axis=1)
+    assert (normal[np.isclose(middle[:, 2], 0.5, atol=1e-4), 2] < 0).all()
+    assert (normal[np.isclose(middle[:, 2], 1.5, atol=1e-4), 2] > 0).all()
+    shown = s.data.display(item, mesh)
+    assert shown.positions.shape[0] == mesh.n_points
+
+
+def test_the_first_iso_volume_of_a_run(reef3d_run):
+    s = Session()
+    s.open_case(reef3d_run)
+    item = s.add_iso_volume()
+    props = s.scene.get(item).properties
+    assert props["iso_by"] == "velocity" and props["iso_min"] < props["iso_max"]
+    assert s.data.load(item).n_triangles > 0

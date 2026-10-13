@@ -30,9 +30,11 @@ from lagoonviz.core.data.mesh import (
     PieceMerger,
     SurfaceMesh,
     VolumePlan,
+    grid_edges,
     orient_by_field,
     plan_cut,
     plan_level,
+    polygon_edges,
     scalar_values,
     triangulate,
     tubes,
@@ -160,6 +162,7 @@ class Dataset:
         self.kind, self.components = self._describe(frames[0])
         self._merger = PieceMerger("xy" if self.surface_like else "xyz")
         self._triangles = np.zeros((0, 3), np.uint32)
+        self._edges: np.ndarray | None = None  # a surface's grid lines
         self._volume_plan: VolumePlan | None = None
         self._step_array: np.ndarray | None = None
         self._cells: dict[int, tuple] = {}  # piece number -> cells, for slices
@@ -305,7 +308,7 @@ class Dataset:
                     plan = self._volume_plan = VolumePlan.build(full)
                     del full
             points, data = plan.apply(light)
-            triangles = plan.triangles
+            triangles, edges = plan.triangles, plan.edges
         else:
             with self._lock:
                 if not self._merger.accepts(light):
@@ -314,16 +317,29 @@ class Dataset:
                     self._triangles = np.ascontiguousarray(
                         triangulate(merged.connectivity, merged.offsets), dtype=np.uint32
                     )
+                    # the surface's grid lines: its polygons' edges (of triangles, as
+                    # REEF3D writes them, without the cells' diagonals)
+                    self._edges = (
+                        grid_edges(self._triangles, merged.points)
+                        if self._all_triangles(merged.offsets)
+                        else polygon_edges(merged.connectivity, merged.offsets)
+                    )
                 plan = self._merger.plan
-                triangles = self._triangles
+                triangles, edges = self._triangles, self._edges
             merged = plan.apply(light)
             points, data = merged.points, merged.point_data
         mesh = SurfaceMesh(
             points=np.ascontiguousarray(points, dtype=np.float32),
             triangles=triangles,
             point_data=data,
+            outlines=edges,
         )
         return mesh.with_normals()  # here, so it runs in the loader thread
+
+    @staticmethod
+    def _all_triangles(offsets: np.ndarray) -> bool:
+        sizes = np.diff(np.concatenate(([0], offsets)))
+        return bool(sizes.size) and bool((sizes == 3).all())
 
     def _plain_piece(self, path: Path, arrays: list[str] | None, cell_data: bool):
         """One file of an object output (a store hands out its points instead)."""
@@ -467,6 +483,53 @@ class Dataset:
             plan = plan_level(field.astype(np.float64) - value, connectivity, offsets, types, True)
             plan = orient_by_field(plan, piece.points, field)
             parts.append(plan.apply(piece.points, piece.point_data))
+        return _joined(parts)
+
+    def read_iso_volume(
+        self,
+        index: int,
+        variable: str,
+        low: float,
+        high: float,
+        variables: list[str] | None = None,
+    ) -> SurfaceMesh:
+        """The part of a volume frame where ``variable`` lies between ``low`` and
+        ``high`` (ParaView's iso-volume, e.g. the water where the level set phi >= 0),
+        as its surface: the iso-surfaces at the two bounds (facing out of the part)
+        and the volume's outer surface clipped to the range."""
+        if self.kind != "UnstructuredGrid":
+            raise ValueError(f"{self.label}: iso-volumes need a volume")
+        from lagoonviz.core.data.mesh import clip_surface
+
+        low, high = sorted((float(low), float(high)))
+        names = [*(variables or []), variable]
+        parts = []
+        bottom = self.read_iso(index, variable, low, names)
+        if bottom.n_triangles:  # it faces the rising field: into the part, so turned
+            parts.append(
+                SurfaceMesh(
+                    bottom.points,
+                    np.ascontiguousarray(bottom.triangles[:, ::-1]),
+                    bottom.point_data,
+                )
+            )
+        top = self.read_iso(index, variable, high, names)
+        if top.n_triangles:
+            parts.append(top)
+        outside = self.read(index, names)
+        field = scalar_values(outside.point_data, variable)
+        if field is None:
+            raise ValueError("an iso-volume needs a variable")
+        outside = clip_surface(outside, field, low, "above")
+        if outside.n_triangles:
+            outside = clip_surface(
+                outside, scalar_values(outside.point_data, variable), high, "below"
+            )
+        if outside.n_triangles:
+            parts.append(SurfaceMesh(outside.points, outside.triangles, outside.point_data))
+        if not parts:
+            empty = np.zeros((0, 3), np.float32)
+            return SurfaceMesh(empty, np.zeros((0, 3), np.uint32), {})
         return _joined(parts)
 
     def read_streamlines(

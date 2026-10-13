@@ -43,6 +43,7 @@ from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
 DATA_KINDS = {kind: role for role, kind in ROLES.items() if role not in ("solid", "topo")} | {
     "slice": "volume",
     "iso_surface": "volume",
+    "iso_volume": "volume",
     "streamlines": "volume",
 }
 #: 2D: heights of the flat layers (the free surface over objects over the bed)
@@ -51,6 +52,7 @@ PLAN_LAYERS = {
     "volume": 0.5,
     "slice": 0.5,
     "iso_surface": 0.5,
+    "iso_volume": 0.5,
     "streamlines": 2.5,
     "structure": 1.0,
     "body": 1.5,
@@ -640,6 +642,17 @@ class DataManager:
             if variable == "none":
                 return None  # nothing chosen yet
             extra = ("iso", variable, float(item.properties.get("iso_value", 0.0)))
+        elif item.kind == "iso_volume":
+            variable = str(item.properties.get("iso_by", "none"))
+            if variable == "none":
+                return None
+            props = item.properties
+            extra = (
+                "isovol",
+                variable,
+                float(props.get("iso_min", 0.0)),
+                float(props.get("iso_max", 1.0)),
+            )
         elif item.kind == "streamlines":
             props = item.properties
             vector = str(props.get("streamlines_of", "none"))
@@ -678,6 +691,9 @@ class DataManager:
             mesh = dataset.read_slice(key.index, key.extra[1], key.extra[2], list(key.arrays))
         elif key.extra and key.extra[0] == "iso":
             mesh = dataset.read_iso(key.index, key.extra[1], key.extra[2], list(key.arrays))
+        elif key.extra and key.extra[0] == "isovol":
+            _, variable, low, high = key.extra
+            mesh = dataset.read_iso_volume(key.index, variable, low, high, list(key.arrays))
         elif key.extra and key.extra[0] == "stream":
             _, vector, axis, position, count, lines_in = key.extra
             mesh = dataset.read_streamlines(
@@ -793,7 +809,7 @@ class DataManager:
         item = self.scene.get(item_id)
         if item.kind == "amr":
             colour = str(item.properties.get("outlines", "dark"))
-        elif item.kind == "slice":
+        elif "grid_lines" in item.properties:  # slices, surfaces, volumes
             colour = str(item.properties.get("grid_lines", "off"))
         else:
             return None
@@ -801,17 +817,29 @@ class DataManager:
             return None
         if not len(mesh.outlines) or shown.positions.shape[0] != mesh.n_points:
             return None
-        segments = np.array(shown.positions[mesh.outlines.astype(np.int64)], np.float32)
+        edges = mesh.outlines.astype(np.int64)
+        if item.kind != "slice" and shown.triangles.size:  # not over hidden dry land
+            used = np.zeros(mesh.n_points, bool)
+            used[shown.triangles.ravel()] = True
+            edges = edges[used[edges].all(axis=1)]
+            if not len(edges):
+                return None
+        segments = np.array(shown.positions[edges], np.float32)
         span = np.ptp(shown.positions, axis=0)
         lift = 0.06 if self.scene.flat else 2.5e-3 * float(max(span.max(), 1e-9))
         axis = AXES.get(str(item.properties.get("normal", "z")), 2) if item.kind == "slice" else 2
-        if self.scene.flat or axis == 2:
+        if self.scene.flat or (item.kind in ("slice", "amr") and axis == 2):
             segments[..., 2] += lift
-        else:  # a vertical slice: on both of its sides
+        elif item.kind == "slice":  # a vertical slice: on both of its sides
             other = segments.copy()
             segments[..., axis] += lift
             other[..., axis] -= lift
             segments = np.concatenate([segments, other])
+        elif shown.normals is not None and len(shown.normals) == len(shown.positions):
+            # off the surface along its normals (a volume's sides face sideways)
+            segments += lift * np.asarray(shown.normals, np.float32)[edges]
+        else:
+            segments[..., 2] += lift
         return Trails(
             item_id, segments, shown.visible, "#ffffff" if colour == "white" else "#1e2833"
         )
@@ -1324,6 +1352,25 @@ class DataManager:
         middle = 0.5 * (low + high) if not (low < 0.0 < high) else 0.5 * high
         return variable, float(f"{middle:.3g}")
 
+    def iso_volume_default(self, properties: dict) -> tuple[str, float, float] | None:
+        """A first iso-volume: where REEF3D's level set phi >= 0 (the water of CFD
+        runs), else the upper half of the velocity (or the first variable)."""
+        dataset = self.dataset_for("iso_volume", properties)
+        if dataset is None or dataset.kind != "UnstructuredGrid":
+            return None
+        names = dataset.variables()
+        variable = ("phi" if "phi" in names else "velocity" if "velocity" in names else None) or (
+            names[0] if names else None
+        )
+        if variable is None:
+            return None
+        mesh = dataset.read(0, [variable])  # the volume's outer surface: a fair sample
+        low, high = auto_range(mesh.scalar(variable))
+        top = float(f"{high:.3g}") if high > 0 else high
+        if variable == "phi":
+            return variable, 0.0, max(top, 1.0)
+        return variable, float(f"{0.5 * (low + high):.3g}"), top
+
     def domain_center(self, kind: str, properties: dict) -> tuple[float, float, float] | None:
         """Centre of the first frame of the dataset an item would show (to place slices)."""
         dataset = self.dataset_for(kind, properties)
@@ -1338,7 +1385,7 @@ class DataManager:
         point. Times as on the timeline. None when the item has nothing to plot."""
         item = self.scene.get(probe.item_id)
         dataset = self.dataset(probe.item_id)
-        if dataset is None or item.kind in ("slice", "iso_surface", "streamlines"):
+        if dataset is None or item.kind in ("slice", "iso_surface", "iso_volume", "streamlines"):
             return None
         variable = (
             "eta" if item.kind in WATER_KINDS and "eta" in dataset.components else probe.variable

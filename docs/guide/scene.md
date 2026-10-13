@@ -26,6 +26,7 @@ script the session writes ([Scripting](../scripting.md)).
 | Volume | the outside of the volume output |
 | Slice | the volume cut by an x, y or z plane |
 | Iso-surface | where a variable of the volume has a given value |
+| Iso-volume | the part of the volume where a variable lies in a range (the water of a CFD run: phi from 0 up) |
 | Streamlines | lines along a vector field, through the volume, in a plane or on the free surface |
 | Time series | wave gauges, 6DOF motions or forces, plotted under the 3D view |
 | Wave profile | the surface along the lines of `WSFLINE`, with the wave theory (FNPF) |
@@ -79,7 +80,12 @@ Plots panel adds them over time. Click on empty space to remove it.
 *Position* in metres; *Grid lines* (dark or white) draws the edges of the cells it
 cuts, so the slice shows the grid the solver computed on (on a σ-grid the lines
 follow the bed and the free surface). *Add → Iso-surface* draws where a variable
-has a *Value*.
+has a *Value*. *Add → Iso-volume* (and its button in the toolbar) draws the part of
+the volume where a variable lies between *From* and *To*, as a closed body: for a
+CFD run it starts with the level set phi from 0 up, the water itself; else the
+upper half of the velocity. The free surface, the bed and the volume have *Grid
+lines* too: the edges of their cells (the triangles REEF3D writes, two per cell,
+without the diagonals), dark or white, drawn just off the surface.
 *Add → Streamlines* starts lines on a seed plane (*Seeds on plane*, *Plane at*)
 and follows a vector field through the volume, only in the seed plane, or on the
 free surface; *Lines* sets about how many. New streamlines start where you are

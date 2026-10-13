@@ -748,6 +748,30 @@ class Session:
             "iso_surface", iso_by=iso_by, iso_value=float(iso_value or 0.0), **properties
         )
 
+    def add_iso_volume(
+        self,
+        iso_by: str | None = None,
+        iso_min: float | None = None,
+        iso_max: float | None = None,
+        **properties: Any,
+    ) -> str:
+        """Add an iso-volume: the part of the volume where ``iso_by`` lies between
+        ``iso_min`` and ``iso_max``; without a variable a first one (phi >= 0, the water
+        of a CFD run; see :meth:`DataManager.iso_volume_default`), recorded so the
+        script repeats it."""
+        if iso_by is None:
+            chosen = self.data.iso_volume_default(properties)
+            iso_by, low, high = chosen if chosen else ("none", 0.0, 1.0)
+            iso_min = low if iso_min is None else iso_min
+            iso_max = high if iso_max is None else iso_max
+        return self.add_item(
+            "iso_volume",
+            iso_by=iso_by,
+            iso_min=float(iso_min if iso_min is not None else 0.0),
+            iso_max=float(iso_max if iso_max is not None else 1.0),
+            **properties,
+        )
+
     def add_streamlines(
         self, seed_normal: str = "y", seed_position: float | None = None, **properties: Any
     ) -> str:

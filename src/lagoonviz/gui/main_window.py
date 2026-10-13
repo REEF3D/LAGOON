@@ -59,7 +59,15 @@ SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
 LAYOUT_VERSION = 4
 #: the items the toolbar adds (the Add menu has them all)
-TOOLBAR_KINDS = ("free_surface", "bathymetry", "volume", "slice", "iso_surface", "series")
+TOOLBAR_KINDS = (
+    "free_surface",
+    "bathymetry",
+    "volume",
+    "slice",
+    "iso_surface",
+    "iso_volume",
+    "series",
+)
 #: how often "Follow running simulation" looks for new output
 FOLLOW_SECONDS = 5
 QWIDGETSIZE_MAX = (1 << 24) - 1  # Qt's "no maximum size"
@@ -628,6 +636,8 @@ class MainWindow(QMainWindow):
             return self.session.add_slice("y")
         if kind == "iso_surface":
             return self.session.add_iso_surface()
+        if kind == "iso_volume":
+            return self.session.add_iso_volume()
         if kind == "streamlines":
             return self.session.add_streamlines(**self._streamline_start())
         if kind == "volume":  # the volume a case opened with, switched off: show it

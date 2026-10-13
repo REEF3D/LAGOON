@@ -140,6 +140,59 @@ def triangulate(connectivity: np.ndarray, offsets: np.ndarray) -> np.ndarray:
     return np.concatenate(parts) if parts else np.zeros((0, 3), np.int64)
 
 
+def polygon_edges(connectivity: np.ndarray, offsets: np.ndarray) -> np.ndarray:
+    """The edges of VTK polygons (each once): the grid lines of a surface, (k, 2)."""
+    if offsets.size == 0:
+        return np.zeros((0, 2), np.uint32)
+    starts = np.concatenate(([0], offsets[:-1])).astype(np.int64)
+    sizes = offsets - starts
+    parts = []
+    for size in np.unique(sizes):
+        if size < 2:
+            continue
+        first = starts[sizes == size]
+        nodes = connectivity[first[:, None] + np.arange(size)]
+        parts.append(np.stack([nodes, np.roll(nodes, -1, axis=1)], axis=2).reshape(-1, 2))
+    return unique_edges(np.concatenate(parts) if parts else np.zeros((0, 2), np.int64))
+
+
+def grid_edges(triangles: np.ndarray, points: np.ndarray) -> np.ndarray:
+    """The grid lines of a surface REEF3D wrote as triangles, two per grid cell: their
+    edges without the diagonals (an edge that is the longest, measured across, of
+    both triangles that share it), each once."""
+    triangles = np.asarray(triangles, np.int64)
+    if not len(triangles):
+        return np.zeros((0, 2), np.uint32)
+    xy = np.asarray(points, np.float64)[:, :2]
+    edges = np.stack([triangles, np.roll(triangles, -1, axis=1)], axis=2)  # (m, 3, 2)
+    length = np.linalg.norm(xy[edges[..., 0]] - xy[edges[..., 1]], axis=2)
+    longest = np.sort(edges[np.arange(len(triangles)), length.argmax(axis=1)], axis=1)
+    keys, counts = np.unique(longest, axis=0, return_counts=True)
+    diagonals = keys[counts == 2]
+    every = unique_edges(edges.reshape(-1, 2)).astype(np.int64)
+    if not len(diagonals):
+        return every.astype(np.uint32)
+    span = int(max(every.max(), diagonals.max())) + 1
+    drop = np.isin(every[:, 0] * span + every[:, 1], diagonals[:, 0] * span + diagonals[:, 1])
+    return every[~drop].astype(np.uint32)
+
+
+def face_edges(faces: np.ndarray) -> np.ndarray:
+    """The edges of (k, 4) faces (triangles repeat their last node), each once."""
+    faces = np.asarray(faces, np.int64)
+    if not len(faces):
+        return np.zeros((0, 2), np.uint32)
+    edges = np.stack([faces, np.roll(faces, -1, axis=1)], axis=2).reshape(-1, 2)
+    return unique_edges(edges[edges[:, 0] != edges[:, 1]])
+
+
+def unique_edges(edges: np.ndarray) -> np.ndarray:
+    """Point pairs each once, whichever way round, (k, 2) uint32."""
+    if not len(edges):
+        return np.zeros((0, 2), np.uint32)
+    return np.unique(np.sort(np.asarray(edges, np.int64), axis=1), axis=0).astype(np.uint32)
+
+
 # ----------------------------------------------------------------- volumes
 # Faces of the linear cells REEF3D writes, in VTK's node order. Faces are listed
 # with outward normals (right-hand rule) so the extracted surface shades correctly.
@@ -215,6 +268,8 @@ class VolumePlan:
     take: tuple[np.ndarray, ...]  # per piece: local ids of the surface points
     first: np.ndarray  # stacked surface point -> merged point (unique, in order)
     triangles: np.ndarray  # (m, 3) uint32 on merged points
+    #: the cells' edges on the outer surface (its grid lines), (k, 2) uint32
+    edges: np.ndarray | None = None
 
     @classmethod
     def build(cls, pieces: list[Piece], decimals: int = 5) -> VolumePlan:
@@ -243,7 +298,7 @@ class VolumePlan:
         faces = compact.reshape(faces.shape)
         triangles = np.ascontiguousarray(faces_to_triangles(faces), dtype=np.uint32)
         sizes = tuple(p.points.shape[0] for p in pieces)
-        return cls(sizes, tuple(takes), first[order][kept], triangles)
+        return cls(sizes, tuple(takes), first[order][kept], triangles, face_edges(faces))
 
     def accepts(self, pieces: list[Piece]) -> bool:
         return tuple(p.points.shape[0] for p in pieces) == self.sizes
@@ -614,6 +669,67 @@ def orient_by_field(plan: CutPlan, points: np.ndarray, field: np.ndarray) -> Cut
     flip = (normal * up[triangles].sum(axis=1)).sum(axis=1) < 0
     triangles[flip] = triangles[flip][:, [0, 2, 1]]
     return CutPlan(plan.a, plan.b, plan.t, np.ascontiguousarray(triangles, dtype=np.uint32))
+
+
+def clip_surface(mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str) -> SurfaceMesh:
+    """The part of a triangle surface where ``field`` is at least (``keep`` "above")
+    or at most ("below") ``level``: triangles across the level are cut on their
+    edges (points and data interpolated, cut points shared by neighbours)."""
+    d = np.asarray(field, np.float64) - float(level)
+    if keep == "below":
+        d = -d
+    triangles = np.asarray(mesh.triangles, np.int64)
+    inside = d[triangles] >= 0
+    count = inside.sum(axis=1)
+    whole = triangles[count == 3]
+    partial = triangles[(count == 1) | (count == 2)]
+    one = count[(count == 1) | (count == 2)] == 1
+    if not len(partial):
+        kept, compact = np.unique(whole, return_inverse=True)
+        return SurfaceMesh(
+            mesh.points[kept],
+            compact.reshape(-1, 3).astype(np.uint32),
+            {name: values[kept] for name, values in mesh.point_data.items()},
+        ).with_normals()
+    # the odd corner first (inside of one, outside of two), the winding kept
+    flags = inside[(count == 1) | (count == 2)]
+    odd = np.where(one, flags.argmax(axis=1), (~flags).argmax(axis=1))
+    order = (odd[:, None] + np.arange(3)) % 3
+    corners = np.take_along_axis(partial, order, axis=1)
+    v0, v1, v2 = corners[:, 0], corners[:, 1], corners[:, 2]
+    # the cut points on the edges v0-v1 and v0-v2, each edge once
+    a = np.concatenate([v0, v0])
+    b = np.concatenate([v1, v2])
+    low, high = np.minimum(a, b), np.maximum(a, b)
+    keys, first, inverse = np.unique(
+        low * (int(high.max()) + 1) + high, return_index=True, return_inverse=True
+    )
+    a, b = a[first], b[first]
+    t = d[a] / np.where(d[a] == d[b], 1.0, d[a] - d[b])
+    n = mesh.n_points
+    cut01 = n + inverse[: len(v0)]
+    cut02 = n + inverse[len(v0) :]
+    made = [whole]
+    made.append(np.stack([v0, cut01, cut02], axis=1)[one])  # one corner inside
+    two = ~one  # two corners inside: a quad, two triangles
+    made.append(np.stack([cut01, v1, v2], axis=1)[two])
+    made.append(np.stack([cut01, v2, cut02], axis=1)[two])
+    triangles = np.concatenate(made)
+    w = t[:, None]
+    points = np.concatenate(
+        [mesh.points, (mesh.points[a] + w * (mesh.points[b] - mesh.points[a])).astype(np.float32)]
+    )
+    data = {}
+    for name, values in mesh.point_data.items():
+        va, vb = values[a], values[b]
+        mixed = va + (w if va.ndim == 2 else t) * (vb - va)
+        data[name] = np.concatenate([values, mixed.astype(values.dtype)])
+    kept, compact = np.unique(triangles, return_inverse=True)
+    return SurfaceMesh(
+        points[kept].astype(np.float32),
+        compact.reshape(-1, 3).astype(np.uint32),
+        {name: values[kept] for name, values in data.items()},
+    ).with_normals()
 
 
 def cut_cells(
