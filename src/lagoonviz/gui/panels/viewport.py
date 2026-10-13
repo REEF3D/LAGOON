@@ -315,6 +315,18 @@ class Viewport3D(QWidget):
         self.ortho_button.setToolTip("Orthographic projection (5)")
         self.ortho_button.toggled.connect(self._set_ortho)
         bar.addWidget(self.ortho_button)
+        self.north_button = QToolButton()
+        self.north_button.setText("North up")
+        self.north_button.setCheckable(True)
+        self.north_button.setChecked(True)
+        self.north_button.setAutoRaise(True)
+        self.north_button.setToolTip(
+            "From the top: the map north up and a turned model turned (off: the model's "
+            "axes along the screen). Only for a case with a georeference"
+        )
+        self.north_button.toggled.connect(lambda _on: self._apply_north())
+        self.north_button.hide()
+        bar.addWidget(self.north_button)
         self.case_box = QComboBox()
         self.case_box.setToolTip("The case this view shows")
         self.case_box.setSizeAdjustPolicy(QComboBox.AdjustToContents)
@@ -445,6 +457,7 @@ class Viewport3D(QWidget):
     def refresh(self, item_ids: list[str] | None = None) -> None:
         """Bring the shown meshes up to date with the scene and the current time."""
         data = self.session.data
+        self._apply_north()
         if self.case_filter and self.case_filter not in self.session.scene:
             self.case_filter = ""  # its case was removed
         current = set(self.items())
@@ -1095,6 +1108,32 @@ class Viewport3D(QWidget):
         except Exception:  # noqa: BLE001
             log.warning("could not store the camera:\n%s", traceback.format_exc())
         self._view_moved()
+
+    def _north(self):
+        """North in model coordinates for the case shown (its georeference), or None."""
+        cases = [i.id for i in self.session.scene if i.kind == "case"]
+        if self.case_filter in cases:
+            cases = [self.case_filter]
+        for case_id in cases:
+            north = self.session.data.backgrounds.north(case_id)
+            if north is not None:
+                return north
+        return None
+
+    def _apply_north(self) -> None:
+        """From the top, north up (the map as on a map, a turned model turned), when
+        the case is georeferenced and "North up" is on."""
+        try:
+            north = self._north()
+        except Exception:  # noqa: BLE001 (a bad georef.json must not stop the drawing)
+            log.warning("north of the case:\n%s", traceback.format_exc())
+            north = None
+        self.north_button.setVisible(north is not None)
+        if not self.north_button.isChecked():
+            north = None
+        if self.view.set_north(north):
+            self._view_moved()
+            self.redraw()
 
     def _view_moved(self) -> None:
         """The view was zoomed, panned or framed: the background maps follow the 2D

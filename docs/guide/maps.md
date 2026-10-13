@@ -69,8 +69,8 @@ GeoTIFF and only the part of a large one that is needed).
   *Apply* writes `georef.json`, *Remove* takes it away.
 - **Domain**: *Draw on the map* turns the view to 2D from the top; drag the
   domain's rectangle there (B 10, snapped to the cell size B 1). **Shift + drag**
-  turns the model on the map about the domain's centre: the domain stays
-  axis-aligned in model coordinates and the map turns under it. Esc stops.
+  turns the model on the map about the domain's centre: the domain turns, the map
+  stays north up (B 10 keeps its numbers: the model's own axes turn). Esc stops.
   Or type the extent (*Set B 10*) or the rotation (*Turn*).
 - **Background map**: *Show map* adds a *Background map* item for the case.
 - **Bathymetry**: *From* **Download** needs no file: LAGOON asks the web for the
@@ -118,6 +118,11 @@ sketch. Its properties:
 | Margin | how far the map reaches round the domain, in domain sizes |
 | Placed | below the model (a floor under the bed), or at the still water level round the domain; in 2D from the top it lies under everything |
 | Opacity, Resolution | how strongly, and with how many pixels along the longer side |
+
+From the top the view shows north up (*North up* in the view's bar, for a
+georeferenced case): the map lies as on a map, and a turned model is drawn
+turned; turning it (*Turn*, Shift + drag) turns the domain, not the map. Off,
+the model's axes lie along the screen.
 
 In the 2D view from the top the map follows the view: zoom in and it is fetched
 again in finer detail, zoom out or pan and it covers the new area (once the view

@@ -694,3 +694,14 @@ def test_geo_dat_from_the_web(fjord, tmp_path, monkeypatch):
     session.make_geo_dat("kartverket")
     assert len(server.asked) == 2  # the same area: from the cache
     assert "session.make_geo_dat('best'" in session.to_script()
+
+
+def test_north_in_model_coordinates(fjord):
+    session = Session()
+    case = session.open_case(fjord)
+    assert session.data.backgrounds.north(case) is None
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=30.0)
+    north = session.data.backgrounds.north(case)
+    # the model point north of the origin lies due north on the map
+    big_x, big_y = GEOREF.to_world(100 * north[0], 100 * north[1])
+    assert big_x == pytest.approx(270000.0) and big_y == pytest.approx(7040100.0)

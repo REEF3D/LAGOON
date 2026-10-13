@@ -110,6 +110,17 @@ class Backgrounds:
         found, _ = self._georef(item_id)
         return found
 
+    def north(self, item_id: str) -> tuple[float, float] | None:
+        """North as a unit (x, y) vector in the model coordinates of an item's case
+        (its georeference turned back), or None without a georeference."""
+        import math
+
+        georef = self.georef(item_id)
+        if georef is None:
+            return None
+        r = math.radians(georef.rotation_deg)
+        return (math.sin(r), math.cos(r))
+
     def georef_error(self, item_id: str) -> str:
         return self._georef(item_id)[1]
 

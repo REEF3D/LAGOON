@@ -388,6 +388,9 @@ def view_extent(camera, size: tuple[int, int]) -> tuple[float, float, float, flo
     direction = np.asarray(camera.world.forward, dtype=float)
     if abs(abs(direction[2]) - 1.0) > 1e-6:
         return None  # not looking straight down
+    right = getattr(camera.world, "right", (1.0, 0.0, 0.0))
+    if abs(float(right[0]) - 1.0) > 1e-6:
+        return None  # turned (north up over a turned model): no x and y axes
     width, height = float(camera.width), float(camera.height)
     aspect = size[0] / max(size[1], 1)
     if width / max(height, 1e-12) < aspect:

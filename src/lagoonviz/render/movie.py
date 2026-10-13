@@ -153,6 +153,9 @@ class OffscreenView:
             else:
                 self.scene.update_background(backgrounds.shown(item_id, made))
         if not self._camera_set:
+            cases = [i.id for i in session.scene if i.kind == "case"]
+            norths = [session.data.backgrounds.north(c) for c in cases]
+            self.scene.set_north(next((n for n in norths if n is not None), None))
             plan = session.scene
             if plan.flat:
                 self.scene.set_plan(True)

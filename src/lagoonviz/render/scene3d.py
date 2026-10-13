@@ -8,6 +8,7 @@ on screen and an image made headless on a cluster look the same.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -293,6 +294,8 @@ class SceneRenderer:
         #: outside ``content`` so they do not change the framed bounds
         self._backgrounds: dict[str, tuple[gfx.Mesh, int]] = {}
         self._outline: gfx.Line | None = None
+        #: north in model coordinates (set_north), None: the model's y
+        self.north: tuple[float, float] | None = None
 
     # ------------------------------------------------------------- items
     def _texture(self, colormap: str):
@@ -1198,8 +1201,11 @@ class SceneRenderer:
         return np.min(lows, axis=0).astype(float), np.max(highs, axis=0).astype(float)
 
     def frame(self, view: str = "perspective") -> None:
-        """Point the camera at everything visible from a named direction."""
+        """Point the camera at everything visible from a named direction (from the
+        top: north up, when :meth:`set_north` gave north)."""
         direction, up = VIEWS[view]
+        if view == "top" and self.north is not None:
+            up = (self.north[0], self.north[1], 0.0)
         corners = self.bounds() or self.bounds(visible_only=False)
         if corners is None:
             return  # nothing to frame
@@ -1316,6 +1322,24 @@ class SceneRenderer:
         """Frame the scene the first time something is shown."""
         if not self._framed and (self._shown or self._setup_bounds):
             self.frame(view)
+
+    def set_north(self, north) -> bool:
+        """Which way north is in model coordinates (a unit (x, y) vector; None: the
+        model's y), so the view from the top shows the map north up and a turned
+        model turned. Turns a camera that looks straight down at once. True if it
+        changed."""
+        north = None if north is None else (float(north[0]), float(north[1]))
+        if north is not None and abs(north[0]) < 1e-9 and north[1] > 0:
+            north = None  # the model's y is north: as without
+        if north == self.north:
+            return False
+        self.north = north
+        forward = np.asarray(self.camera.world.forward, dtype=float)
+        if abs(abs(forward[2]) - 1.0) < 1e-6:  # looking straight down: turn about z
+            nx, ny = north if north is not None else (0.0, 1.0)
+            angle = math.atan2(-nx, ny)
+            self.camera.local.rotation = (0.0, 0.0, math.sin(angle / 2), math.cos(angle / 2))
+        return True
 
     def set_plan(self, on: bool) -> None:
         """2D: the items are flat layers seen from above; the sun's shadows would only
