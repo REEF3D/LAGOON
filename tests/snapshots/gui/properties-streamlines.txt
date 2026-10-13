@@ -12,8 +12,9 @@ QWidget
   Colour by: choice 'velocity' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
   Colour map: choice 'ocean' of ['reef3d', 'ocean', 'tension', 'lagoon_blue', 'balance', 'viridis', 'rainbow', 'sand', 'greys', 'white']
   Automatic range: checkbox '' on
-  Range min: number 0.002 in [-1e+09, 1e+09] decimals 3
-  Range max: number 2.165 in [-1e+09, 1e+09] decimals 3
+  Range from: choice '1st - 99th percentile' of ['1st - 99th percentile', 'lowest to highest']
+  Range min: number 0.032 in [-1e+09, 1e+09] decimals 3
+  Range max: number 2.072 in [-1e+09, 1e+09] decimals 3
   Range [%]: number 100 in [1, 500] decimals 3
   Opacity: number 1 in [0, 1] decimals 3
   Line width [px]: number 2 in [0.5, 20] decimals 3
