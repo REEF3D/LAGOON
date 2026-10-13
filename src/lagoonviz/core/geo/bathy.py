@@ -175,11 +175,12 @@ def grid_heights(
 
 #: bathymetry from the web: the choice -> the sources asked, the finest first
 WEB = {
-    "best": ("kartverket", "emodnet", "copernicus", "etopo"),
+    "best": ("kartverket", "emodnet", "copernicus", "etopo", "gebco"),
     "kartverket": ("kartverket",),
     "emodnet": ("emodnet",),
     "copernicus": ("copernicus",),
     "etopo": ("etopo",),
+    "gebco": ("gebco",),
 }
 
 

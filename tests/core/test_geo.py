@@ -770,12 +770,14 @@ class FakeWorld:
         from urllib.parse import unquote
 
         q = unquote(url)
-        lat0, stride, lat1 = re.search(r"z\[\(([^)]+)\):(\d+):\(([^)]+)\)\]", q).groups()
+        variable = "elevation" if "GEBCO" in q else "z"
+        depth = -30.0 if "GEBCO" in q else -20.0
+        lat0, stride, lat1 = re.search(variable + r"\[\(([^)]+)\):(\d+):\(([^)]+)\)\]", q).groups()
         lon0, _, lon1 = re.search(r"\]\[\(([^)]+)\):(\d+):\(([^)]+)\)\]", q).groups()
         lats = np.arange(float(lat0), float(lat1), 1 / 240 * int(stride))
         lons = np.arange(float(lon0), float(lon1), 1 / 240 * int(stride))
-        rows = ["latitude,longitude,z", "degrees_north,degrees_east,"]
-        rows += [f"{a},{o},-20.0" for a in lats for o in lons]
+        rows = [f"latitude,longitude,{variable}", "degrees_north,degrees_east,m"]
+        rows += [f"{a},{o},{depth}" for a in lats for o in lons]
         return ("\n".join(rows) + "\n").encode()
 
 
@@ -817,3 +819,18 @@ def test_the_map_tells_how_many_tiles_it_has(tmp_path):
     total = heard[-1][1]
     assert heard[0] == (0, total) and heard[-1] == (total, total) and made.missing == 0
     assert [d for d, _ in heard] == list(range(total + 1))
+
+
+def test_geo_dat_from_gebco(tmp_path, monkeypatch):
+    from lagoonviz.core.geo import download
+
+    monkeypatch.setenv("LAGOON_CACHE", str(tmp_path / "cache"))
+    server = FakeWorld(tmp_path)
+    monkeypatch.setattr(download, "http_fetch", server)
+    session = Session()
+    case = session.new_case_from_map((-33.9, 18.30), length=1000.0)
+    session.make_geo_dat("gebco", spacing=100.0)
+    assert session.geo_sources == ["GEBCO 2020 (land and sea, world)"]
+    assert "GEBCO_2020.csv" in server.asked[-1] and "elevation" in server.asked[-1]
+    points = np.loadtxt(session.data.case_folder(case) / "geo.dat")
+    assert np.allclose(points[:, 2], -30.0)

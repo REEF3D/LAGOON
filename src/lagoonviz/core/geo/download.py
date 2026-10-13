@@ -10,7 +10,9 @@
 - **Copernicus DEM GLO-30** (land, the world): 30 m, from the open archive on AWS
   (1° tiles), heights to EGM2008; the sea is left to the other sources.
 - **NOAA ETOPO 2022** (land and sea, the world): 15 arc-seconds (about 450 m),
-  from NOAA's ERDDAP, heights to EGM2008; the last fallback.
+  from NOAA's ERDDAP, heights to EGM2008 (built on GEBCO 2022 at sea).
+- **GEBCO 2020** (land and sea, the world): 15 arc-seconds, from NOAA's ERDDAP,
+  heights to mean sea level; public domain; the last fallback.
 
 :func:`download` asks the service for the area round a model rectangle, at the
 spacing wanted, and returns it as a :class:`~lagoonviz.core.geo.raster.GeoImage`
@@ -92,6 +94,16 @@ SOURCES = {
             450.0,
             (-180.0, -90.0, 180.0, 90.0),
         ),
+        BathymetrySource(
+            "gebco",
+            "GEBCO 2020 (land and sea, world)",
+            "GEBCO Compilation Group (2020) GEBCO 2020 Grid "
+            "(doi:10.5285/a29c5465-b138-234d-e053-6c86abc040b9)",
+            "public domain",
+            "mean sea level",
+            450.0,
+            (-180.0, -90.0, 180.0, 90.0),
+        ),
     )
 }
 #: the choice that takes the finest source with data, the others for the gaps
@@ -100,7 +112,13 @@ BEST = "best"
 KARTVERKET_WCS = "https://wcs.geonorge.no/skwms1/wcs.hoyde-dtm-nhm-topobathy-{zone}"
 EMODNET_WCS = "https://ows.emodnet-bathymetry.eu/wcs"
 COPERNICUS_TILE = "https://copernicus-dem-30m.s3.amazonaws.com/{name}/{name}.tif"  # 1° x 1° COGs
-ETOPO_ERDDAP = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/ETOPO_2022_v1_15s.csv"
+ERDDAP = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/{dataset}.csv"
+#: the global grids on NOAA's ERDDAP: source -> (dataset, variable)
+ERDDAP_GRIDS = {
+    "etopo": ("ETOPO_2022_v1_15s", "z"),
+    "gebco": ("GEBCO_2020", "elevation"),
+}
+ETOPO_ERDDAP = ERDDAP.format(dataset="ETOPO_2022_v1_15s")
 #: at most this many Copernicus tiles (1° x 1°, some 30 MB each) for one domain
 MOST_TILES = 9
 
@@ -191,15 +209,16 @@ def copernicus_names(bounds) -> list[str]:
     return names
 
 
-def etopo_url(bounds, spacing: float) -> str:
-    """ERDDAP query of ETOPO 2022 (15 arc-seconds) over bounds in longitude and
-    latitude, every n-th value for a coarser spacing [m], as CSV."""
+def etopo_url(bounds, spacing: float, key: str = "etopo") -> str:
+    """ERDDAP query of a global 15 arc-second grid (ETOPO 2022, GEBCO) over bounds
+    in longitude and latitude, every n-th value for a coarser spacing [m], as CSV."""
+    dataset, variable = ERDDAP_GRIDS[key]
     lon0, lat0, lon1, lat1 = bounds
     step = 1.0 / 240.0
     cells = max((lon1 - lon0), (lat1 - lat0)) / step
     stride = max(1, int(spacing // 450.0), math.ceil(cells / MOST_PIXELS))
-    query = f"z[({lat0:.6f}):{stride}:({lat1:.6f})][({lon0:.6f}):{stride}:({lon1:.6f})]"
-    return ETOPO_ERDDAP + "?" + urllib.parse.quote(query, safe="():")
+    query = f"{variable}[({lat0:.6f}):{stride}:({lat1:.6f})][({lon0:.6f}):{stride}:({lon1:.6f})]"
+    return ERDDAP.format(dataset=dataset) + "?" + urllib.parse.quote(query, safe="():")
 
 
 def _cached(url: str, suffix: str, fetch, label: str, check=None) -> Path | None:
@@ -300,8 +319,8 @@ def download_all(key: str, georef: Georef, box, spacing: float, fetch=None) -> l
             image.data = np.where(image.data <= 0.0, np.nan, image.data)
             images.append(image)
         return images
-    # etopo: CSV of latitude, longitude, z from ERDDAP
-    path = _cached(etopo_url(bounds, spacing), ".csv", fetch, label)
+    # etopo, gebco: CSV of latitude, longitude, height from ERDDAP
+    path = _cached(etopo_url(bounds, spacing, key), ".csv", fetch, label)
     if path is None:
         return []
     return [_heights(_grid_from_csv(path, label), label)]

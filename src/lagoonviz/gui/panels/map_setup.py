@@ -68,6 +68,7 @@ BATHYMETRY_CHOICES = {
     "Download: EMODnet (European seas)": "emodnet",
     "Download: Copernicus DEM 30 m (land, world)": "copernicus",
     "Download: NOAA ETOPO 2022 (land and sea, world)": "etopo",
+    "Download: GEBCO 2020 (land and sea, world)": "gebco",
     "A file of mine…": "file",
 }
 #: where the Map tab starts when no case is open: Trondheim, its harbour and Nidelva
@@ -297,8 +298,8 @@ class MapTab(QWidget):
         self.bathy_source.setToolTip(
             "Download the bathymetry for the domain (no file needed). Best available: "
             "Kartverket in Norway (land and sea, to 1 m), EMODnet at sea in Europe "
-            "(115 m), Copernicus on land (30 m, the world), NOAA ETOPO 2022 for the rest "
-            "(450 m, the world). Or a file of yours"
+            "(115 m), Copernicus on land (30 m, the world), NOAA ETOPO 2022 and GEBCO for "
+            "the rest (450 m, the world). Or a file of yours"
         )
         self.bathy_source.currentIndexChanged.connect(lambda _i: self._source_changed())
         self.file_label = QLabel("No file chosen")

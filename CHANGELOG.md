@@ -31,8 +31,8 @@
   model on the map.
 - **Bathymetry from the web**: *Make geo.dat* needs no file: Kartverket's
   national topobathy model (Norway, land and sea), EMODnet's terrain model
-  (European seas), the Copernicus DEM GLO-30 (land, the world, 30 m) and NOAA's
-  ETOPO 2022 (the world, 450 m) are downloaded for the domain, the finest first;
+  (European seas), the Copernicus DEM GLO-30 (land, the world, 30 m), NOAA's
+  ETOPO 2022 and GEBCO 2020 (the world, 450 m) are downloaded for the domain, the finest first;
   `session.make_geo_dat("best")`. With no case open the Map tab starts at
   Trondheim on Kartverket's map.
 - **Bathymetry to geo.dat**: a GeoTIFF, ASCII grid or x y z soundings interpolated

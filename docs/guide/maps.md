@@ -83,8 +83,9 @@ GeoTIFF and only the part of a large one that is needed).
   where surveyed, else 50 m; heights in NN2000), EMODnet's Digital Terrain Model
   at sea in Europe (about 115 m, heights to LAT), the Copernicus DEM GLO-30 on
   land anywhere (30 m, heights to EGM2008; its 1° tiles are some 30 MB each,
-  fetched once) and NOAA's ETOPO 2022 for the rest of the world, land and sea
-  (15 arc-seconds, about 450 m, EGM2008). Each can be chosen alone too. Land
+  fetched once) NOAA's ETOPO 2022 for the rest of the world, land and sea
+  (15 arc-seconds, about 450 m, EGM2008; at sea built on GEBCO 2022), and GEBCO
+  2020 (15 arc-seconds, public domain) last. Each can be chosen alone too. Land
   below sea level (polders) is taken from ETOPO, as Copernicus' heights at or
   below 0 are read as the sea. Or *A file of mine…*: a GeoTIFF, an Esri ASCII grid
   (`.asc`) or an x y z text file (soundings: spaces, tabs, commas or semicolons;
