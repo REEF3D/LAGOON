@@ -242,9 +242,14 @@ class MapTab(QWidget):
         row.addWidget(self.geo_button)
         form.addRow(row)
 
+        #: what to do first, while the buttons wait for it (no case, no georeference)
+        self.hint = QLabel()
+        self.hint.setWordWrap(True)
+        self.hint.setStyleSheet("color: #e07b39; font-weight: 600;")
         inner = QWidget()
         layout = QVBoxLayout(inner)
         layout.setContentsMargins(6, 6, 6, 6)
+        layout.addWidget(self.hint)
         for group in (georef, domain, background, bathymetry):
             layout.addWidget(group)
         layout.addStretch(1)
@@ -295,6 +300,20 @@ class MapTab(QWidget):
         georef = self.session.data.georef(self.case_id) if has_case else None
         self.remove_button.setEnabled(georef is not None)
         self.turn_button.setEnabled(georef is not None)
+        if not has_case:
+            hint = (
+                "Open a case first (File → Open case…), or start one with File → New "
+                "case…: the map works on a case's folder."
+            )
+        elif georef is None:
+            hint = (
+                "Place the case on the Earth first: type a latitude and longitude under "
+                "Place at and press Place (or choose the CRS and origin, then Apply)."
+            )
+        else:
+            hint = ""
+        self.hint.setText(hint)
+        self.hint.setVisible(bool(hint))
         self.geo_button.setEnabled(has_case and self._bathymetry is not None)
         # the fields follow the files when those change, not while being typed in
         shown = (self.case_id, georef)

@@ -162,6 +162,7 @@ def test_the_map_tab_places_the_case(window, flume, monkeypatch):
     panel = window.setup_panel
     tab = panel.map_tab
     assert panel.tabs.tabText(2) == "Map" and not tab.remove_button.isEnabled()
+    assert tab.place_button.isEnabled() and "Place at" in tab.hint.text()
     # the domain's centre at Trondheim: the UTM zone is chosen
     tab.place.setText("63.44, 10.40")
     tab.place_domain()
@@ -169,6 +170,7 @@ def test_the_map_tab_places_the_case(window, flume, monkeypatch):
     assert georef is not None and georef.crs == "EPSG:25832"
     assert Georef.from_json((flume / "georef.json").read_text()) == georef
     assert tab.remove_button.isEnabled() and "UTM zone 32N" in tab.crs_name.text()
+    assert tab.hint.text() == ""
     # the domain dragged in the 2D view, snapped to the cell size (B 1 0.5)
     tab.domain_drawn((1.12, 20.3, -2.1, 4.9))
     assert window.session.input_file("control.txt").values("B 10")[:4] == [1.0, 20.5, -2.0, 5.0]
@@ -185,3 +187,9 @@ def test_the_map_tab_places_the_case(window, flume, monkeypatch):
     window.act_undo.trigger()  # the map
     window.act_undo.trigger()  # the turn
     assert window.session.georef().rotation_deg == 0.0
+
+
+def test_the_map_tab_says_to_open_a_case_first(window):
+    tab = window.setup_panel.map_tab
+    assert not tab.place_button.isEnabled() and not tab.map_button.isEnabled()
+    assert "Open a case first" in tab.hint.text()
