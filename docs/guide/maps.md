@@ -11,8 +11,8 @@ With no case open, the *Map* tab starts one at Trondheim on Kartverket's map:
 *Find* takes it anywhere else.
 
 *File → New case from map…* asks where: a place name (*Nidelva*, *Trondheim
-havn*: Kartverket's place names in Norway, OpenStreetMap's elsewhere) or a
-latitude and longitude (`63.44, 10.40`). LAGOON starts a draft case there: a
+havn*; see [Finding a place](#finding-a-place)) or a latitude and longitude
+(`63.44, 10.40`). LAGOON starts a draft case there: a
 domain of 1000 × 500 m centred on the place, in its UTM zone, with a background
 map, in the set-up's 2D view and the *Map* tab. Then
 
@@ -32,6 +32,27 @@ case = session.new_case_from_map("Nidelva", length=2000.0)
 session.place_case((63.44, 10.40))   # move it
 session.create_case("~/runs/nidelva")
 ```
+
+## Finding a place
+
+A place is found by its name or its latitude and longitude:
+
+- **Names** come from Kartverket's place names in Norway (sentralt
+  stedsnavnregister: rivers, bays, islets, skerries, farms, towns) and from
+  OpenStreetMap's Nominatim for the whole world. When the name as typed is not
+  there, LAGOON looks for names beginning so (*Munkh* finds Munkholmen) and then
+  for names alike (*Trondhem* finds Trondheim).
+- **Name, municipality** narrows it: *Nidelva, Trondheim* (or *Nidelva, Arendal*)
+  when several places have the name.
+- The likeliest place comes first: the name as typed before names beginning so,
+  towns and fjords before farms, and **the places near the case** before those
+  far away (near Trondheim when there is no case yet). The list under the field
+  (or *Which one?* for a new case) offers the others.
+- **Coordinates**: `63.44, 10.40`, `63.44N 10.4E`, `lat 63.44 lon 10.40`, `63,44
+  10,40`; latitude first unless N/S/E/W or *lat*/*lon* say otherwise.
+
+One request goes to each service per search (none while typing), with LAGOON's
+name, as their terms ask. Offline, type the latitude and longitude.
 
 ## The georeference
 
@@ -64,10 +85,11 @@ GeoTIFF and only the part of a large one that is needed).
 
 *Set-up → Map*:
 
-- **Find the place**: a place name or a latitude and longitude, then *Find*: the
-  centre of the domain goes there (in the place's UTM zone when the case has no
-  CRS yet), and the case gets a background map. When several places have the
-  name, the list under the field offers the others.
+- **Find the place**: a place name (*Nidelva, Trondheim*: name, municipality) or
+  a latitude and longitude, then *Find*: the centre of the domain goes there (in
+  the place's UTM zone when the case has no CRS yet), and the case gets a
+  background map. When several places have the name, the list under the field
+  offers the others, those near the case first.
 - **Georeference**: the CRS, the origin, the rotation, the vertical datum;
   *Apply* writes `georef.json`, *Remove* takes it away.
 - **Domain**: *Draw on the map* turns the view to 2D from the top; drag the

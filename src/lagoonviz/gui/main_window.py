@@ -872,8 +872,9 @@ class MainWindow(QMainWindow):
         text, ok = QInputDialog.getText(
             self,
             "New case from map",
-            "Where? A place name (Nidelva, Trondheim havn) or latitude, longitude "
-            "(63.44, 10.40). Leave it empty to find the place later in the Map tab.",
+            "Where? A place name (Nidelva; Nidelva, Arendal: name, municipality) or "
+            "latitude, longitude (63.44, 10.40). Leave it empty to find the place later "
+            "in the Map tab.",
             QLineEdit.EchoMode.Normal,
             "Trondheim",
         )
@@ -883,7 +884,7 @@ class MainWindow(QMainWindow):
         if text.strip():
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
-                found = search(text)
+                found = search(text, near=self.session.location() or (63.4365, 10.398))
             except OSError as error:
                 found = []
                 QMessageBox.warning(self, "Place search", f"{error}\nType latitude, longitude.")

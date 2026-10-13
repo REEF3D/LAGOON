@@ -16,6 +16,9 @@
   case there with a domain and a map; *Create case…* puts it in its folder when
   it is ready. `session.new_case_from_map(...)`, `place_case(...)`,
   `create_case(...)`.
+- **Place search**: a name as typed, else names beginning so, else alike (a
+  misspelling); *Nidelva, Trondheim* (name, municipality) narrows it; the places
+  near the case come first, towns and fjords before farms.
 - **Georeference**: a case's `georef.json` (CRS, origin, rotation, vertical datum)
   says where its model coordinates lie; *Set-up → Map* edits it (*Find* a place
   by name or latitude, longitude), `session.set_georef(...)`, `session.turn_model(...)`.

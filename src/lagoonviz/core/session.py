@@ -203,7 +203,7 @@ class Session:
         from lagoonviz.core.geo.places import Place, search
 
         if isinstance(place, str):
-            found = search(place)
+            found = search(place, near=self.location(case))
             if not found:
                 raise ValueError(f"no place found for {place!r}")
             place = found[0]
@@ -246,6 +246,27 @@ class Session:
             source = next(label for label, k in SOURCE_CHOICES.items() if k == key)
             self.add_background_map(source, case=case_id)
         return place
+
+    def location(self, case: str | None = None) -> tuple[float, float] | None:
+        """Latitude and longitude of the centre of a case's domain (the open case's;
+        None without a georeference or a case). A place search puts the places close
+        to it first."""
+        from lagoonviz.core.geo.crs import transformer
+
+        try:
+            case_id = self._case_id(case)
+        except (KeyError, ValueError):
+            return None
+        georef = self.georef(case_id)
+        if georef is None:
+            return None
+        domain = self.data.backgrounds.domain(case_id)
+        cx, cy = ((domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2) if domain else (0, 0)
+        try:
+            lon, lat = transformer(georef.crs, "EPSG:4326")(*georef.to_world(cx, cy))
+        except (ValueError, OSError):
+            return None
+        return float(lat), float(lon)
 
     def is_draft(self, case: str | None = None) -> bool:
         """Whether a case is a draft started on the map, not yet in a folder of its

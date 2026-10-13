@@ -12,6 +12,9 @@ and Blender but made for hydrodynamics.
 - **Open a run** — point LAGOON at a REEF3D case folder: free surface, bed,
   volume, wave gauges, wave profiles, floating bodies and moorings appear by
   themselves. [Opening runs](guide/runs.md)
+- **Place** — start a case on the map, draw its domain there and make DIVEMesh's
+  `geo.dat` from bathymetry downloaded for it (Norway, Europe, the world); maps
+  and satellite images under the results. [Maps](guide/maps.md)
 - **Explore** — a GPU 3D view with Blender's navigation, slices, iso-surfaces,
   streamlines, contour lines and vectors, all linked to the time series under it.
   [The 3D view](guide/viewport.md)

@@ -4,8 +4,12 @@
 
 *File → Open case…* takes the folder a REEF3D run wrote into (with its
 `REEF3D_*` folders), one of those output folders, or a LAGOON store. *File → Open
-output file…* takes a single `.pvtu`, `.pvtp`, `.vtu` or `.vtp` file and the series
-it belongs to. A run can also be opened from a terminal:
+output file…* opens one output series: it lists a folder's files as ParaView
+does, the numbered files of a series as one line (`REEF3D-NHFLOW-FSF-..pvtp`,
+with the number of files, their first and last number and their size) and the
+pieces of parallel output (the `.vtp`/`.vtu` next to their `.pvtp`/`.pvtu`) left
+out. Double-click a folder to go in (*Up* goes out), a series or a file to open
+it with its case. A run can also be opened from a terminal:
 
 ```bash
 lagoon ~/runs/flume                            # a case folder

@@ -32,6 +32,12 @@ waves and the bed's relief stay shaded; from the front or side it is an elevatio
 of the shapes.
 ++2++ again goes back to 3D. The buttons in the corner of the view do the same.
 
+For a case placed on the Earth ([Maps](maps.md)), *North up* in the view's bar
+turns the view from the top so that north is up, as on a map: a turned model is
+drawn turned. A *Background map* under the case follows the 2D view, fetched
+again in finer detail when you zoom in and for the new area when you pan; a bar
+above the view counts its tiles while they come.
+
 ![The 2D view from the top](../images/view-top.png)
 
 ## Looks

@@ -546,6 +546,73 @@ def test_place_names_from_kartverket_and_openstreetmap():
         search("Nidelva", down)
 
 
+def _kartverket_names(url):
+    """A fake of Kartverket's place names: two Nidelvas (Arendal's first, as the
+    service lists them), Munkholmen, Trondheim; the url's search and fuzzy flag."""
+    import json
+    import urllib.parse
+
+    query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+    names = {
+        "Nidelva": [
+            ("Nidelva", "Elv", "Arendal", 8.70, 58.45),
+            ("Nidelva", "Elv", "Trondheim", 10.40, 63.43),
+        ],
+        "Munkholmen": [("Munkholmen", "Øy", "Trondheim", 10.383, 63.451)],
+        "Trondheim": [("Trondheim", "By", "Trondheim", 10.395, 63.430)],
+    }
+    text, fuzzy = query["sok"], query["fuzzy"] == "true"
+    if text.endswith("*"):
+        found = [e for n, es in names.items() if n.startswith(text[:-1]) for e in es]
+    elif fuzzy:
+        found = [
+            e
+            for n, es in names.items()
+            if len(n) == len(text) + 1 and n[:3] == text[:3]
+            for e in es
+        ]
+    else:
+        found = names.get(text, [])
+    return json.dumps(
+        {
+            "navn": [
+                {
+                    "skrivemåte": name,
+                    "navneobjekttype": kind,
+                    "kommuner": [{"kommunenavn": town}],
+                    "representasjonspunkt": {"øst": lon, "nord": lat},
+                }
+                for name, kind, town, lon, lat in found
+            ]
+        }
+    ).encode()
+
+
+def _names_only_in_norway(url):
+    return _kartverket_names(url) if "geonorge" in url else b"[]"
+
+
+def test_a_place_name_with_its_municipality_or_near_the_case():
+    from lagoonviz.core.geo.places import search
+
+    found = search("Nidelva", _names_only_in_norway)
+    assert {p.where for p in found} == {"Arendal", "Trondheim"}
+    assert search("Nidelva, Trondheim", _names_only_in_norway)[0].where == "Trondheim"
+    assert search("Nidelva, Arendal", _names_only_in_norway)[0].where == "Arendal"
+    near_trondheim = search("Nidelva", _names_only_in_norway, near=(63.43, 10.39))
+    assert near_trondheim[0].where == "Trondheim"
+    near_arendal = search("Nidelva", _names_only_in_norway, near=(58.46, 8.77))
+    assert near_arendal[0].where == "Arendal"
+
+
+def test_a_place_name_begun_or_misspelt():
+    from lagoonviz.core.geo.places import search
+
+    assert search("Munkh", _names_only_in_norway)[0].name == "Munkholmen"  # beginning
+    assert search("Trondhem", _names_only_in_norway)[0].name == "Trondheim"  # fuzzy
+    assert search("Xyzzy", _names_only_in_norway) == []
+
+
 def test_a_case_started_on_the_map(tmp_path):
     from lagoonviz.core.session import drafts_folder
 
@@ -834,3 +901,15 @@ def test_geo_dat_from_gebco(tmp_path, monkeypatch):
     assert "GEBCO_2020.csv" in server.asked[-1] and "elevation" in server.asked[-1]
     points = np.loadtxt(session.data.case_folder(case) / "geo.dat")
     assert np.allclose(points[:, 2], -30.0)
+
+
+def test_the_location_of_a_case_and_a_search_near_it(monkeypatch):
+    from lagoonviz.core.geo import places
+
+    session = Session()
+    case = session.new_case_from_map((58.46, 8.77), length=2000.0)
+    assert session.location(case) == pytest.approx((58.46, 8.77), abs=1e-6)
+    monkeypatch.setattr(places, "_http", _names_only_in_norway)
+    monkeypatch.setattr(places.search, "__defaults__", (_names_only_in_norway, None))
+    place = session.place_case("Nidelva", case=case)  # Arendal's: the case is there
+    assert place.where == "Arendal"

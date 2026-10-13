@@ -3,7 +3,8 @@
 """The Map tab of the set-up: where a case lies on the Earth, its domain on the map,
 and its bathymetry.
 
-- *Find the place*: a place name (Kartverket, OpenStreetMap) or latitude, longitude;
+- *Find the place*: a place name (Kartverket, OpenStreetMap; "name, municipality"
+  narrows it) or latitude, longitude;
   the domain's centre goes there (in the place's UTM zone when the case has no CRS
   yet), with a background map. A case started on the map (File → New case from
   map) is a draft until *Create case…* puts it in a folder of its own.
@@ -73,6 +74,8 @@ BATHYMETRY_CHOICES = {
 }
 #: where the Map tab starts when no case is open: Trondheim, its harbour and Nidelva
 DEFAULT_PLACE = Place("Trondheim", 63.4365, 10.3980, "town", "Trøndelag", "default")
+#: a search with no case placed yet prefers the places near this one
+_DEFAULT_NEAR = (DEFAULT_PLACE.lat, DEFAULT_PLACE.lon)
 METHODS = {"Linear (TIN)": "tin", "Inverse distance": "idw", "Nearest point": "nearest"}
 
 
@@ -196,7 +199,9 @@ class MapTab(QWidget):
         self.remove_button.setToolTip("Take georef.json away")
         self.remove_button.clicked.connect(self.remove)
         self.place = QLineEdit()
-        self.place.setPlaceholderText("Nidelva, Trondheim havn … or 63.44, 10.40")
+        self.place.setPlaceholderText(
+            "Nidelva · Nidelva, Arendal (name, municipality) · 63.44, 10.40"
+        )
         self.place.setToolTip(
             "A place name (Kartverket in Norway, OpenStreetMap elsewhere) or latitude, "
             "longitude: the centre of the domain goes there (in its UTM zone when the case "
@@ -548,7 +553,7 @@ class MapTab(QWidget):
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            found = search(text)
+            found = search(text, near=self.session.location(self.case_id) or _DEFAULT_NEAR)
         except OSError as error:
             self.message.emit(f"{error} (offline? type latitude, longitude)", True)
             return

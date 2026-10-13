@@ -18,6 +18,7 @@ script the session writes ([Scripting](../scripting.md)).
 | Case | a REEF3D run; its *Vertical scale* applies to all its items |
 | Case set-up | the input files' domain, sides, relaxation zones, gauges, probes, bodies ([Case set-up](setup.md)) |
 | DIVEMesh grid | the grid lines on the faces of the domain, the MPI partition ([Case set-up](setup.md)) |
+| Background map | a map or satellite image round a georeferenced case, under the set-up and the results ([Maps](maps.md#background-maps)) |
 | Free surface | the water surface, coloured by a variable or plain |
 | AMR surface | the surface of an adaptive-mesh run, finer patches over coarser ones, with the patch outlines |
 | Bed | the bathymetry (sand coloured by default) |

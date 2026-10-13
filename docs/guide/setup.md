@@ -33,6 +33,12 @@ line, and opens it in the set-up. Add DIVEMesh's commands in the Set-up panel's
 then REEF3D's in the `ctrl.txt` tab, and *Save*. In a script:
 `session.new_case("~/runs/flume")`.
 
+*File → New case from map…* starts a case at a place on the Earth instead: a
+draft with a domain and a background map, which you move and turn on the map, give
+a bathymetry from the web and then put in its folder with *Create case…*
+([Starting a case on the map](maps.md#starting-a-case-on-the-map)). With no case
+open, the *Map* tab of the Set-up panel starts one at Trondheim.
+
 ## A case that has not run yet
 
 A case folder without output opens as its set-up:
