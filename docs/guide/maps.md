@@ -153,10 +153,11 @@ sketch. Its properties:
 | Placed | below the model (a floor under the bed), or at the still water level round the domain; in 2D from the top it lies under everything |
 | Opacity, Resolution | how strongly, and with how many pixels along the longer side |
 
-From the top the view shows north up (*North up* in the view's bar, for a
-georeferenced case): the map lies as on a map, and a turned model is drawn
-turned; turning it (*Turn*, Shift + drag) turns the domain, not the map. Off,
-the model's axes lie along the screen.
+The 2D view from the top shows north up: the map lies as on a map, and a turned
+model is drawn turned. Turning the model (*Turn*, Shift + drag) turns the domain
+and its grid, never the map, in 2D and in 3D. *North up* in the view's bar (or
+++n++) turns any view, 2D or 3D, back so that north points up the screen (in 3D:
+away from you, the tilt kept), after you have turned it about.
 
 In the 2D view from the top the map follows the view: zoom in and it is fetched
 again in finer detail, zoom out or pan and it covers the new area (once the view

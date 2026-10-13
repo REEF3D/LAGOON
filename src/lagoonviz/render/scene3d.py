@@ -1370,12 +1370,45 @@ class SceneRenderer:
         self._north_known = True
         return True
 
-    def _turn_camera(self, angle: float) -> None:
-        """Turn the camera about the vertical through the middle of what is shown."""
+    def point_north(self) -> None:
+        """Turn the view so north (the model's y without a georeference) points up the
+        screen: from the top straight up, in 3D away from the viewer, the tilt kept;
+        about the point at the middle of the view."""
+        nx, ny = self.north if self.north is not None else (0.0, 1.0)
+        forward = np.asarray(self.camera.world.forward, dtype=float)
+        if abs(abs(forward[2]) - 1.0) < 1e-6:  # straight down: north up the screen
+            angle = _north_angle(self.north)
+            self.camera.local.rotation = (0.0, 0.0, math.sin(angle / 2), math.cos(angle / 2))
+            return
+        # the screen's up on the ground (for a view from above, where it looks; for a
+        # view along the ground, where it looks)
+        up = np.asarray(self.camera.world.up, dtype=float)
+        heading = up[:2] if np.hypot(*up[:2]) > 1e-3 else forward[:2]
+        if np.hypot(*heading) < 1e-9:
+            return
+        angle = math.atan2(ny, nx) - math.atan2(heading[1], heading[0])
+        self._turn_camera(math.remainder(angle, 2 * math.pi), self._view_centre())
+
+    def _view_centre(self) -> np.ndarray:
+        """Where the middle of the view meets the level of the middle of the model."""
+        corners = self.bounds() or self.bounds(visible_only=False)
+        middle = (corners[0] + corners[1]) / 2 if corners is not None else np.zeros(3)
+        position = np.asarray(self.camera.local.position, dtype=float)
+        forward = np.asarray(self.camera.world.forward, dtype=float)
+        if abs(forward[2]) < 1e-6:
+            return middle
+        reach = (middle[2] - position[2]) / forward[2]
+        return position + max(reach, 0.0) * forward if reach > 0 else middle
+
+    def _turn_camera(self, angle: float, pivot=None) -> None:
+        """Turn the camera about the vertical through ``pivot`` (default: the middle
+        of what is shown)."""
         if abs(angle) < 1e-12:
             return
-        corners = self.bounds() or self.bounds(visible_only=False)
-        pivot = (corners[0] + corners[1]) / 2 if corners is not None else np.zeros(3)
+        if pivot is None:
+            corners = self.bounds() or self.bounds(visible_only=False)
+            pivot = (corners[0] + corners[1]) / 2 if corners is not None else np.zeros(3)
+        pivot = np.asarray(pivot, dtype=float)
         c, s = math.cos(angle), math.sin(angle)
         position = np.asarray(self.camera.local.position, dtype=float) - pivot
         position[:2] = (c * position[0] - s * position[1], s * position[0] + c * position[1])

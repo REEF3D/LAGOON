@@ -15,6 +15,7 @@ the mouse over the view):
 | --- | --- |
 | ++1++, ++3++, ++7++ | front, right side, top (with ++ctrl++: back, left, bottom) |
 | ++5++ | perspective or orthographic |
+| ++n++ | north up |
 | ++2++ | the 2D view (see below) |
 | ++home++ or ++period++ | frame everything |
 | arrow keys | move the view (with ++shift++: further) |
@@ -32,9 +33,9 @@ waves and the bed's relief stay shaded; from the front or side it is an elevatio
 of the shapes.
 ++2++ again goes back to 3D. The buttons in the corner of the view do the same.
 
-For a case placed on the Earth ([Maps](maps.md)), *North up* in the view's bar
-turns the view from the top so that north is up, as on a map: a turned model is
-drawn turned. A *Background map* under the case follows the 2D view, fetched
+*North up* in the view's bar (++n++) turns the view so that north points up the
+screen, in 2D and in 3D (the tilt kept): north of the case's georeference
+([Maps](maps.md)), else the model's y. A *Background map* under the case follows the 2D view, fetched
 again in finer detail when you zoom in and for the new area when you pan; a bar
 above the view counts its tiles while they come.
 

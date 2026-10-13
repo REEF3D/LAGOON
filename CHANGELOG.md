@@ -11,9 +11,12 @@
 
 ### Rendering
 
-- **North in 3D**: with *North up*, turning a georeferenced model (*Turn*, Shift +
-  drag) turns the 3D view with it about the model's middle, so the background map
-  stays where it is and the model and its grid turn, as in the 2D view.
+- **North in 3D**: turning a georeferenced model (*Turn*, Shift + drag) turns the
+  3D view with it about the model's middle, so the background map stays where it
+  is and the model and its grid turn, as in the 2D view.
+- **North up** is a button (and ++n++) that turns any view, 2D or 3D, so north
+  points up the screen (the model's y without a georeference); it was a switch
+  that did something only from the top and for a turned model.
 - **White water in Cycles**: *View → White water in Cycles* (none, light, medium,
   heavy) and the export dialog choose how much foam, spray and bubbles path-traced
   stills and films show; medium, the new default, is about half the white water

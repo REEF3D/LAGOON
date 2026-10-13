@@ -320,14 +320,8 @@ class Viewport3D(QWidget):
         bar.addWidget(self.ortho_button)
         self.north_button = QToolButton()
         self.north_button.setText("North up")
-        self.north_button.setCheckable(True)
-        self.north_button.setChecked(True)
         self.north_button.setAutoRaise(True)
-        self.north_button.setToolTip(
-            "From the top: the map north up and a turned model turned (off: the model's "
-            "axes along the screen). Only for a case with a georeference"
-        )
-        self.north_button.toggled.connect(lambda _on: self._apply_north())
+        self.north_button.clicked.connect(self.point_north)
         self.north_button.hide()
         bar.addWidget(self.north_button)
         self.case_box = QComboBox()
@@ -951,6 +945,8 @@ class Viewport3D(QWidget):
                 self.set_2d(True, view)
             else:
                 self.frame(view)
+        elif key in ("n", "N"):
+            self.point_north()
         elif key == "2":
             self.two_d_button.toggle()
         elif key == "5":
@@ -1143,6 +1139,14 @@ class Viewport3D(QWidget):
     def _on_interaction(self, _event) -> None:
         self._save_camera.start()
 
+    def point_north(self) -> None:
+        """North up (the button, N): the view turns so north points up the screen, from
+        the top and in 3D; the model's y without a georeference."""
+        self._apply_north()
+        self.view.point_north()
+        self._store_camera()
+        self.redraw()
+
     def _store_camera(self) -> None:
         try:
             self.session.set_camera(self.view.camera_state())
@@ -1169,9 +1173,15 @@ class Viewport3D(QWidget):
         except Exception:  # noqa: BLE001 (a bad georef.json must not stop the drawing)
             log.warning("north of the case:\n%s", traceback.format_exc())
             north = None
-        self.north_button.setVisible(north is not None)
-        if not self.north_button.isChecked():
-            north = None
+        cases = any(i.kind == "case" for i in self.session.scene)
+        self.north_button.setVisible(cases)
+        self.north_button.setToolTip(
+            "Turn the view so north points up the screen (N); the map stays north up when "
+            "the model is turned"
+            if north is not None
+            else "Turn the view so the model's y points up the screen (N): the case has no "
+            "georeference (Set-up → Map) to know north by"
+        )
         if self.view.set_north(north):
             self._view_moved()
             self.redraw()

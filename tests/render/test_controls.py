@@ -148,3 +148,35 @@ def test_north_turns_the_3d_view_about_the_model(reef3d_run):
     view.set_camera_state(state)
     view.set_north((0.5, math.sqrt(0.75)))
     assert np.asarray(view.camera.local.position, float) == pytest.approx(after)
+
+
+def test_north_up_turns_any_view_so_north_points_up(reef3d_run):
+    import math
+
+    from lagoonviz.core import Session
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        if mesh is not None:
+            view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+    angle = math.radians(40.0)
+    north = (math.sin(angle), math.cos(angle))  # the model turned 40° on the map
+    for name in ("perspective", "front", "top"):
+        view.frame(name)
+        view.set_north(north)
+        view.point_north()
+        up = np.asarray(view.camera.world.up, float)
+        forward = np.asarray(view.camera.world.forward, float)
+        heading = up[:2] if np.hypot(*up[:2]) > 1e-3 else forward[:2]
+        heading = heading / np.linalg.norm(heading)
+        assert heading == pytest.approx(north, abs=1e-6), name
+    # without a georeference: the model's y
+    view.frame("perspective")
+    view.set_north(None)
+    view.point_north()
+    up = np.asarray(view.camera.world.up, float)
+    assert (up[:2] / np.linalg.norm(up[:2])) == pytest.approx((0.0, 1.0), abs=1e-6)
