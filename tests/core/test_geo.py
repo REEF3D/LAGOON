@@ -560,6 +560,8 @@ def test_a_case_started_on_the_map(tmp_path):
     assert (lat, lon) == pytest.approx((63.44, 10.40), abs=1e-7)  # the domain's centre
     maps = [i for i in session.scene if i.kind == "basemap"]
     assert len(maps) == 1 and maps[0].properties["source"] == "Kartverket topo"
+    grid = next(i for i in session.scene if i.kind == "grid")
+    assert not grid.visible  # its lines would hide the map
     assert session.input_file("control.txt", case).values("B 10") == [0, 2000, 0, 1000, 0, 1]
     # moved somewhere else: the same domain there, the map kept
     session.place_case((60.39, 5.32), case=case)

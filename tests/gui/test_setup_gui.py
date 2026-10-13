@@ -175,6 +175,8 @@ def test_the_map_tab_places_the_case(window, flume, monkeypatch):
     # the domain dragged in the 2D view, snapped to the cell size (B 1 0.5)
     tab.domain_drawn((1.12, 20.3, -2.1, 4.9))
     assert window.session.input_file("control.txt").values("B 10")[:4] == [1.0, 20.5, -2.0, 5.0]
+    assert [f.text() for f in tab.extent] == ["1", "20.5", "-2", "5"]  # shown, readable
+    assert tab.x0.text() == f"{georef.origin[0]:.3f}".rstrip("0").rstrip(".")
     # Shift + drag: the model turned on the map about the domain's centre
     centre = georef.to_world(10.75, 1.5)
     tab.model_turned(15.0, (10.75, 1.5))

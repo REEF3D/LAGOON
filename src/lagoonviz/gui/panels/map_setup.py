@@ -24,13 +24,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QLocale, Qt, Signal
+from PySide6.QtGui import QColor, QDoubleValidator, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -39,6 +38,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -51,20 +51,74 @@ from lagoonviz.core.geo.crs import (
 )
 from lagoonviz.core.geo.places import search
 from lagoonviz.core.kinds import BASEMAP_SOURCES
+from lagoonviz.gui.theme import COLORS
 
 log = logging.getLogger(__name__)
 
 METHODS = {"Linear (TIN)": "tin", "Inverse distance": "idw", "Nearest point": "nearest"}
 
 
-def _spin(low: float, high: float, decimals: int = 3, suffix: str = "") -> QDoubleSpinBox:
-    box = QDoubleSpinBox()
-    box.setRange(low, high)
-    box.setDecimals(decimals)
-    box.setSuffix(suffix)
-    box.setKeyboardTracking(False)
-    box.setButtonSymbols(QDoubleSpinBox.NoButtons)
+class NumberField(QLineEdit):
+    """A number typed as text (metres, degrees): narrow, any size of number, the unit
+    after it. ``valueChanged`` when edited and confirmed; an empty field is 0 (or its
+    placeholder's meaning)."""
+
+    valueChanged = Signal(float)
+
+    def __init__(self, low: float, high: float, decimals: int = 3, unit: str = "") -> None:
+        super().__init__()
+        self.low, self.high, self.decimals = float(low), float(high), int(decimals)
+        validator = QDoubleValidator(self.low, self.high, self.decimals, self)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        validator.setLocale(QLocale.c())  # a point as the decimal mark, as in the files
+        self.setValidator(validator)
+        self.setMinimumWidth(60)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        if unit:
+            self.setToolTip(unit.strip())
+            self.addAction(_unit_icon(unit), QLineEdit.ActionPosition.TrailingPosition)
+        self.editingFinished.connect(lambda: self.valueChanged.emit(self.value()))
+
+    def value(self) -> float:
+        try:
+            return min(max(float(self.text().strip() or 0.0), self.low), self.high)
+        except ValueError:
+            return 0.0
+
+    def setValue(self, value: float) -> None:  # noqa: N802 (as QDoubleSpinBox)
+        text = f"{float(value):.{self.decimals}f}".rstrip("0").rstrip(".")
+        self.setText("0" if text in ("", "-0") else text)
+        if not self.signalsBlocked():
+            self.valueChanged.emit(self.value())
+
+
+def _unit_icon(unit: str):
+    """The unit (m, °) drawn small at the end of a field."""
+    from PySide6.QtGui import QIcon, QPainter, QPixmap
+
+    pixmap = QPixmap(32, 32)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setPen(QColor(COLORS["dim"]))
+    font = painter.font()
+    font.setPixelSize(20)
+    painter.setFont(font)
+    painter.drawText(pixmap.rect(), Qt.AlignCenter, unit.strip())
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _combo() -> QComboBox:
+    """A combo box that narrows with the panel (long entries are elided)."""
+    box = QComboBox()
+    box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    box.setMinimumContentsLength(10)
+    box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     return box
+
+
+def _spin(low: float, high: float, decimals: int = 3, suffix: str = "") -> NumberField:
+    return NumberField(low, high, decimals, suffix)
 
 
 class MapTab(QWidget):
@@ -86,7 +140,7 @@ class MapTab(QWidget):
         self._shown_domain: tuple | None = None
 
         # ---- georeference
-        self.crs = QComboBox()
+        self.crs = _combo()
         self.crs.setEditable(True)
         self.crs.setInsertPolicy(QComboBox.NoInsert)
         for code, name in COMMON.items():
@@ -126,7 +180,7 @@ class MapTab(QWidget):
         self.place.returnPressed.connect(self.place_domain)
         self.place_button = QPushButton("Find")
         self.place_button.clicked.connect(self.place_domain)
-        self.results = QComboBox()
+        self.results = _combo()
         self.results.setToolTip("The places found: choose one to put the domain there")
         self.results.activated.connect(self._result_chosen)
         self.results.hide()
@@ -149,10 +203,8 @@ class MapTab(QWidget):
         origin.addWidget(QLabel("Y0"))
         origin.addWidget(self.y0, 1)
         form.addRow("Origin", origin)
-        turn = QHBoxLayout()
-        turn.addWidget(self.rotation, 1)
-        turn.addWidget(self.bearing)
-        form.addRow("Rotation", turn)
+        form.addRow("Rotation", self.rotation)
+        form.addRow("", self.bearing)
         form.addRow("Vertical datum", self.datum)
         form.addRow("z = 0 at", self.z_offset)
         buttons = QHBoxLayout()
@@ -201,7 +253,7 @@ class MapTab(QWidget):
         form.addRow("Turn to", row)
 
         # ---- background map
-        self.source = QComboBox()
+        self.source = _combo()
         self.source.addItems(list(BASEMAP_SOURCES))
         self.map_button = QPushButton("Show map")
         self.map_button.setToolTip(
@@ -225,13 +277,13 @@ class MapTab(QWidget):
             "The CRS of the file's coordinates (EPSG:4326 for longitude, latitude; "
             "'model' for model coordinates)"
         )
-        self.method = QComboBox()
+        self.method = _combo()
         self.method.addItems(list(METHODS))
         self.method.setToolTip(
             "How scattered soundings are carried onto the grid (a raster is sampled bilinearly)"
         )
         self.spacing = _spin(0.0, 1e5, 3, " m")
-        self.spacing.setSpecialValueText("DIVEMesh's cell size (B 1)")
+        self.spacing.setPlaceholderText("DIVEMesh's cell size (B 1)")
         self.depths = QCheckBox("The file gives depths (positive down)")
         self.geo_button = QPushButton("Make geo.dat")
         self.geo_button.setToolTip(
@@ -287,6 +339,8 @@ class MapTab(QWidget):
         layout.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        # the fields narrow with the panel: every button stays in view
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(inner)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)

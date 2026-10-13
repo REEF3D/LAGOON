@@ -181,6 +181,9 @@ class Session:
         )
         (folder / "ctrl.txt").write_text("// REEF3D input, started on the map in LAGOON\n")
         case_id = self.open_case(folder, name)
+        for item in [i for i in self.scene if i.kind == "grid"]:
+            if self.data.case_item(item.id) is self.scene.get(case_id) and item.visible:
+                self.set_visible(item.id, False)  # its lines would hide the map
         if place is not None:
             self.place_case(place, case=case_id)
         if self.scene.mode != "setup":
