@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Opening output
+
+- **File → Open output file** lists a folder's files grouped into series, as
+  ParaView does (`REEF3D-NHFLOW-FSF-..pvtp`, with the number of files, their
+  numbers and size); the pieces of parallel output are left out. Opening a series
+  opens it with its case.
+
 ### Maps and the place of a case
 
 - **A case started on the map**: *File → New case from map…* finds the place (a

@@ -55,7 +55,6 @@ from lagoonviz.gui.theme import DEFAULT_THEME, THEME_LOOKS, apply_theme
 
 log = logging.getLogger(__name__)
 SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
-OUTPUT_FILTER = "REEF3D output (*.pvtu *.pvtp *.vtu *.vtp);;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
 LAYOUT_VERSION = 4
 #: the items the toolbar adds (the Add menu has them all)
@@ -916,9 +915,11 @@ class MainWindow(QMainWindow):
         return case_id
 
     def open_output_dialog(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open REEF3D output file", self._last_dir(), OUTPUT_FILTER
-        )
+        """File → Open output file: the folder's files grouped into series (as
+        ParaView lists them); a series opens with its case."""
+        from lagoonviz.gui.open_output import choose_output
+
+        path = choose_output(self._last_dir(), self)
         if path:
             self.open_case(path)
 
