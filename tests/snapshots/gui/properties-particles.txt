@@ -9,6 +9,7 @@ QWidget
   Automatic range: checkbox '' on
   Range min: number 0 in [-1e+09, 1e+09] decimals 3
   Range max: number 1 in [-1e+09, 1e+09] decimals 3
+  Range [%]: number 100 in [1, 500] decimals 3
   Opacity: number 1 in [0, 1] decimals 3
   Point size [px]: number 4 in [1, 40] decimals 3
   Trail [outputs]: number 0 in [0, 500] decimals 0

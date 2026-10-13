@@ -9,6 +9,7 @@ QWidget
   Automatic range: checkbox '' on (disabled)
   Range min: number 0 in [-1e+09, 1e+09] decimals 3 (disabled)
   Range max: number 1 in [-1e+09, 1e+09] decimals 3 (disabled)
+  Range [%]: number 100 in [1, 500] decimals 3
   Opacity: number 1 in [0, 1] decimals 3
   Contour lines of: choice 'none' of ['none', 'elevation', 'depth']
   Contour lines: number 10 in [2, 100] decimals 0

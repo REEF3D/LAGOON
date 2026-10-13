@@ -75,6 +75,11 @@ View
     [ ] Underwater (cinematic)
     [ ] Diorama (cinematic)
     [ ] Diorama classic (cinematic)
+  White water in Cycles >
+    [ ] None
+    [ ] Light
+    [x] Medium
+    [ ] Heavy
   Sun...
   ----
   [ ] Compare side by side  [Ctrl+Shift+2]

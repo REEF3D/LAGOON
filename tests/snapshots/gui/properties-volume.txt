@@ -9,6 +9,7 @@ QWidget
   Automatic range: checkbox '' on
   Range min: number 0.146 in [-1e+09, 1e+09] decimals 3
   Range max: number 2.316 in [-1e+09, 1e+09] decimals 3
+  Range [%]: number 100 in [1, 500] decimals 3
   Opacity: number 1 in [0, 1] decimals 3
   button 'Fit range to this frame' tip='Fix the colour range to the values of the current frame'
   label 'NHFLOW volume · 3 frames · REEF3D_NHFLOW_VTU' (disabled)
