@@ -48,6 +48,7 @@ Add
   Rod trees
   Case set-up
   DIVEMesh grid
+  Background map
   Particles
 View
   [ ] Set-up  [Ctrl+Shift+U]
