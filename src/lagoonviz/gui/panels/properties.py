@@ -390,13 +390,13 @@ class PropertiesPanel(QWidget):
             )
         if getattr(self, "fit_button", None) is not None:
             self.fit_button.setEnabled(coloured)
-        percent_box = self.editors.get("range_percent")
-        if percent_box is not None:
-            percent_box.setEnabled(coloured)
-            if not coloured:
-                percent_box.setToolTip(hint)
-            else:
-                percent_box.setToolTip(kind_spec_tip(self.session, self.item_id, "range_percent"))
+        for key in ("range_percent", "range_from"):  # greyed out as the range is
+            box = self.editors.get(key)
+            if box is not None:
+                box.setEnabled(coloured)
+                box.setToolTip(
+                    hint if not coloured else kind_spec_tip(self.session, self.item_id, key)
+                )
         auto = bool(props.get("auto_range", True))
         for box in (low_box, high_box):
             # always editable while coloured: typing a bound fixes the range
