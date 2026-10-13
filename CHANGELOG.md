@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixes
+
+- **No crash when opening a large case**: Python's garbage collector ran in a
+  loader thread while the window deleted a panel's widgets and walked a half-deleted
+  Qt object (a segmentation fault in `SbkObject_tp_traverse`). It now runs on the
+  GUI thread only.
+
 ### Rendering
 
 - **White water in Cycles**: *View → White water in Cycles* (none, light, medium,

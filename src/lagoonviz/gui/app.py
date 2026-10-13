@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 
 import lagoonviz
 from lagoonviz.core import Session
+from lagoonviz.gui import gc_guard
 from lagoonviz.gui.macos import set_app_name
 from lagoonviz.gui.main_window import MainWindow
 from lagoonviz.gui.resources import resource_path
@@ -44,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationVersion(lagoonviz.__version__)
     app.setWindowIcon(QIcon(str(resource_path("icon.png"))))
     apply_theme(app, str(QSettings().value("view/theme", DEFAULT_THEME)))
+    # loader threads must not run the garbage collector while the GUI thread deletes
+    # widgets (a segmentation fault in SbkObject_tp_traverse)
+    gc_guard.install(app)
 
     window = MainWindow(Session())
     window.show()
