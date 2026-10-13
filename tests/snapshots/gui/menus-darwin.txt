@@ -52,6 +52,7 @@ Add
   DIVEMesh grid
   Background map
   geo.dat points
+  Sea state
   Particles
 View
   [ ] Set-up  [Ctrl+Shift+U]
