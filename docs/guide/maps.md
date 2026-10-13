@@ -109,6 +109,11 @@ sketch. Its properties:
 | Placed | below the model (a floor under the bed), or at the still water level round the domain; in 2D from the top it lies under everything |
 | Opacity, Resolution | how strongly, and with how many pixels along the longer side |
 
+In the 2D view from the top the map follows the view: zoom in and it is fetched
+again in finer detail, zoom out or pan and it covers the new area (once the view
+rests; the map before stays until the new one is there). In 3D it covers the
+domain and its margin.
+
 Map tiles are fetched once and kept in a cache (`~/Library/Caches/LAGOON/tiles`
 on a Mac; `LAGOON_CACHE` moves it). LAGOON asks the servers with its own name and
 only for the tiles over the area shown, as their terms ask.

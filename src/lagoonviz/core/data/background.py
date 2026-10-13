@@ -98,6 +98,8 @@ class Backgrounds:
         #: item -> the signature its map could not be made with; items being made
         self._failed: dict[str, tuple] = {}
         self._making: set[str] = set()
+        #: the 2D top view's area and pixels (set_view), or None
+        self._view: tuple[tuple[float, float, float, float], int] | None = None
         self.cache = None  # the tile cache, made when first needed
 
     # ------------------------------------------------------------- georeference
@@ -236,7 +238,7 @@ class Backgrounds:
         """The work of making an item's map, as a function to call in any thread
         (it reads only what it was given and stores what it made); None when there
         is nothing to make (made already, or it cannot be: see :meth:`error`)."""
-        from lagoonviz.core.geo.basemap import background, expanded
+        from lagoonviz.core.geo.basemap import background
         from lagoonviz.core.geo.raster import read_raster
         from lagoonviz.core.geo.tiles import SOURCES, TileCache, custom_source
 
@@ -258,10 +260,9 @@ class Backgrounds:
         georef = self.georef(item_id)
         domain = self.domain(item_id)
         assert georef is not None and domain is not None
-        box = expanded(domain[:4], float(props.get("margin", 0.5)))
+        box, pixels = self._wanted(item_id, domain, props)
         choice = SOURCE_CHOICES.get(str(props.get("source")), "kartverket_topo")
         file = str(props.get("file", "") or "").strip()
-        pixels = int(props.get("pixels", 2048))
         if self.cache is None:
             self.cache = TileCache()
         cache = self.cache
@@ -302,11 +303,47 @@ class Backgrounds:
         return make
 
     def cached(self, item_id: str):
-        """The map made before for the item's current signature, else None (no work)."""
+        """The map made before for the item's current signature (and covering the 2D
+        view finely enough, when it follows it), else None (no work)."""
+        signature = self.signature(item_id)
+        with self._lock:
+            made = self._made.get(item_id)
+        if made is None or made[0] != signature:
+            return None
+        domain = self.domain(item_id)
+        props = self.data.scene.get(item_id).properties
+        if domain is not None and not _covers(made[1], *self._wanted(item_id, domain, props)):
+            return None  # made for another view
+        return made[1]
+
+    def latest(self, item_id: str):
+        """The map made last for the item as it is now, even when it does not cover
+        the 2D view (shown while the one for the view is being made), else None."""
         signature = self.signature(item_id)
         with self._lock:
             made = self._made.get(item_id)
         return made[1] if made is not None and made[0] == signature else None
+
+    # ------------------------------------------------------------- the 2D view
+    def set_view(self, box: tuple[float, float, float, float] | None, pixels: int = 0) -> None:
+        """The area the 2D top view shows (x0, x1, y0, y1, model coordinates) and its
+        width in pixels: the maps follow it, fetched again for a new area or zoom.
+        None: the maps cover the domain and their margin (as in 3D)."""
+        self._view = None if box is None else (tuple(float(v) for v in box), int(pixels))
+
+    def _following(self) -> bool:
+        return self._view is not None and self.data.scene.flat
+
+    def _wanted(self, item_id: str, domain, props) -> tuple[tuple, int]:
+        """The rectangle a map covers and its pixels along the longer side: the 2D
+        view's and a quarter round it (when it follows the view), else the domain and
+        its margin."""
+        from lagoonviz.core.geo.basemap import expanded
+
+        if self._following():
+            box, pixels = self._view
+            return expanded(box, 0.25), int(min(max(pixels * 1.5, 512), 4096))
+        return expanded(domain[:4], float(props.get("margin", 0.5))), int(props.get("pixels", 2048))
 
     def shown(self, item_id: str, made) -> BackgroundMap:
         """Where and how the renderer draws a made map: below the model or at the
@@ -367,3 +404,17 @@ class Backgrounds:
             else:
                 self._made.pop(item_id, None)
                 self._failed.pop(item_id, None)
+
+
+def _covers(made, box, pixels: int) -> bool:
+    """Whether a made map holds a rectangle (x0, x1, y0, y1) finely enough for
+    ``pixels`` along its longer side (and not much more coarsely than wanted)."""
+    x0, x1, y0, y1 = made.extent
+    bx0, bx1, by0, by1 = box
+    # the view's own area (the quarter round it may come from the map made before):
+    # panning by up to a quarter of the view keeps the map
+    gx, gy = (bx1 - bx0) / 6.0, (by1 - by0) / 6.0
+    inside = x0 <= bx0 + gx and x1 >= bx1 - gx and y0 <= by0 + gy and y1 >= by1 - gy
+    have = (x1 - x0) / max(made.image.shape[1], 1)  # metres per pixel
+    want = max(bx1 - bx0, by1 - by0) / max(pixels, 1)
+    return inside and want / 2.5 <= have <= 1.6 * want

@@ -18,7 +18,8 @@
   cloudless (satellite), OpenStreetMap, a tile server or a GeoTIFF of yours, warped
   into the model's frame and drawn under the results and the set-up in the 3D and
   2D views, figures, films and the set-up sketch, with the credit its source asks
-  for. Tiles are cached on disk.
+  for. Tiles are cached on disk. In the 2D top view the map follows the view
+  (finer when zoomed in, the new area when zoomed out or panned).
 - **The domain on the map**: drag it in the 2D view (B 10), Shift + drag turns the
   model on the map.
 - **Bathymetry to geo.dat**: a GeoTIFF, ASCII grid or x y z soundings interpolated

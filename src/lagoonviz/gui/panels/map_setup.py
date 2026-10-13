@@ -264,8 +264,7 @@ class MapTab(QWidget):
         layout.addWidget(self.hint)
         self.start_button = QPushButton("New case from map…")
         self.start_button.setToolTip(
-            "Find a place, start a case there with a domain and a map (File → New case "
-            "from map)"
+            "Find a place, start a case there with a domain and a map (File → New case from map)"
         )
         self.start_button.clicked.connect(lambda: self.newCase.emit())
         layout.addWidget(self.start_button)

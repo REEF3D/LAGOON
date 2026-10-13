@@ -352,6 +352,10 @@ class Viewport3D(QWidget):
         self._save_camera.setSingleShot(True)
         self._save_camera.setInterval(400)
         self._save_camera.timeout.connect(self._store_camera)
+        self._view_timer = QTimer(self)  # the background maps follow the 2D view at rest
+        self._view_timer.setSingleShot(True)
+        self._view_timer.setInterval(300)
+        self._view_timer.timeout.connect(self._follow_view)
         self._sun_timer = QTimer(self)  # the sky's sun glow follows once the sun rests
         self._sun_timer.setSingleShot(True)
         self._sun_timer.setInterval(150)
@@ -500,7 +504,8 @@ class Viewport3D(QWidget):
                         name="lagoon-map",
                         daemon=True,
                     ).start()
-                made = backgrounds.cached(item_id)
+                # the map for the view, else the one before while that is being made
+                made = backgrounds.cached(item_id) or backgrounds.latest(item_id)
                 if made is None:
                     self.view.remove_background(item_id)
                 else:
@@ -859,6 +864,7 @@ class Viewport3D(QWidget):
         self._mark_2d_side()
         if frame:
             self.frame(self._home_view)
+        self._view_moved()  # the maps: the 2D view's area, or the domain's in 3D
 
     def _mark_2d_side(self) -> None:
         """In 2D the button of the side it looks from is shown pressed."""
@@ -1088,6 +1094,41 @@ class Viewport3D(QWidget):
             self.session.set_camera(self.view.camera_state())
         except Exception:  # noqa: BLE001
             log.warning("could not store the camera:\n%s", traceback.format_exc())
+        self._view_moved()
+
+    def _view_moved(self) -> None:
+        """The view was zoomed, panned or framed: the background maps follow the 2D
+        view once it rests."""
+        timer = getattr(self, "_view_timer", None)
+        if timer is not None:
+            timer.start()
+
+    def _follow_view(self) -> None:
+        """Tell the background maps what the 2D top view shows (in 3D: nothing, they
+        cover the domain and its margin) and draw them again (made anew in a worker
+        thread when the area or the zoom changed)."""
+        backgrounds = self.session.data.backgrounds
+        if not backgrounds.items():
+            return
+        box = None
+        pixels = 0
+        if self.two_d and self.two_d_side == "top":
+            try:
+                size = tuple(self.canvas.get_logical_size())
+            except AttributeError:
+                size = (self.canvas.width(), self.canvas.height())
+            w, h = float(size[0]), float(size[1])
+            corners = [
+                self.view.plan_point(x, y, size) for x, y in ((0, 0), (w, 0), (0, h), (w, h))
+            ]
+            if all(c is not None for c in corners) and w > 0 and h > 0:
+                xs = [c[0] for c in corners]
+                ys = [c[1] for c in corners]
+                box = (min(xs), max(xs), min(ys), max(ys))
+                pixels = int(max(w, h) * self.devicePixelRatioF())
+        backgrounds.set_view(box, pixels)
+        self._update_backgrounds()
+        self.redraw()
 
 
 def _same_camera(a: dict, b: dict) -> bool:

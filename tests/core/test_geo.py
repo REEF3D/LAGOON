@@ -103,7 +103,7 @@ class FakeServer:
 
     def __call__(self, url: str) -> bytes:
         self.asked.append(url)
-        z, x, y = (int(v) for v in url.split("/")[-3:])
+        z, x, y = (int(v.split(".")[0]) for v in url.split("/")[-3:])
         if (x, y) in self.down:
             raise OSError("404")
         return _png((x % 256, y % 256, z))
@@ -590,3 +590,32 @@ def test_a_place_outside_norway_gets_openstreetmap():
         next(i for i in session.scene if i.kind == "basemap").properties["source"]
         == "OpenStreetMap"
     )
+
+
+def test_the_map_follows_the_2d_view(fjord, tmp_path):
+    session = Session()
+    session.open_case(fjord)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0))
+    item = session.add_background_map("OpenStreetMap", margin=0.2, pixels=256)
+    backgrounds = session.data.backgrounds
+    backgrounds.cache = TileCache(tmp_path / "tiles", FakeServer())
+    first = backgrounds.image(item)
+    assert first.extent == pytest.approx((-200.0, 1200.0, -200.0, 700.0))
+    # in 3D the view does not matter
+    backgrounds.set_view((5000.0, 6000.0, 0.0, 500.0), 800)
+    assert backgrounds.cached(item) is first
+    session.set_plan_view(True, "top")
+    assert backgrounds.cached(item) is None and backgrounds.latest(item) is first
+    zoomed_out = backgrounds.image(item)
+    assert zoomed_out.extent == pytest.approx((4750.0, 6250.0, -250.0, 750.0))
+    # a small pan keeps it; zooming in a lot makes it again, finer
+    backgrounds.set_view((5100.0, 6100.0, 0.0, 500.0), 800)
+    assert backgrounds.cached(item) is zoomed_out
+    backgrounds.set_view((5400.0, 5500.0, 200.0, 250.0), 800)
+    assert backgrounds.cached(item) is None
+    zoomed_in = backgrounds.image(item)
+    width = zoomed_in.extent[1] - zoomed_in.extent[0]
+    assert width == pytest.approx(150.0) and zoomed_in.image.shape[1] == 1200
+    assert zoomed_in.missing == 0
+    backgrounds.set_view(None)
+    assert backgrounds.cached(item) is None  # back to the domain and its margin
