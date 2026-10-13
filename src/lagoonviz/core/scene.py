@@ -36,9 +36,10 @@ VIEW_EVENTS = ("camera_keys", "sun", "play_range", "highlight")
 MODES = ("results", "setup")
 #: kinds of items that belong to the set-up: hidden in the results unless ticked
 SETUP_KINDS = ("setup", "grid")
-#: kinds of items with a check box of their own in each mode: the set-up items and
-#: the background map (on in the set-up, off over the results until ticked there)
-MODE_KINDS = (*SETUP_KINDS, "basemap")
+#: kinds of items with a check box of their own in each mode (on in the set-up, off
+#: over the results until ticked there); the background map is not one of them: it
+#: lies under the set-up and the results alike
+MODE_KINDS = SETUP_KINDS
 
 
 @dataclass

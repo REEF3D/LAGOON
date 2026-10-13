@@ -1354,9 +1354,7 @@ class DataManager:
         item = self.scene.get(item_id)
         if item.kind in SETUP_KINDS:
             return "setup"
-        if item.kind == "basemap":
-            return "setup"  # over the results when ticked there
-        if item.kind == "case":
+        if item.kind in ("case", "basemap"):
             return "both"
         if item.kind in DATA_KINDS:
             dataset = self.dataset(item_id)

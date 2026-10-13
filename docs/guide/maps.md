@@ -109,9 +109,8 @@ session.add_background_map("Sentinel-2 2017 (satellite)", margin=1.0)
 ## Background maps
 
 A *Background map* item shows a map round its case's domain, under the results
-and the set-up (like the set-up items it has a check box of its own in each mode:
-on in the set-up, off over the results until you tick it there; each mode keeps
-its own view, the set-up its 2D map, the results their 3D view), in the 3D view, the 2D view, paper figures, films and the set-up
+and the set-up (each mode keeps its own view: the set-up its 2D map, the results
+their 3D view, the map under both), in the 3D view, the 2D view, paper figures, films and the set-up
 sketch. Its properties:
 
 | property | |

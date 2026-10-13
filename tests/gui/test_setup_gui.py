@@ -259,6 +259,6 @@ def test_the_results_leave_the_map(window):
     basemap = next(i for i in session.scene if i.kind == "basemap")
     assert session.mode == "setup" and basemap.visible
     window.act_mode_results.trigger()
-    assert not session.scene.get(basemap.id).visible  # ticked off over the results
+    assert session.scene.get(basemap.id).visible  # the map stays under the results
     window.act_mode_setup.trigger()
     assert session.scene.get(basemap.id).visible

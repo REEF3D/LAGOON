@@ -391,7 +391,7 @@ def test_a_background_map_item(fjord, tmp_path):
     assert uv.min() == 0.0 and uv.max() == 1.0
     session.turn_model(10.0)
     assert backgrounds.cached(item) is None  # turned: made again
-    assert session.data.item_mode(item) == "setup"
+    assert session.data.item_mode(item) == "both"
 
 
 def test_a_store_converted_keeps_the_case_georeference(tmp_path):
@@ -707,17 +707,13 @@ def test_north_in_model_coordinates(fjord):
     assert big_x == pytest.approx(270000.0) and big_y == pytest.approx(7040100.0)
 
 
-def test_the_map_has_a_check_box_of_its_own_in_each_mode(fjord):
+def test_the_map_lies_under_the_results_too(fjord):
     session = Session()
     session.open_case(fjord)
     item = session.add_background_map("OpenStreetMap")
     assert session.mode == "setup" and session.scene.get(item).visible
     session.set_mode("results")
-    assert not session.scene.get(item).visible
-    session.set_visible(item, True)  # ticked over the results
-    session.set_mode("setup")
-    session.set_mode("results")
-    assert session.scene.get(item).visible
+    assert session.scene.get(item).visible and session.data.drawn(item)
 
 
 def test_making_geo_dat_tells_its_progress_and_can_be_cancelled(fjord, terrain):
