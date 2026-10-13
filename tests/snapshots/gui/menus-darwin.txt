@@ -77,6 +77,10 @@ View
     [ ] Underwater (cinematic)
     [ ] Diorama (cinematic)
     [ ] Diorama classic (cinematic)
+  Memory use >
+    [ ] Performance
+    [x] Balanced
+    [ ] Low memory
   White water in Cycles >
     [ ] None
     [ ] Light
