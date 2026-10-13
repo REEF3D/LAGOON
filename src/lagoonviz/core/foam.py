@@ -21,7 +21,7 @@ so a lab flume and a coast get the same look. NumPy only.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -44,6 +44,33 @@ class FoamSettings:
     #: at most this many particles (the oldest go first)
     limit: int = 400_000
     seed: int = 1
+
+    def scaled(self, amount: float) -> FoamSettings:
+        """Less (or more) white water: as many particles born and as long a life times
+        ``amount`` (1: as above)."""
+        return replace(self, rate=self.rate * amount, lifetime=self.lifetime * amount)
+
+
+#: how much white water a path-traced render shows (1: FoamSettings as they are)
+WHITE_WATER_AMOUNTS = {"none": 0.0, "light": 0.35, "medium": 0.6, "heavy": 1.0}
+DEFAULT_WHITE_WATER = "medium"
+
+
+def white_water_amount(foam) -> float:
+    """The amount of white water ``foam`` asks for: True the default ("medium"),
+    False or None none, a name of WHITE_WATER_AMOUNTS, or a number (0 - 2)."""
+    if foam is True:
+        return WHITE_WATER_AMOUNTS[DEFAULT_WHITE_WATER]
+    if foam is False or foam is None:
+        return 0.0
+    if isinstance(foam, str):
+        try:
+            return WHITE_WATER_AMOUNTS[foam.lower()]
+        except KeyError:
+            raise ValueError(
+                f"white water: one of {', '.join(WHITE_WATER_AMOUNTS)}, got {foam!r}"
+            ) from None
+    return min(max(float(foam), 0.0), 2.0)
 
 
 # ======================================================================== surface

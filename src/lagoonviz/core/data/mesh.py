@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -417,25 +417,108 @@ class CutPlan:
     plane whose position along its axis does not change between frames (vertical
     slices of REEF3D's σ-grids, any slice of a fixed grid) one plan serves all
     frames, and a frame costs only the interpolation.
+
+    ``line_a``, ``line_b``, ``line_t``: the cells' edges in the plane (the grid
+    lines of a slice), two points per segment, given the same way; applying puts
+    them after the surface's points and their pairs in the mesh's ``outlines``.
     """
 
     a: np.ndarray  # (k,) first node of the cut edge of each output point
     b: np.ndarray  # (k,) second node
     t: np.ndarray  # (k,) weight: point = a + t (b - a)
     triangles: np.ndarray  # (m, 3) uint32
+    line_a: np.ndarray | None = None  # (2q,) the grid lines' points, as a, b, t
+    line_b: np.ndarray | None = None
+    line_t: np.ndarray | None = None
 
     @property
     def n_points(self) -> int:
         return int(self.a.size)
 
     def apply(self, points: np.ndarray, point_data: dict[str, np.ndarray]) -> SurfaceMesh:
-        t = self.t[:, None]
-        cut = points[self.a] + t * (points[self.b] - points[self.a])
+        a, b, weight = self.a, self.b, self.t
+        lines = self.line_a is not None and self.line_a.size > 0
+        if lines:
+            a = np.concatenate([a, self.line_a])
+            b = np.concatenate([b, self.line_b])
+            weight = np.concatenate([weight, self.line_t])
+        t = weight[:, None]
+        cut = points[a] + t * (points[b] - points[a])
         data = {}
         for name, values in point_data.items():
-            va, vb = values[self.a], values[self.b]
-            data[name] = (va + (t if va.ndim == 2 else self.t) * (vb - va)).astype(np.float32)
-        return SurfaceMesh(cut.astype(np.float32), self.triangles, data)
+            va, vb = values[a], values[b]
+            data[name] = (va + (t if va.ndim == 2 else weight) * (vb - va)).astype(np.float32)
+        outlines = None
+        if self.line_a is not None:  # a slice: its grid lines (none in a piece it misses)
+            count = self.line_a.size
+            outlines = (self.n_points + np.arange(count, dtype=np.uint32)).reshape(-1, 2)
+        return SurfaceMesh(cut.astype(np.float32), self.triangles, data, outlines=outlines)
+
+
+#: the faces of linear cells (VTK node order), for the grid lines of a slice
+CELL_FACES: dict[int, tuple[int, tuple[tuple[int, ...], ...]]] = {
+    VTK_HEXAHEDRON: (
+        8,
+        (
+            (0, 1, 2, 3),
+            (4, 5, 6, 7),
+            (0, 1, 5, 4),
+            (1, 2, 6, 5),
+            (2, 3, 7, 6),
+            (3, 0, 4, 7),
+        ),
+    ),
+    VTK_WEDGE: (6, ((0, 1, 2), (3, 4, 5), (0, 1, 4, 3), (1, 2, 5, 4), (2, 0, 3, 5))),
+    VTK_TETRA: (4, ((0, 1, 2), (0, 1, 3), (1, 2, 3), (0, 2, 3))),
+}
+
+
+def plan_cell_edges(
+    distance: np.ndarray, connectivity: np.ndarray, offsets: np.ndarray, types: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The grid lines where the zero level of ``distance`` (a plane) cuts the cells'
+    faces: a segment per face crossed (a face two cells share once), as (a, b, t)
+    with two points per segment (see :class:`CutPlan`)."""
+    distance = np.asarray(distance, dtype=np.float64)
+    starts = np.concatenate(([0], offsets[:-1])).astype(np.int64)
+    by_size: dict[int, list[np.ndarray]] = {}
+    for cell_type in np.unique(types):
+        if int(cell_type) not in CELL_FACES:
+            continue
+        n_nodes, faces = CELL_FACES[int(cell_type)]
+        first = starts[types == cell_type]
+        nodes = connectivity[first[:, None] + np.arange(n_nodes)]
+        signs = distance[nodes]
+        nodes = nodes[(signs.min(axis=1) <= 0) & (signs.max(axis=1) > 0)]
+        for face in faces:
+            by_size.setdefault(len(face), []).append(nodes[:, list(face)])
+    found_a, found_b = [], []
+    for size, groups in by_size.items():
+        faces = np.concatenate(groups).astype(np.int64)
+        if not len(faces):
+            continue
+        # a face shared by two cells once
+        _, first = np.unique(np.sort(faces, axis=1), axis=0, return_index=True)
+        faces = faces[np.sort(first)]
+        above = distance[faces] > 0
+        crossed = above != np.roll(above, -1, axis=1)  # edge e: node e to node e + 1
+        two = crossed.sum(axis=1) >= 2
+        faces, crossed = faces[two], crossed[two]
+        if not len(faces):
+            continue
+        # the first two crossed edges of each face: the segment across it
+        order = np.argsort(~crossed, axis=1, kind="stable")[:, :2]
+        rows = np.arange(len(faces))[:, None]
+        start = faces[rows, order]
+        end = faces[rows, (order + 1) % size]
+        found_a.append(start.ravel())
+        found_b.append(end.ravel())
+    if not found_a:
+        none = np.zeros(0, np.int64)
+        return none, none, np.zeros(0)
+    a, b = np.concatenate(found_a), np.concatenate(found_b)
+    da, db = distance[a], distance[b]
+    return a, b, da / np.where(da == db, 1.0, da - db)
 
 
 def plan_cut(
@@ -452,7 +535,9 @@ def plan_cut(
     that cross the plane are processed, so a slice of a large grid is cheap.
     """
     distance = points[:, axis].astype(np.float64) - position
-    return plan_level(distance, connectivity, offsets, types)
+    plan = plan_level(distance, connectivity, offsets, types)
+    line_a, line_b, line_t = plan_cell_edges(distance, connectivity, offsets, types)
+    return replace(plan, line_a=line_a, line_b=line_b, line_t=line_t)
 
 
 def plan_level(

@@ -44,6 +44,10 @@ Surfaces, slices and objects share these properties:
   sample of the outputs, so a colour means the same value at every time; slices
   and iso-surfaces widen it to each output shown. Switched off, *Range min* and
   *Range max* hold. *Fit range to this frame* sets them to the current output.
+- **Range [%]** scales the automatic range: 100 % runs from the lowest to the
+  highest value, 95 % from 0.95 × min to 0.95 × max (values beyond take the colours
+  at the ends), 50 % brings out the small waves. *Fit range to this frame* uses it
+  too.
 - **Opacity**: a transparent free surface shows the bed under it.
 - **Contour lines of** a variable, and how many.
 - **Vectors of** a vector field: arrows spread over the surface, how many, and
@@ -69,7 +73,10 @@ Plots panel adds them over time. Click on empty space to remove it.
 ## Slices, iso-surfaces, streamlines
 
 *Add → Slice* cuts the volume in the middle; set the *Normal* (x, y or z) and the
-*Position* in metres. *Add → Iso-surface* draws where a variable has a *Value*.
+*Position* in metres; *Grid lines* (dark or white) draws the edges of the cells it
+cuts, so the slice shows the grid the solver computed on (on a σ-grid the lines
+follow the bed and the free surface). *Add → Iso-surface* draws where a variable
+has a *Value*.
 *Add → Streamlines* starts lines on a seed plane (*Seeds on plane*, *Plane at*)
 and follows a vector field through the volume, only in the seed plane, or on the
 free surface; *Lines* sets about how many. New streamlines start where you are

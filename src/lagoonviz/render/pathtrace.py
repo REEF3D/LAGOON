@@ -1457,11 +1457,13 @@ def export_scene(
     look: str = "open_ocean",
     samples: int = 64,
     progress: Progress | None = None,
-    foam: bool = True,
+    foam: bool | str | float = True,
 ) -> Path:
     """Write the session at ``times`` for Blender: ``scene.json``, a ``frame_NNNNN.npz``
     per time and ``environment.hdr``. With ``foam``, white water (foam, spray and
-    bubbles) where the free surface breaks. Returns the path of ``scene.json``."""
+    bubbles) where the free surface breaks: True the default amount ("medium"), or
+    "none", "light", "medium", "heavy" or a number (1: "heavy"; see
+    :func:`lagoonviz.core.foam.white_water_amount`). Returns the path of ``scene.json``."""
     folder = Path(folder).expanduser()
     folder.mkdir(parents=True, exist_ok=True)
     preset = look_preset(look)
@@ -1470,7 +1472,10 @@ def export_scene(
         raise ValueError("nothing to render: no times")
     size = (int(size[0]), int(size[1]))
     original_time = session.scene.time
-    white = WhiteWater(session) if foam else None
+    from lagoonviz.core.foam import FoamSettings, white_water_amount
+
+    amount = white_water_amount(foam)
+    white = WhiteWater(session, FoamSettings().scaled(amount)) if amount > 0 else None
     frames = []
     materials: dict[str, dict[str, Any]] = {}
     water_bodies = 0
@@ -1860,7 +1865,7 @@ def path_trace(
     resume: bool = True,
     cancel: Callable[[], bool] | None = None,
     status: Callable[[str], None] | None = None,
-    foam: bool = True,
+    foam: bool | str | float = True,
 ) -> Path:
     """Path trace the session with Blender: a still (``.png``, at ``times[0]`` or the
     session's time), a film (``.mp4``/``.mov``) or numbered PNGs (a folder). The

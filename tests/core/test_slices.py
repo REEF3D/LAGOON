@@ -91,3 +91,40 @@ def test_slice_without_volume_is_empty(tmp_path):
     slice_id = s.add_slice("y")
     assert s.scene.get(slice_id).properties["position"] == 0.0
     assert s.data.load(slice_id) is None
+
+
+def _lengths(mesh) -> np.ndarray:
+    ends = mesh.points[mesh.outlines.astype(np.int64)].astype(float)
+    return np.linalg.norm(ends[:, 1] - ends[:, 0], axis=1)
+
+
+def test_grid_lines_where_the_plane_cuts_the_cells_faces():
+    one = cut_cells(CUBE, np.arange(8), np.array([8]), np.array([12]), {}, 0, 0.5)
+    assert len(one.outlines) == 4 and _lengths(one).sum() == pytest.approx(4.0)
+    np.testing.assert_allclose(one.points[one.outlines.ravel(), 0], 0.5, atol=1e-6)
+    # two cubes on top of each other: the face they share is cut once
+    points = np.concatenate([CUBE, CUBE[4:] + [0, 0, 1]])
+    cells = np.array([0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7, 8, 9, 10, 11])
+    two = cut_cells(points, cells, np.array([8, 16]), np.array([12, 12]), {}, 0, 0.5)
+    assert len(two.outlines) == 7 and _lengths(two).sum() == pytest.approx(7.0)
+    assert area(two) == pytest.approx(2.0)  # the section itself as before
+
+
+def test_a_slice_shows_its_grid_lines(reef3d_run):
+    s = Session()
+    s.open_case(reef3d_run)
+    slice_id = s.add_slice("y", position=2.5)
+    mesh = s.data.load(slice_id)
+    shown = s.data.display(slice_id, mesh)
+    assert s.data.patch_outlines(slice_id, mesh, shown) is None  # off by default
+    s.set_property(slice_id, "grid_lines", "dark")
+    lines = s.data.patch_outlines(slice_id, mesh, shown)
+    assert lines is not None and lines.color == "#1e2833"
+    ends = lines.segments.astype(float)
+    # on both sides of the plane, just off it
+    assert np.unique(np.round(ends[..., 1], 6)).size == 2
+    assert np.abs(ends[..., 1] - 2.5).max() < 0.05
+    # the vertical grid lines stand at every x of the grid
+    vertical = np.isclose(ends[:, 0, 0], ends[:, 1, 0])
+    xs = np.unique(np.round(ends[vertical, 0, 0], 4))
+    np.testing.assert_allclose(xs, np.arange(NX), atol=1e-4)

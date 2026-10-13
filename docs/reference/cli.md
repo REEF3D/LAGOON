@@ -41,7 +41,8 @@ lagoon-render SOURCE OUTPUT [options]
 | `--samples SAMPLES` | Cycles: samples per pixel (default 64) |
 | `--blender BLENDER` | Cycles: the Blender executable (default: found) |
 | `--fresh` | Cycles: render every frame again, instead of keeping the frames rendered before from the same data, camera and settings |
-| `--no-foam` | Cycles: no white water (by default foam, spray and bubbles where the free surface breaks) |
+| `--white-water {none,light,medium,heavy}` | Cycles: how much foam, spray and bubbles where the free surface breaks (default medium) |
+| `--no-foam` | Cycles: no white water (as `--white-water none`) |
 
 ```bash
 lagoon-render ~/runs/flume view.png --time 120 --size 1920x1080

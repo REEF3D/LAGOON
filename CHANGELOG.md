@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Rendering
+
+- **White water in Cycles**: *View → White water in Cycles* (none, light, medium,
+  heavy) and the export dialog choose how much foam, spray and bubbles path-traced
+  stills and films show; medium, the new default, is about half the white water
+  of before (heavy). `--white-water` for `lagoon-render`, `foam="light"` in scripts.
+- **Dragging the timeline** is smooth again: a time step no longer draws again
+  what does not change with time (the bed, solids, geo.dat's points, the set-up,
+  the background maps).
+
+### Slices
+
+- **Grid lines** on slices: the edges of the cells the slice cuts (dark or white),
+  from the VTU cells or straight from a LAGOON store's grid.
+
+### Colours
+
+- **Range [%]** in the properties of every coloured item: the automatic range's
+  min and max times a percentage (95 %: 0.95 × min to 0.95 × max); *Fit range to
+  this frame* uses it too. `session.set_property(item, "range_percent", 95)`.
+
 ### Opening output
 
 - **Results opened from the set-up are shown**: opening a case that has results

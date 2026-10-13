@@ -1091,7 +1091,14 @@ def _joined(parts: list[SurfaceMesh]) -> SurfaceMesh:
     )
     names = set.intersection(*(set(p.point_data) for p in parts)) if parts else set()
     data = {name: np.concatenate([p.point_data[name] for p in parts]) for name in names}
-    mesh = SurfaceMesh(points, np.ascontiguousarray(triangles, dtype=np.uint32), data)
+    outlines = None
+    if parts and all(p.outlines is not None for p in parts):  # a slice's grid lines
+        outlines = np.concatenate(
+            [p.outlines.astype(np.int64) + s for p, s in zip(parts, shift, strict=True)]
+        ).astype(np.uint32)
+    mesh = SurfaceMesh(
+        points, np.ascontiguousarray(triangles, dtype=np.uint32), data, outlines=outlines
+    )
     return mesh.with_normals()
 
 

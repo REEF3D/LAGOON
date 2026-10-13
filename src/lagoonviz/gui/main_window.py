@@ -427,6 +427,18 @@ class MainWindow(QMainWindow):
             action.setChecked(name == current_look)
             action.triggered.connect(lambda _=False, n=name: self.set_viewport_look(n))
             self.look_actions[name] = action
+        water_menu = view_menu.addMenu("&White water in Cycles")
+        from lagoonviz.gui.export_movie import set_white_water, white_water_setting
+
+        chosen = white_water_setting(self)
+        self.white_water_actions = {}
+        for name in ("none", "light", "medium", "heavy"):
+            action = water_menu.addAction(name.capitalize())
+            action.setCheckable(True)
+            action.setChecked(name == chosen)
+            action.setToolTip("Foam, spray and bubbles in path-traced stills and films")
+            action.triggered.connect(lambda _=False, n=name: set_white_water(self, n))
+            self.white_water_actions[name] = action
         view_menu.addAction(self.act_sun)
         view_menu.addSeparator()
         view_menu.addAction(self.act_compare)

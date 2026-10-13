@@ -706,7 +706,8 @@ class DataManager:
         props = item.properties
         if not props.get("auto_range", True):
             return float(props.get("vmin", 0.0)), float(props.get("vmax", 1.0))
-        return self._range_of(item_id, str(props.get("variable", "none")), mesh)
+        low, high = self._range_of(item_id, str(props.get("variable", "none")), mesh)
+        return scaled_range(low, high, props)
 
     def _range_of(self, item_id: str, variable: str, mesh: SurfaceMesh) -> tuple[float, float]:
         """The automatic range of a variable of an item, found once and kept.
@@ -776,17 +777,31 @@ class DataManager:
     def patch_outlines(
         self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
     ) -> Trails | None:
-        """The borders of an AMR surface's refined patches on the surface as shown,
-        lifted like contour lines; None when the item draws none."""
+        """The borders of an AMR surface's refined patches, or a slice's grid lines (the
+        edges of the cells it cuts), on the surface as shown, lifted like contour lines
+        (a slice's: off its plane to both sides); None when the item draws none."""
         item = self.scene.get(item_id)
-        colour = str(item.properties.get("outlines", "dark"))
-        if item.kind != "amr" or colour == "off" or mesh.outlines is None:
+        if item.kind == "amr":
+            colour = str(item.properties.get("outlines", "dark"))
+        elif item.kind == "slice":
+            colour = str(item.properties.get("grid_lines", "off"))
+        else:
+            return None
+        if colour == "off" or mesh.outlines is None:
             return None
         if not len(mesh.outlines) or shown.positions.shape[0] != mesh.n_points:
             return None
         segments = np.array(shown.positions[mesh.outlines.astype(np.int64)], np.float32)
         span = np.ptp(shown.positions, axis=0)
-        segments[..., 2] += 0.06 if self.scene.flat else 2.5e-3 * float(max(span.max(), 1e-9))
+        lift = 0.06 if self.scene.flat else 2.5e-3 * float(max(span.max(), 1e-9))
+        axis = AXES.get(str(item.properties.get("normal", "z")), 2) if item.kind == "slice" else 2
+        if self.scene.flat or axis == 2:
+            segments[..., 2] += lift
+        else:  # a vertical slice: on both of its sides
+            other = segments.copy()
+            segments[..., axis] += lift
+            other[..., axis] -= lift
+            segments = np.concatenate([segments, other])
         return Trails(
             item_id, segments, shown.visible, "#ffffff" if colour == "white" else "#1e2833"
         )
@@ -852,8 +867,9 @@ class DataManager:
                 return None
             finally:
                 item.properties["auto_range"] = auto
-            return self._auto_ranges.get(key, found)  # (values all alike: not kept)
-        return self._auto_ranges.get(key)
+            kept = self._auto_ranges.get(key)  # (values all alike: not kept)
+            return found if kept is None else scaled_range(*kept, item.properties)
+        return scaled_range(*self._auto_ranges[key], item.properties)
 
     def forget_range(self, item_id: str) -> None:
         for key in [k for k in self._auto_ranges if k[0] == item_id]:
@@ -1641,6 +1657,15 @@ def _spread(values: np.ndarray | None) -> bool:
         return False
     finite = values[np.isfinite(values)]
     return bool(finite.size) and float(finite.max() - finite.min()) >= 1e-12
+
+
+def scaled_range(low: float, high: float, props: dict) -> tuple[float, float]:
+    """A range's min and max times an item's "range_percent" (100 %: as found;
+    95 %: 0.95 x min to 0.95 x max)."""
+    factor = float(props.get("range_percent", 100.0)) / 100.0
+    if factor == 1.0:
+        return low, high
+    return low * factor, high * factor
 
 
 def auto_range(values: np.ndarray | None) -> tuple[float, float]:

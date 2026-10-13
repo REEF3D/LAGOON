@@ -82,3 +82,19 @@ def test_same_settings_same_water_and_a_limit():
     assert np.array_equal(a.position, b.position)
     small = run(2.0, limit=500)
     assert len(small) <= 500
+
+
+def test_how_much_white_water():
+    from lagoonviz.core.foam import WHITE_WATER_AMOUNTS, white_water_amount
+
+    assert white_water_amount(True) == WHITE_WATER_AMOUNTS["medium"] < 1.0
+    assert white_water_amount(False) == 0.0 and white_water_amount("none") == 0.0
+    assert white_water_amount("Heavy") == 1.0 and white_water_amount(0.5) == 0.5
+    with pytest.raises(ValueError, match="white water"):
+        white_water_amount("lots")
+    less = FoamSettings().scaled(0.5)
+    assert (less.rate, less.lifetime) == (10.0, 6.0)
+    # less white water: fewer particles from the same breaking wave
+    full = run(2.0)
+    light = run(2.0, rate=20.0 * 0.35, lifetime=12.0 * 0.35)
+    assert len(light) < 0.6 * len(full)

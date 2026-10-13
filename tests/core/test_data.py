@@ -949,3 +949,24 @@ def test_an_empty_store_folder_says_so(tmp_path):
     store.mkdir()
     with pytest.raises(ValueError, match="empty LAGOON store"):
         open_case(store)
+
+
+def test_a_range_of_a_percentage_of_the_min_and_max(reef3d_run):
+    s = Session()
+    s.open_case(reef3d_run)
+    full = s.data.automatic_range("free_surface-1")
+    s.set_property("free_surface-1", "range_percent", 95.0)
+    low, high = s.data.automatic_range("free_surface-1")
+    assert (low, high) == pytest.approx((0.95 * full[0], 0.95 * full[1]))
+    shown = s.data.display("free_surface-1", s.data.load("free_surface-1"))
+    assert (shown.vmin, shown.vmax) == pytest.approx((low, high))
+    # switched off, the fixed range starts at what is shown
+    s.set_property("free_surface-1", "auto_range", False)
+    props = s.scene.get("free_surface-1").properties
+    assert (props["vmin"], props["vmax"]) == pytest.approx((low, high), rel=1e-5)
+    # fit to this frame: its min and max times the percentage
+    s.set_property("free_surface-1", "range_percent", 50.0)
+    eta = s.data.load("free_surface-1").scalar("eta")
+    fitted = s.fit_range("free_surface-1")
+    assert fitted == pytest.approx((0.5 * np.nanmin(eta), 0.5 * np.nanmax(eta)))
+    assert "session.set_property('free_surface-1', 'range_percent', 50.0)" in s.to_script()

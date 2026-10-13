@@ -108,8 +108,10 @@ cells and the water depth), so a flume and a coast look alike. A still runs the
 foam from a few wave periods before its time, so it has formed.
 
 It needs the free surface's velocity on its grid (NHFLOW and FNPF write it) and
-the output times in seconds. *Foam and spray* in the export dialog, or
-`--no-foam` on the command line, turns it off.
+the output times in seconds. How much there is: *View → White water in Cycles*
+(*None*, *Light*, *Medium*, *Heavy*; Medium by default, Heavy as much as before
+October 2026), also in the export dialog, or `--white-water light` on the command
+line (`--no-foam`: none). In a script, `path_trace(..., foam="light")`.
 
 ### Time
 

@@ -364,7 +364,14 @@ class StoreDataset(Dataset):
         if missing.any():
             quads = quads[~missing[quads].any(axis=1)]
         triangles = np.concatenate([quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]])
-        return SurfaceMesh(points, triangles.astype(np.uint32), data)
+        # the grid lines: the quads' edges, each once
+        edges = np.concatenate(
+            [quads[:, [0, 1]], quads[:, [1, 2]], quads[:, [2, 3]], quads[:, [3, 0]]]
+        )
+        edges = np.unique(np.sort(edges, axis=1), axis=0) if len(edges) else edges
+        return SurfaceMesh(
+            points, triangles.astype(np.uint32), data, outlines=edges.astype(np.uint32)
+        )
 
     # ------------------------------------------------------------- probes
     def point_series(self, variable: str, x: float, y: float) -> tuple[tuple, np.ndarray]:

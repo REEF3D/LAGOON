@@ -467,10 +467,14 @@ class Viewport3D(QWidget):
         self.canvas.request_draw()
 
     # ------------------------------------------------------------- data
-    def refresh(self, item_ids: list[str] | None = None) -> None:
-        """Bring the shown meshes up to date with the scene and the current time."""
+    def refresh(self, item_ids: list[str] | None = None, time_only: bool = False) -> None:
+        """Bring the shown meshes up to date with the scene and the current time.
+        ``time_only``: only the time moved (the timeline played or dragged): what does
+        not change with time (north, the set-up, the background maps) is left as it
+        is, so dragging the timeline stays smooth."""
         data = self.session.data
-        self._apply_north()
+        if not time_only:
+            self._apply_north()
         if self.case_filter and self.case_filter not in self.session.scene:
             self.case_filter = ""  # its case was removed
         current = set(self.items())
@@ -496,6 +500,11 @@ class Viewport3D(QWidget):
                     self.statusMessage.emit(f"{item_id}: {error}")
                 continue
             self._wanted[item_id] = key
+            if time_only and self._shown_keys.get(item_id) == key:
+                # the same frame as before (a bed, solids, geo.dat's points: shown at
+                # any time): not displayed and uploaded again at every step
+                self.loader.want(owner, key)
+                continue
             mesh = data.cache.get(key)
             if mesh is not None:
                 self.loader.want(owner, key)
@@ -503,8 +512,9 @@ class Viewport3D(QWidget):
             else:
                 self.loader.request(key, self._loaded.emit, owner=owner)
         self._update_gauges()
-        self._update_setup()
-        self._update_backgrounds()
+        if not time_only:
+            self._update_setup()
+            self._update_backgrounds()
         self._update_overlays()
         self.redraw()
 
@@ -709,7 +719,7 @@ class Viewport3D(QWidget):
 
     def _on_time(self) -> None:
         self.follow_path()
-        self.refresh()
+        self.refresh(time_only=True)
 
     def follow_path(self) -> bool:
         """With the camera path on, put the camera where the path is at this time."""

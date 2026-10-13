@@ -390,6 +390,13 @@ class PropertiesPanel(QWidget):
             )
         if getattr(self, "fit_button", None) is not None:
             self.fit_button.setEnabled(coloured)
+        percent_box = self.editors.get("range_percent")
+        if percent_box is not None:
+            percent_box.setEnabled(coloured)
+            if not coloured:
+                percent_box.setToolTip(hint)
+            else:
+                percent_box.setToolTip(kind_spec_tip(self.session, self.item_id, "range_percent"))
         auto = bool(props.get("auto_range", True))
         for box in (low_box, high_box):
             # always editable while coloured: typing a bound fixes the range
@@ -518,3 +525,11 @@ class _LogSlider(QWidget):
     def _typed(self, value: float) -> None:
         self._place(value)
         self.valueChanged.emit(value)
+
+
+def kind_spec_tip(session, item_id: str, key: str) -> str:
+    """The tooltip of an item's property, as its kind gives it."""
+    from lagoonviz.core.kinds import kind_spec
+
+    prop = kind_spec(session.scene.get(item_id).kind).properties.get(key)
+    return prop.tip if prop is not None else ""

@@ -84,6 +84,13 @@ def test_a_store_opens_like_the_vtk_output(converted):
     cut = vtk.read_slice(1, 0, 2.05, ["pressure"])
     np.testing.assert_allclose(section.bounds()[0], cut.bounds()[0], atol=1e-5)
     np.testing.assert_allclose(section.bounds()[1], cut.bounds()[1], atol=1e-5)
+
+    # the grid lines: as long in all as those cut from the VTU cells
+    def length(mesh):
+        ends = mesh.points[mesh.outlines.astype(np.int64)].astype(float)
+        return float(np.linalg.norm(ends[:, 1] - ends[:, 0], axis=1).sum())
+
+    assert length(section) == pytest.approx(length(cut), rel=1e-4)
     lines = volume.read_streamlines(1, "velocity", 0, 1.0, 10)
     assert lines.segments is not None and len(lines.segments)
     # a probe reads one chunk per output, at the top of the column

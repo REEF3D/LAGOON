@@ -99,10 +99,18 @@ def main(argv: list[str] | None = None) -> int:
     cycles.add_argument("--samples", type=int, default=64, help="Cycles samples per pixel")
     cycles.add_argument("--blender", help="the Blender executable (default: found)")
     cycles.add_argument(
+        "--white-water",
+        dest="foam",
+        choices=["none", "light", "medium", "heavy"],
+        default="medium",
+        help="how much foam, spray and bubbles where the surface breaks (default: medium)",
+    )
+    cycles.add_argument(
         "--no-foam",
         dest="foam",
-        action="store_false",
-        help="no white water (default: foam, spray and bubbles where the surface breaks)",
+        action="store_const",
+        const="none",
+        help="no white water (as --white-water none)",
     )
     cycles.add_argument(
         "--fresh",

@@ -121,6 +121,15 @@ def _colouring(variable: str, colormap: str) -> dict[str, PropertySpec]:
         "auto_range": PropertySpec(True, "Automatic range"),
         "vmin": PropertySpec(0.0, "Range min"),
         "vmax": PropertySpec(1.0, "Range max"),
+        "range_percent": PropertySpec(
+            100.0,
+            "Range [%]",
+            minimum=1.0,
+            maximum=500.0,
+            tip="The automatic range's min and max times this: 100 % the lowest to the "
+            "highest value, 95 % 0.95 × min to 0.95 × max (values beyond take the end "
+            "colours). Fit range to this frame uses it too",
+        ),
         "opacity": PropertySpec(1.0, "Opacity", minimum=0.0, maximum=1.0),
     }
 
@@ -269,6 +278,12 @@ KINDS: dict[str, KindSpec] = {
             "normal": PropertySpec("y", "Normal", choices=("x", "y", "z")),
             "position": PropertySpec(0.0, "Position [m]", tip="Where the plane cuts the axis"),
             **_colouring("velocity", "ocean"),
+            "grid_lines": PropertySpec(
+                "off",
+                "Grid lines",
+                choices=("off", "dark", "white"),
+                tip="The edges of the cells the slice cuts: the grid the solver computed on",
+            ),
             **_contours(),
             **_vectors(),
         },

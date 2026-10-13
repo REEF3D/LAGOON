@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from lagoonviz.core import Session
 from lagoonviz.core.colormaps import lut
+from lagoonviz.core.foam import DEFAULT_WHITE_WATER, WHITE_WATER_AMOUNTS
 from lagoonviz.core.plotting import tick_label
 
 log = logging.getLogger("lagoon.gui")
@@ -61,6 +62,27 @@ def view_sizes(viewport_size) -> list[tuple[str, tuple[int, int]]]:
         h = max(2, round(target * height / width / 2) * 2)
         sizes.append((f"As the 3D view, {name} width: {w} × {h}", (w, h)))
     return sizes
+
+
+def white_water_setting(window) -> str:
+    """How much white water path-traced renders show: the window's setting (View →
+    White water in Cycles, or the last film's), "medium" by default."""
+    settings = getattr(window, "settings", None)
+    name = str(settings.value(WHITE_WATER_KEY, DEFAULT_WHITE_WATER)) if settings else ""
+    return name if name in WHITE_WATER_AMOUNTS else DEFAULT_WHITE_WATER
+
+
+#: the window setting of the white water in Cycles renders
+WHITE_WATER_KEY = "render/white_water"
+
+
+def set_white_water(window, name: str) -> None:
+    """Keep the white water chosen, and tick it in View → White water in Cycles."""
+    settings = getattr(window, "settings", None)
+    if settings is not None:
+        settings.setValue(WHITE_WATER_KEY, name)
+    for key, action in getattr(window, "white_water_actions", {}).items():
+        action.setChecked(key == name)
 
 
 class ExportAnimationDialog(QDialog):
@@ -155,15 +177,19 @@ class ExportAnimationDialog(QDialog):
             "or set LAGOON_BLENDER"
         )
         self.blender_label.setWordWrap(True)
-        self.foam = QCheckBox("Foam and spray")
-        self.foam.setChecked(True)
+        self.foam = QComboBox()
+        for name in WHITE_WATER_AMOUNTS:
+            self.foam.addItem(name, name)
+        self.foam.setCurrentIndex(max(self.foam.findData(white_water_setting(parent)), 0))
         self.foam.setToolTip(
             "White water where the surface breaks: spray off the crests, foam drifting "
-            "on the surface, bubbles under it (from the free surface's velocity)"
+            "on the surface, bubbles under it (from the free surface's velocity); also "
+            "View → White water in Cycles"
         )
         cycles = QHBoxLayout()
         cycles.addWidget(QLabel("samples"))
         cycles.addWidget(self.samples)
+        cycles.addWidget(QLabel("white water"))
         cycles.addWidget(self.foam)
         cycles.addWidget(self.blender_label, 1)
         self.cycles_row = QWidget()
@@ -217,7 +243,7 @@ class ExportAnimationDialog(QDialog):
             "overlay": self.overlay.isChecked() and self.overlay.isEnabled(),
             "engine": self.engine.currentData(),
             "samples": self.samples.value(),
-            "foam": self.foam.isChecked(),
+            "foam": self.foam.currentData(),
         }
 
 
@@ -310,6 +336,8 @@ def export_animation(window) -> str | None:
     if dialog.exec() != QDialog.Accepted:
         return None
     settings = dialog.settings()
+    if settings.get("engine") == "cycles":  # remembered for the next film or still
+        set_white_water(window, settings["foam"])
     path = Path(settings["path"]).expanduser()
     if path.suffix.lower() not in (".mp4", ".mov", ".m4v"):
         path = path.with_suffix(".mp4")
@@ -541,7 +569,7 @@ def render_still(window, samples: int = 64) -> str | None:
     style = getattr(getattr(viewport, "view", None), "style_name", "studio")
     canvas = getattr(viewport, "canvas", viewport)
     size = view_sizes((canvas.width(), canvas.height()))[0][1]
-    settings = {"size": size, "samples": samples, "fps": 25.0}
+    settings = {"size": size, "samples": samples, "fps": 25.0, "foam": white_water_setting(window)}
     progress = QProgressDialog("Handing the scene to Blender…", "Stop", 0, 1, window)
     progress.setWindowTitle("Render still with Cycles")
     progress.setWindowModality(Qt.WindowModal)

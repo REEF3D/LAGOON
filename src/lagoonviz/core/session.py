@@ -828,14 +828,16 @@ class Session:
         self.stack.execute(SetProperties(self.scene, item_id, values))
 
     def fit_range(self, item_id: str) -> tuple[float, float]:
-        """Fix the colour range of an item to the values of the current frame."""
-        from lagoonviz.core.data.manager import auto_range
+        """Fix the colour range of an item to the values of the current frame (their
+        min and max times the item's "range_percent")."""
+        from lagoonviz.core.data.manager import auto_range, scaled_range
 
         mesh = self.data.load(item_id)
         if mesh is None:
             raise ValueError(f"{item_id}: no data loaded")
-        values = mesh.scalar(str(self.scene.get(item_id).properties.get("variable", "none")))
-        low, high = auto_range(values)
+        props = self.scene.get(item_id).properties
+        values = mesh.scalar(str(props.get("variable", "none")))
+        low, high = scaled_range(*auto_range(values), props)
         self.set_properties(item_id, auto_range=False, vmin=round(low, 6), vmax=round(high, 6))
         return low, high
 
