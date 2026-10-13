@@ -38,6 +38,11 @@
   ETOPO 2022 and GEBCO 2020 (the world, 450 m) are downloaded for the domain, the finest first;
   `session.make_geo_dat("best")`. With no case open the Map tab starts at
   Trondheim on Kartverket's map.
+- **geo.dat points** item: the points of a case's `geo.dat` as DIVEMesh reads
+  them, a dot each coloured by height, with their number, spacing, extent and
+  heights in the properties; a set-up item with a check box of its own in each
+  mode, drawn again when *Make geo.dat* writes the file. (The *Case set-up* item
+  no longer draws them in its *Bed* group.)
 - **Bathymetry to geo.dat**: a GeoTIFF, ASCII grid or x y z soundings interpolated
   (TIN, inverse distance, nearest) onto a grid over the domain and written as
   geo.dat in model coordinates with G 10 1; `session.make_geo_dat(...)`.

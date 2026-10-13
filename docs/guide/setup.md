@@ -57,7 +57,8 @@ A case folder without output opens as its set-up:
 - direct forcing and porous **structures** (A 581 – A 589, B 210 – B 270), and
   other regions (A 276, A 372, F 72, S 74);
 - DIVEMesh's **solids** (S), as a structure item, and the **bed**: its topo
-  objects (T) and the points of `geo.dat` (G 10).
+  objects (T);
+- the points of **`geo.dat`**, as an item of their own (see below).
 
 The vertical scale of the case applies to the set-up as to any other item
 ([Vertical scale](scene.md#vertical-scale)), and the 2D button draws it flat from
@@ -87,11 +88,25 @@ set-up* adds another one. Each group can be switched off in its properties:
 | Structures | direct forcing and porous structures | A 581 – A 589, B 210 – B 270 |
 | Regions | refinement boxes, wind areas, prescribed water levels | A 276, A 277, A 372, F 72, S 74 |
 | Solids | outlines of DIVEMesh's solids (off: they are a structure item) | S |
-| Bed | DIVEMesh's topo objects and the geo.dat points | T, G 10 |
+| Bed | DIVEMesh's topo objects | T |
 | Labels | the numbers of gauges and probes, the kinds of the sides | |
 
 Commands LAGOON cannot place (an unknown shape, too few values) are listed in the
 set-up's notes (`lagoon-setup CASE --describe`).
+
+## The points of geo.dat
+
+A case with a `geo.dat` gets a **geo.dat points** item in the scene, beside
+*Case set-up* and *DIVEMesh grid*: every point of the file as DIVEMesh reads it
+(scaled with G 12, z turned with G 23), a dot each, coloured by its height
+(*Colour by* `elevation` or `depth`, any colour map). Zoom in, in the 2D view from
+the top, to see how far apart they lie; *Point size* makes the dots smaller or
+larger. Its properties say how many points there are, their **spacing** (the
+grid's dx and dy for a regular grid such as the one *Make geo.dat* writes, else
+the median distance to the nearest point, for soundings), and their extent and
+heights. Like the other set-up items it has a check box of its own in each mode:
+on in the set-up, off over the results until ticked. *Make geo.dat* adds it and
+draws it again whenever it writes the file.
 
 ## Editing the input files
 

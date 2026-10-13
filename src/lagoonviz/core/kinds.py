@@ -160,7 +160,7 @@ _SETUP_TIPS = {
     "structures": "Direct forcing (A 581 - A 589) and porous (B 210 - B 270) structures",
     "regions": "Refinement boxes, wind areas and other regions (A 276, A 372, F 72, S 74)",
     "solids": "Outlines of DIVEMesh's solids (S); the solids themselves are a structure item",
-    "bed": "The bed's topo objects (T) and the geo.dat points",
+    "bed": "The bed's topo objects (T); geo.dat's points are an item of their own",
 }
 
 
@@ -460,6 +460,20 @@ KINDS: dict[str, KindSpec] = {
             "opacity": PropertySpec(1.0, "Opacity", minimum=0.0, maximum=1.0),
             "pixels": PropertySpec(
                 2048, "Resolution [px]", minimum=256, maximum=8192, tip="Along the longer side"
+            ),
+        },
+    ),
+    "geodat": KindSpec(
+        "geo.dat points",
+        {
+            **_data_source("geo.dat"),
+            **_colouring("elevation", "viridis"),
+            "point_size": PropertySpec(
+                5.0,
+                "Point size [px]",
+                minimum=1.0,
+                maximum=40.0,
+                tip="Size on screen: zoom in to see the spacing of the points",
             ),
         },
     ),

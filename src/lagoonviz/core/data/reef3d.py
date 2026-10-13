@@ -69,7 +69,10 @@ ROLES = {
     "amr": "amr",
     "solid": "structure",  # DIVEMesh's solids (a monopile, the blocks under a beach)
     "topo": "bathymetry",  # DIVEMesh's bed (its topo objects, geo.dat), before a run
+    "geodat": "geodat",  # the points of geo.dat, as DIVEMesh reads them
 }
+#: roles of the case, not of a run: DIVEMesh's solids and bed, geo.dat's points
+CASE_ROLES = ("solid", "topo", "geodat")
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
 _SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp", ".vtk")
@@ -130,6 +133,7 @@ ROLE_LABELS = {
     "amr": "AMR surface",
     "solid": "solids",
     "topo": "bed",
+    "geodat": "geo.dat points",
 }
 
 
@@ -594,7 +598,7 @@ class Case:
 
     def _shown_run(self) -> list[Dataset]:
         """The shown datasets the run wrote (DIVEMesh's solids were written before it)."""
-        return [d for d in self.main_datasets().values() if d.role not in ("solid", "topo")]
+        return [d for d in self.main_datasets().values() if d.role not in CASE_ROLES]
 
     def main_profiles(self) -> list[ProfileSet]:
         """Wave profiles written during the shown run (as for :meth:`main_series`)."""
@@ -817,8 +821,96 @@ class TopoDataset(Dataset):
         return written, written
 
 
+class GeoDatDataset(Dataset):
+    """The points of a case's ``geo.dat`` (x y z per line), as DIVEMesh reads them
+    with G 10 1 (scaled with G 12, z turned with G 23): one frame, shown at any time,
+    read again when geo.dat or control.txt changes. Coloured by ``elevation`` (z) or
+    ``depth`` (-z); :meth:`facts` gives their number and spacing."""
+
+    def __init__(self, source: Path, case_dir: Path) -> None:
+        self.source = source
+        self._mesh: SurfaceMesh | None = None
+        self._stamp: tuple | None = None
+        self._facts: dict[str, str] | None = None
+        super().__init__("geodat", "DIVEMesh", "geodat", [Frame(0, source, [source])], case_dir)
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        return "Points", {"elevation": 1, "depth": 1}
+
+    @property
+    def label(self) -> str:
+        return "geo.dat points"
+
+    def default_variable(self) -> str:
+        return "elevation"
+
+    def _files_stamp(self) -> tuple:
+        stamp = []
+        for path in (self.source, self.folder / "control.txt"):
+            try:
+                info = path.stat()
+                stamp.append((info.st_mtime_ns, info.st_size))
+            except OSError:
+                stamp.append(None)
+        return tuple(stamp)
+
+    def read(self, index: int = 0, variables: list[str] | None = None) -> SurfaceMesh:
+        stamp = self._files_stamp()
+        if self._mesh is None or stamp != self._stamp:
+            from lagoonviz.core.data.controlfile import read_commands
+            from lagoonviz.core.data.setup import read_geo
+
+            points = read_geo(self.source, read_commands(self.folder / "control.txt"))
+            points = np.ascontiguousarray(points, dtype=np.float32).reshape(-1, 3)
+            z = np.ascontiguousarray(points[:, 2])
+            normals = np.zeros_like(points)
+            normals[:, 2] = 1.0
+            self._mesh = SurfaceMesh(
+                points,
+                np.zeros((0, 3), np.uint32),
+                {"elevation": z, "depth": -z},
+                normals=normals,
+            )
+            self._stamp = stamp
+            self._facts = None
+        return self._mesh
+
+    def facts(self) -> dict[str, str]:
+        """Number of points, their spacing, extent and heights, as text."""
+        mesh = self.read()
+        if self._facts is None:
+            from lagoonviz.core.data.setup import geo_spacing
+
+            points = mesh.points.astype(np.float64)
+            facts = {"Points": f"{len(points):,}"}
+            if len(points):
+                spacing = geo_spacing(points)
+                if isinstance(spacing, tuple):
+                    dx, dy = spacing
+                    facts["Spacing"] = (
+                        f"{dx:.4g} m (a regular grid)"
+                        if abs(dx - dy) <= 1e-6 * max(dx, dy)
+                        else f"{dx:.4g} × {dy:.4g} m (a regular grid)"
+                    )
+                elif spacing is not None:
+                    facts["Spacing"] = f"{spacing:.4g} m (median to the nearest point)"
+                low, high = points.min(axis=0), points.max(axis=0)
+                facts["x"] = f"{low[0]:.6g} – {high[0]:.6g} m"
+                facts["y"] = f"{low[1]:.6g} – {high[1]:.6g} m"
+                facts["z"] = f"{low[2]:.6g} – {high[2]:.6g} m"
+            self._facts = facts
+        return self._facts
+
+    def written_span(self) -> tuple[float, float]:
+        try:
+            written = self.source.stat().st_mtime
+        except OSError:
+            written = 0.0
+        return written, written
+
+
 def solid_datasets(case_dir: Path) -> list[Dataset]:
-    """DIVEMesh's solids and bed of a case folder, when it has any."""
+    """DIVEMesh's solids and bed of a case folder, and its geo.dat, when it has any."""
     from lagoonviz.core.data.divemesh import find_solids
     from lagoonviz.core.data.divemesh_grid import TOPO
 
@@ -826,6 +918,8 @@ def solid_datasets(case_dir: Path) -> list[Dataset]:
     found: list[Dataset] = [SolidDataset(source, case_dir)] if source is not None else []
     if (case_dir / TOPO).is_file():
         found.append(TopoDataset(case_dir / TOPO, case_dir))
+    if (case_dir / "geo.dat").is_file():
+        found.append(GeoDatDataset(case_dir / "geo.dat", case_dir))
     return found
 
 
@@ -1249,7 +1343,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
             )
     from lagoonviz.core.data.setup import has_inputs
 
-    run = [d for d in datasets if d.role not in ("solid", "topo")]
+    run = [d for d in datasets if d.role not in CASE_ROLES]
     setup_only = not run and not series and not profiles and path == case_dir
     if setup_only and not has_inputs(case_dir):
         raise ValueError(

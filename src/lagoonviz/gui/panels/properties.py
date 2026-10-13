@@ -242,6 +242,19 @@ class PropertiesPanel(QWidget):
                 "DIVEMesh's grid" if grid.source == "DIVEMesh" else "from control.txt (not run)"
             )
             return f"{source}\n{nx} × {ny} × {nz} = {nx * ny * nz:,} cells\n{sizes} m"
+        if item.kind == "geodat":
+            dataset = data.dataset(item_id)
+            if dataset is None:
+                return "No geo.dat in the case folder: Set-up → Map → Make geo.dat"
+            try:
+                facts = dataset.facts()
+            except (OSError, ValueError) as error:
+                return f"geo.dat: {error}"
+            lines = [f"{k}: {v}" for k, v in facts.items()]
+            setup = data.case_setup(item_id)
+            if setup is not None and setup.control.int("G 10", 0) <= 0:
+                lines.append("Not read by DIVEMesh without G 10 1 (control.txt)")
+            return "\n".join(lines)
         if item.kind == "series":
             found = data.series_file(item_id)
             table = data.series(item_id)
@@ -273,7 +286,7 @@ class PropertiesPanel(QWidget):
         if event in ("removed", "reset") and self.item_id not in self.session.scene:
             self.show_item("")
         elif event == "inputs" and self.item_id in self.session.scene:
-            if self.session.scene.get(self.item_id).kind in ("setup", "grid"):
+            if self.session.scene.get(self.item_id).kind in ("setup", "grid", "geodat"):
                 self.info.setText(self._data_info(self.item_id))  # the set-up's facts
         elif event == "changed" and item_id == self.item_id:
             self._refresh()

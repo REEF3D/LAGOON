@@ -367,6 +367,8 @@ def test_the_session_sets_the_domain_and_makes_geo_dat(fjord, terrain):
     assert session.input_file("control.txt").int("G 10") == 1
     setup = session.data.case_setup(session.scene.ids()[0])
     assert len(setup.geo_points()) == count
+    geodat = next(i for i in session.scene if i.kind == "geodat")  # its points, an item
+    assert session.data.load(geodat.id).n_points == count
     assert "session.make_geo_dat(" in session.to_script()
 
 

@@ -32,11 +32,11 @@ from lagoonviz.core.data.divemesh_grid import (
 )
 from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
-from lagoonviz.core.data.reef3d import ROLES, Case, Dataset, open_case
+from lagoonviz.core.data.reef3d import CASE_ROLES, ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
 from lagoonviz.core.data.setup import CaseSetup, has_inputs, read_setup
 from lagoonviz.core.kinds import kind_spec
-from lagoonviz.core.scene import SETUP_KINDS, Scene, SceneItem
+from lagoonviz.core.scene import MODE_KINDS, SETUP_KINDS, Scene, SceneItem
 from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
 
 #: item kinds that show a dataset, and the dataset role they use by default
@@ -58,10 +58,13 @@ PLAN_LAYERS = {
     "ice": 1.5,
     "rods": 1.5,
     "particles": 2.2,
+    "geodat": 3.5,  # over the water, under the set-up's marks
     "mooring": 2.0,
     "free_surface": 3.0,
     "amr": 3.0,
 }
+#: kinds drawn as points, one screen-space dot each
+POINT_KINDS = ("particles", "geodat")
 #: kinds drawn as the free surface: the still water level, dry land, the probe
 WATER_KINDS = ("free_surface", "amr")
 #: 2D: gauges and wave profiles on top of everything
@@ -509,7 +512,7 @@ class DataManager:
         for item_id in self.data_items():
             dataset = self.dataset(item_id)
             # beds and DIVEMesh's solids and bed are shown at any time: not part of it
-            if dataset is not None and dataset.role not in ("bed", "solid", "topo"):
+            if dataset is not None and dataset.role not in ("bed", *CASE_ROLES):
                 datasets.append(dataset)
         key = tuple((d.folder, d.key, len(d)) for d in datasets)
         if self._logged is not None and self._logged[0] == key:
@@ -1018,7 +1021,7 @@ class DataManager:
             color=self._plain_color(item),
             segments=mesh.segments,
             line_width=float(props.get("line_width", 3.0)),
-            point_size=float(props.get("point_size", 4.0)) if item.kind == "particles" else None,
+            point_size=float(props.get("point_size", 4.0)) if item.kind in POINT_KINDS else None,
             material=str(props.get("material", "") or ""),
         )
 
@@ -1352,7 +1355,7 @@ class DataManager:
         (cases, DIVEMesh's solids and bed: the geometry of the set-up and of the
         results) or "results" (what a run wrote)."""
         item = self.scene.get(item_id)
-        if item.kind in SETUP_KINDS:
+        if item.kind in MODE_KINDS:  # the set-up items and geo.dat's points
             return "setup"
         if item.kind in ("case", "basemap"):
             return "both"

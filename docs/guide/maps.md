@@ -120,7 +120,8 @@ GeoTIFF and only the part of a large one that is needed).
   folder), carries the bathymetry onto a grid over the domain (every B 1 metres,
   two cells beyond the domain) and writes it in model coordinates, with `G 10 1`
   in `control.txt`. A progress bar shows how far it is; *Cancel* keeps the
-  geo.dat there was. A raster
+  geo.dat there was. The *geo.dat points* item then shows the points written
+  (zoom in to see their spacing). A raster
   is sampled bilinearly; scattered points are interpolated linearly on their
   triangulation (*TIN*), by inverse distance or from the nearest point; outside
   the data the nearest height is taken. Downloads are kept in the cache.

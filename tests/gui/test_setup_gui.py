@@ -246,6 +246,10 @@ def test_make_geo_dat_asks_where_and_moves_a_draft_there(window, tmp_path, monke
     assert (target / "geo.dat").is_file() and (target / "georef.json").is_file()
     assert (target / "notes.txt").read_text() == "mine"
     assert str(target) in panel_message(window)
+    # its points: an item in the scene, with their spacing in the properties
+    geodat = next(i for i in session.scene if i.kind == "geodat")
+    window.scene_tree.select(geodat.id)
+    assert "Spacing: 4 m (a regular grid)" in window.properties.info.text()
 
 
 def panel_message(window) -> str:

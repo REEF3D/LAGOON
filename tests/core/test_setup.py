@@ -366,3 +366,57 @@ def test_the_selected_command_is_highlighted(basin):
     assert len(session.data.setup_marks(item.id).highlight[0]) == 12  # the domain's box
     session.data.set_highlight(case_id, "ctrl.txt", "")
     assert session.data.setup_marks(item.id).highlight is None
+
+
+# ------------------------------------------------------------------ geo.dat's points
+def _geo_case(folder, points, g10=1):
+    folder.mkdir()
+    (folder / "control.txt").write_text(
+        f"B 1 10.0\nB 10 0.0 200.0 0.0 100.0 -10.0 2.0\nG 10 {g10}\n"
+    )
+    (folder / "ctrl.txt").write_text("// REEF3D\n")
+    np.savetxt(folder / "geo.dat", points, fmt="%.3f")
+    return folder
+
+
+def test_geo_dat_points_are_an_item_of_their_own(tmp_path):
+    from lagoonviz.core.session import Session
+
+    x, y = np.meshgrid(np.arange(-20.0, 221.0, 10.0), np.arange(-20.0, 121.0, 10.0))
+    z = -5.0 + 0.01 * x
+    case = _geo_case(tmp_path / "bay", np.c_[x.ravel(), y.ravel(), z.ravel()])
+    session = Session()
+    session.open_case(case)
+    item = next(i for i in session.scene if i.kind == "geodat")
+    assert item.visible and session.data.item_mode(item.id) == "setup"
+    mesh = session.data.load(item.id)
+    assert mesh.n_points == x.size and mesh.n_triangles == 0
+    assert np.allclose(mesh.point_data["elevation"], z.ravel(), atol=1e-3)
+    shown = session.data.display(item.id, mesh)
+    assert shown.point_size == 5.0 and shown.variable == "elevation"
+    facts = session.data.dataset(item.id).facts()
+    assert facts["Points"] == f"{x.size:,}" and facts["Spacing"] == "10 m (a regular grid)"
+    # no mark of the Case set-up draws them again
+    setup = session.data.case_setup(item.id)
+    assert not [m for m in setup.marks() if "geo.dat" in m.legend]
+    # a check box of their own in each mode, as the other set-up items
+    case_setup = next(i for i in session.scene if i.kind == "setup")
+    for mode in ("results", "setup"):
+        session.set_mode(mode)
+        assert session.scene.get(item.id).visible == session.scene.get(case_setup.id).visible
+    session.set_visible(item.id, False)
+    session.set_mode("results")
+    session.set_mode("setup")
+    assert not session.scene.get(item.id).visible  # as it was left in the set-up
+
+
+def test_the_spacing_of_scattered_soundings():
+    from lagoonviz.core.data.setup import geo_spacing
+
+    rng = np.random.default_rng(1)
+    line = np.arange(0.0, 500.0, 2.0)  # soundings every 2 m along lines 25 m apart
+    points = np.array([(x, y + rng.normal(0, 0.5), 0.0) for y in range(0, 500, 25) for x in line])
+    assert geo_spacing(points) == pytest.approx(2.0, rel=0.15)
+    assert geo_spacing(np.zeros((1, 3))) is None
+    dx, dy = geo_spacing(np.array([(0, 0, 0), (5, 0, 0), (0, 2, 0), (5, 2, 0)], float))
+    assert (dx, dy) == pytest.approx((5.0, 2.0))

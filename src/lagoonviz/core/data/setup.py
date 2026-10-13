@@ -366,7 +366,7 @@ class CaseSetup:
     def geo_points(self, limit: int = GEO_POINTS) -> np.ndarray:
         """The points of geo.dat (a random sample of ``limit`` at most), (n, 3)."""
         if self._bed is None:
-            self._bed = (_read_geo(self.path / GEO, self.control),)
+            self._bed = (read_geo(self.path / GEO, self.control),)
         points = self._bed[0]
         if len(points) > limit:
             pick = np.random.default_rng(0).choice(len(points), limit, replace=False)
@@ -845,7 +845,7 @@ def _water_level(setup: CaseSetup) -> float | None:
     return level
 
 
-def _read_geo(path: Path, control: ControlFile) -> np.ndarray:
+def read_geo(path: Path, control: ControlFile) -> np.ndarray:
     """geo.dat: x y z per line (a letter before them with G 19 1), scaled (G 12) and
     with the sign of z reversed with G 23 1."""
     try:
@@ -868,6 +868,38 @@ def _read_geo(path: Path, control: ControlFile) -> np.ndarray:
     if control.int("G 23", 0) > 0:
         numbers[:, 2] *= -1
     return numbers
+
+
+def geo_spacing(points: np.ndarray) -> tuple[float, float] | float | None:
+    """The spacing of geo.dat's points: (dx, dy) when they lie on a regular grid
+    (along the model's axes), else the median distance to the nearest point (in a
+    window round the middle of at most some 50 000 points); None for fewer than 2."""
+    xy = np.asarray(points, float)[:, :2]
+    xy = xy[np.isfinite(xy).all(axis=1)]
+    if len(xy) < 2:
+        return None
+    span = float(np.ptp(xy, axis=0).max()) or 1.0
+    xs = np.unique(np.round(xy[:, 0] / span, 7))
+    ys = np.unique(np.round(xy[:, 1] / span, 7))
+    if len(xs) > 1 and len(ys) > 1 and len(xs) * len(ys) <= 1.05 * len(xy):
+        return float(np.median(np.diff(xs))) * span, float(np.median(np.diff(ys))) * span
+    most = 50_000
+    if len(xy) > most:
+        low, high = xy.min(axis=0), xy.max(axis=0)
+        middle = np.median(xy, axis=0)
+        half = 0.5 * np.sqrt(most / len(xy)) * (high - low)
+        inside = (np.abs(xy - middle) <= half).all(axis=1)
+        window = xy[inside]
+        if len(window) < 100:
+            pick = np.random.default_rng(0).choice(len(xy), most, replace=False)
+            window = xy[pick]
+        xy = window
+    from scipy.spatial import cKDTree
+
+    distance, _ = cKDTree(xy).query(xy, k=2)
+    nearest = distance[:, 1]
+    nearest = nearest[nearest > 0]
+    return float(np.median(nearest)) if len(nearest) else None
 
 
 def _is_number(text: str) -> bool:
@@ -1213,19 +1245,7 @@ def _marks(setup: CaseSetup) -> list[Mark]:
                         file=CONTROL,
                     )
                 )
-    if (setup.path / GEO).is_file() and setup.control.int("G 10", 0) > 0:
-        points = setup.geo_points()
-        if len(points):
-            marks.append(
-                Mark(
-                    "bed",
-                    "geo.dat points (G 10)",
-                    COLORS["bed"],
-                    points=points,
-                    code="G 10",
-                    file=CONTROL,
-                )
-            )
+    # geo.dat's points are an item of their own ("geo.dat points", GeoDatDataset)
     if skipped:
         setup.notes.append("not drawn: " + ", ".join(sorted(set(skipped))))
     return marks

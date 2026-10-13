@@ -125,6 +125,8 @@ class Session:
                 children.append(AddItem("grid", None, {}))  # DIVEMesh's, or control.txt's
         elif has_inputs(case.path):  # results: the set-up is there, switched off
             children.append(AddItem("setup", None, {}, visible=False))
+        if case.by_role("geodat") is not None:  # geo.dat's points: in the set-up
+            children.append(AddItem("geodat", None, {}, visible=case.setup_only))
         for series in case.main_series():
             children.append(AddItem("series", series.name, {"source": series.key}))
         for profiles in case.main_profiles():
@@ -334,13 +336,19 @@ class Session:
         self.stack.execute(SetMode(self.scene, mode, added))
 
     def _missing_setup_items(self, case_id: str) -> list[AddItem]:
-        """A "Case set-up" item for a case with input files, and a "DIVEMesh grid" item
-        for one with control.txt, if it has none yet."""
+        """A "Case set-up" item for a case with input files, a "DIVEMesh grid" item
+        for one with control.txt and a "geo.dat points" item for one with geo.dat, if
+        it has none yet."""
         cases = [i for i in self.scene if i.kind == "case"]
         found = []
-        for kind in ("setup", "grid"):
+        for kind in ("setup", "grid", "geodat"):
             named = {str(i.properties.get("case", "")) for i in self.scene if i.kind == kind}
             if case_id in named or (len(cases) == 1 and "" in named):
+                continue
+            if kind == "geodat":
+                case = self.data.case(case_id)
+                if case is not None and case.by_role("geodat") is not None:
+                    found.append(AddItem(kind, None, {"case": case_id}))
                 continue
             setup = self.data.case_setup(case_id)
             if setup is None or (kind == "grid" and not setup.control.exists):
@@ -1171,12 +1179,16 @@ class GeoDatJob:
         again, the script line. Returns the number of points."""
         session = self.session
         session.geo_sources = list(self.sources)
+        session.data.reload(self.case_id)  # geo.dat's points: a dataset of the case
         setup = session.data.case_setup(self.case_id, create=True)
         if setup is not None:
             setup.geo_changed()
         session.record_output(self.code)
         session.set_input("control.txt", "G 10", [1], case=self.case)
+        for add in [a for a in session._missing_setup_items(self.case_id) if a.kind == "geodat"]:
+            session.add_item("geodat", **add.overrides)
         session.scene.inputs_changed(self.case_id)
+        session.scene.data_changed()
         return self.count
 
 
