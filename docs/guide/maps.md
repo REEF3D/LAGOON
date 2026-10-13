@@ -73,15 +73,21 @@ GeoTIFF and only the part of a large one that is needed).
   axis-aligned in model coordinates and the map turns under it. Esc stops.
   Or type the extent (*Set B 10*) or the rotation (*Turn*).
 - **Background map**: *Show map* adds a *Background map* item for the case.
-- **Bathymetry**: choose a GeoTIFF, an Esri ASCII grid (`.asc`) or an x y z text
-  file (soundings: spaces, tabs, commas or semicolons; a header line is skipped).
-  Give its CRS if the file does not name one (`EPSG:4326` for longitude and
-  latitude, `model` for model coordinates) and tick *depths* when the values are
-  positive down. *Make geo.dat* carries it onto a grid over the domain (every B 1
-  metres, two cells beyond the domain) and writes `geo.dat` in model coordinates,
-  with `G 10 1` in `control.txt`. A raster is sampled bilinearly; scattered points
-  are interpolated linearly on their triangulation (*TIN*), by inverse distance or
-  from the nearest point; outside the data the nearest height is taken.
+- **Bathymetry**: *From* **Download** needs no file: LAGOON asks the web for the
+  bathymetry of the domain and its margin. *Best available* takes Kartverket's
+  national topobathy terrain model in Norway (land and sea in one model, 1 m
+  where surveyed, else 50 m; heights in NN2000), and EMODnet's Digital Terrain
+  Model (about 115 m, heights to LAT) for what Kartverket does not cover; one of
+  them can be chosen too. Or *A file of mine…*: a GeoTIFF, an Esri ASCII grid
+  (`.asc`) or an x y z text file (soundings: spaces, tabs, commas or semicolons;
+  a header line is skipped). Give its CRS if the file does not name one
+  (`EPSG:4326` for longitude and latitude, `model` for model coordinates) and
+  tick *depths* when the values are positive down. *Make geo.dat* carries it onto
+  a grid over the domain (every B 1 metres, two cells beyond the domain) and
+  writes `geo.dat` in model coordinates, with `G 10 1` in `control.txt`. A raster
+  is sampled bilinearly; scattered points are interpolated linearly on their
+  triangulation (*TIN*), by inverse distance or from the nearest point; outside
+  the data the nearest height is taken. Downloads are kept in the cache.
   Then *Run DIVEMesh*.
 
 Every step is a command of the session: it can be undone, and a script does the
@@ -91,7 +97,7 @@ same:
 session.set_georef("EPSG:25833", origin=[270000.0, 7040000.0], rotation_deg=30.0)
 session.set_domain(0.0, 2000.0, 0.0, 800.0)
 session.turn_model(35.0)  # about the domain's centre
-session.make_geo_dat("~/surveys/nidelva.tif")
+session.make_geo_dat("best")  # downloaded; or a file: "~/surveys/nidelva.tif"
 session.add_background_map("Sentinel-2 2017 (satellite)", margin=1.0)
 ```
 

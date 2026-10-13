@@ -14,8 +14,10 @@ and its bathymetry.
   the extent and the rotation.
 - *Background map*: a map or satellite image round the domain (a "Background map"
   item, in the set-up and over the results).
-- *Bathymetry*: a GeoTIFF, ASCII grid or x y z file, interpolated onto a grid over
-  the domain and written as geo.dat in model coordinates (G 10 1). *Run DIVEMesh*
+- *Bathymetry*: downloaded for the domain (Kartverket's land and sea model in
+  Norway, EMODnet in European seas), or a GeoTIFF, ASCII grid or x y z file of
+  yours, carried onto a grid over the domain and written as geo.dat in model
+  coordinates (G 10 1). *Run DIVEMesh*
   then makes the grid.
 """
 
@@ -55,6 +57,13 @@ from lagoonviz.gui.theme import COLORS
 
 log = logging.getLogger(__name__)
 
+#: where geo.dat comes from: downloaded for the domain, or a file
+BATHYMETRY_CHOICES = {
+    "Download: best available": "best",
+    "Download: Kartverket, land and sea (Norway)": "kartverket",
+    "Download: EMODnet (European seas)": "emodnet",
+    "A file of mine…": "file",
+}
 METHODS = {"Linear (TIN)": "tin", "Inverse distance": "idw", "Nearest point": "nearest"}
 
 
@@ -267,6 +276,14 @@ class MapTab(QWidget):
         row.addWidget(self.map_button)
 
         # ---- bathymetry
+        self.bathy_source = _combo()
+        for label, key in BATHYMETRY_CHOICES.items():
+            self.bathy_source.addItem(label, key)
+        self.bathy_source.setToolTip(
+            "Download the bathymetry for the domain (no file needed): Kartverket's land "
+            "and sea model in Norway, EMODnet in European seas; or a file of yours"
+        )
+        self.bathy_source.currentIndexChanged.connect(lambda _i: self._source_changed())
         self.file_label = QLabel("No file chosen")
         self.file_label.setWordWrap(True)
         self.file_button = QPushButton("Choose…")
@@ -293,14 +310,19 @@ class MapTab(QWidget):
         self.geo_button.clicked.connect(self.make_geo_dat)
         bathymetry = QGroupBox("Bathymetry")
         form = QFormLayout(bathymetry)
+        form.addRow("From", self.bathy_source)
+        self.file_row = QWidget()
+        file_form = QFormLayout(self.file_row)
+        file_form.setContentsMargins(0, 0, 0, 0)
         row = QHBoxLayout()
         row.addWidget(self.file_label, 1)
         row.addWidget(self.file_button)
-        form.addRow("File", row)
-        form.addRow("Its CRS", self.file_crs)
-        form.addRow("Interpolation", self.method)
+        file_form.addRow("File", row)
+        file_form.addRow("Its CRS", self.file_crs)
+        file_form.addRow("Interpolation", self.method)
+        file_form.addRow(self.depths)
+        form.addRow(self.file_row)
         form.addRow("Spacing", self.spacing)
-        form.addRow(self.depths)
         row = QHBoxLayout()
         row.addStretch(1)
         row.addWidget(self.geo_button)
@@ -409,7 +431,11 @@ class MapTab(QWidget):
             else ""
         )
         self.draft_box.setVisible(draft)
-        self.geo_button.setEnabled(has_case and self._bathymetry is not None)
+        web = self.bathy_source.currentData() != "file"
+        self.file_row.setVisible(not web)
+        self.geo_button.setEnabled(
+            has_case and (self._bathymetry is not None or (web and georef is not None))
+        )
         # the fields follow the files when those change, not while being typed in
         shown = (self.case_id, georef)
         if shown == self._shown_georef:
@@ -637,7 +663,14 @@ class MapTab(QWidget):
         self.file_label.setToolTip(chosen)
         self.refresh()
 
+    def _source_changed(self) -> None:
+        self.refresh()
+
     def make_geo_dat(self) -> None:
+        key = self.bathy_source.currentData()
+        if key != "file":
+            self._download_geo_dat(key)
+            return
         if self._bathymetry is None:
             return
         crs = self.file_crs.text().strip() or None
@@ -663,5 +696,27 @@ class MapTab(QWidget):
         if ok:
             self.message.emit(
                 f"geo.dat: {count[0]:,} points in model coordinates, G 10 1; now Run DIVEMesh",
+                False,
+            )
+
+    def _download_geo_dat(self, key: str) -> None:
+        """geo.dat from the bathymetry on the web, for the domain."""
+        spacing = self.spacing.value() or None
+        count = [0]
+
+        def make():
+            count[0] = self.session.make_geo_dat(key, spacing=spacing, case=self.case_id)
+
+        self.message.emit("Downloading the bathymetry for the domain…", False)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            ok = self._run(make)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if ok:
+            sources = " and ".join(self.session.geo_sources) or "the web"
+            self.message.emit(
+                f"geo.dat: {count[0]:,} points from {sources}, in model coordinates, G 10 1; "
+                "now Run DIVEMesh",
                 False,
             )

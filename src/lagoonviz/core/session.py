@@ -60,6 +60,8 @@ class Session:
         self._outputs: list[tuple[Command | None, str]] = []
         self._log_listeners: list[LogListener] = []
         self.stack.subscribe(self._on_stack)
+        #: where the last geo.dat came from (make_geo_dat): file name or web sources
+        self.geo_sources: list[str] = []
 
     # ------------------------------------------------------------- log
     def subscribe_log(self, callback: LogListener) -> None:
@@ -579,10 +581,21 @@ class Session:
         ``"idw"``, ``"nearest"``) onto a grid over the domain and written as geo.dat
         in model coordinates, every ``spacing`` metres (default: DIVEMesh's cell size,
         B 1). ``depths``: the file gives depths (positive down). Turns G 10 on.
+
+        No file: ``source="best"`` downloads the bathymetry for the domain
+        (Kartverket's land and sea model in Norway, EMODnet for the rest of
+        European seas), ``"kartverket"`` or ``"emodnet"`` one of them.
         Returns the number of points written."""
         from lagoon_format.geo import Georef
 
-        from lagoonviz.core.geo.bathy import geo_grid, grid_heights, load, write_geo_dat
+        from lagoonviz.core.geo.bathy import (
+            WEB,
+            geo_grid,
+            grid_heights,
+            load,
+            web_heights,
+            write_geo_dat,
+        )
 
         case_id = self._case_id(case)
         folder = self.data.case_folder(case_id)
@@ -602,13 +615,21 @@ class Session:
             raise ValueError("the domain is not known: set B 10 first (set_domain)")
         if spacing is None:
             spacing = self.input_file("control.txt", case_id).value("B 1") or 0.0
-        bathy = load(Path(source).expanduser(), "model" if crs == "model" else crs, depths)
-        if crs == "model":
-            bathy.crs = "model"
-            if bathy.raster is not None:
-                bathy.raster.crs = "model"
         xs, ys = geo_grid(domain[:4], float(spacing or 0.0))
-        heights = grid_heights(bathy, georef, xs, ys, method)
+        web = isinstance(source, str) and source in WEB and not Path(source).exists()
+        if web:
+            if crs == "model":
+                raise ValueError("bathymetry from the web needs the case's georeference")
+            heights, used = web_heights(source, georef, xs, ys, float(xs[1] - xs[0]))
+            self.geo_sources = used
+        else:
+            bathy = load(Path(source).expanduser(), "model" if crs == "model" else crs, depths)
+            if crs == "model":
+                bathy.crs = "model"
+                if bathy.raster is not None:
+                    bathy.raster.crs = "model"
+            heights = grid_heights(bathy, georef, xs, ys, method)
+            self.geo_sources = [Path(source).name]
         count = write_geo_dat(folder / "geo.dat", xs, ys, heights)
         setup = self.data.case_setup(case_id, create=True)
         if setup is not None:

@@ -157,10 +157,10 @@ def test_sources_name_their_terms():
 
 
 # ------------------------------------------------------------------ rasters
-def write_geotiff(path, data, x0, y0, size, epsg=25833, point=False):
+def write_geotiff(path, data, x0, y0, size, epsg=25833, point=False, size_y=None):
     """A north-up GeoTIFF (float32 heights or uint8 RGB) written with Pillow."""
     info = TiffImagePlugin.ImageFileDirectory_v2()
-    info[33550] = (float(size), float(size), 0.0)
+    info[33550] = (float(size), float(size if size_y is None else size_y), 0.0)
     info.tagtype[33550] = 12
     info[33922] = (0.0, 0.0, 0.0, float(x0), float(y0), 0.0)
     info.tagtype[33922] = 12
@@ -621,3 +621,75 @@ def test_the_map_follows_the_2d_view(fjord, tmp_path):
     assert zoomed_in.missing == 0
     backgrounds.set_view(None)
     assert backgrounds.cached(item) is None  # back to the domain and its margin
+
+
+# ------------------------------------------------------------------ bathymetry from the web
+class FakeWcs:
+    """Kartverket and EMODnet as GeoTIFF answers of a sloping bed (Kartverket only
+    north of y = 7040500, as if the rest had no survey)."""
+
+    def __init__(self, tmp_path):
+        self.tmp = tmp_path
+        self.asked = []
+
+    def __call__(self, url):
+        import re
+        from urllib.parse import parse_qs, urlparse
+
+        self.asked.append(url)
+        if "geonorge" in url:
+            q = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
+            assert q["coverage"] == "nhm_dtm_topobathy_25833" and q["crs"] == "EPSG:25833"
+            x0, y0, x1, y1 = (float(v) for v in q["bbox"].split(","))
+            w, h = int(q["width"]), int(q["height"])
+            cols, rows = np.meshgrid(np.arange(w) + 0.5, np.arange(h) + 0.5)
+            x, y = x0 + cols * (x1 - x0) / w, y1 - rows * (y1 - y0) / h
+            data = np.where(y > 7040500, plane(x, y), -32767.0)
+            path = self.tmp / "k.tif"
+            write_geotiff(path, data, x0, y1, (x1 - x0) / w)
+        else:
+            lat0, lat1 = (float(v) for v in re.search(r"Lat\(([^,]+),([^)]+)\)", url).groups())
+            lon0, lon1 = (float(v) for v in re.search(r"Long\(([^,]+),([^)]+)\)", url).groups())
+            n = 200
+            cols, rows = np.meshgrid(np.arange(n) + 0.5, np.arange(n) + 0.5)
+            lon = lon0 + cols * (lon1 - lon0) / n
+            lat = lat1 - rows * (lat1 - lat0) / n
+            x, y = transformer("EPSG:4326", "EPSG:25833")(lon, lat)
+            path = self.tmp / "e.tif"
+            write_geotiff(
+                path,
+                plane(x, y) - 1.0,
+                lon0,
+                lat1,
+                (lon1 - lon0) / n,
+                4326,
+                size_y=(lat1 - lat0) / n,
+            )
+        return path.read_bytes()
+
+
+def test_geo_dat_from_the_web(fjord, tmp_path, monkeypatch):
+    from lagoonviz.core.geo import download
+
+    monkeypatch.setenv("LAGOON_CACHE", str(tmp_path / "cache"))
+    server = FakeWcs(tmp_path)
+    monkeypatch.setattr(download, "http_fetch", server)
+    session = Session()
+    session.open_case(fjord)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=30.0)
+    count = session.make_geo_dat("best")
+    assert len(server.asked) == 2 and session.geo_sources == [
+        "Kartverket, land and sea (Norway)",
+        "EMODnet (European seas)",
+    ]
+    points = np.loadtxt(fjord / "geo.dat")
+    assert count == len(points)
+    world = GEOREF.to_world(points[:, 0], points[:, 1])
+    truth = plane(*world)
+    north = world[1] > 7040600
+    assert np.allclose(points[north, 2], truth[north], atol=0.05)  # Kartverket's
+    south = world[1] < 7040300
+    assert np.allclose(points[south, 2], truth[south] - 1.0, atol=1.5)  # EMODnet's
+    session.make_geo_dat("kartverket")
+    assert len(server.asked) == 2  # the same area: from the cache
+    assert "session.make_geo_dat('best'" in session.to_script()

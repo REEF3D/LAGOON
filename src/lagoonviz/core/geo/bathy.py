@@ -157,6 +157,52 @@ def grid_heights(
     return interpolate(model_points(bathy, georef), xs, ys, method)
 
 
+#: bathymetry from the web: the choice -> the sources asked, the finest first
+WEB = {
+    "best": ("kartverket", "emodnet"),
+    "kartverket": ("kartverket",),
+    "emodnet": ("emodnet",),
+}
+
+
+def web_heights(
+    choice: str, georef: Georef, xs: np.ndarray, ys: np.ndarray, spacing: float, fetch=None
+) -> tuple[np.ndarray, list[str]]:
+    """Bed heights on a model grid from the web (lagoonviz.core.geo.download): the
+    sources of a choice in turn, each filling what the ones before had no data for,
+    the rest from the nearest data. Returns the heights (model z) and the labels of
+    the sources used."""
+    from lagoonviz.core.geo.download import SOURCES, covers, download
+
+    if choice not in WEB:
+        raise ValueError(f"choose one of {', '.join(WEB)}, got {choice!r}")
+    xs = np.asarray(xs, float)
+    ys = np.asarray(ys, float)
+    box = (float(xs[0]), float(xs[-1]), float(ys[0]), float(ys[-1]))
+    heights = np.full((len(ys), len(xs)), np.nan)
+    used: list[str] = []
+    errors: list[str] = []
+    for key in WEB[choice]:
+        if np.isfinite(heights).all():
+            break
+        if not covers(SOURCES[key], georef, box):
+            errors.append(f"{SOURCES[key].label}: not here")
+            continue
+        try:
+            raster = download(key, georef, box, spacing, fetch)
+        except (OSError, RasterError) as error:
+            errors.append(str(error))
+            continue
+        found = warp(raster, georef, xs, ys)  # model z (z_offset taken away)
+        missing = ~np.isfinite(heights) & np.isfinite(found)
+        if missing.any():
+            heights[missing] = found[missing]
+            used.append(SOURCES[key].label)
+    if not np.isfinite(heights).any():
+        raise RasterError("no bathymetry for the domain: " + "; ".join(errors or ["no data"]))
+    return fill_holes(heights, xs, ys), used
+
+
 def geo_grid(
     domain: tuple[float, float, float, float], spacing: float, margin: float | None = None
 ):

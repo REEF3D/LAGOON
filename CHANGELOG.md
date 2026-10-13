@@ -22,6 +22,10 @@
   (finer when zoomed in, the new area when zoomed out or panned).
 - **The domain on the map**: drag it in the 2D view (B 10), Shift + drag turns the
   model on the map.
+- **Bathymetry from the web**: *Make geo.dat* needs no file: Kartverket's
+  national topobathy model (Norway, land and sea) and EMODnet's terrain model
+  (European seas) are downloaded for the domain, the finest first;
+  `session.make_geo_dat("best")`.
 - **Bathymetry to geo.dat**: a GeoTIFF, ASCII grid or x y z soundings interpolated
   (TIN, inverse distance, nearest) onto a grid over the domain and written as
   geo.dat in model coordinates with G 10 1; `session.make_geo_dat(...)`.
