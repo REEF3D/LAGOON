@@ -40,7 +40,7 @@ Add
   Iso-surface
   Iso-volume
   Streamlines
-  Wave profile
+  Free surface line
   Gauge
   Bodies
   Mooring lines
@@ -64,7 +64,7 @@ View
   [x] Plots
   [x] Timeline
   [x] Python console
-  [x] Wave profiles
+  [x] Free surface lines
   Theme >
     [x] Light
     [ ] Dark

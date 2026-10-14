@@ -1,10 +1,10 @@
 QWidget
-  Name: text 'Wave profile'
-  Kind: label 'Wave profile'
+  Name: text 'Free surface line'
+  Kind: label 'Free surface line'
   Visible: checkbox '' on
   Case: choice 'first case' of ['first case', 'run [case-1]']
-  Profiles: choice 'first' of ['first']
+  Lines from: choice 'first' of ['first']
   Lines: text ''
   Wave theory: checkbox '' on
-  Profile in 3D: checkbox '' on
+  Lines in 3D: checkbox '' on
   label '' (disabled)

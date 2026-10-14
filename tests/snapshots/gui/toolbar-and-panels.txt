@@ -29,7 +29,7 @@ setup: 'Set-up' in RightDockWidgetArea tabbed with dock_properties
 plots: 'Plots' in BottomDockWidgetArea tabbed with dock_profiles
 timeline: 'Timeline' in BottomDockWidgetArea
 console: 'Python console' in BottomDockWidgetArea
-profiles: 'Wave profiles' in BottomDockWidgetArea tabbed with dock_plots
+profiles: 'Free surface lines' in BottomDockWidgetArea tabbed with dock_plots
 
 PLAYER
 button '' tip='Start of the play range' (disabled)
