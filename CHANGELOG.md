@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### The sea at the case (NORA3, NorKyst)
+
+- **Sea tab** in the Set-up panel: MET Norway's hindcasts at a georeferenced case,
+  read from thredds.met.no. *Find storms* lists the largest wave events of NORA3
+  (from 1959) at the wave generation side; one chosen sets the time window.
+- **The conditions as time series**: NORA3's Hs, Tp, direction and wind and
+  NorKyst's water level and current (from 2017-02-20) over the window, as items,
+  their tables in the case's `LAGOON_Sea` folder (directions also in the model's
+  frame, for B 105).
+- **Wave spectrum for REEF3D**: NORA3's 2D spectrum at the storm's peak as
+  `spectrum-file-2d.dat`; ctrl.txt's wave generation set to it (B 85 11, B 92 31,
+  B 93, B 105, B 130 1).
+- **Boundary hydrographs**: NorKyst's water level and discharge along the sides of
+  the domain as `hydrograph_FSF_<n>.dat` and `hydrograph_Q_<n>.dat`, with the
+  patches in ctrl.txt (B 440, B 421, B 422).
+- In scripts: `find_storms`, `sea_conditions`, `write_spectrum`,
+  `write_boundaries`.
+
 ### Print-outs and several cases
 
 - **Slices for every case**: with several cases open, new slices, iso-surfaces,

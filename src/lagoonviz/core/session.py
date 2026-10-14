@@ -62,6 +62,8 @@ class Session:
         self.stack.subscribe(self._on_stack)
         #: where the last geo.dat came from (make_geo_dat): file name or web sources
         self.geo_sources: list[str] = []
+        #: what the last sea_conditions could not read (NorKyst before 2017, ...)
+        self.sea_notes: list[str] = []
 
     # ------------------------------------------------------------- log
     def subscribe_log(self, callback: LogListener) -> None:
@@ -718,6 +720,108 @@ class Session:
             depths,
             code + ")",
         )
+
+    # ------------------------------------------------------------- the sea (MET Norway)
+    def find_storms(
+        self,
+        first_year: int | None = None,
+        last_year: int | None = None,
+        count: int = 10,
+        case: str | None = None,
+        progress=None,
+    ) -> list:
+        """The largest wave events at a case (NORA3, MET Norway; default the last ten
+        years): :class:`~lagoonviz.core.geo.metocean.Storm` s, the highest first. Read
+        at the middle of the wave generation side (else the domain's centre); the
+        case needs a georeference. Not an undo step."""
+        from lagoonviz.core import sea
+
+        first, last = sea.default_years()
+        found, _, _ = sea.find_storms(
+            self,
+            self._case_id(case),
+            first_year or first,
+            last_year or last,
+            count,
+            progress,
+        )
+        return found
+
+    def sea_conditions(self, start, end, case: str | None = None, progress=None) -> list[str]:
+        """The sea at a case from ``start`` to ``end`` (UTC: ISO text, a datetime or
+        seconds since 1970): NORA3's waves and wind and NorKyst's water level and
+        current, as tables in the case's ``LAGOON_Sea`` folder, shown as time series
+        items (time 0 at ``start``). Returns the new items."""
+        from lagoonviz.core import sea
+
+        case_id = self._case_id(case)
+        written = sea.conditions(self, case_id, start, end, progress)
+        self.sea_notes = written.notes
+        return self._show_sea_tables(case_id, written.files)
+
+    def _show_sea_tables(self, case_id: str, files: list[Path]) -> list[str]:
+        self.data.reload(case_id)
+        case = self.data.case(case_id)
+        added = []
+        for path in files:
+            found = None
+            if case is not None:
+                found = next(
+                    (f for f in case.series.values() if f.path.resolve() == path.resolve()), None
+                )
+            if found is None:
+                continue
+            shown = [
+                i
+                for i in self.scene
+                if i.kind == "series"
+                and i.properties.get("source") == found.key
+                and self.data.case_item(i.id).id == case_id
+            ]
+            if shown:
+                added.append(shown[0].id)
+                continue
+            added.append(self.add_item("series", name=found.name, source=found.key, case=case_id))
+        return added
+
+    def write_spectrum(
+        self, when, case: str | None = None, apply: bool = True, half_width: float = 90.0
+    ) -> dict:
+        """NORA3's 2D wave spectrum at a case at ``when`` (UTC) as REEF3D's
+        ``spectrum-file-2d.dat`` in the case folder; with ``apply`` the wave
+        generation of ctrl.txt follows it (B 85 11, B 92 31, B 93, B 105, B 130 1; one
+        undo step, saved with the input files). Returns Hs, Tp, the direction in the
+        model and the file."""
+        from lagoonviz.core import sea
+
+        return sea.spectrum(self, self._case_id(case), when, apply, half_width)
+
+    def write_boundaries(
+        self,
+        start,
+        end,
+        sides=None,
+        case: str | None = None,
+        apply: bool = True,
+        progress=None,
+    ) -> list:
+        """NorKyst's water level and discharge along the sides of a case's domain from
+        ``start`` to ``end`` (UTC): REEF3D's ``hydrograph_FSF_<n>.dat`` and
+        ``hydrograph_Q_<n>.dat`` per side in the water (n: 1 x min, 2 y max, 3 y min,
+        4 x max; ``sides`` to choose), a table of them shown as a time series; with
+        ``apply`` ctrl.txt gets the patches (B 440, B 421, B 422; one undo step).
+        Returns the sides written."""
+        from lagoonviz.core import sea
+
+        case_id = self._case_id(case)
+        chosen = sea.boundaries(self, case_id, start, end, sides, apply, progress)
+        folder = self.data.case_folder(case_id)
+        if chosen and folder is not None:
+            from lagoonviz.core.geo.metocean import _utc
+
+            table = folder / sea.FOLDER / f"Boundaries-{_utc(start):%Y%m%d%H}.dat"
+            self._show_sea_tables(case_id, [table])
+        return chosen
 
     def add_background_map(self, source: str = "Kartverket topo", **properties: Any) -> str:
         """A background map round a georeferenced case: map tiles (``source``, see

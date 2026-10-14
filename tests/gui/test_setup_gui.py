@@ -301,3 +301,47 @@ def test_the_map_tab_starts_at_trondheim(window):
     assert session.is_draft(case) and session.georef(case).crs == "EPSG:25832"
     basemap = next(i for i in session.scene if i.kind == "basemap")
     assert basemap.properties["source"] == "Kartverket topo"
+
+
+def test_the_sea_tab(window, tmp_path, monkeypatch, qtbot):
+    """Storms, the window from one, the spectrum and ctrl.txt (a stand-in THREDDS)."""
+    import datetime as dt
+    import json
+
+    import numpy as np
+    from metocean_fake import FakeThredds, nora3_month, spectra_day
+
+    from lagoonviz.core.geo import metocean as mo
+    from lagoonviz.core.geo.crs import transformer
+
+    fake = FakeThredds()
+    nora3_month(fake, 2020, 1, storm_hour=100)
+    spectra_day(fake, dt.date(2020, 1, 5))
+    monkeypatch.setattr(mo, "FETCH", fake)
+    case = tmp_path / "fjord"
+    case.mkdir()
+    (case / "control.txt").write_text("B 1 50\nB 10 0 2000 0 1000 -30 30\nC 11 6\nC 14 7\n")
+    (case / "ctrl.txt").write_text("A 10 5\nF 60 30.0\n")
+    x, y = transformer("EPSG:4326", "EPSG:25832")(3.95, 61.0)
+    georef = {"version": 1, "crs": "EPSG:25832", "origin": [float(x), float(y)]}
+    (case / "georef.json").write_text(json.dumps(georef))
+    window.open_case(case)
+    tab = window.setup_panel.sea_tab
+    tab.refresh()
+    assert "x min" in tab.where.text() and tab.storm_button.isEnabled()
+    tab.first_year.setValue(2020)
+    tab.last_year.setValue(2020)
+    tab.count.setValue(2)
+    tab.storm_button.click()
+    qtbot.waitUntil(lambda: tab._runner is None and tab.table.rowCount() == 2, timeout=20000)
+    assert tab.table.item(0, 0).text() == "2020-01-05 04:00"
+    tab.table.selectRow(0)
+    assert tab.start.dateTime().toSecsSinceEpoch() == int(
+        dt.datetime(2020, 1, 4, 4, tzinfo=dt.UTC).timestamp()
+    )
+    tab.spectrum_button.click()
+    qtbot.waitUntil(lambda: tab._runner is None, timeout=20000)
+    assert (case / "spectrum-file-2d.dat").is_file()
+    ctrl = window.session.input_file("ctrl.txt")
+    assert ctrl.values("B 85") == [11.0]
+    assert np.isclose(ctrl.values("B 93")[0], 4.0, atol=0.01)

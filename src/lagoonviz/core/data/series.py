@@ -41,6 +41,9 @@ SERIES_FOLDERS = {
 }
 #: REEF3D's folder of the wave theory's time series (P 58), of no solver
 WAVE_THEORY_FOLDER = "REEF3D_Log-Wave"
+#: the sea at the case from MET Norway, written for the set-up (lagoonviz.core.sea)
+SEA_FOLDER = "LAGOON_Sea"
+SEA_NAMES = {"nora3": "NORA3 waves", "norkyst": "NorKyst sea", "boundaries": "Boundaries"}
 #: what REEF3D calls its print-outs (the User Guide's names, P 50 - P 140), by file
 #: name (lower case); {n}: the number in the name
 REEF3D_NAMES = (
@@ -112,6 +115,12 @@ class SeriesFile:
         gauges", "Velocity probe 1", "Run-up gauges"), or e.g. "Body 0 forces"."""
         stem = self.path.stem
         lower = stem.lower()
+        if self.group == "sea conditions":  # NORA3-2020010504: NORA3 waves 2020-01-05 04:00
+            what, _, when = stem.partition("-")
+            label = SEA_NAMES.get(what.lower(), what)
+            if len(when) == 10 and when.isdigit():
+                return f"{label} {when[:4]}-{when[4:6]}-{when[6:8]} {when[8:]}:00"
+            return f"{label} {when}".strip()
         for pattern, name in REEF3D_NAMES:
             found = re.search(pattern, lower)
             if found:
@@ -309,6 +318,8 @@ def find_series(case_dir: Path) -> dict[str, SeriesFile]:
     for folder in sorted(case_dir.iterdir()):
         if folder.name == WAVE_THEORY_FOLDER and folder.is_dir():
             solver, group = "REEF3D", "wave theory"
+        elif folder.name == SEA_FOLDER and folder.is_dir():
+            solver, group = "MET", "sea conditions"
         else:
             match = _FOLDER.match(folder.name)
             if not match or not folder.is_dir():

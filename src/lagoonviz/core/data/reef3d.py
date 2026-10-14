@@ -1537,7 +1537,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     from lagoonviz.core.data.setup import has_inputs
 
     run = [d for d in datasets if d.role not in CASE_ROLES]
-    setup_only = not run and not series and not profiles and path == case_dir
+    written = [f for f in series.values() if f.group != "sea conditions"]  # (for the set-up)
+    setup_only = not run and not written and not profiles and path == case_dir
     if setup_only and not has_inputs(case_dir):
         raise ValueError(
             f"no REEF3D VTU/VTP output, time series or input files (control.txt, ctrl.txt) "
