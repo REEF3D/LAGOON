@@ -496,8 +496,14 @@ class Dataset:
         read once and kept, like slices; neighbouring cut points are merged so the
         surface shades smoothly.
         """
-        if self.kind != "UnstructuredGrid":
-            raise ValueError(f"{self.label}: iso-surfaces need a volume")
+        if self.kind != "UnstructuredGrid":  # a surface: its line at the value
+            from lagoonviz.core.data.mesh import iso_lines
+
+            surface = self.read(index, [*(variables or []), variable])
+            field = scalar_values(surface.point_data, variable)
+            if field is None:
+                raise ValueError(f"{self.label} has no {variable!r} for an iso-line")
+            return iso_lines(surface, field, float(value))
         frame = self.frames[index]
         arrays = self._arrays([*(variables or []), variable]) or []
         parts = []
@@ -524,12 +530,21 @@ class Dataset:
         ``high`` (ParaView's iso-volume, e.g. the water where the level set phi >= 0),
         as its surface: the iso-surfaces at the two bounds (facing out of the part)
         and the volume's outer surface clipped to the range."""
-        if self.kind != "UnstructuredGrid":
-            raise ValueError(f"{self.label}: iso-volumes need a volume")
         from lagoonviz.core.data.mesh import clip_surface
 
         low, high = sorted((float(low), float(high)))
         names = [*(variables or []), variable]
+        if self.kind != "UnstructuredGrid":  # a surface: its part in the range
+            surface = self.read(index, names)
+            field = scalar_values(surface.point_data, variable)
+            if field is None:
+                raise ValueError(f"{self.label} has no {variable!r} for an iso-volume")
+            known = np.isfinite(field)[surface.triangles].all(axis=1)  # dry land: none
+            surface = SurfaceMesh(surface.points, surface.triangles[known], surface.point_data)
+            part = clip_surface(surface, np.nan_to_num(field), low, "above")
+            if part.n_triangles:
+                part = clip_surface(part, scalar_values(part.point_data, variable), high, "below")
+            return part
         parts = []
         bottom = self.read_iso(index, variable, low, names)
         if bottom.n_triangles:  # it faces the rising field: into the part, so turned

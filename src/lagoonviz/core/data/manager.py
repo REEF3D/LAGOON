@@ -488,8 +488,23 @@ class DataManager:
 
     # ------------------------------------------------------------- choices
     def dataset_choices(self, item_id: str) -> list[str]:
+        """The case's datasets an item can show: slices and streamlines a volume,
+        iso-surfaces and iso-volumes a volume or a surface (free surface, bed, ...)."""
         case = self.case(item_id)
-        return list(case.datasets) if case else []
+        if case is None:
+            return []
+        kind = self.scene.get(item_id).kind if item_id in self.scene else ""
+        if kind in ("slice", "streamlines"):
+            return [k for k, d in case.datasets.items() if d.kind == "UnstructuredGrid"]
+        if kind in ("iso_surface", "iso_volume"):
+            return [
+                k
+                for k, d in case.datasets.items()
+                if d.kind == "UnstructuredGrid"
+                or getattr(d, "surface_like", False)
+                or d.role == "amr"
+            ]
+        return list(case.datasets)
 
     def variable_choices(self, item_id: str) -> list[str]:
         dataset = self.dataset(item_id)
@@ -1176,7 +1191,7 @@ class DataManager:
             # normals stay those of the shapes, so the light falls as in the 3D view
             # (waves and the bed's relief shaded, the water's glint)
             positions = np.array(positions, dtype=np.float32, copy=True)
-            positions[:, 2] = PLAN_LAYERS.get(item.kind, 1.0)
+            positions[:, 2] = self._plan_layer(item_id)
         variable = str(props.get("variable", "none"))
         try:
             values = mesh.scalar(variable)
@@ -1214,6 +1229,18 @@ class DataManager:
             point_size=float(props.get("point_size", 4.0)) if item.kind in POINT_KINDS else None,
             material=str(props.get("material", "") or ""),
         )
+
+    def _plan_layer(self, item_id: str) -> float:
+        """The height of an item's flat layer in 2D: its kind's, and for an iso-line
+        or iso-patch on a surface just over that surface (the free surface's over the
+        water, the bed's over the bed)."""
+        item = self.scene.get(item_id)
+        if item.kind in ("iso_surface", "iso_volume"):
+            dataset = self.dataset(item_id)
+            if dataset is not None and dataset.kind != "UnstructuredGrid":
+                kind = ROLES.get(dataset.role, "")
+                return PLAN_LAYERS.get(kind, 1.0) + 0.1
+        return PLAN_LAYERS.get(item.kind, 1.0)
 
     # ------------------------------------------------------------- time series
     def series_items(self) -> list[str]:
@@ -1488,10 +1515,19 @@ class DataManager:
 
     def iso_default(self, properties: dict) -> tuple[str, float] | None:
         """A first iso-surface for a volume: REEF3D's level set ``phi`` at 0 (the free
-        surface of CFD runs), else the middle of the velocity (or the first variable)."""
+        surface of CFD runs), else the middle of the velocity (or the first variable).
+        On a surface (free surface, bed) an iso-line: of the variable it is coloured
+        by, at 0 when that changes sign (eta: the still water line), else its middle."""
         dataset = self.dataset_for("iso_surface", properties)
-        if dataset is None or dataset.kind != "UnstructuredGrid":
+        if dataset is None:
             return None
+        if dataset.kind != "UnstructuredGrid":
+            found = self._surface_range(dataset)
+            if found is None:
+                return None
+            variable, low, high = found
+            middle = 0.0 if low < 0.0 < high else 0.5 * (low + high)
+            return variable, float(f"{middle:.3g}")
         names = dataset.variables()
         if "phi" in names:
             return "phi", 0.0
@@ -1507,8 +1543,15 @@ class DataManager:
         """A first iso-volume: where REEF3D's level set phi >= 0 (the water of CFD
         runs), else the upper half of the velocity (or the first variable)."""
         dataset = self.dataset_for("iso_volume", properties)
-        if dataset is None or dataset.kind != "UnstructuredGrid":
+        if dataset is None:
             return None
+        if dataset.kind != "UnstructuredGrid":  # a surface: its upper part
+            found = self._surface_range(dataset)
+            if found is None:
+                return None
+            variable, low, high = found
+            start = 0.0 if low < 0.0 < high else 0.5 * (low + high)
+            return variable, float(f"{start:.3g}"), float(f"{high:.3g}")
         names = dataset.variables()
         variable = ("phi" if "phi" in names else "velocity" if "velocity" in names else None) or (
             names[0] if names else None
@@ -1521,6 +1564,19 @@ class DataManager:
         if variable == "phi":
             return variable, 0.0, max(top, 1.0)
         return variable, float(f"{0.5 * (low + high):.3g}"), top
+
+    def _surface_range(self, dataset) -> tuple[str, float, float] | None:
+        """A surface's first variable for iso-lines and its range in the first frame
+        (its own default, eta on a free surface)."""
+        names = dataset.variables()
+        variable = dataset.default_variable()
+        if variable not in names:
+            variable = names[0] if names else None
+        if variable is None or variable == "none":
+            return None
+        mesh = dataset.read(0, [variable])
+        low, high = auto_range(mesh.scalar(variable))
+        return variable, float(low), float(high)
 
     def domain_center(self, kind: str, properties: dict) -> tuple[float, float, float] | None:
         """Centre of the first frame of the dataset an item would show (to place slices)."""

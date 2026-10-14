@@ -366,7 +366,8 @@ KINDS: dict[str, KindSpec] = {
                 "none",
                 "Iso-surface of",
                 provider="variables",
-                tip="The variable whose surface of equal value is drawn",
+                tip="The variable whose surface of equal value is drawn (of a free surface "
+                "or bed: its line)",
             ),
             "iso_value": PropertySpec(0.0, "Value", tip="Where the surface lies"),
             **_colouring("none", "ocean"),
@@ -380,7 +381,8 @@ KINDS: dict[str, KindSpec] = {
                 "none",
                 "Iso-volume of",
                 provider="variables",
-                tip="The variable whose range is drawn (phi from 0 up: the water of a CFD run)",
+                tip="The variable whose range is drawn (phi from 0 up: the water of a CFD run; "
+                "of a free surface or bed: the part of it in the range)",
             ),
             "iso_min": PropertySpec(0.0, "From", tip="The part of the volume from this value"),
             "iso_max": PropertySpec(1.0, "To", tip="… up to this value"),

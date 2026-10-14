@@ -693,6 +693,8 @@ class MainWindow(QMainWindow):
         With several cases open, slices, iso-surfaces and streamlines cut the case of
         the selected item (or the one the active view shows), if it has a volume."""
         case = self._target_case() if kind in VOLUME_TOOLS else {}
+        if kind in ("iso_surface", "iso_volume", "slice", "streamlines"):
+            case = {**case, **self._target_dataset(kind)}
         if kind == "slice":
             return self.session.add_slice("y", **case)
         if kind == "iso_surface":
@@ -715,6 +717,30 @@ class MainWindow(QMainWindow):
                 return hidden[0].id
             return self.session.add_item(kind, **case)
         return self.session.add_item(kind)
+
+    def _target_dataset(self, kind: str) -> dict:
+        """``{"case": id, "dataset": key}`` of the data the selected item shows, when
+        a new item of this kind can be made of it: iso-surfaces and iso-volumes of a
+        volume or a surface (free surface, bed: iso-lines, iso-patches), slices and
+        streamlines of a volume. Selected: a volume, a surface, or a slice or iso item
+        of a volume (the same volume). Else nothing: the case's own volume."""
+        data = self.session.data
+        selected = self.scene_tree.selected_id()
+        if not selected or selected not in self.session.scene:
+            return {}
+        dataset = data.dataset(selected)
+        if dataset is None:
+            return {}
+        volume = dataset.kind == "UnstructuredGrid"
+        surface = getattr(dataset, "surface_like", False) or dataset.role == "amr"
+        wanted = volume or (surface and kind in ("iso_surface", "iso_volume"))
+        if not wanted:
+            return {}
+        case_item = data.case_item(selected)
+        found = {"dataset": dataset.key}
+        if case_item is not None and sum(i.kind == "case" for i in self.session.scene) > 1:
+            found["case"] = case_item.id
+        return found
 
     def _target_case(self) -> dict:
         """``{"case": id}`` for an item that cuts a volume, when several cases are

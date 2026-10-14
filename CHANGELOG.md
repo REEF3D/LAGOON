@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Iso-surfaces and iso-volumes of the right data
+
+- **Made of the data selected**: with a volume (or a slice or iso item of it)
+  selected, a new iso-surface, iso-volume, slice or streamlines is made of that
+  volume, not the case's first; with the free surface or the bed selected, an
+  iso-surface or iso-volume of that surface. *Dataset* lists what each can show.
+- **On the free surface and the bed**: an iso-surface is the line where the
+  variable has the value (eta = 0: the still water line; depth contours), an
+  iso-volume the part of the surface in the range; in 2D just over their surface.
+
 ### The map with the results
 
 - **A case opened again has its background map**: the map is kept with the case

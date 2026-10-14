@@ -797,6 +797,65 @@ def orient_by_field(plan: CutPlan, points: np.ndarray, field: np.ndarray) -> Cut
     return CutPlan(plan.a, plan.b, plan.t, np.ascontiguousarray(triangles, dtype=np.uint32))
 
 
+def iso_lines(mesh: SurfaceMesh, field: np.ndarray, level: float) -> SurfaceMesh:
+    """The lines on a triangle surface where ``field`` equals ``level`` (the iso-
+    surface of a surface: a contour line), as segments with the point data
+    interpolated along them; triangles with a missing value (NaN) and hidden
+    (degenerate) ones give none."""
+    triangles = np.asarray(mesh.triangles, np.int64)
+    values = np.asarray(field, np.float64)
+    names = list(mesh.point_data)
+    empty = SurfaceMesh(
+        np.zeros((0, 3), np.float32),
+        np.zeros((0, 3), np.uint32),
+        {n: np.zeros((0,) + np.asarray(mesh.point_data[n]).shape[1:], np.float32) for n in names},
+        segments=np.zeros((0, 2), np.uint32),
+    )
+    if not len(triangles):
+        return empty
+    corner = values[triangles]
+    usable = np.isfinite(corner).all(axis=1)
+    usable &= ~((triangles[:, 0] == triangles[:, 1]) & (triangles[:, 1] == triangles[:, 2]))
+    above = corner >= level
+    count = above.sum(axis=1)
+    crossing = usable & ((count == 1) | (count == 2))
+    if not crossing.any():
+        return empty
+    t, v, a = triangles[crossing], corner[crossing], above[crossing]
+    # the corner alone on its side of the level, then its two edges
+    lone = np.where(a.sum(axis=1) == 1, np.argmax(a, axis=1), np.argmin(a, axis=1))
+    rows = np.arange(len(t))
+    i0, i1, i2 = t[rows, lone], t[rows, (lone + 1) % 3], t[rows, (lone + 2) % 3]
+    v0, v1, v2 = v[rows, lone], v[rows, (lone + 1) % 3], v[rows, (lone + 2) % 3]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s1 = np.nan_to_num(np.clip((level - v0) / (v1 - v0), 0.0, 1.0))
+        s2 = np.nan_to_num(np.clip((level - v0) / (v2 - v0), 0.0, 1.0))
+    start = (i0, i1, s1)
+    end = (i0, i2, s2)
+
+    def along(data: np.ndarray, edge) -> np.ndarray:
+        a_, b_, w = edge
+        data = np.asarray(data)
+        w = w.reshape((-1,) + (1,) * (data.ndim - 1))
+        return data[a_] + w * (data[b_].astype(np.float64) - data[a_])
+
+    n = len(t)
+    points = np.empty((2 * n, 3), np.float64)
+    points[0::2] = along(mesh.points, start)
+    points[1::2] = along(mesh.points, end)
+    point_data = {}
+    for name in names:
+        data = np.asarray(mesh.point_data[name])
+        joined = np.empty((2 * n,) + data.shape[1:], np.float64)
+        joined[0::2] = along(data, start)
+        joined[1::2] = along(data, end)
+        point_data[name] = joined.astype(np.float32)
+    segments = np.arange(2 * n, dtype=np.uint32).reshape(-1, 2)
+    return SurfaceMesh(
+        points.astype(np.float32), np.zeros((0, 3), np.uint32), point_data, segments=segments
+    )
+
+
 def clip_surface(mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str) -> SurfaceMesh:
     """The part of a triangle surface where ``field`` is at least (``keep`` "above")
     or at most ("below") ``level``: triangles across the level are cut on their

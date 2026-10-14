@@ -25,9 +25,9 @@ script the session writes ([Scripting](../scripting.md)).
 | Bed | the bathymetry (sand coloured by default) |
 | Volume | the outside of the volume output |
 | Slice | the volume cut by an x, y or z plane |
-| Iso-surface | where a variable of the volume has a given value |
+| Iso-surface | where a variable of the volume has a given value; on the free surface or the bed, the line where it has it |
 | Sea state | SEASTATE's map of the sea state: Hs, periods, direction, with arrows where the waves go ([Opening runs](runs.md)) |
-| Iso-volume | the part of the volume where a variable lies in a range (the water of a CFD run: phi from 0 up) |
+| Iso-volume | the part of the volume where a variable lies in a range (the water of a CFD run: phi from 0 up); on the free surface or the bed, the part of the surface in the range |
 | Streamlines | lines along a vector field, through the volume, in a plane or on the free surface |
 | Time series | wave gauges, 6DOF motions or forces, plotted under the 3D view |
 | Free surface line | the surface along the lines of `WSFLINE`, with the wave theory (FNPF) |
@@ -85,7 +85,17 @@ Plots panel adds them over time. Click on empty space to remove it.
 With several cases open, a new slice, iso-surface, iso-volume or streamlines cut
 the case of the item selected in the scene tree (else the first case that has a
 volume); *Case* in its properties puts it on another case, through the middle of
-that case's volume if its plane would miss it.
+that case's volume if its plane would miss it. They are made of the data of the
+item selected: with a volume, a slice or an iso item selected, of that volume (a
+case may have several); with the free surface or the bed selected, an iso-surface
+or iso-volume of that surface. *Dataset* in the properties chooses another (slices
+and streamlines: the volumes; iso items: the volumes and the surfaces).
+
+On a surface an **iso-surface** is the line where the variable has the *Value*
+(eta = 0: the still water line on the free surface; a depth contour on the bed),
+coloured as the item says, and an **iso-volume** the part of the surface where the
+variable lies between *From* and *To* (the shallows of the bed, the crests of the
+waves). In 2D they lie just over their surface.
 
 *Add → Slice* cuts the volume in the middle; set the *Normal* (x, y or z) and the
 *Position* in metres; *Grid lines* (dark or white) draws the edges of the cells it
