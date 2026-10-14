@@ -345,3 +345,42 @@ def test_the_sea_tab(window, tmp_path, monkeypatch, qtbot):
     ctrl = window.session.input_file("ctrl.txt")
     assert ctrl.values("B 85") == [11.0]
     assert np.isclose(ctrl.values("B 93")[0], 4.0, atol=0.01)
+
+
+def test_a_turned_model_makes_geo_dat_again_before_divemesh(
+    window, flume, tmp_path, qtbot, monkeypatch
+):
+    """geo.dat made, the model turned on the map: the Map tab says geo.dat no longer
+    fits, and Run DIVEMesh makes it again first."""
+    import numpy as np
+
+    script = tmp_path / "fake_divemesh.py"
+    script.write_text(FAKE.format(tests=str(TESTS)))
+    program = tmp_path / "DiveMESH"
+    program.write_text(f"#!/bin/sh\nexec {sys.executable} {script}\n")
+    program.chmod(program.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("LAGOON_DIVEMESH", str(program))
+    window.open_case(flume)
+    session = window.session
+    session.set_georef("EPSG:25832", origin=(570000.0, 7030000.0))
+    xs, ys = np.meshgrid(np.arange(-20.0, 31.0, 1.0), np.arange(-20.0, 23.0, 1.0))
+    soundings = np.column_stack(
+        [570000.0 + xs.ravel(), 7030000.0 + ys.ravel(), -1.0 + 0.1 * xs.ravel()]
+    )
+    survey = tmp_path / "survey.xyz"
+    np.savetxt(survey, soundings)
+    session.make_geo_dat(survey, crs="EPSG:25832")
+    tab = window.setup_panel.map_tab
+    tab.refresh()
+    assert tab.geo_state.isHidden()
+    tab.model_turned(20.0, (5.0, 1.0))
+    tab.refresh()
+    assert not tab.geo_state.isHidden() and "turned 0°" in tab.geo_state.text()
+    panel = window.setup_panel
+    panel.stale_geo_dat = "remake"
+    assert panel.run_divemesh()
+    qtbot.waitUntil(
+        lambda: panel.process is None and "--DONE--" in panel.log.toPlainText(), timeout=30000
+    )
+    assert session.geo_dat_state() == "" and session.geo_dat_recipe()["rotation_deg"] == 20.0
+    assert tab.geo_state.isHidden()

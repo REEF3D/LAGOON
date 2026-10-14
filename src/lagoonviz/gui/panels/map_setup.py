@@ -350,6 +350,23 @@ class MapTab(QWidget):
         row.addStretch(1)
         row.addWidget(self.geo_button)
         form.addRow(row)
+        # geo.dat made before the model was turned or moved: it no longer fits
+        self.geo_state = QLabel()
+        self.geo_state.setWordWrap(True)
+        self.geo_state.setStyleSheet("color: #e07b39; font-weight: 600;")
+        self.remake_button = QPushButton("Make geo.dat again")
+        self.remake_button.setToolTip(
+            "geo.dat from the same source, spacing and interpolation, for the model as it "
+            "lies now; then Run DIVEMesh"
+        )
+        self.remake_button.clicked.connect(lambda: self.remake_geo_dat())
+        form.addRow(self.geo_state)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(self.remake_button)
+        form.addRow(row)
+        self.geo_state.hide()
+        self.remake_button.hide()
 
         #: what to do first, while the buttons wait for it (no case, no georeference)
         self.hint = QLabel()
@@ -475,6 +492,7 @@ class MapTab(QWidget):
         self.geo_button.setEnabled(
             has_case and (self._bathymetry is not None or (web and georef is not None))
         )
+        self._show_geo_state(has_case)
         # the fields follow the files when those change, not while being typed in
         shown = (self.case_id, georef)
         if shown == self._shown_georef:
@@ -715,6 +733,38 @@ class MapTab(QWidget):
     def _source_changed(self) -> None:
         self.refresh()
 
+    def geo_dat_state(self) -> str:
+        """Why the case's geo.dat no longer fits it ("" when it does or is not known)."""
+        if not self.case_id:
+            return ""
+        try:
+            return self.session.geo_dat_state(self.case_id)
+        except (ValueError, OSError, CrsError):
+            return ""
+
+    def _show_geo_state(self, has_case: bool) -> None:
+        state = self.geo_dat_state() if has_case else ""
+        busy = getattr(self, "_geo_runner", None) is not None
+        self.geo_state.setText(
+            f"{state[0].upper()}{state[1:]}: make it again before running DIVEMesh."
+            if state
+            else ""
+        )
+        self.geo_state.setVisible(bool(state))
+        self.remake_button.setVisible(bool(state))
+        self.remake_button.setEnabled(bool(state) and not busy)
+
+    def remake_geo_dat(self, then=None) -> bool:
+        """geo.dat again from what it was made from, for the model as it lies now
+        (in a worker thread, with a progress bar); ``then()`` after it is made."""
+        try:
+            job = self.session.remake_geo_dat_job(self.case_id)
+        except (ValueError, OSError, CrsError) as error:
+            self.message.emit(str(error), True)
+            return False
+        self._start_geo_job(job, self.session.data.case_folder(self.case_id) / "geo.dat", then)
+        return True
+
     def make_geo_dat(self) -> None:
         """Ask where geo.dat is stored (a draft case moves to that folder), then make
         it, downloaded for the domain or from the file chosen, in a worker thread with
@@ -741,6 +791,11 @@ class MapTab(QWidget):
         except (ValueError, OSError, CrsError) as error:
             self.message.emit(str(error), True)
             return
+        self._start_geo_job(job, chosen)
+
+    def _start_geo_job(self, job, chosen: Path, then=None) -> None:
+        """Run a geo.dat job in a worker thread, with a progress bar; ``then()`` once
+        geo.dat is made."""
         dialog = QProgressDialog("Making geo.dat…", "Cancel", 0, 1000, self)
         dialog.setWindowTitle("geo.dat")
         dialog.setWindowModality(Qt.WindowModal)
@@ -753,7 +808,7 @@ class MapTab(QWidget):
         runner.progressed.connect(
             lambda value, text: (dialog.setValue(value), dialog.setLabelText(text))
         )
-        runner.done.connect(lambda error: self._geo_dat_done(job, error, dialog, chosen))
+        runner.done.connect(lambda error: self._geo_dat_done(job, error, dialog, chosen, then))
         dialog.canceled.connect(stop.set)
 
         def progress(fraction: float, text: str) -> None:
@@ -772,7 +827,7 @@ class MapTab(QWidget):
         self._geo_runner = runner  # kept until done
         threading.Thread(target=work, name="lagoon-geo.dat", daemon=True).start()
 
-    def _geo_dat_done(self, job, error, dialog, chosen: Path) -> None:
+    def _geo_dat_done(self, job, error, dialog, chosen: Path, then=None) -> None:
         """Back in the window's thread: G 10 1 and the message, or why not."""
         dialog.close()
         self._geo_runner = None
@@ -806,6 +861,8 @@ class MapTab(QWidget):
             "G 10 1 in control.txt. Now Run DIVEMesh",
             False,
         )
+        if then is not None:
+            then()
 
     def _where_geo_dat(self) -> Path | None:
         """Where geo.dat is stored, asked in a save dialog; None: cancelled.

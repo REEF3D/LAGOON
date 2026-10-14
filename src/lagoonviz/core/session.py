@@ -722,7 +722,62 @@ class Session:
             method,
             depths,
             code + ")",
+            recipe={
+                "source": str(source),
+                "web": bool(web),
+                "file_crs": crs,
+                "method": method,
+                "depths": bool(depths),
+                "spacing": float(xs[1] - xs[0]) if len(xs) > 1 else float(spacing or 0.0),
+                "domain": [float(v) for v in domain[:4]],
+                "crs": georef.crs if crs != "model" else "",
+                "origin": list(georef.origin) if crs != "model" else [0.0, 0.0],
+                "rotation_deg": georef.rotation_deg if crs != "model" else 0.0,
+            },
         )
+
+    def geo_dat_state(self, case: str | None = None) -> str:
+        """Why the case's geo.dat no longer fits it, or "" (fits, or not known): made
+        before the model was turned or moved on the map, in another CRS, or for a
+        smaller domain. DIVEMesh would then mesh the bed of the old place;
+        :meth:`remake_geo_dat` makes it again from the same source."""
+        from lagoonviz.core.geo import recipe
+
+        case_id = self._case_id(case)
+        made = recipe.read(self.data.case_folder(case_id))
+        return recipe.stale(made, self.georef(case_id), self.data.backgrounds.domain(case_id))
+
+    def geo_dat_recipe(self, case: str | None = None) -> dict | None:
+        """How the case's geo.dat was made (its source, spacing, the georeference and
+        domain it was made for), or None when LAGOON did not make it."""
+        from lagoonviz.core.geo import recipe
+
+        return recipe.read(self.data.case_folder(self._case_id(case)))
+
+    def remake_geo_dat_job(self, case: str | None = None) -> GeoDatJob:
+        """:meth:`remake_geo_dat` in two parts (``job.run``, ``job.finish``)."""
+        made = self.geo_dat_recipe(case)
+        if made is None:
+            raise ValueError("geo.dat was not made by LAGOON: make it in the Map tab")
+        source = str(made.get("source", ""))
+        if not made.get("web") and not Path(source).expanduser().is_file():
+            raise ValueError(f"geo.dat's source {source} is not there any more: choose it again")
+        return self.geo_dat_job(
+            source,
+            crs=made.get("file_crs"),
+            method=str(made.get("method", "tin")),
+            spacing=float(made.get("spacing") or 0.0) or None,
+            depths=bool(made.get("depths", False)),
+            case=case,
+        )
+
+    def remake_geo_dat(self, case: str | None = None, progress=None) -> int:
+        """geo.dat again from the source it was made from, for the case as it is now
+        (turned, moved, its domain): the same spacing, method and file. Returns the
+        number of points."""
+        job = self.remake_geo_dat_job(case)
+        job.run(progress)
+        return job.finish()
 
     # ------------------------------------------------------------- the sea (MET Norway)
     def find_storms(
@@ -1344,8 +1399,10 @@ class GeoDatJob:
         method,
         depths,
         code,
+        recipe=None,
     ):
         self.session = session
+        self.recipe = recipe
         self.case_id, self.case, self.folder = case_id, case, folder
         self.georef, self.xs, self.ys = georef, xs, ys
         self.source, self.web, self.crs = source, web, crs
@@ -1389,6 +1446,10 @@ class GeoDatJob:
             heights,
             progress=lambda f, t: tell(0.8 + 0.2 * f, t),
         )
+        if self.recipe is not None:
+            from lagoonviz.core.geo import recipe
+
+            recipe.write(self.folder, dict(self.recipe, sources=list(self.sources)))
         return self.count
 
     def finish(self) -> int:

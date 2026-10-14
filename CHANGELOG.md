@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### geo.dat follows a turned model
+
+- **geo.dat made before the model was turned** (or moved on the map, given another
+  CRS or a larger domain) no longer fits: it is in model coordinates, and DIVEMesh
+  meshed the bed as it lay before. LAGOON keeps how geo.dat was made
+  (`LAGOON_geo.dat.json`); the Map tab says when it no longer fits, *Make geo.dat
+  again* makes it from the same source and settings, and *Run DIVEMesh* asks to
+  do that first (`session.geo_dat_state()`, `session.remake_geo_dat()`).
+
 ### Maps away from Europe
 
 - **North up is true north**: the view turns the map north up wherever the case

@@ -126,6 +126,14 @@ GeoTIFF and only the part of a large one that is needed).
   triangulation (*TIN*), by inverse distance or from the nearest point; outside
   the data the nearest height is taken. Downloads are kept in the cache.
   Then *Run DIVEMesh*.
+- **Turned or moved afterwards**: `geo.dat` is in model coordinates, the bed as it
+  lay when it was made. Turning the model (*Turn*, Shift + drag), moving it on the
+  map, another CRS or a larger domain leave it as it was, and DIVEMesh would mesh
+  the bed of before. LAGOON keeps how `geo.dat` was made (`LAGOON_geo.dat.json`
+  beside it: its source, spacing, interpolation, and the georeference and domain
+  it was made for), so the Map tab then says it no longer fits, with *Make geo.dat
+  again* (the same source and settings, for the model as it lies now), and *Run
+  DIVEMesh* asks to make it again first. A geo.dat from elsewhere is not checked.
 
 Every step is a command of the session: it can be undone, and a script does the
 same:
@@ -135,6 +143,8 @@ session.set_georef("EPSG:25833", origin=[270000.0, 7040000.0], rotation_deg=30.0
 session.set_domain(0.0, 2000.0, 0.0, 800.0)
 session.turn_model(35.0)  # about the domain's centre
 session.make_geo_dat("best")  # downloaded; or a file: "~/surveys/nidelva.tif"
+session.geo_dat_state()  # why geo.dat no longer fits the case, "" if it does
+session.remake_geo_dat()  # from the same source, for the model as it lies now
 session.add_background_map("Sentinel-2 2017 (satellite)", margin=1.0)
 ```
 

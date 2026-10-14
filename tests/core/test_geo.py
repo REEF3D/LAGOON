@@ -373,6 +373,44 @@ def test_the_session_sets_the_domain_and_makes_geo_dat(fjord, terrain):
     assert "session.make_geo_dat(" in session.to_script()
 
 
+def test_geo_dat_follows_a_turned_model(fjord, terrain):
+    """geo.dat is in model coordinates: turned or moved on the map, the model needs
+    it again (DIVEMesh would mesh the bed of before); made again from its source."""
+    session = Session()
+    session.open_case(fjord)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=30.0)
+    assert session.geo_dat_state() == "" and session.geo_dat_recipe() is None
+    session.make_geo_dat(terrain, spacing=25.0)
+    made = session.geo_dat_recipe()
+    assert made["rotation_deg"] == 30.0 and made["spacing"] == 25.0
+    assert made["source"] == str(terrain) and session.geo_dat_state() == ""
+    session.turn_model(45.0)
+    assert session.geo_dat_state().startswith("geo.dat was made with the model turned 30°")
+    session.undo()  # turned back: it fits again
+    assert session.geo_dat_state() == ""
+    session.redo()
+    count = session.remake_geo_dat()
+    assert session.geo_dat_state() == "" and session.geo_dat_recipe()["rotation_deg"] == 45.0
+    points = np.loadtxt(fjord / "geo.dat")
+    turned = session.data.georef(session.scene.ids()[0])
+    assert count == len(points)
+    assert np.allclose(points[:, 2], plane(*turned.to_world(points[:, 0], points[:, 1])), atol=1e-3)
+    assert np.diff(np.unique(points[:, 0]))[0] == pytest.approx(25.0)  # the same spacing
+    # moved, another CRS, a larger domain
+    current = session.data.georef(session.scene.ids()[0])
+    session.set_georef("EPSG:25833", origin=(270100.0, 7040000.0), rotation_deg=45.0)
+    assert "moved" in session.geo_dat_state()
+    session.set_georef(current.crs, origin=current.origin, rotation_deg=45.0)
+    assert session.geo_dat_state() == ""
+    session.set_domain(0.0, 1500.0, 0.0, 500.0)
+    assert session.geo_dat_state() == "the domain reaches beyond geo.dat"
+    # geo.dat written by another program: nothing known
+    (fjord / "geo.dat").write_text("0 0 -10\n10 0 -10\n0 10 -10\n")
+    assert session.geo_dat_state() == "" and session.geo_dat_recipe() is None
+    with pytest.raises(ValueError, match="not made by LAGOON"):
+        session.remake_geo_dat()
+
+
 def test_a_background_map_item(fjord, tmp_path):
     session = Session()
     session.open_case(fjord)

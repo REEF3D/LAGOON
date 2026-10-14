@@ -438,7 +438,7 @@ class SetupPanel(QWidget):
         self.run_button.setToolTip(
             "Save control.txt and run DIVEMesh in the case folder: the grid, solids and bed"
         )
-        self.run_button.clicked.connect(self.run_divemesh)
+        self.run_button.clicked.connect(lambda: self.run_divemesh())
         top = QHBoxLayout()
         top.setContentsMargins(4, 4, 4, 0)
         top.addWidget(QLabel("Case"))
@@ -602,10 +602,42 @@ class SetupPanel(QWidget):
             self.settings.setValue("divemesh/program", str(program))
         return program
 
-    def run_divemesh(self) -> bool:
-        """Save control.txt and run DIVEMesh on the case (in the background)."""
+    #: what run_divemesh does with a geo.dat that no longer fits, without asking (tests)
+    stale_geo_dat: str | None = None
+
+    def _ask_geo_dat(self, state: str) -> str:
+        """ "remake", "run" (as it is) or "cancel"."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Run DIVEMesh")
+        box.setText(f"{state[0].upper()}{state[1:]}.")
+        box.setInformativeText(
+            "geo.dat is in model coordinates: DIVEMesh would mesh the bed as it lay "
+            "before. Make geo.dat again from the same source first?"
+        )
+        remake = box.addButton("Make geo.dat again, then run", QMessageBox.AcceptRole)
+        run = box.addButton("Run as it is", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(remake)
+        box.exec()
+        clicked = box.clickedButton()
+        return "remake" if clicked is remake else "run" if clicked is run else "cancel"
+
+    def run_divemesh(self, check_geo_dat: bool = True) -> bool:
+        """Save control.txt and run DIVEMesh on the case (in the background). A geo.dat
+        made before the model was turned or moved on the map is made again first, if
+        wanted."""
         if not self.case_id or self.process is not None:
             return False
+        state = self.map_tab.geo_dat_state() if check_geo_dat else ""
+        if state:
+            answer = self.stale_geo_dat or self._ask_geo_dat(state)
+            if answer == "cancel":
+                return False
+            if answer == "remake":
+                return self.map_tab.remake_geo_dat(
+                    then=lambda: self.run_divemesh(check_geo_dat=False)
+                )
         folder = self.session.data.case_folder(self.case_id)
         control = self.session.input_file("control.txt", self.case_id)
         if folder is None or not control:
