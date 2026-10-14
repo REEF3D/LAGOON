@@ -150,11 +150,31 @@ def test_sources_name_their_terms():
     for source in SOURCES.values():
         assert source.attribution and source.licence and "{z}" in source.url
     assert "Kartverket" in SOURCES["kartverket_topo"].attribution
-    assert SOURCES["sentinel2_2017"].licence == "CC BY 4.0"
+    assert SOURCES["sentinel2_2017"].licence == SOURCES["sentinel2_2016"].licence == "CC BY 4.0"
     assert custom_source("https://x.test/{z}/{x}/{y}.png").attribution == "x.test"
     with pytest.raises(ValueError):
         custom_source("https://x.test/{z}/{x}.png")
     assert tuple(SOURCE_CHOICES) == BASEMAP_SOURCES
+
+
+def test_sentinel_2_in_europe_and_elsewhere(tmp_path):
+    """The 2017 mosaic has images of Europe only: elsewhere (Mumbai) the 2016 world
+    mosaic; the old name of the choice still reads."""
+    from lagoonviz.core.data.background import MAP_FILE, _here, remembered_map
+    from lagoonviz.core.geo.tiles import here, source_for
+    from lagoonviz.core.kinds import validate
+
+    s2 = SOURCES["sentinel2_2017"]
+    assert here(s2, 10.4, 63.4) is s2  # Trondheim
+    assert here(s2, 72.9, 19.1).key == "sentinel2_2016"  # Mumbai
+    assert source_for(72.9, 19.1, "sentinel2_2017").key == "sentinel2_2016"
+    assert here(SOURCES["openstreetmap"], 72.9, 19.1).key == "openstreetmap"
+    mumbai = Georef("EPSG:32643", (274766.7, 2107774.7), 0.0)
+    assert _here(s2, mumbai, (0.0, 2000.0, 0.0, 1000.0)).key == "sentinel2_2016"
+    old = "Sentinel-2 2017 (satellite)"
+    assert validate("basemap", "source", old) == "Sentinel-2 (satellite)"
+    (tmp_path / MAP_FILE).write_text(f'{{"source": "{old}"}}', "utf-8")
+    assert remembered_map(tmp_path)["source"] == "Sentinel-2 (satellite)"
 
 
 # ------------------------------------------------------------------ rasters

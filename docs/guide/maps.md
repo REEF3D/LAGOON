@@ -165,7 +165,7 @@ session.make_geo_dat("best")  # downloaded; or a file: "~/surveys/nidelva.tif"
 session.make_geo_dat("best", spacing="finest")  # as fine as the data is
 session.geo_dat_state()  # why geo.dat no longer fits the case, "" if it does
 session.remake_geo_dat()  # from the same source, for the model as it lies now
-session.add_background_map("Sentinel-2 2017 (satellite)", margin=1.0)
+session.add_background_map("Sentinel-2 (satellite)", margin=1.0)
 ```
 
 ## Background maps
@@ -177,7 +177,7 @@ sketch. Its properties:
 
 | property | |
 |---|---|
-| Map | the source: Kartverket's topographic map, grey map or nautical chart (Norway), Sentinel-2 cloudless 2017 (satellite, Europe and the world), OpenStreetMap, a GeoTIFF of yours (an orthophoto, a chart) or a tile server (an XYZ URL with `{z}`, `{x}`, `{y}`) |
+| Map | the source: Kartverket's topographic map, grey map or nautical chart (Norway), Sentinel-2 cloudless (satellite: 2017 in Europe, 2016 elsewhere, where the 2017 mosaic has no images), OpenStreetMap, a GeoTIFF of yours (an orthophoto, a chart) or a tile server (an XYZ URL with `{z}`, `{x}`, `{y}`) |
 | File or URL | the GeoTIFF, or the tile server's URL |
 | Margin | how far the map reaches round the domain, in domain sizes |
 | Placed | below the model (a floor under the bed), or at the still water level round the domain; in 2D from the top it lies under everything |

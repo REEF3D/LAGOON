@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Satellite maps outside Europe
+
+- **Sentinel-2 (satellite)** (was "Sentinel-2 2017"): the 2017 mosaic has images of
+  Europe only (elsewhere a white land and a blue sea, so Mumbai showed none); outside
+  Europe the map now comes from the 2016 world mosaic (also CC BY 4.0). Sessions,
+  scripts and case folders with the old name keep working.
+
 ### Finding what is slow
 
 - **Help → Record a performance report**: counts what every thread of LAGOON does

@@ -21,7 +21,7 @@ import numpy as np
 from lagoon_format.geo import Georef, GeorefError
 from lagoon_format.geo import read as read_georef
 
-from lagoonviz.core.kinds import BASEMAP_PLACEMENTS
+from lagoonviz.core.kinds import BASEMAP_ALIASES, BASEMAP_PLACEMENTS
 
 if TYPE_CHECKING:
     from lagoonviz.core.data.manager import DataManager
@@ -31,7 +31,8 @@ SOURCE_CHOICES = {
     "Kartverket topo": "kartverket_topo",
     "Kartverket grey": "kartverket_grey",
     "Kartverket nautical chart": "kartverket_chart",
-    "Sentinel-2 2017 (satellite)": "sentinel2_2017",
+    # Europe from 2017, elsewhere the 2016 world mosaic (tiles.SOURCES)
+    "Sentinel-2 (satellite)": "sentinel2_2017",
     "OpenStreetMap": "openstreetmap",
     "GeoTIFF file": "file",
     "Tile server URL": "url",
@@ -60,6 +61,8 @@ def remembered_map(folder: Path | None) -> dict | None:
     if data.get("removed"):
         return {"removed": True}
     kept = {k: data[k] for k in MAP_KEYS if k in data}
+    if "source" in kept:
+        kept["source"] = BASEMAP_ALIASES.get(kept["source"], kept["source"])
     kept["visible"] = bool(data.get("visible", True))
     return kept if kept.get("source") in SOURCE_CHOICES else None
 
@@ -376,7 +379,7 @@ class Backgrounds:
                 elif choice == "url":
                     source = custom_source(file)
                 else:
-                    source = SOURCES[choice]
+                    source = _here(SOURCES[choice], georef, domain)
                 result = background(georef, box, source, pixels, cache, progress=progress)
             except Exception as error:  # noqa: BLE001 (a bad file or server: say why)
                 self._errors[item_id] = str(error) or type(error).__name__
@@ -500,6 +503,20 @@ class Backgrounds:
             else:
                 self._made.pop(item_id, None)
                 self._failed.pop(item_id, None)
+
+
+def _here(source, georef: Georef, domain):
+    """The tile source for the middle of the domain: itself where it has tiles, else
+    the one it hands over to (Sentinel-2 2017 outside Europe: the 2016 world mosaic)."""
+    from lagoonviz.core.geo.crs import transformer
+    from lagoonviz.core.geo.tiles import here
+
+    try:
+        x, y = georef.to_world((domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2)
+        lon, lat = transformer(georef.crs, "EPSG:4326")(x, y)
+        return here(source, float(lon), float(lat))
+    except Exception:  # noqa: BLE001 (a CRS that does not transform: as chosen)
+        return source
 
 
 def _covers(made, box, pixels: int) -> bool:

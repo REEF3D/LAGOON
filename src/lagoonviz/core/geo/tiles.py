@@ -49,6 +49,8 @@ class TileSource:
     kind: str = "map"
     #: where it has tiles (lon_min, lat_min, lon_max, lat_max); None: the world
     region: tuple[float, float, float, float] | None = None
+    #: the source used outside the region instead (the same kind of map), or None
+    elsewhere: str | None = None
 
 
 #: the tile sources of the background map item
@@ -83,13 +85,29 @@ SOURCES: dict[str, TileSource] = {
             kind="chart",
             region=(-10.0, 56.0, 35.0, 82.0),
         ),
+        # the 2017 mosaic has images of Europe only (elsewhere a white land and a
+        # blue sea); the 2016 one covers the world (both CC BY 4.0, unlike the later
+        # years, which are for non-commercial use only)
         TileSource(
             "sentinel2_2017",
-            "Sentinel-2 cloudless 2017 (EOX, satellite)",
+            "Sentinel-2 cloudless 2017 (EOX, satellite, Europe)",
             "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2017_3857/default/"
             "GoogleMapsCompatible/{z}/{y}/{x}.jpg",
             "Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH "
             "(Contains modified Copernicus Sentinel data 2016 & 2017)",
+            "CC BY 4.0",
+            max_zoom=15,
+            kind="imagery",
+            region=(-25.0, 34.0, 45.0, 72.0),
+            elsewhere="sentinel2_2016",
+        ),
+        TileSource(
+            "sentinel2_2016",
+            "Sentinel-2 cloudless 2016 (EOX, satellite, world)",
+            "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/"
+            "GoogleMapsCompatible/{z}/{y}/{x}.jpg",
+            "Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH "
+            "(Contains modified Copernicus Sentinel data 2016)",
             "CC BY 4.0",
             max_zoom=15,
             kind="imagery",
@@ -117,15 +135,30 @@ def custom_source(url: str, attribution: str = "") -> TileSource:
 
 
 def source_for(lon: float, lat: float, wanted: str | None = None) -> TileSource:
-    """The source wanted, else the default one if it covers the place, else
+    """The source wanted (or the one it hands over to there: Sentinel-2 2017 outside
+    Europe the 2016 world mosaic), else the default one if it covers the place, else
     OpenStreetMap."""
     if wanted in SOURCES:
-        return SOURCES[wanted]
+        return here(SOURCES[wanted], lon, lat)
     source = SOURCES[DEFAULT_SOURCE]
-    if source.region is not None:
-        lon0, lat0, lon1, lat1 = source.region
-        if not (lon0 <= lon <= lon1 and lat0 <= lat <= lat1):
-            return SOURCES["openstreetmap"]
+    if not covers(source, lon, lat):
+        return SOURCES["openstreetmap"]
+    return source
+
+
+def covers(source: TileSource, lon: float, lat: float) -> bool:
+    """Whether a source has tiles at a place (longitude, latitude)."""
+    if source.region is None:
+        return True
+    lon0, lat0, lon1, lat1 = source.region
+    return lon0 <= lon <= lon1 and lat0 <= lat <= lat1
+
+
+def here(source: TileSource, lon: float, lat: float) -> TileSource:
+    """The source for a place: itself where it has tiles, else the one it hands over
+    to (if it names one)."""
+    if source.elsewhere in SOURCES and not covers(source, lon, lat):
+        return SOURCES[source.elsewhere]
     return source
 
 

@@ -38,11 +38,13 @@ BASEMAP_SOURCES = (
     "Kartverket topo",
     "Kartverket grey",
     "Kartverket nautical chart",
-    "Sentinel-2 2017 (satellite)",
+    "Sentinel-2 (satellite)",
     "OpenStreetMap",
     "GeoTIFF file",
     "Tile server URL",
 )
+#: background maps that were renamed; old sessions, scripts and case folders keep working
+BASEMAP_ALIASES = {"Sentinel-2 2017 (satellite)": "Sentinel-2 (satellite)"}
 BASEMAP_PLACEMENTS = ("below the model", "at the still water level")
 
 
@@ -649,6 +651,8 @@ def validate(kind: str, key: str, value: Any) -> Any:
     value = str(value)
     if key == "colormap":
         value = COLORMAP_ALIASES.get(value, value)
+    elif key == "source" and kind == "basemap":
+        value = BASEMAP_ALIASES.get(value, value)
     if spec.choices is not None and value not in spec.choices:
         raise ValueError(f"{key!r} must be one of {', '.join(spec.choices)}, got {value!r}")
     return value
