@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### The bed next to the coast
+
+- **No flat 1 m next to the coast**: a download's bed between the coastline and
+  the sea source's trusted depths (1.5 of its cells out) is made again: *Near the
+  coast* in the Map tab, *A beach profile (Dean)* (A x^(2/3), bent to meet the
+  sea's depths; the default), *The smoothest bed* (creeks, harbours, mudflats) or
+  *At most 1 m deep* as before. *Trust the sea from* also makes ETOPO's and GEBCO's
+  flat shallows again (`make_geo_dat(..., nearshore=, dean_a=, trust_depth=)`).
+- **Files of one's own over a download**: surveys, chart soundings (their zero
+  below mean sea level), intertidal or coastal terrain models, laid over the
+  download and blended in at their edges (*Over it*, `overlays=`).
+- **ICESat-2's nearshore soundings**: NASA's ATL24 files, or downloaded for the
+  domain with an Earthdata login (*ICESat-2 soundings*, `icesat2=True`), guide the
+  profile near the coast. Reading them needs h5py (now in `lagoon-viz[geo]`).
+- **A shallow coast is the sea, not a polder**: with no sea 10 m deep in the domain
+  (Mumbai's west coast), the sea was taken for low ground behind dikes and kept at
+  Copernicus' 0 m; Copernicus' water at 0 m where the sea source has the sea now
+  joins it to the sea.
+- A geo.dat made before is made again with the 1 m of before (*Make geo.dat
+  again*); its recipe keeps the new settings.
+
 ### Satellite maps outside Europe
 
 - **Sentinel-2 (satellite)** (was "Sentinel-2 2017"): the 2017 mosaic has images of

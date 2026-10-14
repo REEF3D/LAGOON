@@ -707,6 +707,11 @@ class Session:
         progress=None,
         lat_below_msl: float = 0.0,
         most_points: int | None = None,
+        nearshore: str | None = None,
+        dean_a: float | None = None,
+        trust_depth: float | None = None,
+        overlays=None,
+        icesat2: bool = False,
     ) -> int:
         """Bathymetry for DIVEMesh: a GeoTIFF, ASCII grid or x y z file (in ``crs``,
         or its own; ``"model"``: already in model coordinates) interpolated (``"tin"``,
@@ -724,10 +729,35 @@ class Session:
         held below zero there; ``lat_below_msl``: how far EMODnet's datum (the lowest
         astronomical tide) lies below mean sea level here [m], so its depths share
         the land's zero.
+
+        Next to the coast (downloads): ``nearshore`` "dean" (the default: a beach
+        profile, depth ``dean_a`` x^(2/3) at x metres from the coast, bent to meet
+        the sea's data), "smooth" (the smoothest bed from the coast to the sea's
+        data: creeks, mudflats) or "flat" (at most 1 m deep, as LAGOON did before),
+        where the coarse sea source cannot be trusted: close to the coast, or
+        shallower than ``trust_depth`` [m] (ETOPO's flat 1 and 2 m over tidal flats).
+        ``overlays``: files of one's own laid over the download (paths, or dicts
+        with ``path``, ``crs``, ``depths``, ``below_msl``: how far the file's zero,
+        a chart's datum, lies below mean sea level), the later over the earlier;
+        ICESat-2 ATL24 files (``.h5``, or a folder of them) guide the nearshore
+        profile. ``icesat2``: download ATL24 for the domain (a NASA Earthdata
+        login: ``EARTHDATA_TOKEN`` or ``~/.netrc``).
         ``progress(fraction, text)`` hears how far it is (and may raise
         ``bathy.Cancelled``). Returns the number of points written."""
         job = self.geo_dat_job(
-            source, crs, method, spacing, depths, case, lat_below_msl, most_points
+            source,
+            crs,
+            method,
+            spacing,
+            depths,
+            case,
+            lat_below_msl,
+            most_points,
+            nearshore=nearshore,
+            dean_a=dean_a,
+            trust_depth=trust_depth,
+            overlays=overlays,
+            icesat2=icesat2,
         )
         job.run(progress)
         return job.finish()
@@ -742,6 +772,11 @@ class Session:
         case: str | None = None,
         lat_below_msl: float = 0.0,
         most_points: int | None = None,
+        nearshore: str | None = None,
+        dean_a: float | None = None,
+        trust_depth: float | None = None,
+        overlays=None,
+        icesat2: bool = False,
     ) -> GeoDatJob:
         """:meth:`make_geo_dat` in two parts, for a GUI: ``job.run(progress)`` does
         the work (reading, downloading, writing geo.dat) and may run in a worker
@@ -749,6 +784,7 @@ class Session:
         and records it. Checks what it can at once (raises ValueError)."""
         from lagoon_format.geo import Georef
 
+        from lagoonviz.core.geo import nearshore as near
         from lagoonviz.core.geo.bathy import (
             FINEST,
             WEB,
@@ -778,6 +814,20 @@ class Session:
         web = isinstance(source, str) and source in WEB and not Path(source).exists()
         if web and crs == "model":
             raise ValueError("bathymetry from the web needs the case's georeference")
+        if nearshore is not None and nearshore not in near.NEARSHORE:
+            raise ValueError(
+                f"nearshore must be one of {', '.join(near.NEARSHORE)}, got {nearshore!r}"
+            )
+        if dean_a is not None and not float(dean_a) > 0:
+            raise ValueError(f"Dean's A must be above 0, got {dean_a}")
+        specs = [near.spec_of(entry) for entry in overlays or []]
+        if specs and not web:
+            raise ValueError("files of one's own go over a download, not over another file")
+        for spec in specs:
+            if not Path(spec["path"]).exists():
+                raise ValueError(f"{spec['path']}: no such file or folder")
+        if icesat2 and not web:
+            raise ValueError("ICESat-2 soundings go with a download")
         bathy = None
         if spacing == FINEST:
             if web:
@@ -799,6 +849,11 @@ class Session:
             ("case", case, None),
             ("lat_below_msl", float(lat_below_msl or 0.0), 0.0),
             ("most_points", most_points, None),
+            ("nearshore", nearshore, None),
+            ("dean_a", dean_a, None),
+            ("trust_depth", trust_depth, None),
+            ("overlays", specs, []),
+            ("icesat2", bool(icesat2), False),
         ):
             if value != default:
                 code += f", {key}={value!r}"
@@ -824,6 +879,11 @@ class Session:
                 "depths": bool(depths),
                 "lat_below_msl": float(lat_below_msl or 0.0),
                 "most_points": most_points,
+                "nearshore": nearshore or near.DEFAULT,
+                "dean_a": float(near.DEAN_A if dean_a is None else dean_a),
+                "trust_depth": None if trust_depth is None else float(trust_depth),
+                "overlays": specs,
+                "icesat2": bool(icesat2),
                 "spacing": float(xs[1] - xs[0]) if len(xs) > 1 else float(spacing or 0.0),
                 "domain": [float(v) for v in domain[:4]],
                 "crs": georef.crs if crs != "model" else "",
@@ -861,6 +921,10 @@ class Session:
         source = str(made.get("source", ""))
         if not made.get("web") and not Path(source).expanduser().is_file():
             raise ValueError(f"geo.dat's source {source} is not there any more: choose it again")
+        for spec in made.get("overlays") or []:
+            if not Path(str(spec.get("path", ""))).expanduser().exists():
+                raise ValueError(f"geo.dat's file {spec.get('path')} is not there any more")
+        trust_depth = made.get("trust_depth")
         return self.geo_dat_job(
             source,
             crs=made.get("file_crs"),
@@ -870,6 +934,12 @@ class Session:
             case=case,
             lat_below_msl=float(made.get("lat_below_msl", 0.0) or 0.0),
             most_points=made.get("most_points"),
+            # a geo.dat made before the nearshore profile: as it was made
+            nearshore=str(made.get("nearshore", "flat")),
+            dean_a=made.get("dean_a"),
+            trust_depth=None if trust_depth is None else float(trust_depth),
+            overlays=made.get("overlays") or None,
+            icesat2=bool(made.get("icesat2", False)),
         )
 
     def remake_geo_dat(self, case: str | None = None, progress=None) -> int:
@@ -1525,14 +1595,21 @@ class GeoDatJob:
                 progress(max(0.0, min(1.0, fraction)), text)
 
         if self.web:
+            made = self.recipe or {}
+            overlays = self._overlays(made, tell)
             heights, self.sources = web_heights(
                 self.source,
                 self.georef,
                 self.xs,
                 self.ys,
                 float(self.xs[1] - self.xs[0]),
-                progress=lambda f, t: tell(0.8 * f, t),
-                lat_below_msl=float((self.recipe or {}).get("lat_below_msl", 0.0) or 0.0),
+                progress=lambda f, t: tell(0.2 + 0.6 * f, t),
+                lat_below_msl=float(made.get("lat_below_msl", 0.0) or 0.0),
+                nearshore=str(made.get("nearshore") or "dean"),
+                dean_a=made.get("dean_a"),
+                overlays=overlays,
+                method=self.method,
+                trust_depth=made.get("trust_depth"),
             )
         else:
             tell(0.0, f"Reading {Path(self.source).name}…")
@@ -1557,6 +1634,24 @@ class GeoDatJob:
 
             recipe.write(self.folder, dict(self.recipe, sources=list(self.sources)))
         return self.count
+
+    def _overlays(self, made: dict, tell) -> list:
+        """The files of one's own of the recipe, read (ICESat-2's cut to the domain),
+        and ICESat-2 downloaded when asked."""
+        from lagoonviz.core.geo import icesat2
+        from lagoonviz.core.geo.download import _world_box
+        from lagoonviz.core.geo.nearshore import Overlay, load_overlay
+
+        box = (float(self.xs[0]), float(self.xs[-1]), float(self.ys[0]), float(self.ys[-1]))
+        bounds = _world_box(self.georef, box, "EPSG:4326", pad=0.0)
+        overlays = []
+        for spec in made.get("overlays") or []:
+            tell(0.0, f"Reading {Path(spec['path']).name}…")
+            overlays.append(load_overlay(spec, bounds))
+        if made.get("icesat2"):
+            files = icesat2.download(bounds, progress=lambda f, t: tell(0.2 * f, t))
+            overlays.insert(0, Overlay(icesat2.soundings(files, bounds), 0.0, True))
+        return overlays
 
     def finish(self) -> int:
         """After run, in the session's thread: G 10 1, the set-up reads geo.dat

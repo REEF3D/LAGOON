@@ -206,6 +206,11 @@ def web_heights(
     progress: Progress | None = None,
     lat_below_msl: float = 0.0,
     coastline: bool = True,
+    nearshore: str = "dean",
+    dean_a: float | None = None,
+    overlays=(),
+    method: str = "tin",
+    trust_depth: float | None = None,
 ) -> tuple[np.ndarray, list[str]]:
     """Bed heights on a model grid from the web (lagoonviz.core.geo.download): the
     sources of a choice in turn, each filling what the ones before had no data for,
@@ -213,13 +218,25 @@ def web_heights(
     the sources used.
 
     ``coastline`` (with land and sea sources, as "best"): Copernicus' 30 m heights
-    decide where the coast is (:func:`coastal`), not the coarser sea sources.
+    decide where the coast is (:func:`coastal`), not the coarser sea sources;
+    ``nearshore``: how the bed between that coast and the sea source's trusted
+    depths is made ("dean", "smooth" or "flat"; :mod:`~lagoonviz.core.geo.nearshore`),
+    ``dean_a`` Dean's A for "dean"; ``trust_depth``: the sea source's depths
+    shallower than this [m] are not trusted either (ETOPO's and GEBCO's flat 1 or 2
+    m over tidal flats, harbours and creeks).
     ``lat_below_msl``: how far EMODnet's datum, the lowest astronomical tide, lies
-    below mean sea level [m], to put its depths on the land's zero."""
+    below mean sea level [m], to put its depths on the land's zero.
+    ``overlays``: data of one's own (:class:`~lagoonviz.core.geo.nearshore.Overlay`)
+    laid over the download, the later over the earlier, blended in at their edges
+    (``method``: how their soundings are interpolated); control soundings
+    (ICESat-2) guide the nearshore profile only."""
+    from lagoonviz.core.geo import nearshore as near
     from lagoonviz.core.geo.download import SOURCES, covers, download_all
 
     if choice not in WEB:
         raise ValueError(f"choose one of {', '.join(WEB)}, got {choice!r}")
+    if nearshore not in near.NEARSHORE:
+        raise ValueError(f"nearshore must be one of {', '.join(near.NEARSHORE)}, got {nearshore!r}")
     xs = np.asarray(xs, float)
     ys = np.asarray(ys, float)
     box = (float(xs[0]), float(xs[-1]), float(ys[0]), float(ys[-1]))
@@ -228,6 +245,21 @@ def web_heights(
     layers: dict[str, np.ndarray] = {}
     errors: list[str] = []
     progress = progress or _no_progress
+    grid_spacing = (
+        abs(float(ys[1] - ys[0])) if len(ys) > 1 else 1.0,
+        abs(float(xs[1] - xs[0])) if len(xs) > 1 else 1.0,
+    )
+    known = np.full((len(ys), len(xs)), np.nan)  # one's own data, the later over the earlier
+    control = np.full((len(ys), len(xs)), np.nan)
+    dense = []
+    for overlay in overlays:
+        progress(0.0, f"Onto the grid: {overlay.name}")
+        values, covered = near.on_grid(overlay, georef, xs, ys, method)
+        if overlay.control:
+            control = np.where(covered, values, control)
+        else:
+            known = np.where(covered, values, known)
+            dense.append((values, covered))
     for n, key in enumerate(keys):
         if _settled(layers, coastline):
             break
@@ -252,7 +284,17 @@ def web_heights(
             layer = layer - float(lat_below_msl)  # depths below LAT: heights over MSL
         layers[key] = layer
     if coastline and "copernicus" in layers:
-        heights, from_keys = coastal(layers, xs, ys, keys)
+        heights, from_keys = coastal(
+            layers,
+            xs,
+            ys,
+            keys,
+            nearshore=nearshore,
+            dean_a=dean_a,
+            known=known if dense else None,
+            control=control if np.isfinite(control).any() else None,
+            trust_depth=trust_depth,
+        )
     else:
         heights = np.full((len(ys), len(xs)), np.nan)
         from_keys = []
@@ -266,9 +308,13 @@ def web_heights(
             if missing.any():
                 heights[missing] = layer[missing]
                 from_keys.append(key)
+    for values, covered in dense:  # one's own data over the download
+        heights = near.lay(heights, values, covered, grid_spacing)
     if not np.isfinite(heights).any():
         raise RasterError("no bathymetry for the domain: " + "; ".join(errors or ["no data"]))
-    return fill_holes(heights, xs, ys), [SOURCES[k].label for k in keys if k in from_keys]
+    used = [SOURCES[k].label for k in keys if k in from_keys]
+    used += [o.name for o in overlays]
+    return fill_holes(heights, xs, ys), used
 
 
 def _settled(layers: dict[str, np.ndarray], coastline: bool) -> bool:
@@ -296,7 +342,18 @@ def _settled(layers: dict[str, np.ndarray], coastline: bool) -> bool:
     return bool(done.all())
 
 
-def coastal(layers: dict[str, np.ndarray], xs, ys, order=()) -> tuple[np.ndarray, list[str]]:
+def coastal(
+    layers: dict[str, np.ndarray],
+    xs,
+    ys,
+    order=(),
+    nearshore: str = "flat",
+    dean_a: float | None = None,
+    trust: float | None = None,
+    known: np.ndarray | None = None,
+    control: np.ndarray | None = None,
+    trust_depth: float | None = None,
+) -> tuple[np.ndarray, list[str]]:
     """Heights where a fine land mask sets the coast (Copernicus GLO-30: land is above
     0) and coarse sources give the sea's depths:
 
@@ -305,12 +362,24 @@ def coastal(layers: dict[str, np.ndarray], xs, ys, order=()) -> tuple[np.ndarray
       SHORE_DEPTH deep at the coast, deeper by SHORE_SLOPE per metre out to
       SHORE_DEEPEST, so the shoreline lies where Copernicus has it (a coarse cell
       over the coast no longer puts land into the sea, or sea onto the land);
-    - low ground cut off from the sea (polders behind dikes): Copernicus' heights;
+    - next to the coast, with ``nearshore`` "dean" or "smooth": the nearshore band,
+      where the coarse sea cannot be trusted (closer to the coast than TRUST_CELLS
+      of its cells, ``trust`` metres if given; or shallower than ``trust_depth``,
+      default SHORE_DEPTH: a coarse source's flat shallows; or no sea data), made
+      again from the coastline out to the trusted depths
+      (:func:`~lagoonviz.core.geo.nearshore.profile`; ``dean_a``: Dean's A), meeting
+      ``known`` (one's own data, model z, NaN where none) and ``control`` (sparse
+      soundings) on its way;
+    - low ground cut off from the sea (polders behind dikes, not joined to the open
+      sea: no Copernicus tile, a sea source OPEN_SEA deep, or Copernicus' water at
+      0 m where the sea source has the sea): Copernicus' heights;
     - Kartverket (land and sea at up to 1 m) over all of them where it has data.
 
     ``layers``: key -> heights on the grid (NaN: no data; Copernicus NaN: no tile,
     the open sea). Returns the heights and the keys used."""
     from scipy import ndimage
+
+    from lagoonviz.core.geo import nearshore as near
 
     cop = layers["copernicus"]
     shape = cop.shape
@@ -325,6 +394,10 @@ def coastal(layers: dict[str, np.ndarray], xs, ys, order=()) -> tuple[np.ndarray
     low = ~land
     emodnet = layers.get("emodnet")
     open_sea = ~np.isfinite(cop) | (np.isfinite(sea) & (sea < -OPEN_SEA))
+    # Copernicus' sea is its water mask's 0 m (polders lie below it): a shallow
+    # coast, nowhere OPEN_SEA deep in the domain, is still the sea
+    with np.errstate(invalid="ignore"):
+        open_sea |= (cop == 0.0) & np.isfinite(sea) & (sea < 0.0)
     if emodnet is not None:
         open_sea |= np.isfinite(emodnet) & (emodnet < -1.0)
     labels, _ = ndimage.label(low)  # joined along the grid's rows and columns
@@ -347,6 +420,23 @@ def coastal(layers: dict[str, np.ndarray], xs, ys, order=()) -> tuple[np.ndarray
     out = np.full(shape, np.nan)
     out[land] = cop[land]
     out[water] = np.minimum(depths, -shore)[water]
+    if nearshore != "flat" and water.any() and land.any():
+        out = _nearshore(
+            out,
+            water,
+            land,
+            depths,
+            source,
+            sea_keys,
+            distance,
+            (dy, dx),
+            mode=nearshore,
+            a=near.DEAN_A if dean_a is None else dean_a,
+            trust=trust,
+            trust_depth=trust_depth,
+            known=known,
+            control=control,
+        )
     cut_off = low & ~water  # polders: their own heights, else the sea sources'
     out[cut_off] = np.where(np.isfinite(cop), cop, sea)[cut_off]
     used = ["copernicus"] if land.any() or (cut_off & np.isfinite(cop)).any() else []
@@ -357,6 +447,47 @@ def coastal(layers: dict[str, np.ndarray], xs, ys, order=()) -> tuple[np.ndarray
         out = np.where(np.isfinite(fine), fine, out)
         used.append("kartverket")
     return out, used
+
+
+def _nearshore(
+    out,
+    water,
+    land,
+    depths,
+    source,
+    sea_keys,
+    distance,
+    spacing,
+    mode,
+    a,
+    trust=None,
+    trust_depth=None,
+    known=None,
+    control=None,
+):
+    """The nearshore band of :func:`coastal` made again (see there)."""
+    from lagoonviz.core.geo import nearshore as near
+    from lagoonviz.core.geo.download import SOURCES
+
+    if trust is None:  # each sea source trusted TRUST_CELLS of its own cells out
+        reach = np.zeros(out.shape)
+        for index, key in enumerate(sea_keys):
+            reach[source == index] = near.TRUST_CELLS * SOURCES[key].finest
+    else:
+        reach = np.full(out.shape, float(trust))
+    shallow = SHORE_DEPTH if trust_depth is None else max(float(trust_depth), SHORE_DEPTH)
+    with np.errstate(invalid="ignore"):
+        # untrusted: near the coast, no sea data of its own, or shallower than trusted
+        band = water & ((distance < reach) | (source < 0) | ~(depths < -shallow))
+        # trusted: the coarse depths as they are, only kept wet (no flat 1 m)
+        trusted = water & ~band
+        out[trusted] = np.minimum(depths, -SHORE_DEPTH)[trusted]
+    # the beach profile reaches as far as the coarse source is not trusted; beyond
+    # (wide shallows the source has flat or dry) the bed is the smoothest between data
+    reach = np.where(reach > 0, reach, np.max(reach, initial=0.0))
+    return near.profile(
+        out, band, land, np.minimum(distance, reach), spacing, mode, a, known, control
+    )
 
 
 #: geo.dat's spacing asked for as the finest the data has

@@ -18,7 +18,9 @@ and its bathymetry.
 - *Bathymetry*: downloaded for the domain (Kartverket's land and sea model in
   Norway, EMODnet in European seas), or a GeoTIFF, ASCII grid or x y z file of
   yours, carried onto a grid over the domain and written as geo.dat in model
-  coordinates (G 10 1). *Run DIVEMesh*
+  coordinates (G 10 1). A download's bed next to the coast (*Near the coast*: a
+  beach profile, the smoothest bed, or 1 m as before), files of one's own laid over
+  it and ICESat-2's nearshore soundings. *Run DIVEMesh*
   then makes the grid.
 """
 
@@ -34,12 +36,16 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QProgressDialog,
     QPushButton,
@@ -77,6 +83,12 @@ DEFAULT_PLACE = Place("Trondheim", 63.4365, 10.3980, "town", "Trøndelag", "defa
 #: a search with no case placed yet prefers the places near this one
 _DEFAULT_NEAR = (DEFAULT_PLACE.lat, DEFAULT_PLACE.lon)
 METHODS = {"Linear (TIN)": "tin", "Inverse distance": "idw", "Nearest point": "nearest"}
+#: a download's bed next to the coast (lagoonviz.core.geo.nearshore)
+NEARSHORE_CHOICES = {
+    "A beach profile (Dean)": "dean",
+    "The smoothest bed (creeks, mudflats)": "smooth",
+    "At most 1 m deep (as before)": "flat",
+}
 #: geo.dat's resolution: DIVEMesh's cell size, the finest the data has, or a spacing
 RESOLUTIONS = {
     "As DIVEMesh's cells (B 1)": None,
@@ -153,6 +165,59 @@ def _combo() -> QComboBox:
 
 def _spin(low: float, high: float, decimals: int = 3, suffix: str = "") -> NumberField:
     return NumberField(low, high, decimals, suffix)
+
+
+class OverlayDialog(QDialog):
+    """How a file of one's own is read: its CRS, depths or heights, and how far its
+    zero (a chart's datum) lies below mean sea level."""
+
+    def __init__(self, name: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Over the download: {name}")
+        form = QFormLayout(self)
+        self.crs = QLineEdit()
+        self.crs.setPlaceholderText("the file's own, else the case's")
+        self.crs.setToolTip("EPSG:4326 for longitude, latitude; 'model' for model coordinates")
+        self.depths = QCheckBox("The file gives depths (positive down)")
+        self.below_msl = _spin(0.0, 20.0, 2, " m")
+        self.below_msl.setPlaceholderText("0: on mean sea level")
+        self.below_msl.setToolTip(
+            "How far the file's zero lies below mean sea level: a chart's datum (lowest "
+            "astronomical tide, about half the spring tidal range), from the chart's "
+            "datum notes or tide tables"
+        )
+        form.addRow("Its CRS", self.crs)
+        form.addRow(self.depths)
+        form.addRow("Its zero below MSL", self.below_msl)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def spec(self, path: str) -> dict:
+        return {
+            "path": path,
+            "crs": self.crs.text().strip() or None,
+            "depths": self.depths.isChecked(),
+            "below_msl": self.below_msl.value(),
+        }
+
+
+def describe_overlay(spec: dict) -> str:
+    """A file of one's own in the list, in a few words."""
+    from lagoonviz.core.geo import icesat2
+
+    path = Path(spec["path"])
+    if icesat2.is_atl24(path):
+        return f"{path.name}  ·  ICESat-2, near the coast"
+    words = [path.name]
+    if spec.get("crs"):
+        words.append(str(spec["crs"]))
+    if spec.get("depths"):
+        words.append("depths")
+    if spec.get("below_msl"):
+        words.append(f"zero {float(spec['below_msl']):g} m below MSL")
+    return "  ·  ".join(words)
 
 
 class MapTab(QWidget):
@@ -361,6 +426,57 @@ class MapTab(QWidget):
             "tables, the chart's datum notes; about half the spring tidal range) puts "
             "both on one zero, so the coast lies where it should"
         )
+        # ---- a download's coast, and data of one's own over it
+        self.nearshore = _combo()
+        for label, key in NEARSHORE_CHOICES.items():
+            self.nearshore.addItem(label, key)
+        self.nearshore.setToolTip(
+            "The bed between the coast (where Copernicus' 30 m land has it) and the "
+            "first depths of the sea source that can be trusted (1.5 of its cells out: "
+            "about 700 m for ETOPO and GEBCO, 170 m for EMODnet). A beach profile: "
+            "A x^(2/3) deep at x metres from the coast, bent to meet the sea's data. "
+            "The smoothest bed: from 0 m at the coast to the sea's data, for creeks, "
+            "harbours and mudflats. At most 1 m deep: the coarse depths, held 0.1 to "
+            "1 m deep next to the coast, as LAGOON did before"
+        )
+        self.nearshore.currentIndexChanged.connect(lambda _i: self.refresh())
+        self.dean_a = _spin(0.01, 1.0, 3)
+        self.dean_a.setValue(0.1)
+        self.dean_a.setToolTip(
+            "Dean's A [m^(1/3)], about 0.21 D^0.48 for a grain size D in mm: 0.07 for "
+            "0.1 mm, 0.1 for 0.2 mm, 0.14 for 0.4 mm sand"
+        )
+        self.trust_depth = _spin(0.0, 50.0, 2, " m")
+        self.trust_depth.setPlaceholderText("0: as the source has it")
+        self.trust_depth.setToolTip(
+            "The sea source's depths shallower than this are not trusted either and "
+            "made again with the rest of the coast: ETOPO and GEBCO give tidal flats, "
+            "harbours and creeks a flat 1 or 2 m (Mumbai: 2.5 m)"
+        )
+        self.overlay_list = QListWidget()
+        self.overlay_list.setMaximumHeight(84)
+        self.overlay_list.setToolTip(
+            "Files of yours laid over the download, the lower over the higher, blended "
+            "in at their edges: surveys, chart soundings, an intertidal terrain model "
+            "from satellite waterlines, DeltaDTM. ICESat-2 ATL24 files (.h5, or a "
+            "folder of them) guide the bed near the coast"
+        )
+        self.overlay_list.currentRowChanged.connect(
+            lambda row: self.overlay_remove.setEnabled(row >= 0)
+        )
+        self.overlay_add = QPushButton("Add…")
+        self.overlay_add.clicked.connect(self.add_overlay)
+        self.overlay_remove = QPushButton("Remove")
+        self.overlay_remove.clicked.connect(self.remove_overlay)
+        self.overlay_remove.setEnabled(False)
+        self.icesat2 = QCheckBox("ICESat-2 soundings (NASA ATL24; an Earthdata login)")
+        self.icesat2.setToolTip(
+            "Download ICESat-2's nearshore soundings for the domain (NASA ATL24, the "
+            "world over; to 20-40 m in clear water, a few metres in turbid): they "
+            "guide the bed near the coast. Needs a free NASA Earthdata login: "
+            "EARTHDATA_TOKEN, or ~/.netrc with machine urs.earthdata.nasa.gov"
+        )
+        self._overlays: list[dict] = []
         self.geo_button = QPushButton("Make geo.dat")
         self.geo_button.setToolTip(
             "Interpolate the file onto a grid over the domain and write geo.dat in model "
@@ -381,6 +497,23 @@ class MapTab(QWidget):
         file_form.addRow("Interpolation", self.method)
         file_form.addRow(self.depths)
         form.addRow(self.file_row)
+        self.web_row = QWidget()
+        self.web_form = web_form = QFormLayout(self.web_row)
+        web_form.setContentsMargins(0, 0, 0, 0)
+        web_form.addRow("Near the coast", self.nearshore)
+        web_form.addRow("Dean's A", self.dean_a)
+        web_form.addRow("Trust the sea from", self.trust_depth)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(self.overlay_add)
+        buttons.addWidget(self.overlay_remove)
+        column = QVBoxLayout()
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addWidget(self.overlay_list)
+        column.addLayout(buttons)
+        web_form.addRow("Over it", column)
+        web_form.addRow(self.icesat2)
+        form.addRow(self.web_row)
         form.addRow("Resolution", self.resolution)
         self.spacing_label = QLabel("Spacing")
         form.addRow(self.spacing_label, self.spacing)
@@ -531,6 +664,11 @@ class MapTab(QWidget):
         self.draft_box.setVisible(draft)
         web = self.bathy_source.currentData() != "file"
         self.file_row.setVisible(not web)
+        self.web_row.setVisible(web)
+        mode = self.nearshore.currentData()
+        self.web_form.setRowVisible(self.dean_a, mode == "dean")
+        self.web_form.setRowVisible(self.trust_depth, mode != "flat")
+        self.overlay_remove.setEnabled(self.overlay_list.currentRow() >= 0)
         self._resolution_changed()
         emodnet = self.bathy_source.currentData() in ("best", "emodnet")
         self.lat_label.setVisible(emodnet)
@@ -779,6 +917,39 @@ class MapTab(QWidget):
     def _source_changed(self) -> None:
         self.refresh()
 
+    def add_overlay(self) -> None:
+        """Files of one's own to lay over the download: asked for, then how each is
+        read (ICESat-2 files need nothing more)."""
+        from lagoonviz.core.geo import icesat2
+
+        chosen, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Over the download",
+            str(self.session.data.case_folder(self.case_id) or Path.home()),
+            "Bathymetry (*.tif *.tiff *.asc *.xyz *.txt *.csv *.dat *.pts *.h5);;All files (*)",
+        )
+        for path in chosen:
+            if icesat2.is_atl24(path):
+                spec = {"path": path, "crs": None, "depths": False, "below_msl": 0.0}
+            else:
+                dialog = OverlayDialog(Path(path).name, self)
+                if dialog.exec() != QDialog.Accepted:
+                    continue
+                spec = dialog.spec(path)
+            self._overlays.append(spec)
+            item = QListWidgetItem(describe_overlay(spec))
+            item.setToolTip(path)
+            self.overlay_list.addItem(item)
+        self.refresh()
+
+    def remove_overlay(self) -> None:
+        row = self.overlay_list.currentRow()
+        if row < 0:
+            return
+        self.overlay_list.takeItem(row)
+        del self._overlays[row]
+        self.refresh()
+
     def geo_dat_state(self) -> str:
         """Why the case's geo.dat no longer fits it ("" when it does or is not known)."""
         if not self.case_id:
@@ -890,12 +1061,18 @@ class MapTab(QWidget):
                     most_points=self._most_points(),
                 )
             else:
+                mode = self.nearshore.currentData()
                 job = self.session.geo_dat_job(
                     key,
                     spacing=spacing,
                     case=self.case_id,
                     lat_below_msl=self.lat_offset.value() if key in ("best", "emodnet") else 0.0,
                     most_points=self._most_points(),
+                    nearshore=mode,
+                    dean_a=self.dean_a.value() if mode == "dean" else None,
+                    trust_depth=(self.trust_depth.value() or None) if mode != "flat" else None,
+                    overlays=list(self._overlays) or None,
+                    icesat2=self.icesat2.isChecked(),
                 )
         except (ValueError, OSError, CrsError) as error:
             self.message.emit(str(error), True)

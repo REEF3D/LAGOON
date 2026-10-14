@@ -43,12 +43,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# the Earth under a case: any CRS (pyproj), any GeoTIFF read in windows (rasterio);
-# without them LAGOON knows WGS 84, ETRS89, Web Mercator, UTM and NTM and reads
-# plain GeoTIFFs itself
+# the Earth under a case: any CRS (pyproj), any GeoTIFF read in windows (rasterio),
+# ICESat-2's nearshore soundings (h5py); without them LAGOON knows WGS 84, ETRS89,
+# Web Mercator, UTM and NTM and reads plain GeoTIFFs itself
 geo = [
     "pyproj>=3.6",
     "rasterio>=1.3",
+    "h5py>=3.8",
 ]
 dev = [
     "pytest>=8",

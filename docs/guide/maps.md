@@ -119,7 +119,31 @@ GeoTIFF and only the part of a large one that is needed).
   sea sources' depths, at least 0.1 m deep at the coast and 2 cm deeper per metre
   out, to 1 m, so a coarse cell over the coast no longer puts land into the sea or
   sea onto the land. Low ground behind dikes (polders) keeps Copernicus' heights.
-  Kartverket's model, where it has data, goes over all of them. EMODnet's depths
+  Kartverket's model, where it has data, goes over all of them.
+  **Near the coast** a coarse sea source is a guess: its first 1.5 cells out (about
+  700 m for ETOPO and GEBCO, 170 m for EMODnet) mix land and sea, and ETOPO and
+  GEBCO give tidal flats, harbours and creeks a flat 1 or 2 m. *Near the coast*
+  makes the bed there again, between the coastline and the sea's depths further
+  out: *A beach profile (Dean)*, the default, is A x^(2/3) deep at x metres from
+  the coast (*Dean's A*: about 0.21 D^0.48 for a grain size D in mm, 0.1 for
+  0.2 mm sand), bent to meet the sea's depths; *The smoothest bed* goes from 0 m at
+  the coast to the sea's depths, for creeks, harbours and mudflats, whose bed is no
+  beach; *At most 1 m deep* keeps the coarse depths, held 0.1 to 1 m deep next to
+  the coast, as LAGOON did before (and as a geo.dat made before is made again).
+  *Trust the sea from* also makes the sea source's shallows again (Mumbai: 2.5 m,
+  over ETOPO's flat 1 and 2 m).
+  **Over it** go files of yours, the lower in the list over the higher, blended in
+  over five cells at their edges, and met by the profile near the coast: surveys,
+  chart soundings (*depths*; *Its zero below MSL*: the chart's datum, about half
+  the spring tidal range), an intertidal terrain model from satellite waterlines,
+  DeltaDTM (30 m coastal terrain without buildings and trees, CC BY 4.0). ICESat-2
+  files (NASA's ATL24, `.h5`, from the NSIDC Data Access Tool or Earthdata Search)
+  and *ICESat-2 soundings*, downloaded for the domain (a free NASA Earthdata login:
+  `EARTHDATA_TOKEN`, or `~/.netrc` with `machine urs.earthdata.nasa.gov`; reading
+  them needs h5py, in `lagoon-viz[geo]`), give the sea floor along the satellite's
+  tracks to 20 to 40 m in clear water (a few metres in turbid), heights over EGM2008
+  as Copernicus' and ETOPO's: too sparse to lie over the sea, they guide the
+  profile near the coast. EMODnet's depths
   are below the lowest astronomical tide (LAT): *LAT below MSL* (from tide tables
   or the chart's datum notes, about half the spring tidal range) puts them on the
   land's zero. Or *A file of mine…*: a GeoTIFF, an Esri ASCII grid
@@ -163,6 +187,13 @@ session.set_domain(0.0, 2000.0, 0.0, 800.0)
 session.turn_model(35.0)  # about the domain's centre
 session.make_geo_dat("best")  # downloaded; or a file: "~/surveys/nidelva.tif"
 session.make_geo_dat("best", spacing="finest")  # as fine as the data is
+session.make_geo_dat("best", nearshore="smooth", trust_depth=2.5)  # creeks, mudflats
+session.make_geo_dat(
+    "best",
+    overlays=[{"path": "~/charts/soundings.xyz", "crs": "EPSG:4326", "depths": True,
+               "below_msl": 2.6}, "~/icesat2/"],  # a chart, then ICESat-2 files
+    icesat2=True,  # and ICESat-2 downloaded for the domain
+)
 session.geo_dat_state()  # why geo.dat no longer fits the case, "" if it does
 session.remake_geo_dat()  # from the same source, for the model as it lies now
 session.add_background_map("Sentinel-2 (satellite)", margin=1.0)
