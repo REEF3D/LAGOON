@@ -3,7 +3,7 @@ QWidget
   Kind: label 'Streamlines'
   Visible: checkbox '' on
   Case: choice 'first case' of ['first case', 'run [case-1]']
-  Dataset: choice 'automatic (NHFLOW volume)' of ['automatic (NHFLOW volume)', 'NHFLOW bed [nhflow_bed]', 'NHFLOW free surface [nhflow_free_surface]', 'NHFLOW volume [nhflow_volume]']
+  Dataset: choice 'automatic (NHFLOW volume)' of ['automatic (NHFLOW volume)', 'NHFLOW volume [nhflow_volume]']
   Streamlines of: choice 'velocity' of ['none', 'velocity']
   Lines in: choice 'volume' of ['volume', 'seed plane', 'free surface']
   Seeds on plane: choice 'y' of ['x', 'y', 'z']
