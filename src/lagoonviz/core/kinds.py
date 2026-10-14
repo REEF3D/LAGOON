@@ -150,6 +150,40 @@ def _colouring(variable: str, colormap: str) -> dict[str, PropertySpec]:
             "colours). Fit range to this frame uses it too",
         ),
         "opacity": PropertySpec(1.0, "Opacity", minimum=0.0, maximum=1.0),
+        **_legend(),
+    }
+
+
+def _legend() -> dict[str, PropertySpec]:
+    """The item's colour bar (lagoonviz.core.legend): the 3D view's, films', figures'."""
+    from lagoonviz.core.legend import NUMBER_FORMATS
+
+    return {
+        "legend": PropertySpec(
+            True,
+            "Colour bar",
+            tip="Show this item's colour bar (3D view, films, saved images, figures)",
+        ),
+        "legend_title": PropertySpec(
+            "",
+            "Bar title",
+            tip=r"The colour bar's title (empty: name · variable); $\eta$ [m] for symbols",
+        ),
+        "legend_format": PropertySpec(
+            "auto",
+            "Bar numbers",
+            choices=NUMBER_FORMATS,
+            tip="How the colour bar's numbers are written",
+        ),
+        "legend_ticks": PropertySpec(
+            0,
+            "Bar ticks",
+            minimum=0,
+            maximum=11,
+            tip="Numbers along the colour bar: 0 automatic (the 3D view and films: its "
+            "ends; figures: round numbers), 1 the ends and the middle, 2 to 11 that "
+            "many, evenly spaced from end to end",
+        ),
     }
 
 
@@ -293,6 +327,22 @@ KINDS: dict[str, KindSpec] = {
             ),
             "gauges_3d": PropertySpec(
                 True, "Gauges in 3D", tip="Show wave gauge positions in the 3D view"
+            ),
+            "labels": PropertySpec(
+                "",
+                "Line names",
+                tip="Names for the legends of the plots and their figures, e.g. "
+                "P1 = gauge 1; P4 = gauge 4 (empty: the column names)",
+            ),
+            "plot_legend": PropertySpec(
+                "above the plot",
+                "Legend",
+                choices=("above the plot", "in the plot", "off"),
+                tip="Where the Plots panel shows the lines' names (figures: inside, "
+                "where they cover least; off: none)",
+            ),
+            "legend_values": PropertySpec(
+                True, "Values at the cursor", tip="The legend gives each line's value at the time"
             ),
         },
     ),

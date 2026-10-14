@@ -54,6 +54,11 @@ Surfaces, slices and objects share these properties:
   at the ends), 50 % brings out the small waves. *Fit range to this frame* uses it
   too.
 - **Opacity**: a transparent free surface shows the bed under it.
+- **Colour bar**: whether the item has one, under the 3D view, on films and in
+  figures. *Bar title* (empty: name · variable; `$\eta$ [m]` for symbols), *Bar
+  numbers* (auto, integer, 1 to 3 decimals, scientific) and *Bar ticks* (0: the
+  ends under the view and on films, round numbers in figures; 1: the ends and the
+  middle; 2 to 11: that many, evenly spaced) are the bar's in all of them.
 - **Contour lines of** a variable, and how many.
 - **Vectors of** a vector field: arrows spread over the surface, how many, and
   their length.

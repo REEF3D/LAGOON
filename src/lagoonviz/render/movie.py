@@ -224,10 +224,17 @@ def write_movie(
     view: str | None = None,
     overlay: Overlay | None = None,
     progress: Progress | None = None,
+    legend: bool = False,
 ) -> Path:
     """Film the session. Returns what was written: the movie file, or the folder of
-    PNGs. Stops early (keeping what was written) when ``progress`` returns False."""
+    PNGs. Stops early (keeping what was written) when ``progress`` returns False.
+    ``legend``: the time and the colour bars on the frames, where the session's
+    legend layout puts them (:meth:`Session.set_legend`)."""
     path = Path(path).expanduser()
+    if legend and overlay is None:
+        from lagoonviz.render.legend_overlay import LegendOverlay
+
+        overlay = LegendOverlay(session)
     times = frame_times(session) if times is None else list(times)
     if not times:
         raise ValueError("nothing to film: no frames in the session")

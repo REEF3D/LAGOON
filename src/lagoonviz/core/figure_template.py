@@ -37,6 +37,32 @@ PANEL_KINDS = ("time", "spectrum", "profile", "view")
 LINE_DATA = ("series", "profile")
 #: 3D view panels: the view as it was (camera) or from the top with axes in metres
 VIEWS = ("camera", "top")
+#: where a line panel's legend goes: inside (matplotlib's places), outside, or off
+LEGEND_PLACES = (
+    "auto",
+    "best",
+    "upper right",
+    "upper left",
+    "lower left",
+    "lower right",
+    "center right",
+    "center left",
+    "upper center",
+    "lower center",
+    "outside right",
+    "above",
+    "below",
+    "off",
+)
+#: where a view panel's colour bars go
+BAR_PLACES = (
+    "below",
+    "right",
+    "inside lower left",
+    "inside lower right",
+    "inside upper left",
+    "inside upper right",
+)
 LINE_STYLES = ("-", "--", ":", "-.", "none")
 MARKERS = ("", "o", "s", "^", "x", ".")
 
@@ -55,6 +81,7 @@ class Line:
     marker: str = ""
     width: float = 0.0  # 0: the style's line width
     data: str = "series"  # "series" (a time series column) or "profile" (a free surface line line)
+    legend: bool = True  # named in the panel's legend
 
     @property
     def measured(self) -> bool:
@@ -108,6 +135,16 @@ class Panel:
     camera: dict | None = None  # views: the 3D camera; None: the session's
     look: str = ""  # views: the 3D look ("studio", ...); empty: the window's
     colour_bars: bool = True  # views: a colour bar per coloured item under the image
+    # line panels: where the legend goes (LEGEND_PLACES; "auto": inside where it
+    # covers least, when there are several lines), its columns (0: as fits), text
+    # size [pt] (None: the figure's), a frame round it
+    legend: str = "auto"
+    legend_columns: int = 0
+    legend_size: float | None = None
+    legend_frame: bool = False
+    # views: where the colour bars go (BAR_PLACES) and their length (of the image)
+    bar_place: str = "below"
+    bar_length: float = 0.7
 
 
 @dataclass
@@ -153,6 +190,10 @@ class FigureTemplate:
                 values["kind"] = "time"
             if values.get("view", "camera") not in VIEWS:
                 values["view"] = "camera"
+            if values.get("legend", "auto") not in LEGEND_PLACES:
+                values["legend"] = "auto"
+            if values.get("bar_place", "below") not in BAR_PLACES:
+                values["bar_place"] = "below"
             panels.append(Panel(lines=lines, notes=notes, **values))
         values = {k: v for k, v in data.items() if k in cls.__dataclass_fields__ and k != "panels"}
         return cls(panels=panels, **values)

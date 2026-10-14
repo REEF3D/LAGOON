@@ -141,7 +141,7 @@ def test_film_and_screenshot_code(tmp_path):
         compile(code, "<code>", "exec")
         assert code.startswith("if MAKE_OUTPUTS:")
         assert "session.set_camera(" in code
-    assert "write_movie(" in film and "(3840, 2160)" in film and "added by the GUI only" in film
+    assert "write_movie(" in film and "(3840, 2160)" in film and "legend=True" in film
     assert "render_session(" in shot and "write_png(" in shot
 
 

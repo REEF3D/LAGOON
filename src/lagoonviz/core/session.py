@@ -1163,6 +1163,29 @@ class Session:
             (first if start is None else float(start), last if end is None else float(end))
         )
 
+    def set_legend(self, **settings) -> dict:
+        """Where films and saved images put the colour bars and the time, and how they
+        look; the 3D view's bars on or off (lagoonviz.core.legend.LAYOUT): ``bars``
+        (a corner: "lower left", "lower right", "upper left", "upper right"),
+        ``time`` (a corner or "off"), ``length`` (of the image's width), ``thickness``
+        and ``text`` (1: as by default), ``box`` (a light box behind them), ``view``
+        ("below the view" or "off"). ``reset=True`` first goes back to the defaults.
+        Each bar's title, numbers and ticks are the item's (``legend_*``). View
+        state: not an undo step. Returns the whole layout."""
+        from lagoonviz.core.legend import layout
+
+        reset = bool(settings.pop("reset", False))
+        current = {} if reset else dict(self.scene.legend)
+        current.update(settings)
+        self.scene.set_legend(current)
+        return layout(self.scene.legend)
+
+    def legend_layout(self) -> dict:
+        """The whole legend layout (:meth:`set_legend`)."""
+        from lagoonviz.core.legend import layout
+
+        return layout(self.scene.legend)
+
     def sun_angles(self, look: str | None = None) -> tuple[float, float]:
         """(azimuth, elevation) of the sun in degrees: the session's, else the look's."""
         import math
@@ -1286,6 +1309,9 @@ class Session:
         if self.scene.play_range is not None:
             start, end = self.scene.play_range
             lines.append(f"session.set_play_range({start!r}, {end!r})")
+        if self.scene.legend:
+            settings = ", ".join(f"{k}={v!r}" for k, v in self.scene.legend.items())
+            lines.append(f"session.set_legend({settings})")
         return "\n".join(lines) + "\n"
 
     @staticmethod

@@ -49,6 +49,8 @@ from PySide6.QtWidgets import (
 )
 
 from lagoonviz.core.figure_template import (
+    BAR_PLACES,
+    LEGEND_PLACES,
     LINE_STYLES,
     MARKERS,
     SUFFIX,
@@ -279,7 +281,30 @@ class FigureEditor(QDialog):
         self.view_box = QComboBox()
         self.view_box.addItem("as captured (3D)", "camera")
         self.view_box.addItem("from the top (2D, axes in m)", "top")
-        self.bars_box = QCheckBox("Colour bars under the image")
+        self.bars_box = QCheckBox("Colour bars of the coloured items")
+        self.bar_place_box = QComboBox()
+        for place in BAR_PLACES:
+            self.bar_place_box.addItem(place, place)
+        self.bar_place_box.setToolTip(
+            "Where the colour bars go: under the image, right of it, or in a corner of it. "
+            "Each bar's title, numbers and ticks are the item's (its Properties)"
+        )
+        self.bar_length_box = _number(10, 100, " %", "")
+        self.bar_length_box.setDecimals(0)
+        self.bar_length_box.setToolTip("The bars' length, of the image's width (right: height)")
+        self.legend_box = QComboBox()
+        for place in LEGEND_PLACES:
+            self.legend_box.addItem(LEGEND_NAMES.get(place, place), place)
+        self.legend_box.setToolTip(
+            "Where the legend goes: inside the axes, outside right, above or below them, or none"
+        )
+        self.legend_columns_box = QSpinBox()
+        self.legend_columns_box.setRange(0, 8)
+        self.legend_columns_box.setSpecialValueText("as fits")
+        self.legend_columns_box.setToolTip("Columns of the legend")
+        self.legend_size_box = _number(0, 30, " pt", "figure's")
+        self.legend_size_box.setToolTip("Text size of the legend")
+        self.legend_frame_box = QCheckBox("Frame round the legend")
         self.take_view_button = QPushButton("Take the 3D view as it is now")
         self.take_view_button.setToolTip("The camera, time and look of the 3D view, for this panel")
         self.take_view_button.clicked.connect(self.take_view)
@@ -300,6 +325,8 @@ class FigureEditor(QDialog):
         form.addRow("", self.take_view_button)
         form.addRow("View", self.view_box)
         form.addRow("", self.bars_box)
+        form.addRow("Colour bars", self.bar_place_box)
+        form.addRow("Bar length", self.bar_length_box)
         form.addRow("y label", self.ylabel_box)
         form.addRow("y min", self.ymin_box)
         form.addRow("y max", self.ymax_box)
@@ -307,14 +334,26 @@ class FigureEditor(QDialog):
         form.addRow("From", self.start_box)
         form.addRow("To", self.end_box)
         form.addRow("", self.compare_box)
+        form.addRow("Legend", self.legend_box)
+        form.addRow("Legend columns", self.legend_columns_box)
+        form.addRow("Legend text", self.legend_size_box)
+        form.addRow("", self.legend_frame_box)
         form.addRow("Notes", self.notes_box)
-        for box in (self.kind_box, self.view_box):
+        for box in (self.kind_box, self.view_box, self.bar_place_box, self.legend_box):
             box.currentIndexChanged.connect(self._panel_changed)
         for box in (self.ylabel_box, self.ymin_box, self.ymax_box, self.panel_title_box):
             box.editingFinished.connect(self._panel_changed)
-        for box in (self.logy_box, self.compare_box, self.bars_box):
+        for box in (self.logy_box, self.compare_box, self.bars_box, self.legend_frame_box):
             box.toggled.connect(self._panel_changed)
-        for box in (self.start_box, self.end_box, self.moment_box, self.span_box):
+        for box in (
+            self.start_box,
+            self.end_box,
+            self.moment_box,
+            self.span_box,
+            self.bar_length_box,
+            self.legend_columns_box,
+            self.legend_size_box,
+        ):
             box.valueChanged.connect(self._panel_changed)
         self.notes_box.textChanged.connect(self._panel_changed)
         return form_widget
@@ -327,6 +366,12 @@ class FigureEditor(QDialog):
             self.take_view_button: kind == "view",
             self.view_box: kind == "view",
             self.bars_box: kind == "view",
+            self.bar_place_box: kind == "view",
+            self.bar_length_box: kind == "view",
+            self.legend_box: lines,
+            self.legend_columns_box: lines,
+            self.legend_size_box: lines,
+            self.legend_frame_box: lines,
             self.ylabel_box: lines,
             self.ymin_box: lines,
             self.ymax_box: lines,
@@ -355,11 +400,15 @@ class FigureEditor(QDialog):
         for marker in MARKERS:
             self.marker_box.addItem(marker or "no marker", marker)
         self.width_line_box = _number(0, 10, " pt", "style's")
+        self.in_legend_box = QCheckBox("In the legend")
+        self.in_legend_box.setToolTip("Name this line in the panel's legend")
         form.addRow("Label", self.label_box)
         form.addRow("Colour", self.color_button)
         form.addRow("Line", self.linestyle_box)
         form.addRow("Marker", self.marker_box)
         form.addRow("Width", self.width_line_box)
+        form.addRow("", self.in_legend_box)
+        self.in_legend_box.toggled.connect(self._line_changed)
         self.label_box.editingFinished.connect(self._line_changed)
         for box in (self.linestyle_box, self.marker_box):
             box.currentIndexChanged.connect(self._line_changed)
@@ -556,6 +605,12 @@ class FigureEditor(QDialog):
             self.moment_box.setValue(-1 if p.time is None else p.time)
             self.view_box.setCurrentIndex(max(self.view_box.findData(p.view), 0))
             self.bars_box.setChecked(p.colour_bars)
+            self.bar_place_box.setCurrentIndex(max(self.bar_place_box.findData(p.bar_place), 0))
+            self.bar_length_box.setValue(100.0 * (p.bar_length or 0.7))
+            self.legend_box.setCurrentIndex(max(self.legend_box.findData(p.legend), 0))
+            self.legend_columns_box.setValue(int(p.legend_columns or 0))
+            self.legend_size_box.setValue(float(p.legend_size or 0))
+            self.legend_frame_box.setChecked(bool(p.legend_frame))
             if self.notes_box.toPlainText() != notes_text(p.notes):
                 self.notes_box.setPlainText(notes_text(p.notes))
             self._panel_rows(p.kind)
@@ -567,6 +622,7 @@ class FigureEditor(QDialog):
             self.linestyle_box.setCurrentIndex(max(self.linestyle_box.findData(item.linestyle), 0))
             self.marker_box.setCurrentIndex(max(self.marker_box.findData(item.marker), 0))
             self.width_line_box.setValue(item.width)
+            self.in_legend_box.setChecked(item.legend)
         self._updating = False
 
     def _figure_changed(self) -> None:
@@ -600,6 +656,12 @@ class FigureEditor(QDialog):
         p.time = None if moment < 0 else moment
         p.view = self.view_box.currentData()
         p.colour_bars = self.bars_box.isChecked()
+        p.bar_place = self.bar_place_box.currentData()
+        p.bar_length = self.bar_length_box.value() / 100.0
+        p.legend = self.legend_box.currentData()
+        p.legend_columns = self.legend_columns_box.value()
+        p.legend_size = self.legend_size_box.value() or None
+        p.legend_frame = self.legend_frame_box.isChecked()
         p.notes = parse_notes(self.notes_box.toPlainText())
         self._panel_rows(p.kind)
         self.tree.topLevelItem(panel).setText(0, self._panel_label(panel + 1, p))
@@ -632,6 +694,7 @@ class FigureEditor(QDialog):
         item.linestyle = self.linestyle_box.currentData()
         item.marker = self.marker_box.currentData()
         item.width = self.width_line_box.value()
+        item.legend = self.in_legend_box.isChecked()
         self.tree.currentItem().setText(0, item.title())
         self.changed()
 
@@ -744,6 +807,13 @@ class FigureEditor(QDialog):
         )
         self.main_window.statusBar().showMessage(f"Figure saved to {written}", 15000)
         return str(written)
+
+
+#: how the legend places read in the editor
+LEGEND_NAMES = {
+    "auto": "inside, where it covers least (several lines)",
+    "best": "inside, where it covers least",
+}
 
 
 def _number(low: float, high: float, suffix: str, special: str) -> QDoubleSpinBox:

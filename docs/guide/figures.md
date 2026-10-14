@@ -47,6 +47,14 @@ Labels may hold `$\eta$`-style mathematics without LaTeX installed.
 Notes are placed with `x, y: text` (fractions of the panel) and may hold
 `$LaTeX$`.
 
+**Legends.** A panel of lines has its *Legend*: inside where it covers least
+(by default only with several lines), in a corner or at a side inside the axes,
+outside right, above or below the axes, or off; its columns, text size and a
+frame. A line's *In the legend* leaves it out. A 3D view panel puts its
+*Colour bars* under the image, right of it, or in a corner of it, with their
+*Bar length*; each bar's title, numbers and ticks are the item's
+([Colours](scene.md#colours)).
+
 ![Free surface lines](../images/figure-profiles.png)
 
 ## Templates

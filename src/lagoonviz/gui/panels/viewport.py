@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from lagoonviz.core.data.manager import BackgroundLoader, FrameKey
+from lagoonviz.core.legend import colour_bars, plain
 from lagoonviz.core.scene import VIEW_EVENTS
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.panels.colorbar import ColorBarEntry, ColorBarStrip
@@ -750,6 +751,9 @@ class Viewport3D(QWidget):
             self._sun_timer.start()
             self.redraw()
             return
+        if event == "legend":  # the bars under the view on or off
+            self._update_overlays()
+            return
         if event in VIEW_EVENTS:
             return  # e.g. the play range: nothing to draw again
         if self.comparing:
@@ -782,8 +786,8 @@ class Viewport3D(QWidget):
 
     def _update_overlays_now(self) -> None:
         self._update_probe()  # a probe follows the timeline
-        entries = []
         frames = []
+        loaded = {}
         for item_id in self.view.item_ids:
             if item_id not in self.session.scene:
                 continue
@@ -794,22 +798,14 @@ class Viewport3D(QWidget):
                 if dataset is not None and key.index < len(dataset.frames):
                     frames.append(dataset.frames[key.index].step)  # REEF3D output number
                 mesh = self.session.data.cache.get(key)
-                if mesh is None:
-                    continue
-                variable = str(item.properties.get("variable", "none"))
-                if variable != "none":
-                    try:
-                        vmin, vmax = self.session.data.value_range(item_id, mesh)
-                    except KeyError:
-                        continue  # a new variable is still loading
-                    entries.append(
-                        ColorBarEntry(
-                            f"{item.name} · {variable}",
-                            str(item.properties.get("colormap", "viridis")),
-                            vmin,
-                            vmax,
-                        )
-                    )
+                if mesh is not None:
+                    loaded[item_id] = mesh
+        entries = []
+        if self.session.legend_layout()["view"] != "off":
+            entries = [
+                ColorBarEntry(plain(bar.label), bar.colormap, bar.vmin, bar.vmax, bar.ticks)
+                for bar in colour_bars(self.session, loaded)
+            ]
         self.colorbars.set_entries(entries)
         loading = " · loading…" if self.busy else ""
         if self.probe is not None:

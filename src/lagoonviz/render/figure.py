@@ -24,6 +24,8 @@ import numpy as np
 from lagoonviz.core import Session
 from lagoonviz.core.colormaps import SERIES_PALETTES, lut
 from lagoonviz.core.data.manager import Trace
+from lagoonviz.core.legend import ColourBar, format_number, line_name
+from lagoonviz.core.legend import colour_bars as legend_bars
 
 MM = 1 / 25.4  # inches per millimetre
 #: journal column widths [mm]
@@ -176,18 +178,19 @@ def series_figure(
         seconds = session.data.time_in_seconds()
         for ax, (item_id, traces) in zip(axes, rows, strict=True):
             units = {t.unit for t in traces}
+            item = _row_item(session, item_id)
             for index, trace in enumerate(traces):
                 color = (
                     PROBE_COLOR if item_id == "probe" else spec.palette[index % len(spec.palette)]
                 )
-                ax.plot(trace.time, trace.values, color=color, label=trace.name)
+                ax.plot(trace.time, trace.values, color=color, label=line_name(item, trace.name))
             if len(traces) == 1:
-                ax.set_ylabel(_label(traces[0].name, traces[0].unit))
+                ax.set_ylabel(_label(line_name(item, traces[0].name), traces[0].unit))
             else:
                 ax.set_ylabel(
                     _label(_row_name(session, item_id), units.pop() if len(units) == 1 else "")
                 )
-                ax.legend(loc="best", ncols=min(len(traces), 4))
+                place_legend(ax, _row_legend(item), columns=min(len(traces), 4))
             if spec.time_cursor and seconds:
                 ax.axvline(session.scene.time, color="0.4", linewidth=0.6, linestyle="--")
             ax.margins(x=0)
@@ -197,6 +200,19 @@ def series_figure(
         if spec.title:
             figure.suptitle(spec.title)
     return figure
+
+
+def _row_item(session: Session, item_id: str):
+    """The time series item of a row of plots (None: the probe's)."""
+    return session.scene.get(item_id) if item_id in session.scene else None
+
+
+def _row_legend(item) -> str:
+    """Where a quick figure puts a time series item's legend: inside, or off as the
+    item's Plots legend is."""
+    if item is not None and item.properties.get("plot_legend") == "off":
+        return "off"
+    return "best"
 
 
 def _row_name(session: Session, item_id: str) -> str:
@@ -257,6 +273,7 @@ def spectrum_figure(
         highest = 0.0
         for ax, (item_id, traces) in zip(axes, rows, strict=True):
             units = {t.unit for t in traces}
+            item = _row_item(session, item_id)
             for index, trace in enumerate(traces):
                 try:
                     f, s = spectrum(trace.time, trace.values, start=start, end=end)
@@ -268,7 +285,8 @@ def spectrum_figure(
                 )
                 unit = f" {trace.unit}" if trace.unit else ""
                 label = (
-                    f"{trace.name}: $H_{{m0}}$ = {waves.hm0:.3g}{unit}, $T_p$ = {waves.tp:.3g} s"
+                    f"{line_name(item, trace.name)}: $H_{{m0}}$ = {waves.hm0:.3g}{unit}, "
+                    f"$T_p$ = {waves.tp:.3g} s"
                 )
                 ax.plot(f, s, color=color, label=label)
                 # up to where the spectrum has fallen to half a percent of its peak
@@ -278,8 +296,9 @@ def spectrum_figure(
             unit = units.pop() if len(units) == 1 else ""
             ax.set_ylabel(f"S [{unit}$^2$/Hz]" if unit else "S [1/Hz]")
             top = max((line.get_ydata().max() for line in ax.get_lines()), default=1.0)
-            ax.set_ylim(0, 1.45 * top)  # room for the legend above the peaks
-            ax.legend(loc="upper right")
+            legend = _row_legend(item)
+            ax.set_ylim(0, (1.45 if legend != "off" else 1.05) * top)  # room for the legend
+            place_legend(ax, "upper right" if legend != "off" else "off")
             ax.set_title(_row_name(session, item_id), loc="left")
         if highest > 0:
             axes[0].set_xlim(0, highest)
@@ -350,34 +369,75 @@ def validation_figure(
 
 
 # ======================================================================== 3D view
-@dataclass
-class ColourBar:
-    label: str
-    colormap: str
-    vmin: float
-    vmax: float
-
-
 def colour_bars(session: Session) -> list[ColourBar]:
-    """The colour scales of the visible coloured items, as the view shows them."""
-    data = session.data
-    bars = []
-    for item_id in data.data_items():
-        item = session.scene.get(item_id)
-        variable = str(item.properties.get("variable", "none"))
-        if not item.visible or variable == "none":
-            continue
-        mesh = data.load(item_id)
-        if mesh is None:
-            continue
-        try:
-            vmin, vmax = data.value_range(item_id, mesh)
-        except KeyError:
-            continue
-        bars.append(
-            ColourBar(f"{item.name}: {variable}", str(item.properties["colormap"]), vmin, vmax)
+    """The colour bars of the visible coloured items that have one, as the view shows
+    them (lagoonviz.core.legend)."""
+    return legend_bars(session)
+
+
+def draw_bar(figure, cax, bar: ColourBar, orientation: str = "horizontal") -> None:
+    """A colour bar in its axes: the item's colour map and range, its title, and its
+    numbers as the item asks (ticks, format)."""
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    from matplotlib.ticker import FuncFormatter
+
+    mappable = ScalarMappable(Normalize(bar.vmin, bar.vmax), colormap(bar.colormap))
+    colourbar = figure.colorbar(mappable, cax=cax, orientation=orientation)
+    colourbar.set_label(bar.label)
+    colourbar.outline.set_linewidth(0.5)
+    if bar.count > 0:
+        colourbar.set_ticks([value for value, _ in bar.ticks])
+        colourbar.set_ticklabels([text for _, text in bar.ticks])
+    elif bar.number_format != "auto":
+        how = bar.number_format
+        colourbar.formatter = FuncFormatter(lambda value, _pos: format_number(value, how))
+        colourbar.update_ticks()
+
+
+def place_legend(
+    ax,
+    place: str = "auto",
+    entries: int | None = None,
+    columns: int = 0,
+    size: float | None = None,
+    frame: bool = False,
+) -> None:
+    """A line panel's legend where ``place`` says (LEGEND_PLACES): "auto" inside where
+    it covers least, when there are several lines; outside right, above or below the
+    axes; "off" none. ``columns`` 0: one, or a row of up to four above and below."""
+    handles, labels = ax.get_legend_handles_labels()
+    count = len(labels) if entries is None else entries
+    if place == "off" or not labels or (place == "auto" and count < 2):
+        return
+    options: dict = {"frameon": bool(frame)}
+    if size:
+        options["fontsize"] = size
+    across = columns or (min(len(labels), 4) if place in ("above", "below") else 1)
+    options["ncols"] = max(int(across), 1)
+    if place == "outside right":
+        options.update(loc="center left", bbox_to_anchor=(1.01, 0.5), borderaxespad=0.0)
+    elif place == "above":
+        options.update(loc="lower right", bbox_to_anchor=(1.0, 1.0), borderaxespad=0.2)
+    elif place == "below":
+        # under the tick labels and the x label: their height in points, down from
+        # the axes' lower edge
+        from matplotlib import rcParams
+        from matplotlib.transforms import ScaledTranslation
+
+        def points(key: str) -> float:
+            size = rcParams[key]
+            return float(size) if isinstance(size, int | float) else 0.9 * rcParams["font.size"]
+
+        drop = 1.5 * (points("xtick.labelsize") + points("axes.labelsize")) + 6.0
+        figure = ax.get_figure()
+        below = ax.transAxes + ScaledTranslation(0, -drop / 72, figure.dpi_scale_trans)
+        options.update(
+            loc="upper center", bbox_to_anchor=(0.5, 0.0), bbox_transform=below, borderaxespad=0
         )
-    return bars
+    else:
+        options["loc"] = "best" if place == "auto" else place
+    ax.legend(handles, labels, **options)
 
 
 def view_extent(camera, size: tuple[int, int]) -> tuple[float, float, float, float] | None:
@@ -447,15 +507,8 @@ def view_figure(
         ax.set_title(
             spec.title or (f"t = {when:.2f} s" if seconds else f"output {round(when)}"), loc="left"
         )
-        from matplotlib.cm import ScalarMappable
-        from matplotlib.colors import Normalize
-
         for index, bar in enumerate(bars):
-            cax = figure.add_subplot(grid[index + 1])
-            mappable = ScalarMappable(Normalize(bar.vmin, bar.vmax), colormap(bar.colormap))
-            colourbar = figure.colorbar(mappable, cax=cax, orientation="horizontal")
-            colourbar.set_label(bar.label)
-            colourbar.outline.set_linewidth(0.5)
+            draw_bar(figure, figure.add_subplot(grid[index + 1]), bar)
     return figure
 
 
@@ -478,6 +531,8 @@ PANEL_HEIGHTS = {"time": 30.0, "spectrum": 34.0, "profile": 32.0}
 #: a colour bar under a view panel [mm]: the bar, and with its ticks and label
 BAR_MM = 3.0
 BAR_ROOM_MM = 13.0
+#: a colour bar right of a view panel [mm]: the bar, its ticks and its title
+BAR_SIDE_MM = 16.0
 
 
 def template_figure(
@@ -502,7 +557,8 @@ def template_figure(
 
     def natural(panel, span: int) -> float:
         if panel.kind == "view":
-            extra = BAR_ROOM_MM * len(bars) if panel.colour_bars else 0.0
+            below = panel.colour_bars and getattr(panel, "bar_place", "below") == "below"
+            extra = BAR_ROOM_MM * len(bars) if below else 0.0
             return cell_mm * span * 9 / 16 + extra + (14.0 if panel.view == "top" else 6.0)
         return PANEL_HEIGHTS.get(panel.kind, 30.0)
 
@@ -604,7 +660,7 @@ def _lines_panel(ax, session: Session, panel, spec: FigureSpec, missing: list[st
         style = {
             "color": color,
             "linestyle": "none" if linestyle == "none" else linestyle,
-            "label": data.name,
+            "label": data.name if getattr(line, "legend", True) else "_nolegend_",
         }
         if line.width:
             style["linewidth"] = line.width
@@ -627,7 +683,10 @@ def _lines_panel(ax, session: Session, panel, spec: FigureSpec, missing: list[st
                 missing.append(f"{line.title()}: {error}")
                 continue
             waves = wave_parameters(f, s)
-            style["label"] = f"{data.name}: $H_{{m0}}$ = {waves.hm0:.3g}, $T_p$ = {waves.tp:.3g} s"
+            if getattr(line, "legend", True):
+                style["label"] = (
+                    f"{data.name}: $H_{{m0}}$ = {waves.hm0:.3g}, $T_p$ = {waves.tp:.3g} s"
+                )
             ax.plot(f, s, **style)
         else:
             keep = np.ones(data.time.size, bool)
@@ -690,28 +749,45 @@ def _lines_panel(ax, session: Session, panel, spec: FigureSpec, missing: list[st
         ax.set_yscale("log")
     if panel.ymin is not None or panel.ymax is not None:
         ax.set_ylim(panel.ymin, panel.ymax)
-    if len(drawn) > 1:
-        ax.legend(loc="best")
+    place_legend(
+        ax,
+        getattr(panel, "legend", "auto"),
+        len(drawn),
+        getattr(panel, "legend_columns", 0),
+        getattr(panel, "legend_size", None),
+        getattr(panel, "legend_frame", False),
+    )
     return title
 
 
 def _view_panel(figure, cell, session: Session, panel, spec, width_mm, bars, image):
     """A 3D view panel: the image (rendered off screen at the panel's moment and
-    camera, unless given), its colour bars under it. Returns (axes, default title)."""
-    image_mm = width_mm * 9 / 16
-    if bars:
+    camera, unless given), its colour bars below it, right of it or inside it (the
+    panel's ``bar_place``). Returns (axes, default title)."""
+    place = getattr(panel, "bar_place", "below")
+    length = min(max(float(getattr(panel, "bar_length", 0.7) or 0.7), 0.1), 1.0)
+    side = place == "right" and bool(bars)
+    image_w_mm = width_mm - (BAR_SIDE_MM * len(bars) if side else 0.0)
+    image_mm = image_w_mm * 9 / 16
+    bar_axes = []
+    if bars and place == "below":
         sub = cell.subgridspec(1 + len(bars), 1, height_ratios=[image_mm] + [BAR_MM] * len(bars))
         ax = figure.add_subplot(sub[0])
         bar_axes = [figure.add_subplot(sub[k + 1]) for k in range(len(bars))]
+    elif side:
+        sub = cell.subgridspec(
+            1, 1 + len(bars), width_ratios=[image_w_mm] + [BAR_SIDE_MM] * len(bars)
+        )
+        ax = figure.add_subplot(sub[0, 0])
+        bar_axes = [figure.add_subplot(sub[0, k + 1]) for k in range(len(bars))]
     else:
         ax = figure.add_subplot(cell)
-        bar_axes = []
     when = session.scene.time if panel.time is None else float(panel.time)
     extent = None
     if image is None:
         image, extent = render_view(
             session,
-            (round(width_mm * MM * spec.dpi), round(image_mm * MM * spec.dpi)),
+            (round(image_w_mm * MM * spec.dpi), round(image_mm * MM * spec.dpi)),
             time=when,
             camera=panel.camera,
             top=panel.view == "top",
@@ -726,18 +802,53 @@ def _view_panel(figure, cell, session: Session, panel, spec, width_mm, bars, ima
         ax.imshow(image, interpolation="lanczos")
         ax.set_axis_off()
     map_credits(ax, session)
-    from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import Normalize
-
-    for room, bar in zip(bar_axes, bars, strict=True):
-        room.set_axis_off()  # the bar sits centred in its row, narrower than the image
-        cax = room.inset_axes([0.15, 0.0, 0.7, 1.0])
-        mappable = ScalarMappable(Normalize(bar.vmin, bar.vmax), colormap(bar.colormap))
-        colourbar = figure.colorbar(mappable, cax=cax, orientation="horizontal")
-        colourbar.set_label(bar.label)
-        colourbar.outline.set_linewidth(0.5)
+    if place == "below":
+        for room, bar in zip(bar_axes, bars, strict=True):
+            room.set_axis_off()  # the bar sits centred in its row, narrower than the image
+            draw_bar(figure, room.inset_axes([(1 - length) / 2, 0.0, length, 1.0]), bar)
+    elif side:
+        for room, bar in zip(bar_axes, bars, strict=True):
+            room.set_axis_off()
+            cax = room.inset_axes([0.0, (1 - length) / 2, 0.22, length])
+            draw_bar(figure, cax, bar, "vertical")
+    elif bars:
+        _bars_inside(ax, figure, bars, place, length, spec, image_mm)
     seconds = session.data.time_in_seconds()
     return ax, (f"t = {when:.2f} s" if seconds else f"output {round(when)}")
+
+
+def _bars_inside(ax, figure, bars, place: str, length: float, spec, image_mm: float) -> None:
+    """Colour bars stacked in a corner of a view, on a light box."""
+    from matplotlib.patches import Rectangle
+
+    font_mm = spec.font_size * 0.3528
+    bar_h = BAR_MM / image_mm  # of the axes' height
+    row = (BAR_MM + 2.6 * font_mm + 1.0) / image_mm
+    width = min(length, 0.9) * 0.6  # inside: shorter than below the image
+    pad = 0.02
+    left = "left" in place
+    upper = "upper" in place
+    x = pad + 0.02 if left else 1 - pad - 0.02 - width
+    total = row * len(bars)
+    y_top = 1 - pad if upper else pad + total
+    ax.add_patch(
+        Rectangle(
+            (x - 0.045, y_top - total - 0.01),
+            width + 0.09,
+            total + 0.01,
+            transform=ax.transAxes,
+            facecolor="white",
+            alpha=0.75,
+            edgecolor="none",
+            zorder=3,
+        )
+    )
+    for k, bar in enumerate(bars):
+        # title above the bar, numbers under it: the bar in the row's middle
+        y = y_top - (k + 1) * row + (1.3 * font_mm + 0.5) / image_mm
+        cax = ax.inset_axes([x, y, width, bar_h], zorder=4)
+        draw_bar(figure, cax, bar)
+        cax.xaxis.set_label_position("top")
 
 
 def map_credits(ax, session: Session) -> None:

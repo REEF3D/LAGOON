@@ -23,6 +23,7 @@ from PySide6.QtWidgets import QComboBox, QSizePolicy, QWidget
 
 from lagoonviz.core.data.manager import Trace
 from lagoonviz.core.data.series import decimate
+from lagoonviz.core.legend import line_name
 from lagoonviz.core.plotting import nice_step, nice_ticks, tick_label, value_range
 from lagoonviz.core.scene import VIEW_EVENTS
 from lagoonviz.gui.bridge import SessionBridge
@@ -365,8 +366,10 @@ class PlotsPanel(QWidget):
             painter.drawText(rect, Qt.AlignCenter, "no data: check the item's file and columns")
 
     def _paint_legend(self, painter, metrics, item_id, traces, rect, cursor) -> None:
-        """Title and legend above a row, with each line's value at the cursor."""
+        """Title and legend above a row (or the legend inside it, or none, as the item
+        says), with each line's name and its value at the cursor."""
         x = rect.left() + 2
+        item = None
         if item_id == SHOW_PROBE:  # the orange dot of the 3D view, then its title
             painter.setPen(QColor(PROBE_COLOR))
             painter.drawText(
@@ -375,22 +378,51 @@ class PlotsPanel(QWidget):
             x += metrics.horizontalAdvance("\u25cf") + 4
             title = "Probe"
         else:
-            title = self.session.scene.get(item_id).name
+            item = self.session.scene.get(item_id)
+            title = item.name
+        place = (
+            str(item.properties.get("plot_legend", "above the plot")) if item else "above the plot"
+        )
+        values = bool(item.properties.get("legend_values", True)) if item else True
         painter.setPen(QColor(COLORS["text"]))
         painter.drawText(QRectF(x, rect.top() - TOP + 2, 400, TOP - 4), Qt.AlignVCenter, title)
         x += metrics.horizontalAdvance(title) + 14
+        if place == "off":
+            return
+        entries = []
         for index, trace in enumerate(traces):
-            color = _trace_color(item_id, index)
-            text = trace.name + (f" [{trace.unit}]" if trace.unit else "")
-            if cursor is not None:
-                value = _value_at(trace, cursor)
-                text += f" = {_format_value(value)}"
+            text = line_name(item, trace.name) + (f" [{trace.unit}]" if trace.unit else "")
+            if cursor is not None and values:
+                text += f" = {_format_value(_value_at(trace, cursor))}"
+            entries.append((_trace_color(item_id, index), text))
+        if place == "in the plot":
+            self._legend_inside(painter, metrics, entries, rect)
+            return
+        for color, text in entries:
             painter.fillRect(QRectF(x, rect.top() - TOP / 2 - 1, 10, 3), color)
             painter.setPen(QColor(COLORS["text"]))
             painter.drawText(
                 QRectF(x + 14, rect.top() - TOP + 2, 400, TOP - 4), Qt.AlignVCenter, text
             )
             x += 14 + metrics.horizontalAdvance(text) + 14
+
+    @staticmethod
+    def _legend_inside(painter, metrics, entries, rect: QRectF) -> None:
+        """The lines' names stacked in the plot's upper right corner, on its background."""
+        if not entries:
+            return
+        line_h = metrics.height() + 2
+        width = max(metrics.horizontalAdvance(text) for _, text in entries) + 26
+        rows = max(1, min(len(entries), int((rect.height() - 8) // line_h)))
+        box = QRectF(rect.right() - width - 6, rect.top() + 4, width, rows * line_h + 4)
+        background = QColor(COLORS["base"])
+        background.setAlpha(215)
+        painter.fillRect(box, background)
+        for k, (color, text) in enumerate(entries[:rows]):
+            y = box.top() + 2 + k * line_h
+            painter.fillRect(QRectF(box.left() + 6, y + line_h / 2 - 1, 10, 3), color)
+            painter.setPen(QColor(COLORS["text"]))
+            painter.drawText(QRectF(box.left() + 20, y, width - 22, line_h), Qt.AlignVCenter, text)
 
     def _path(self, trace: Trace, rect: QRectF, low_t, high_t, y_of) -> QPainterPath:
         time, values = trace.time, trace.values

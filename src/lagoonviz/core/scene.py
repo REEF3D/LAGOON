@@ -29,7 +29,7 @@ PLAN_SIDES = ("top", "front", "back", "right", "left")
 
 
 #: events of view state, not of the items (panels that only show items skip them)
-VIEW_EVENTS = ("camera_keys", "sun", "play_range", "highlight")
+VIEW_EVENTS = ("camera_keys", "sun", "play_range", "highlight", "legend")
 
 #: what the session works on: the results of a run, or its set-up (the input files,
 #: DIVEMesh's grid); each mode shows its own items
@@ -100,6 +100,9 @@ class Scene:
         self.sun: tuple[float, float] | None = None
         #: the part of the timeline that plays (start, end times); None: all of it
         self.play_range: tuple[float, float] | None = None
+        #: the legend layout of films and saved images (lagoonviz.core.legend.LAYOUT):
+        #: only the settings changed from it
+        self.legend: dict[str, Any] = {}
         #: "results" or "setup" (see MODES); changed by the SetMode command
         self.mode: str = "results"
         #: whether each set-up item is shown in the other mode (it keeps its own
@@ -249,6 +252,15 @@ class Scene:
         self.play_range = play_range
         self._notify("play_range", None)
 
+    def set_legend(self, settings: dict[str, Any]) -> None:
+        """The legend layout (lagoonviz.core.legend): the settings that differ from
+        its defaults; observers get "legend"."""
+        from lagoonviz.core.legend import LAYOUT, layout
+
+        full = layout(settings)
+        self.legend = {k: v for k, v in full.items() if v != LAYOUT[k]}
+        self._notify("legend", None)
+
     def inputs_changed(self, case_id: str) -> None:
         """A case's input files (ctrl.txt, control.txt) were edited: observers get
         "inputs" (the set-up is drawn again)."""
@@ -283,6 +295,7 @@ class Scene:
             "camera_path": self.camera_path,
             "sun": list(self.sun) if self.sun is not None else None,
             "play_range": list(self.play_range) if self.play_range is not None else None,
+            "legend": dict(self.legend),
             "mode": self.mode,
             "other_visibility": dict(self.other_visibility),
             "counters": dict(self._counters),
@@ -321,6 +334,16 @@ class Scene:
         self.play_range = (
             (float(played[0]), float(played[1])) if isinstance(played, list | tuple) else None
         )
+        self.legend = {}
+        legend = data.get("legend")
+        if isinstance(legend, dict):
+            from lagoonviz.core.legend import LAYOUT, layout
+
+            try:
+                full = layout({k: v for k, v in legend.items() if k in LAYOUT})
+            except ValueError:
+                full = dict(LAYOUT)
+            self.legend = {k: v for k, v in full.items() if v != LAYOUT[k]}
         mode = str(data.get("mode", "results"))
         self.mode = mode if mode in MODES else "results"
         other = data.get("other_visibility", {})

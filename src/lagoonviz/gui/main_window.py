@@ -374,6 +374,12 @@ class MainWindow(QMainWindow):
             tip="Where the light comes from: the 3D view, films and path tracing",
         )
         self.sun_dialog = None
+        self.act_legend = self._action(
+            "&Legend...",
+            self.show_legend_dialog,
+            tip="Where films put the time and the colour bars, and the 3D view's bars",
+        )
+        self.legend_dialog = None
         self.act_reset_layout = self._action("&Reset layout", self.reset_layout)
         self.act_about = self._action("&About LAGOON", self.about)
 
@@ -470,6 +476,7 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _=False, n=name: set_white_water(self, n))
             self.white_water_actions[name] = action
         view_menu.addAction(self.act_sun)
+        view_menu.addAction(self.act_legend)
         view_menu.addSeparator()
         view_menu.addAction(self.act_compare)
         view_menu.addAction(self.act_full_screen)
@@ -854,6 +861,17 @@ class MainWindow(QMainWindow):
         self.sun_dialog.show()
         self.sun_dialog.raise_()
         return self.sun_dialog
+
+    def show_legend_dialog(self):
+        """View → Legend: the films' time and colour bars, the 3D view's bars."""
+        from lagoonviz.gui.legend_dialog import LegendDialog
+
+        if self.legend_dialog is None:
+            self.legend_dialog = LegendDialog(self, self.session)
+        self.legend_dialog.show_layout()
+        self.legend_dialog.show()
+        self.legend_dialog.raise_()
+        return self.legend_dialog
 
     def set_viewport_look(self, name: str) -> None:
         """Background and lighting of the 3D view; remembered for the next start."""

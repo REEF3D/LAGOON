@@ -264,10 +264,11 @@ def film_code(
             )
         )
         return _block("File > Export animation (path traced with Blender)", imports, body)
+    extra = ", legend=True" if overlay else ""
     body.append(
         "write_movie("
         + f"session, {_path(path)!r}, times, {tuple(int(v) for v in size)!r}, {float(fps)!r}, "
-        + f"{style!r})"
+        + f"{style!r}{extra})"
     )
     if len(body[-1]) + 4 > WIDTH:
         body[-1] = _raw_call(
@@ -279,10 +280,9 @@ def film_code(
                 repr(tuple(int(v) for v in size)),
                 repr(float(fps)),
                 repr(style),
+                *(["legend=True"] if overlay else []),
             ],
         )
-    if overlay:
-        body.append("# the time and colour bars drawn on the frames are added by the GUI only")
     return _block("File > Export animation", imports, body)
 
 

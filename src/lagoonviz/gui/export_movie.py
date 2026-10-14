@@ -16,8 +16,7 @@ import traceback
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QLinearGradient, QPainter
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -38,9 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from lagoonviz.core import Session
-from lagoonviz.core.colormaps import lut
 from lagoonviz.core.foam import DEFAULT_WHITE_WATER, WHITE_WATER_AMOUNTS
-from lagoonviz.core.plotting import tick_label
 
 log = logging.getLogger("lagoon.gui")
 
@@ -91,6 +88,7 @@ class ExportAnimationDialog(QDialog):
     def __init__(self, parent: QWidget, session: Session, folder: str, viewport_size) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export animation")
+        self.session = session
         steps = session.data.timeline()[1]
         first = int(steps[0]) if len(steps) else 0
         last = int(steps[-1]) if len(steps) else 0
@@ -153,7 +151,17 @@ class ExportAnimationDialog(QDialog):
 
         self.overlay = QCheckBox("Time and colour bars")
         self.overlay.setChecked(True)
-        form.addRow("Show", self.overlay)
+        self.legend_button = QPushButton("Legend…")
+        self.legend_button.setToolTip("Where the time and the colour bars go, and their look")
+        self.legend_button.clicked.connect(self._legend)
+        shown = QHBoxLayout()
+        shown.setContentsMargins(0, 0, 0, 0)
+        shown.addWidget(self.overlay)
+        shown.addWidget(self.legend_button)
+        shown.addStretch(1)
+        holder = QWidget()
+        holder.setLayout(shown)
+        form.addRow("Show", holder)
 
         from lagoonviz.render.pathtrace import find_blender
 
@@ -216,9 +224,16 @@ class ExportAnimationDialog(QDialog):
         cycles = self.engine.currentData() == "cycles"
         self.cycles_row.setVisible(cycles)
         self.overlay.setEnabled(not cycles)  # Cycles films show the scene alone
+        self.legend_button.setVisible(not cycles)
         buttons = self.findChild(QDialogButtonBox)
         if buttons is not None:
             buttons.button(QDialogButtonBox.Ok).setEnabled(not cycles or bool(self.blender))
+
+    def _legend(self) -> None:
+        """The legend layout, over this dialog (it takes the input while it is open)."""
+        from lagoonviz.gui.legend_dialog import LegendDialog
+
+        LegendDialog(self, self.session).exec()
 
     def _browse(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -248,63 +263,11 @@ class ExportAnimationDialog(QDialog):
 
 
 def make_overlay(session: Session):
-    """Draw the time and the colour bars of the coloured items onto a frame."""
+    """The time and the colour bars on the frames, as the session's legend layout
+    puts them (View → Legend…)."""
+    from lagoonviz.render.legend_overlay import LegendOverlay
 
-    def overlay(image: np.ndarray, time: float) -> np.ndarray:
-        height, width = image.shape[:2]
-        pixels = np.ascontiguousarray(image[..., :4], dtype=np.uint8)
-        qimage = QImage(pixels.data, width, height, 4 * width, QImage.Format_RGBA8888)
-        painter = QPainter(qimage)
-        painter.setRenderHint(QPainter.Antialiasing)
-        unit = max(height / 1080, 0.4)
-        font = QFont(QApplication.font())
-        font.setPixelSize(round(26 * unit))
-        painter.setFont(font)
-        painter.setPen(QColor("#1e2833"))
-        data = session.data
-        label = f"t = {time:.2f} s" if data.time_in_seconds() else f"output {round(time)}"
-        margin = 28 * unit
-        painter.drawText(QRectF(margin, margin, width / 2, 40 * unit), Qt.AlignLeft, label)
-
-        bars = []
-        for item_id in data.data_items():
-            item = session.scene.get(item_id)
-            variable = str(item.properties.get("variable", "none"))
-            if not item.visible or variable == "none":
-                continue
-            mesh = data.load(item_id)
-            if mesh is None:
-                continue
-            try:
-                vmin, vmax = data.value_range(item_id, mesh)
-            except KeyError:
-                continue
-            bars.append((f"{item.name} · {variable}", str(item.properties["colormap"]), vmin, vmax))
-        font.setPixelSize(round(20 * unit))
-        painter.setFont(font)
-        bar_w, bar_h = width * 0.28, 14 * unit
-        y = height - margin - len(bars) * 46 * unit
-        for name, colormap, vmin, vmax in bars:
-            x = margin
-            painter.setPen(QColor("#1e2833"))
-            painter.drawText(QRectF(x, y, bar_w, 22 * unit), Qt.AlignLeft, name)
-            gradient = QLinearGradient(x, 0, x + bar_w, 0)
-            table = lut(colormap, 16)
-            for i, rgba in enumerate(table):
-                gradient.setColorAt(i / (len(table) - 1), QColor.fromRgbF(*map(float, rgba)))
-            top = y + 24 * unit
-            painter.fillRect(QRectF(x, top, bar_w, bar_h), gradient)
-            step = abs(vmax - vmin) / 10 or 1.0
-            painter.drawText(
-                QRectF(x + bar_w + 8 * unit, top - 5 * unit, 300 * unit, 24 * unit),
-                Qt.AlignLeft,
-                f"{tick_label(vmin, step)} … {tick_label(vmax, step)}",
-            )
-            y += 46 * unit
-        painter.end()
-        return np.frombuffer(qimage.constBits(), np.uint8).reshape(height, width, 4).copy()
-
-    return overlay
+    return LegendOverlay(session)
 
 
 def movie_folder(session: Session | None) -> Path:

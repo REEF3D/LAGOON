@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Legends
+
+- **Each item's colour bar**: on or off, its title (`$\eta$ [m]`), how its numbers
+  are written and how many ticks it has (*Colour bar*, *Bar title*, *Bar numbers*,
+  *Bar ticks*); the 3D view, films and figures follow them.
+- **View → Legend…**: where films put the colour bars and the time (a corner, or no
+  time), the bars' length and thickness, the text size, a box behind them; the 3D
+  view's bars on or off. Kept with the session (`session.set_legend`). Films made
+  by scripts get the time and the colour bars too (`write_movie(..., legend=True)`).
+- **Figure editor**: a panel's legend inside, outside right, above, below or off,
+  its columns, text size and frame; lines left out of it; a 3D view's colour bars
+  under, right of or inside the image, and their length.
+- **Plots panel**: line names (`P1 = gauge 1`), the legend above the plot, in it or
+  off, values at the cursor or not; the figures made from the plots use the names.
+
 ### The sea at the case (NORA3, NorKyst)
 
 - **Sea tab** in the Set-up panel: MET Norway's hindcasts at a georeferenced case,

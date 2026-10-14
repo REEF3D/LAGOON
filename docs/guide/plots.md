@@ -45,6 +45,10 @@ The legend shows each line's value at the current time. A point picked on a
 surface in the 3D view ([Reading values](scene.md#reading-values)) is plotted
 too, in orange.
 
+A time series item says how its legend looks: *Line names* (`P1 = gauge 1;
+P4 = gauge 4`; also in the figures made from the plots), *Legend* above the
+plot, in the plot (its upper right corner) or off, and *Values at the cursor*.
+
 ## Free surface lines
 
 **Free surface line** items show the surface elevation along REEF3D's free surface
