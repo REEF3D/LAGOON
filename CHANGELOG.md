@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Finding what is slow
+
+- **Help → Record a performance report**: counts what every thread of LAGOON does
+  while you use it; stopped, it saves a plain text report (per thread, where the
+  time went), to send when LAGOON is sluggish.
+
 ### geo.dat as fine as the data
 
 - **Resolution** in the Map tab: geo.dat as DIVEMesh's cells (B 1), *the finest the

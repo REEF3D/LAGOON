@@ -1022,3 +1022,13 @@ def test_memory_use_from_the_view_menu(window):
         assert window.session.data.cache.max_bytes == 256 << 20
     finally:
         window.set_memory_use(before)
+
+
+def test_a_performance_report(window, tmp_path, qtbot):
+    window.toggle_profile(True)
+    assert window.act_profile.isChecked() and window.profiler.running
+    qtbot.wait(200)
+    saved = window.toggle_profile(False, path=tmp_path / "report.txt")
+    text = (tmp_path / "report.txt").read_text()
+    assert saved and "=== thread window" in text and "idle" in text
+    assert window.profiler is None and not window.act_profile.isChecked()

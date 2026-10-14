@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time as time_module
 import traceback
 from pathlib import Path
 
@@ -382,6 +383,13 @@ class MainWindow(QMainWindow):
         self.legend_dialog = None
         self.act_reset_layout = self._action("&Reset layout", self.reset_layout)
         self.act_about = self._action("&About LAGOON", self.about)
+        self.act_profile = self._action(
+            "Record a &performance report",
+            self.toggle_profile,
+            tip="Record where LAGOON spends its time while you use it; stop to save the report",
+        )
+        self.act_profile.setCheckable(True)
+        self.profiler = None
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -492,6 +500,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.act_reset_layout)
 
         help_menu = bar.addMenu("&Help")
+        help_menu.addAction(self.act_profile)
         help_menu.addAction(self.act_about)
 
     def _build_toolbar(self) -> None:
@@ -1385,6 +1394,40 @@ class MainWindow(QMainWindow):
         self.settings.setValue("files/last_dir", str(Path(path).resolve().parent))
 
     # ------------------------------------------------------------- help
+    def toggle_profile(self, on: bool | None = None, path: str | Path | None = None) -> str | None:
+        """Help → Record a performance report: on, every thread's doings are counted;
+        off, the report is saved (asked where, or ``path``). Returns where it went."""
+        from lagoonviz.gui.profiler import Recorder
+
+        on = self.act_profile.isChecked() if on is None else bool(on)
+        self.act_profile.setChecked(on)
+        if on:
+            self.profiler = Recorder()
+            self.profiler.start()
+            self.statusBar().showMessage(
+                "Recording a performance report: use LAGOON as when it is slow, then "
+                "Help → Record a performance report again to stop and save it",
+                15000,
+            )
+            return None
+        recorder, self.profiler = self.profiler, None
+        if recorder is None:
+            return None
+        recorder.stop()
+        if path is None:
+            stamp = time_module.strftime("%Y%m%d-%H%M%S")
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save the performance report",
+                str(Path(self._last_dir()) / f"lagoon-performance-{stamp}.txt"),
+                "Text (*.txt)",
+            )
+        if not path:
+            return None
+        saved = recorder.save(path)
+        self.statusBar().showMessage(f"Performance report saved to {saved}", 10000)
+        return str(saved)
+
     def about(self) -> None:
         QMessageBox.about(
             self,
