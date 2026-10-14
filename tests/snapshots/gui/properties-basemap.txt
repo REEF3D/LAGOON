@@ -3,7 +3,7 @@ QWidget
   Kind: label 'Background map'
   Visible: checkbox '' on
   Case: choice 'first case' of ['first case', 'run [case-1]']
-  Map: choice 'Kartverket topo' of ['Kartverket topo', 'Kartverket grey', 'Kartverket nautical chart', 'Sentinel-2 2017 (satellite)', 'OpenStreetMap', 'GeoTIFF file', 'Tile server URL']
+  Map: choice 'Kartverket topo' of ['Kartverket topo', 'Kartverket grey', 'Kartverket nautical chart', 'Sentinel-2 (satellite)', 'OpenStreetMap', 'GeoTIFF file', 'Tile server URL']
   File or URL: text ''
   Margin: number 0.5 in [0, 10] decimals 3
   Placed: choice 'below the model' of ['below the model', 'at the still water level']
