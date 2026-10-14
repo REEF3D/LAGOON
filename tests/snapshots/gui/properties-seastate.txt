@@ -12,6 +12,10 @@ QWidget
   Range max: number 1 in [-1e+09, 1e+09] decimals 3
   Range [%]: number 100 in [1, 500] decimals 3
   Opacity: number 1 in [0, 1] decimals 3
+  Colour bar: checkbox '' on
+  Bar title: text ''
+  Bar numbers: choice 'auto' of ['auto', 'integer', '1 decimal', '2 decimals', '3 decimals', 'scientific']
+  Bar ticks: number 0 in [0, 11] decimals 0
   Grid lines: choice 'off' of ['off', 'dark', 'white']
   Contour lines of: choice 'none' of ['none']
   Contour lines: number 10 in [2, 100] decimals 0

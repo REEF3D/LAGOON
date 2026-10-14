@@ -88,6 +88,7 @@ View
     [x] Medium
     [ ] Heavy
   Sun...
+  Legend...
   ----
   [ ] Compare side by side  [Ctrl+Shift+2]
   [ ] Full screen viewer  [Ctrl+Shift+F]

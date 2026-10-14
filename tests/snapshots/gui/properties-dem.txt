@@ -13,6 +13,10 @@ QWidget
   Range max: number 1 in [-1e+09, 1e+09] decimals 3 (disabled)
   Range [%]: number 100 in [1, 500] decimals 3 (disabled)
   Opacity: number 1 in [0, 1] decimals 3
+  Colour bar: checkbox '' on
+  Bar title: text ''
+  Bar numbers: choice 'auto' of ['auto', 'integer', '1 decimal', '2 decimals', '3 decimals', 'scientific']
+  Bar ticks: number 0 in [0, 11] decimals 0
   Trail [outputs]: number 0 in [0, 500] decimals 0
   button 'Fit range to this frame' tip='Fix the colour range to the values of the current frame' (disabled)
   label '' (disabled)

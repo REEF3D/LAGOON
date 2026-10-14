@@ -6,4 +6,7 @@ QWidget
   File: choice 'first file' of ['first file']
   Columns: text ''
   Gauges in 3D: checkbox '' on
+  Line names: text ''
+  Legend: choice 'above the plot' of ['above the plot', 'in the plot', 'off']
+  Values at the cursor: checkbox '' on
   label 'No time series: open a case with gauge, 6DOF or force output' (disabled)
