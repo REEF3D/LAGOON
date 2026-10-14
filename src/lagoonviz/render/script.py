@@ -286,6 +286,33 @@ def film_code(
     return _block("File > Export animation", imports, body)
 
 
+def image_code(
+    path: str | Path,
+    *,
+    size: tuple[int, int],
+    scale: float = 1.0,
+    time: float = 0.0,
+    style: str = "studio",
+    camera: dict | None = None,
+    plan: tuple[bool, str] | None = None,
+    legend: bool = False,
+    dpi: float | None = None,
+) -> str:
+    """File → Export image: the 3D view alone at a size of one's choice."""
+    imports = ["from lagoonviz.render.offscreen import render_image"]
+    body = _view(time, camera, plan)
+    parts = ["session", repr(_path(path)), repr(tuple(int(v) for v in size))]
+    if float(scale) != 1.0:
+        parts.append(f"scale={float(scale)!r}")
+    parts.append(f"style={style!r}")
+    if legend:
+        parts.append("legend=True")
+    if dpi:
+        parts.append(f"dpi={float(dpi)!r}")
+    body.append(_raw_call("render_image", parts))
+    return _block("File > Export image (the 3D view)", imports, body)
+
+
 def cycles_still_code(
     path: str | Path,
     *,

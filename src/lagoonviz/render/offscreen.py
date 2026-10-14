@@ -32,11 +32,75 @@ def render_session(
     time: float | None = None,
     view: str | None = None,
     style: str = "studio",
+    scale: float = 1.0,
 ) -> np.ndarray:
-    """Draw the session's visible items and return an (h, w, 4) uint8 RGBA image."""
+    """Draw the session's visible items and return an (h, w, 4) uint8 RGBA image.
+    ``scale``: image pixels to a pixel of the view drawn (2: the view of half the
+    size, twice as sharp)."""
     from lagoonviz.render.movie import OffscreenView
 
-    return OffscreenView(session, size, style, view).render(time)
+    return OffscreenView(session, size, style, view, scale).render(time)
+
+
+#: the image formats of :func:`write_image`, by suffix
+IMAGE_SUFFIXES = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".tif": "TIFF", ".tiff": "TIFF"}
+
+
+def render_image(
+    session: Session,
+    path: str | Path,
+    size: tuple[int, int],
+    *,
+    scale: float = 1.0,
+    style: str = "studio",
+    legend: bool = False,
+    dpi: float | None = None,
+    time: float | None = None,
+    view: str | None = None,
+) -> Path:
+    """File → Export image: the 3D view alone, ``size`` pixels (``scale`` of them to
+    a pixel of the view: lines, markers and text keep their share of the image),
+    with the time and the colour bars where the legend layout puts them
+    (``legend``), written as PNG, JPEG or TIFF by the suffix (``dpi``: the print
+    resolution kept in the file). Returns the path written."""
+    from lagoonviz.render.movie import OffscreenView
+
+    path = Path(path).expanduser()
+    if path.suffix.lower() not in IMAGE_SUFFIXES:
+        raise ValueError(f"{path.name}: write .png, .jpg or .tif")
+    offscreen = OffscreenView(session, size, style, view, scale)
+    image = offscreen.render(time)
+    if legend:
+        from lagoonviz.render.legend_overlay import LegendOverlay
+
+        image = LegendOverlay(session)(image, session.scene.time)
+    write_image(path, image, dpi)
+    return path
+
+
+def write_image(path: str | Path, image: np.ndarray, dpi: float | None = None) -> None:
+    """An RGBA or RGB uint8 image as PNG, JPEG (no alpha: on white) or TIFF, by the
+    path's suffix; ``dpi``: the print resolution kept in the file."""
+    from PIL import Image
+
+    path = Path(path)
+    kind = IMAGE_SUFFIXES.get(path.suffix.lower())
+    if kind is None:
+        raise ValueError(f"{path.name}: write .png, .jpg or .tif")
+    image = np.ascontiguousarray(image, dtype=np.uint8)
+    picture = Image.fromarray(image, "RGBA" if image.shape[2] == 4 else "RGB")
+    options: dict = {}
+    if dpi:
+        options["dpi"] = (float(dpi), float(dpi))
+    if kind == "JPEG":
+        if picture.mode == "RGBA":
+            white = Image.new("RGBA", picture.size, (255, 255, 255, 255))
+            picture = Image.alpha_composite(white, picture)
+        picture = picture.convert("RGB")
+        options.update(quality=95, subsampling=0)
+    elif kind == "TIFF":
+        options["compression"] = "tiff_lzw"
+    picture.save(path, kind, **options)
 
 
 def write_png(path: str | Path, image: np.ndarray) -> None:

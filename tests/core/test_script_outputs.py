@@ -145,6 +145,40 @@ def test_film_and_screenshot_code(tmp_path):
     assert "render_session(" in shot and "write_png(" in shot
 
 
+def test_image_code(tmp_path):
+    from lagoonviz.render.script import image_code
+
+    code = image_code(
+        tmp_path / "view.tif", size=(3840, 2160), scale=3.2, time=2.0, legend=True, dpi=300
+    )
+    compile(code, "<code>", "exec")
+    assert "render_image(" in code and "(3840, 2160)" in code and "scale=3.2" in code
+    assert "legend=True" in code and "dpi=300.0" in code
+    plain = image_code(tmp_path / "view.png", size=(800, 450))
+    assert "scale=" not in plain and "legend" not in plain and "dpi" not in plain
+
+
+def test_write_image(tmp_path):
+    """PNG, JPEG (on white) and TIFF, the print resolution kept."""
+    pytest.importorskip("PIL")
+    import numpy as np
+    from PIL import Image
+
+    from lagoonviz.render.offscreen import write_image
+
+    image = np.zeros((20, 30, 4), np.uint8)
+    image[..., 0] = 200
+    image[:10, ..., 3] = 255  # the lower half transparent
+    for name in ("a.png", "a.jpg", "a.tif"):
+        write_image(tmp_path / name, image, dpi=300)
+        with Image.open(tmp_path / name) as read:
+            assert read.size == (30, 20) and round(read.info["dpi"][0]) == 300
+    with Image.open(tmp_path / "a.jpg") as read:
+        assert read.mode == "RGB" and read.getpixel((5, 15))[1] > 200  # on white
+    with pytest.raises(ValueError):
+        write_image(tmp_path / "a.bmp", image)
+
+
 def test_path_traced_film_code(session, tmp_path):
     film = film_code(
         tmp_path / "showcase.mp4",

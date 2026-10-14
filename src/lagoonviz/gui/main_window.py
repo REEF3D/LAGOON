@@ -285,6 +285,13 @@ class MainWindow(QMainWindow):
             "F12",
             tip="Save a picture of the LAGOON window, including the 3D view",
         )
+        self.act_export_image = self._action(
+            "Export &image...",
+            self.export_image,
+            "Ctrl+Shift+I",
+            tip="The 3D view alone as an image at a size of your choice (as on the screen, "
+            "4K, 8K, a width in cm for print): PNG, JPEG or TIFF",
+        )
         self.act_convert = self._action(
             "Convert to LAGOON &format...",
             self.convert_case,
@@ -412,6 +419,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_export_script)
         file_menu.addAction(self.act_export_figure)
         file_menu.addAction(self.act_figure_editor)
+        file_menu.addAction(self.act_export_image)
         file_menu.addAction(self.act_export_movie)
         file_menu.addAction(self.act_cycles_still)
         file_menu.addAction(self.act_screenshot)
@@ -1195,6 +1203,12 @@ class MainWindow(QMainWindow):
         from lagoonviz.gui.figure_editor import open_figure_editor
 
         return open_figure_editor(self)
+
+    def export_image(self, path: str | Path | None = None, **settings) -> str | None:
+        """File → Export image: the 3D view alone at a size of one's choice."""
+        from lagoonviz.gui.export_image import export_image
+
+        return export_image(self, path, **settings)
 
     def export_animation(self) -> str | None:
         """File → Export animation: an MP4 of the 3D view over the timeline."""

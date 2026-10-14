@@ -78,7 +78,11 @@ class OffscreenView:
         size: tuple[int, int] = (1600, 900),
         style: str = "studio",
         view: str | None = None,
+        scale: float = 1.0,
     ) -> None:
+        """``size``: the image's pixels; ``scale``: how many of them to a pixel of
+        the view drawn (2: as the 3D view on a screen half as wide, twice as sharp:
+        lines, markers and text as thick relative to the image)."""
         import pygfx as gfx
 
         from lagoonviz.render.scene3d import SceneRenderer
@@ -88,8 +92,10 @@ class OffscreenView:
             side = view.partition("-")[2] or None
             session.set_plan_view(True, side)  # as the 2D view shows it
         self.size = (int(size[0]), int(size[1]))
-        self.canvas = _offscreen_canvas(self.size)
+        self.scale = max(float(scale), 0.1)
+        self.canvas = _offscreen_canvas(self.size, self.scale)
         self.renderer = gfx.WgpuRenderer(self.canvas)
+        _within_limits(self.renderer, self.size)
         self.scene = SceneRenderer(style)
         self.view = view
         self._camera_set = False
@@ -454,12 +460,45 @@ def movie_available() -> bool:
     return True
 
 
-def _offscreen_canvas(size: tuple[int, int]):
+def _offscreen_canvas(size: tuple[int, int], scale: float = 1.0):
+    """A canvas of ``size`` pixels, drawn as a view ``scale`` times smaller."""
     try:
         from rendercanvas.offscreen import RenderCanvas
     except ImportError:  # pygfx before rendercanvas
         from wgpu.gui.offscreen import WgpuCanvas as RenderCanvas
+    logical = (size[0] / scale, size[1] / scale)
     try:
-        return RenderCanvas(size=size, pixel_ratio=1)
+        return RenderCanvas(size=logical, pixel_ratio=scale)
     except TypeError:
         return RenderCanvas(size=size)
+
+
+#: the largest image side when the GPU does not say [px] (WebGPU's default limit)
+TEXTURE_LIMIT = 8192
+
+
+def texture_limit() -> int:
+    """The largest image side the GPU draws in one go [px]."""
+    try:
+        from pygfx.renderers.wgpu import get_shared
+
+        return int(get_shared().device.limits["max-texture-dimension-2d"])
+    except Exception:  # noqa: BLE001 (no GPU asked yet, an older wgpu: the default)
+        return TEXTURE_LIMIT
+
+
+def _within_limits(renderer, size: tuple[int, int]) -> None:
+    """Images drawn at twice their pixels and shrunk (smooth edges) when that fits on
+    the GPU, else at their pixels; too large even so: an error that says how large
+    can be. (pygfx would draw a view scaled 2 or more at its pixels only.)"""
+    limit = texture_limit()
+    side = max(size)
+    if side > limit:
+        raise ValueError(
+            f"{size[0]} × {size[1]} pixels is more than the GPU draws ({limit} pixels a "
+            "side at most): choose a smaller size"
+        )
+    try:
+        renderer.pixel_scale = 2.0 if 2 * side <= limit else 1.0
+    except (AttributeError, TypeError, ValueError):
+        pass  # an older pygfx: as it draws

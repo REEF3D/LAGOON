@@ -84,12 +84,25 @@ same wave can be compared in two runs.
 *View → Full screen viewer* (++ctrl+shift+f++) shows only the 3D view and the
 player on the whole screen, for presentations; ++escape++ goes back.
 
-## Screenshots
+## Images and screenshots
 
-*File → Save screenshot…* (++f12++) saves a picture of the whole window with the
-3D view in it. For a picture of the 3D view alone, at any size, use
-[`lagoon-render`](../reference/cli.md#lagoon-render) or *File → Export figure… →
-3D view*.
+*File → Export image…* (++ctrl+shift+i++) draws the 3D view alone again, off
+screen, as large as you choose: as on the screen, twice as sharp, Full HD, 4K or
+8K wide, a width in pixels of your own, or a width in centimetres at a print
+resolution (17 cm at 300 dpi: a journal's page width; the resolution is kept in
+the file). The image frames what the view shows, and lines, markers and text keep
+their share of it: a 4K image is the view drawn sharper, not smaller. The time and
+the colour bars go where the legend layout puts them (*Legend…*). PNG, JPEG or
+TIFF, by the file's end; the GPU draws up to 8192 pixels a side. In a script:
+
+```python
+from lagoonviz.render.offscreen import render_image
+render_image(session, "view.tif", (2008, 1130), scale=2.5, legend=True, dpi=300)
+```
+
+*File → Save screenshot…* (++f12++) saves a quick picture of the whole window with
+the 3D view in it. For a paper figure with axes, see *File → Export figure… → 3D
+view*.
 
 ## Without a GPU
 

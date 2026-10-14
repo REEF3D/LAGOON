@@ -366,6 +366,51 @@ def test_save_screenshot(window, tmp_path):
     compile(script, "<script>", "exec")
 
 
+def test_export_image_sizes(window):
+    """File → Export image: sizes with the 3D view's shape, from the screen's to a
+    width in cm at a print resolution; too large for the GPU: not exported."""
+    from lagoonviz.gui.export_image import ExportImageDialog, pixels_for, size_choices
+
+    view = (800, 400)
+    labels = [label for label, _ in size_choices(view, 2.0)]
+    assert labels[0] == "As on the screen: 1600 × 800" and "3840 × 1920" in labels[3]
+    assert pixels_for(("width", 3840), view, 0, 0, 0) == ((3840, 1920), 4.8, None)
+    size, scale, dpi = pixels_for(("print", None), view, 0, 17.0, 300)
+    assert size == (2008, 1004) and dpi == 300.0 and scale == pytest.approx(2.51)
+    dialog = ExportImageDialog(window, window.session, "x.png", view, 2.0)
+    dialog.size.setCurrentIndex(dialog.size.findData(("print", None)))
+    assert dialog.print_row.isVisibleTo(dialog) and not dialog.custom.isVisibleTo(dialog)
+    assert "2008 × 1004 pixels (17.0 × 8.5 cm)" in dialog.summary.text()
+    dialog.size.setCurrentIndex(dialog.size.findData(("custom", None)))
+    dialog.custom.setValue(dialog.limit + 1)
+    assert "too large" in dialog.summary.text()
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    assert not dialog.buttons.button(QDialogButtonBox.Ok).isEnabled()
+    dialog.custom.setValue(1000)
+    dialog.remember()
+    again = ExportImageDialog(window, window.session, "x.png", view, 2.0)
+    assert again.size.currentData() == ("custom", None) and again.custom.value() == 1000
+
+
+def test_export_image(window, reef3d_run, tmp_path):
+    """The 3D view alone, drawn off screen at the size asked, as PNG or TIFF (its
+    print resolution kept), with the time and colour bars, into the script."""
+    pytest.importorskip("pygfx")
+    from PIL import Image
+
+    window.open_case(reef3d_run)
+    png = window.export_image(tmp_path / "view.png", size=(320, 180), scale=2.0, legend=True)
+    assert png and Image.open(png).size == (320, 180)
+    tif = window.export_image(tmp_path / "view.tif", size=(200, 100), scale=1.0, dpi=300)
+    with Image.open(tif) as image:
+        assert image.size == (200, 100) and round(image.info["dpi"][0]) == 300
+    script = window.session.to_script()
+    assert "File > Export image" in script and "render_image(" in script
+    assert "legend=True" in script and "dpi=300.0" in script
+    compile(script, "<script>", "exec")
+
+
 def test_dev_remote_runs_actions(window, reef3d_run, tmp_path):
     import json
 

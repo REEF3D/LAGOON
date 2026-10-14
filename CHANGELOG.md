@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Images of the 3D view
+
+- **File → Export image…**: the 3D view alone, drawn again off screen at the size
+  you choose (as on the screen, twice as sharp, Full HD, 4K or 8K wide, a width in
+  pixels, or a width in cm at a print resolution), lines, markers and text keeping
+  their share of the image; the time and colour bars on it if you like; PNG, JPEG
+  or TIFF (the dpi kept). In scripts: `render_image(...)`; `render_session` and
+  the films' `OffscreenView` take a `scale`.
+
 ### The bed next to the coast
 
 - **No flat 1 m next to the coast**: a download's bed between the coastline and
