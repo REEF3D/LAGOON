@@ -84,7 +84,7 @@ def test_a_store_keeps_the_georeference(tmp_path):
     path = tmp_path / "REEF3D_FNPF.lagoon"
     StoreWriter.create(path, "FNPF", georef=TRONDHEIM)
     store = Store(path)
-    assert store.georef == TRONDHEIM and store.info["version"] == "0.4"
+    assert store.georef == TRONDHEIM and store.info["version"] == "0.5"
     writer = StoreWriter.open(path)
     writer.set_georef(TRONDHEIM.replace(rotation_deg=0.0))
     assert Store(path).georef.rotation_deg == 0.0

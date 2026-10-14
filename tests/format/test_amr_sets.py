@@ -99,7 +99,7 @@ def test_root_lists_amr_sets(tmp_path):
     )
     writer.close()
     store = Store(path)
-    assert store.info["amr"] == ["fnpf_amr"] and store.info["version"] == "0.4"
+    assert store.info["amr"] == ["fnpf_amr"] and store.info["version"] == "0.5"
     assert list(store.amr) == ["fnpf_amr"]
 
 

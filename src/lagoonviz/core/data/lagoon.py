@@ -28,6 +28,8 @@ from lagoonviz.core.data.mesh import (
     grid_normals,
     grid_points,
     grid_triangles,
+    plan_normals,
+    plan_points,
     scalar_values,
     unique_edges,
 )
@@ -225,14 +227,16 @@ class StoreDataset(Dataset):
         ys = output.y[j0:j1].astype(np.float32)
         z = output.heights(t, block)
         volume = output.grid != "surface"
+        # where the block's grid points lie (a curvilinear grid: each its own place)
+        px, py = (a.astype(np.float32) for a in output.plan(i0, i1, j0, j1))
         if volume:
             nz = z.shape[0]
-            x = np.broadcast_to(xs[None, None, :], z.shape)
-            y = np.broadcast_to(ys[None, :, None], z.shape)
+            x = np.broadcast_to(px[None], z.shape)
+            y = np.broadcast_to(py[None], z.shape)
         else:
             nz = 1
-            x = np.broadcast_to(xs[None, :], z.shape)
-            y = np.broadcast_to(ys[:, None], z.shape)
+            x = np.broadcast_to(px, z.shape)
+            y = np.broadcast_to(py, z.shape)
         points = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=1).astype(np.float32)
         names = list(output.variables) if point_arrays is None else point_arrays
         data = {}
@@ -275,15 +279,20 @@ class StoreDataset(Dataset):
         nz, ny, nx = output.shape
         faces = []
         x, y = output.x.astype(np.float32), output.y.astype(np.float32)
+        curved = output.curvilinear
         for level, flip in ((0, True), (nz - 1, False)):
             z = output.heights(index, level=level)
             data = {n: output.read(n, index, level=level) for n in names}
             # the bottom and top are height fields: normals from their slopes (from
             # the triangles they took seconds for a large volume)
-            normals = grid_normals(z, x, y)
+            if curved:
+                points = plan_points(output.xc, output.yc, z).reshape(ny, nx, 3)
+                normals = plan_normals(points)
+            else:
+                normals = grid_normals(z, x, y)
+                points = grid_points(x, y, z).reshape(ny, nx, 3)
             if flip:
                 normals *= -1.0
-            points = grid_points(x, y, z).reshape(ny, nx, 3)
             faces.append(_face(points, data, flip, normals))
         for axis, line, flip, outward in (
             (0, 0, True, (-1.0, 0.0, 0.0)),
@@ -292,6 +301,14 @@ class StoreDataset(Dataset):
             (1, ny - 1, True, (0.0, 1.0, 0.0)),
         ):
             z, data = self._side(index, axis, line, names)
+            if curved:  # the side follows the grid's boundary line; normals from its triangles
+                px = output.xc[:, line] if axis == 0 else output.xc[line, :]
+                py = output.yc[:, line] if axis == 0 else output.yc[line, :]
+                flat_x = np.broadcast_to(px[None, :], z.shape)
+                flat_y = np.broadcast_to(py[None, :], z.shape)
+                points = np.stack([flat_x, flat_y, z], axis=-1).astype(np.float32)
+                faces.append(_face(points, data, flip))
+                continue
             along = y if axis == 0 else x
             a = np.broadcast_to(along[None, :], z.shape)
             p = np.full(z.shape, (x if axis == 0 else y)[line], np.float32)
@@ -313,18 +330,25 @@ class StoreDataset(Dataset):
         # are made
         reads = {name: _READS.submit(self._surface_array, name, index, detail) for name in names}
         z = output.heights(index)
+        xc, yc = output.xc, output.yc
         if rows is not None:
             z = z[rows][:, cols]
             x, y = x[cols], y[rows]
+            if xc is not None:
+                xc, yc = xc[rows][:, cols], yc[rows][:, cols]
         with self._cells_lock:
             triangles = self._cells_cache.get(("surface", detail))
             if triangles is None:
                 missing = ~np.isfinite(z)
                 triangles = grid_triangles(*z.shape, missing if missing.any() else None)
                 self._cells_cache[("surface", detail)] = triangles
-        points = grid_points(x, y, z)
-        # the normals from the grid's slopes: much faster than from the triangles
-        normals = grid_normals(z, x, y).reshape(-1, 3)
+        if xc is not None:  # a curvilinear grid
+            points = plan_points(xc, yc, z)
+            normals = plan_normals(points.reshape(*z.shape, 3)).reshape(-1, 3)
+        else:
+            points = grid_points(x, y, z)
+            # the normals from the grid's slopes: much faster than from the triangles
+            normals = grid_normals(z, x, y).reshape(-1, 3)
         data = {name: future.result() for name, future in reads.items()}
         values = {n: _flat(v, z.size) for n, v in data.items()}
         return SurfaceMesh(points, triangles, values, normals=normals)
@@ -432,7 +456,8 @@ class StoreDataset(Dataset):
         lines around the plane (the tiles holding them) are read, and the section is
         their interpolation (exactly what cutting REEF3D's hexahedra gives)."""
         output = self.output
-        if output.grid not in ("sigma", "cartesian") or axis not in (0, 1):
+        if output.grid not in ("sigma", "cartesian") or axis not in (0, 1) or output.curvilinear:
+            # a curvilinear grid's lines are not planes: its hexahedra are cut
             return super().read_slice(index, axis, position, variables)
         lines = output.x if axis == 0 else output.y
         if len(lines) < 2 or not lines[0] <= position <= lines[-1]:
@@ -514,7 +539,7 @@ class StoreDataset(Dataset):
             z = float(output.column_heights(i, j)[0, -1])
         else:
             z = float(output.series("z", i, j)[0])
-        where = (float(output.x[i]), float(output.y[j]), z)
+        where = (*output.point_xy(i, j), z)
         if values.ndim == 1:
             return where, values
         if component:

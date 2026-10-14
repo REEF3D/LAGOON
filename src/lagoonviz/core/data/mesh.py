@@ -463,6 +463,39 @@ def grid_points(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> np.ndarray:
     return out.reshape(-1, 3)
 
 
+def plan_points(xc: np.ndarray, yc: np.ndarray, z: np.ndarray) -> np.ndarray:
+    """Points (ny * nx, 3) float32 of a surface of heights z (ny, nx) over a
+    curvilinear grid whose points lie at (xc, yc), each (ny, nx)."""
+    z = np.asarray(z)
+    out = np.empty((*z.shape, 3), np.float32)
+    out[..., 0] = xc
+    out[..., 1] = yc
+    out[..., 2] = z
+    return out.reshape(-1, 3)
+
+
+def plan_normals(points: np.ndarray) -> np.ndarray:
+    """Unit normals (ny, nx, 3) of a surface on a curvilinear grid, its points
+    (ny, nx, 3): the cross product of the grid lines' directions (central
+    differences, one-sided at the edges), turned to point up. Points without a
+    height give (0, 0, 1)."""
+    p = np.asarray(points, np.float32)
+    ny, nx = p.shape[:2]
+    if ny < 2 or nx < 2:
+        return np.broadcast_to(np.array((0.0, 0.0, 1.0), np.float32), (ny, nx, 3)).copy()
+    along_i = np.gradient(p, axis=1)
+    along_j = np.gradient(p, axis=0)
+    out = np.cross(along_i, along_j).astype(np.float32)
+    length = np.linalg.norm(out, axis=-1, keepdims=True)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out /= length
+    bad = ~np.isfinite(out).all(axis=-1) | (length[..., 0] == 0)
+    out[bad] = (0.0, 0.0, 1.0)
+    if float(np.mean(out[..., 2])) < 0.0:  # a grid numbered clockwise
+        out *= -1.0
+    return out
+
+
 def grid_normals(z: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """Unit normals (ny, nx, 3) of a surface given as heights z (ny, nx) on a
     rectilinear grid (x along the columns, y along the rows), pointing up: from the

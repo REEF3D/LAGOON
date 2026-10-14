@@ -330,7 +330,7 @@ def test_time_series_and_wave_profiles_in_the_store(tmp_path):
     report = convert(run)
     assert report.outputs["series"] == 4 and report.outputs["profiles"] == 6
     store = Store(report.store)
-    assert store.info["version"] == "0.4"
+    assert store.info["version"] == "0.5"
     gauges = store.tables["nhflow_wsf_hg"]
     original = read_series(run / "REEF3D_NHFLOW_WSF" / "REEF3D-NHFLOW-WSF-HG.dat")
     np.testing.assert_array_equal(gauges.time, original.time)

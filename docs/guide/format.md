@@ -20,7 +20,9 @@ version 3, so other tools can read it too.
 
     Converting again appends what a running simulation has written since.
 - **By REEF3D itself**, while it runs: `P 18 1` writes the store instead of the
-  VTU/VTP files, `P 18 2` as well as them.
+  VTU/VTP files, `P 18 2` as well as them. FNPF, NHFLOW, SFLOW and CFD; on
+  curvilinear grids (`G 50`) too, which the converter cannot read from the VTK
+  files.
 
 ## Opening a store
 

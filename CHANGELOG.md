@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### SFLOW and curvilinear grids in LAGOON stores
+
+- **Curvilinear grids** (REEF3D's `G 50`, NHFLOW and SFLOW) in LAGOON stores:
+  format 0.5 keeps where every grid point lies (`xc`, `yc`, SPEC 2.2); LAGOON draws
+  the free surface, bed and volume there, cuts slices through the grid's cells,
+  and probes the nearest point. The ParaView reader too. The converter leaves out a
+  curvilinear run's VTK output (it is on no grid lines): REEF3D writes its store.
+- REEF3D writes **SFLOW's** free surface and bed into the store (`P 18`).
+
 ### Images of the 3D view
 
 - **File → Export image…**: the 3D view alone, drawn again off screen at the size

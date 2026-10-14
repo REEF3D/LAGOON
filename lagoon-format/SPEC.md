@@ -1,14 +1,19 @@
 # LAGOON data format specification
 
-Version: 0.4 (12 October 2026)
+Version: 0.5 (14 October 2026)
 Status: σ-grid volumes (FNPF, NHFLOW), Cartesian volumes (CFD), structured
 surfaces (free surface, bed), time series (wave gauges, 6DOF, forces), wave
 profiles, floating bodies, particles (CPM, NHFLOW), objects (DEM elements, ice
 floes, rod trees, mooring lines) and adaptive mesh refinement surfaces (FNPF,
 NHFLOW, SFLOW) are specified and implemented: the reference reader and writer
-`lagoon_format` 0.4.0, the converter `lagoon-convert`, and REEF3D's own store
+`lagoon_format` 0.5.0, the converter `lagoon-convert`, and REEF3D's own store
 output (`P 18`) for volumes, surfaces, bodies, NHFLOW particles, DEM elements,
 ice floes and AMR surfaces. How to make and read stores: [GUIDE.md](GUIDE.md).
+
+Changes in 0.5: curvilinear grids (section 2.2, REEF3D's `G 50`): an output's
+attribute `horizontal: "curvilinear"` and its arrays `xc`, `yc`, the x and y of
+every grid point. A 0.4 reader opens 0.5 stores, but draws a curvilinear output
+on its index lines; rectilinear outputs are unchanged.
 
 Changes in 0.4: the georeference of the model coordinates (section 1.2, root
 attribute `georef`). A 0.3 reader opens 0.4 stores and ignores it.
@@ -91,7 +96,7 @@ Group and array names are case sensitive and use only `[A-Za-z0-9_.-]`.
 {"zarr_format": 3, "node_type": "group",
  "attributes": {
    "lagoon": {
-     "format": "lagoon", "version": "0.4",
+     "format": "lagoon", "version": "0.5",
      "solver": "FNPF",
      "outputs": ["volume", "free_surface", "bed"],
      "created_by": "lagoon-convert 0.2.0 (lagoon-format 0.2.0)",
@@ -194,6 +199,20 @@ an output whose data is incomplete. Data arrays may be longer than `time`.
 The horizontal grid does not change during a run. A grid with one point in y (a
 2D flume written with one cell) has `ny = 2` as REEF3D writes it.
 
+**Curvilinear grids** (REEF3D's `G 50`: the grid follows a river bend, a coast or
+a harbour): the output's attributes have `"horizontal": "curvilinear"` (without
+it, or `"rectilinear"`, the grid is the product of `x` and `y`), and two more
+arrays give where each grid point lies:
+
+| array | shape    | dtype   | content |
+|-------|----------|---------|---------|
+| `xc`  | (ny, nx) | float64 | x of grid point (i, j), as the VTU/VTP point has it |
+| `yc`  | (ny, nx) | float64 | y of grid point (i, j) |
+
+`x` and `y` are then the grid's index lines (REEF3D's logical box), still rising,
+for the blocks and the chunks; a column, its σ-levels and the surface's
+quadrilaterals are those of the rectilinear grid, only placed at (`xc`, `yc`).
+
 ### 2.3 Blocks
 
 The grid is split into rectangular blocks in x and y, one per MPI rank. A block
@@ -285,9 +304,10 @@ The surface is drawn as the quadrilaterals between neighbouring grid points that
 all have a value.
 
 REEF3D writes the store itself with `P 18` (1: instead of the VTU/VTP files of
-what it holds, 2: as well as them). It writes the free surface and bed (FNPF, NHFLOW, and
-CFD's topography as `bed`): each rank's VTP piece becomes its block; `P 18 1`
-leaves out the surface VTP files.
+what it holds, 2: as well as them). It writes the free surface and bed (FNPF, NHFLOW,
+SFLOW, and CFD's topography as `bed`): each rank's VTP piece becomes its block;
+`P 18 1` leaves out the surface VTP files. On a curvilinear grid (`G 50`, NHFLOW and
+SFLOW) the volume, free surface and bed carry `xc` and `yc` (section 2.2).
 
 ## 5. Chunks, shards and codecs
 
@@ -362,6 +382,8 @@ it is the only codec outside the Zarr v3 core.
 - **Surfaces (VTP)**: each point becomes the grid point of its column. A surface
   whose points are not on a grid (CFD's free surface, an iso-surface of the level
   set) is left out.
+- A run on a curvilinear grid (`G 50`) is not converted (its points are on no
+  grid of distinct x and y lines): REEF3D writes its store itself with `P 18`.
 - The time of every output comes from the run log, else from the `TimeValue`
   field data, else from `P 30` (output interval) times the output number.
 - The fields are stored as they are in the VTK files; `z` of the points is kept

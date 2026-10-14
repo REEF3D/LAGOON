@@ -44,7 +44,7 @@ from lagoon_format.series import ProfileSet, ProfileWriter, Table, write_table
 from lagoon_format.zarr3 import Array, Group, ZarrError, codecs_for, node_type
 
 FORMAT = "lagoon"
-VERSION = "0.4"
+VERSION = "0.5"
 GRIDS = ("sigma", "cartesian", "surface")
 #: per-output arrays of the grid itself, not variables
 GRID_ARRAYS = {"sigma": ("z_bed", "z_surface", "z_offset"), "cartesian": (), "surface": ("z",)}
@@ -145,6 +145,18 @@ class Output:
         }
         self.x = group.array("x")[:]
         self.y = group.array("y")[:]
+        #: a curvilinear grid (SPEC 2.3): the x and y of every grid point (ny, nx);
+        #: ``x`` and ``y`` are then its index lines. None for a rectilinear grid.
+        self.xc: np.ndarray | None = None
+        self.yc: np.ndarray | None = None
+        if info.get("horizontal", "rectilinear") == "curvilinear":
+            self.xc = group.array("xc")[:].astype(np.float64)
+            self.yc = group.array("yc")[:].astype(np.float64)
+            if self.xc.shape != (len(self.y), len(self.x)) or self.yc.shape != self.xc.shape:
+                raise StoreError(f"{group.path}: xc and yc are not {len(self.y)} x {len(self.x)}")
+        elif info.get("horizontal", "rectilinear") != "rectilinear":
+            kind = info["horizontal"]
+            raise StoreError(f"{group.path}: horizontal grid {kind!r} is not supported")
         self.sigma = group.array("sigma")[:] if self.grid == "sigma" else None
         #: heights of the levels of a Cartesian grid
         self.z = group.array("z")[:] if self.grid == "cartesian" else None
@@ -226,9 +238,33 @@ class Output:
                 return block
         return None
 
+    @property
+    def curvilinear(self) -> bool:
+        return self.xc is not None
+
     def nearest(self, x: float, y: float) -> tuple[int, int]:
         """Grid indices (i, j) of the point nearest to (x, y)."""
+        if self.xc is not None:
+            distance = (self.xc - x) ** 2 + (self.yc - y) ** 2
+            j, i = np.unravel_index(int(np.nanargmin(distance)), distance.shape)
+            return int(i), int(j)
         return int(np.argmin(np.abs(self.x - x))), int(np.argmin(np.abs(self.y - y)))
+
+    def point_xy(self, i: int, j: int) -> tuple[float, float]:
+        """Where grid point (i, j) lies."""
+        if self.xc is not None:
+            return float(self.xc[j, i]), float(self.yc[j, i])
+        return float(self.x[i]), float(self.y[j])
+
+    def plan(self, i0: int = 0, i1: int | None = None, j0: int = 0, j1: int | None = None):
+        """x and y of the grid points of a block of the grid, each (j1 - j0, i1 - i0)."""
+        rows, cols = slice(j0, j1), slice(i0, i1)
+        if self.xc is not None:
+            return self.xc[rows, cols], self.yc[rows, cols]
+        xs, ys = self.x[cols], self.y[rows]
+        return np.broadcast_to(xs[None, :], (len(ys), len(xs))), np.broadcast_to(
+            ys[:, None], (len(ys), len(xs))
+        )
 
     # ------------------------------------------------------------- reading
     def read_block(
@@ -682,9 +718,13 @@ class StoreWriter:
         shard_time: int = 16,
         tile: int = 64,
         level: int = 1,
+        xc: np.ndarray | None = None,
+        yc: np.ndarray | None = None,
     ) -> OutputWriter:
         """A new output group; ``blocks`` are ((i0, j0), (nx_b, ny_b)) per block, or
-        ((i0, j0, k0), (nx_b, ny_b, nz_b)) for a Cartesian grid split in z too."""
+        ((i0, j0, k0), (nx_b, ny_b, nz_b)) for a Cartesian grid split in z too.
+        ``xc``, ``yc``: a curvilinear grid's points (ny, nx); ``x``, ``y`` are then
+        its index lines."""
         if grid not in GRIDS:
             raise StoreError(f"grid {grid!r} is not supported")
         if grid == "sigma" and sigma is None:
@@ -706,6 +746,12 @@ class StoreWriter:
         }
         if source:
             info["source"] = source
+        curvilinear = xc is not None or yc is not None
+        if curvilinear:
+            xc, yc = np.asarray(xc, np.float64), np.asarray(yc, np.float64)
+            if xc.shape != (len(y), len(x)) or yc.shape != xc.shape:
+                raise StoreError(f"xc and yc must be {len(y)} x {len(x)}")
+            info["horizontal"] = "curvilinear"
         info.update(attributes or {})  # e.g. "dataset": what LAGOON called the source
         group = Group.create(self.path / name, {"lagoon": info})
         for array_name, values, dims in (
@@ -713,6 +759,7 @@ class StoreWriter:
             ("y", y, ["y"]),
             *([("sigma", sigma, ["level"])] if sigma is not None else []),
             *([("z", z, ["level"])] if grid == "cartesian" else []),
+            *([("xc", xc, ["y", "x"]), ("yc", yc, ["y", "x"])] if curvilinear else []),
         ):
             values = np.asarray(values, np.float64)
             Array.create(group.path / array_name, values.shape, "float64", dimension_names=dims)[

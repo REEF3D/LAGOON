@@ -106,6 +106,13 @@ def _grid_lines(pieces: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     different MPI ranks differ in the last digits)."""
     xs = np.unique(np.concatenate([np.round(p[:, 0].astype(np.float64), 3) for p in pieces]))
     ys = np.unique(np.concatenate([np.round(p[:, 1].astype(np.float64), 3) for p in pieces]))
+    # on grid lines, the lines' crossings are about as many as the points (fewer for
+    # a volume); a curvilinear grid (G 50) has as many distinct x and y as points
+    points = sum(len(p) for p in pieces)
+    if len(xs) * len(ys) > 8 * max(points, 1):
+        raise Unstructured(
+            "not on grid lines (a curvilinear grid, G 50: REEF3D writes its store with P 18)"
+        )
     return xs, ys
 
 

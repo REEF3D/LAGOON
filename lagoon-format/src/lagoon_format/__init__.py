@@ -5,10 +5,10 @@ small Zarr v3 implementation (``lagoon_format.zarr3``) and the REEF3D run log
 MIT-licensed, independent of the LAGOON application.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 #: Version of the format specification implemented by this package.
-SPEC_VERSION = "0.4"
+SPEC_VERSION = "0.5"
 
 #: Version of the REEF3D run log specification (RUN.md) read by ``lagoon_format.run``.
 RUN_LOG_VERSION = 1

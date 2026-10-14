@@ -6,7 +6,7 @@ refinement, floating bodies, particles and gauges.
 
 This package holds
 
-- the format **specification** ([SPEC.md](https://github.com/REEF3D/LAGOON/blob/main/lagoon-format/SPEC.md), version 0.4: σ-grid volumes of
+- the format **specification** ([SPEC.md](https://github.com/REEF3D/LAGOON/blob/main/lagoon-format/SPEC.md), version 0.5: σ-grid volumes of
   FNPF and NHFLOW, Cartesian volumes of CFD, structured free surface and bed
   surfaces, time series tables, wave profiles, floating bodies, particles and
   objects such as DEM elements and mooring lines, and the refined surfaces of

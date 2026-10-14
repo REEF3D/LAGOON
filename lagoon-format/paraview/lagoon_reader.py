@@ -50,8 +50,12 @@ def structured_block(output, block, t: int) -> tuple[tuple[int, int, int], np.nd
     if z.ndim == 2:
         z = z[None]
     nz = z.shape[0]
-    gx = np.broadcast_to(x[None, None, :], z.shape)
-    gy = np.broadcast_to(y[None, :, None], z.shape)
+    if getattr(output, "xc", None) is not None:  # a curvilinear grid (SPEC 2.2)
+        gx = np.broadcast_to(output.xc[j0:j1, i0:i1][None], z.shape)
+        gy = np.broadcast_to(output.yc[j0:j1, i0:i1][None], z.shape)
+    else:
+        gx = np.broadcast_to(x[None, None, :], z.shape)
+        gy = np.broadcast_to(y[None, :, None], z.shape)
     points = np.stack([gx.ravel(), gy.ravel(), z.ravel()], axis=1).astype(np.float32)
     arrays = {}
     for name, components in output.variables.items():

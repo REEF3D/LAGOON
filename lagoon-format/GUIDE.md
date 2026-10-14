@@ -22,8 +22,10 @@ REEF3D writes `./REEF3D_<SOLVER>.lagoon` next to its other output:
 - the **volume** (FNPF, NHFLOW: σ-grid; CFD: Cartesian grid), when the VTU output
   is on (`P 10`); each MPI rank writes its block in the background, so the run does
   not wait for it;
-- the **free surface** and **bed** (FNPF, NHFLOW; CFD: the topography as bed), when
-  their VTP output is on;
+- the **free surface** and **bed** (FNPF, NHFLOW, SFLOW; CFD: the topography as bed),
+  when their VTP output is on;
+- on a **curvilinear grid** (`G 50`, NHFLOW and SFLOW) the volume, free surface and
+  bed with the place of every grid point (`xc`, `yc`, SPEC 2.2);
 - **floating bodies** (6DOF): the mesh once and the motion of each output;
 - **NHFLOW particles** (with `L 62` 1 or 3), **DEM elements** and **FNPF ice floes**;
 - the **AMR surface** of FNPF, NHFLOW and SFLOW with refinement (`A 270`): level 0
@@ -32,7 +34,8 @@ REEF3D writes `./REEF3D_<SOLVER>.lagoon` next to its other output:
 
 A run never adds to the store of an earlier run: that store is renamed to
 `REEF3D_<SOLVER>-<run>.lagoon-earlier` when the new run starts. Moving or tilted
-grids (`B 180`, `B 191`, `B 192`) are not written to the store. CFD's free
+grids (`B 180`, `B 191`, `B 192`) and the AMR surface of a curvilinear grid are
+not written to the store. CFD's free
 surface (an iso-surface of the level set, not a grid), CPM particles, mooring
 lines, rod trees and the time series files are not written by REEF3D; the
 converter adds them (CPM, mooring lines, rod trees, time series) after the run.
