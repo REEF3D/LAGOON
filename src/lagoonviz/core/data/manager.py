@@ -298,6 +298,10 @@ class DataManager:
         self._errors: dict[str, str] = {}
         self._resolved: dict[str, str] = {}
         self._auto_ranges: dict[tuple, tuple[float, float]] = {}
+        #: (dataset key, variable) -> a variable's values sampled over the run, made
+        #: in a loader thread when the first frame is read (see _sampled_values)
+        self._samples: dict[tuple, list[np.ndarray]] = {}
+        self._samples_lock = threading.Lock()
         #: particle trails: ids and their centres of each output read for them
         self._trail_centres: dict[FrameKey, tuple[np.ndarray, np.ndarray]] = {}
         self._still_water: dict[tuple, float] = {}
@@ -333,6 +337,8 @@ class DataManager:
         self._still_water.clear()
         self._wet.clear()
         self._logged = None
+        with self._samples_lock:
+            self._samples.clear()  # the run may have grown: sampled again
         for key in [k for k in self._setups if not self._setups[k].control.modified]:
             if not self._setups[key].ctrl.modified:
                 del self._setups[key]  # read again (edits not saved yet are kept)
@@ -725,6 +731,11 @@ class DataManager:
             )
         else:
             mesh = dataset.read(key.index, list(key.arrays))
+            if dataset.surface_like and len(dataset) > 2:
+                # the colour range's samples over the run, here in the loader thread
+                for name in key.arrays:
+                    if dataset.components.get(name) in (1, 3):
+                        self._sampled_values(dataset, name)
         self.cache.put(key, mesh)
         return mesh
 
@@ -918,9 +929,16 @@ class DataManager:
             segments[..., 2] += lift
         return ContourLines(item_id, segments, levels, shown.visible)
 
-    @staticmethod
-    def _sampled_values(dataset, variable: str, samples: int = 5) -> list[np.ndarray]:
-        """A variable's values in a few frames spread over a run (surfaces: cheap)."""
+    def _sampled_values(self, dataset, variable: str, samples: int = 5) -> list[np.ndarray]:
+        """A variable's values in a few frames spread over a run (surfaces: cheap),
+        kept: each frame's values thinned to at most 200 000, with its lowest and
+        highest. Usually made in a loader thread already (load_key), not while the
+        window waits."""
+        key = (dataset.folder, dataset.key, variable)
+        with self._samples_lock:
+            found = self._samples.get(key)
+        if found is not None:
+            return found
         found = []
         array = variable.partition(".")[0]
         if array not in dataset.components:
@@ -930,8 +948,18 @@ class DataManager:
                 values = dataset.read_values(int(index), variable)
             except (OSError, ValueError, KeyError):
                 continue
-            if values is not None:
-                found.append(values)
+            if values is None:
+                continue
+            values = np.asarray(values).ravel()
+            finite = values[np.isfinite(values)]
+            if not finite.size:
+                continue
+            step = finite.size // 200_000 + 1
+            found.append(np.concatenate([finite[::step], [finite.min(), finite.max()]]))
+        with self._samples_lock:
+            if len(self._samples) > 64:
+                self._samples.clear()
+            self._samples[key] = found
         return found
 
     def automatic_range(self, item_id: str) -> tuple[float, float] | None:
