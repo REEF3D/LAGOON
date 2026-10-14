@@ -1068,3 +1068,16 @@ def test_geo_dat_at_the_finest_the_data_has(fjord, terrain, tmp_path, monkeypatc
     job = session.geo_dat_job("best", spacing="finest")
     assert job.finest == 1.0 and len(job.xs) * len(job.ys) <= 10_000
     assert job.xs[1] - job.xs[0] > 1.0
+
+
+def test_geo_dat_with_the_most_points_asked_for(fjord, terrain):
+    session = Session()
+    session.open_case(fjord)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0))
+    few = session.geo_dat_job(terrain, spacing=1.0, most_points=5_000)
+    assert len(few.xs) * len(few.ys) <= 5_000 and few.xs[1] - few.xs[0] > 1.0
+    unlimited = session.geo_dat_job(terrain, spacing=1.0, most_points=0)
+    assert unlimited.xs[1] - unlimited.xs[0] == pytest.approx(1.0)  # 0: no limit
+    session.make_geo_dat(terrain, spacing=1.0, most_points=5_000)
+    assert "most_points=5000" in session.to_script()
+    assert session.geo_dat_recipe()["most_points"] == 5_000

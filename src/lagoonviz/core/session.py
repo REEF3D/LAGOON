@@ -706,15 +706,16 @@ class Session:
         case: str | None = None,
         progress=None,
         lat_below_msl: float = 0.0,
+        most_points: int | None = None,
     ) -> int:
         """Bathymetry for DIVEMesh: a GeoTIFF, ASCII grid or x y z file (in ``crs``,
         or its own; ``"model"``: already in model coordinates) interpolated (``"tin"``,
         ``"idw"``, ``"nearest"``) onto a grid over the domain and written as geo.dat
         in model coordinates, every ``spacing`` metres (default: DIVEMesh's cell size,
         B 1; ``"finest"``: the finest the data has, Kartverket's 1 m in Norway,
-        Copernicus' 30 m on land elsewhere, a file's own cells; at most 4 million
-        points, coarser if the domain needs more). ``depths``: the file gives depths
-        (positive down). Turns G 10 on.
+        Copernicus' 30 m on land elsewhere, a file's own cells), coarser where it would
+        be more than ``most_points`` points (default 4 million; 0: no limit).
+        ``depths``: the file gives depths (positive down). Turns G 10 on.
 
         No file: ``source="best"`` downloads the bathymetry for the domain
         (Kartverket's land and sea model in Norway, EMODnet for the rest of
@@ -725,7 +726,9 @@ class Session:
         the land's zero.
         ``progress(fraction, text)`` hears how far it is (and may raise
         ``bathy.Cancelled``). Returns the number of points written."""
-        job = self.geo_dat_job(source, crs, method, spacing, depths, case, lat_below_msl)
+        job = self.geo_dat_job(
+            source, crs, method, spacing, depths, case, lat_below_msl, most_points
+        )
         job.run(progress)
         return job.finish()
 
@@ -738,6 +741,7 @@ class Session:
         depths: bool = False,
         case: str | None = None,
         lat_below_msl: float = 0.0,
+        most_points: int | None = None,
     ) -> GeoDatJob:
         """:meth:`make_geo_dat` in two parts, for a GUI: ``job.run(progress)`` does
         the work (reading, downloading, writing geo.dat) and may run in a worker
@@ -785,7 +789,7 @@ class Session:
                 spacing = finest_file(bathy)
         elif spacing is None:
             spacing = self.input_file("control.txt", case_id).value("B 1") or 0.0
-        xs, ys = geo_grid(domain[:4], float(spacing or 0.0))
+        xs, ys = geo_grid(domain[:4], float(spacing or 0.0), most=most_points)
         code = f"session.make_geo_dat({str(source)!r}"
         for key, value, default in (
             ("crs", crs, None),
@@ -794,6 +798,7 @@ class Session:
             ("depths", depths, False),
             ("case", case, None),
             ("lat_below_msl", float(lat_below_msl or 0.0), 0.0),
+            ("most_points", most_points, None),
         ):
             if value != default:
                 code += f", {key}={value!r}"
@@ -818,6 +823,7 @@ class Session:
                 "method": method,
                 "depths": bool(depths),
                 "lat_below_msl": float(lat_below_msl or 0.0),
+                "most_points": most_points,
                 "spacing": float(xs[1] - xs[0]) if len(xs) > 1 else float(spacing or 0.0),
                 "domain": [float(v) for v in domain[:4]],
                 "crs": georef.crs if crs != "model" else "",
@@ -863,6 +869,7 @@ class Session:
             depths=bool(made.get("depths", False)),
             case=case,
             lat_below_msl=float(made.get("lat_below_msl", 0.0) or 0.0),
+            most_points=made.get("most_points"),
         )
 
     def remake_geo_dat(self, case: str | None = None, progress=None) -> int:

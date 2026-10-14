@@ -135,7 +135,9 @@ GeoTIFF and only the part of a large one that is needed).
   finest the data has* (Kartverket's 1 m in Norway, Copernicus' 30 m on land,
   EMODnet's 115 m, ETOPO's and GEBCO's 450 m; a file's own cells or the distance
   between its points; the tab says what that is over the domain), or every so many
-  metres; at most 4 million points, coarser where the domain would need more, and writes it in model coordinates, with `G 10 1`
+  metres; at most *Most points* (4 million by default, 0: no limit), coarser where
+  the domain would need more (DIVEMesh reads, bins and interpolates every point and
+  writes them out again for ParaView; geo.dat takes some 35 bytes a point), and writes it in model coordinates, with `G 10 1`
   in `control.txt`. A progress bar shows how far it is; *Cancel* keeps the
   geo.dat there was. The *geo.dat points* item then shows the points written
   (zoom in to see their spacing). A raster

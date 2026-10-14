@@ -412,11 +412,15 @@ def finest_file(bathy: Bathymetry) -> float:
 
 
 def geo_grid(
-    domain: tuple[float, float, float, float], spacing: float, margin: float | None = None
+    domain: tuple[float, float, float, float],
+    spacing: float,
+    margin: float | None = None,
+    most: int | None = None,
 ):
     """The points geo.dat is written at: the domain (x0, x1, y0, y1) and a margin
     (default two spacings) round it, every ``spacing`` metres (more if it would be
-    more than MOST_POINTS)."""
+    more than ``most`` points, default MOST_POINTS; 0: no limit)."""
+    most = MOST_POINTS if most is None else int(most)
     x0, x1, y0, y1 = domain
     if not spacing > 0:
         spacing = max(x1 - x0, y1 - y0) / 200.0
@@ -424,7 +428,7 @@ def geo_grid(
     while True:
         nx = int(np.floor((x1 - x0 + 2 * margin) / spacing)) + 1
         ny = int(np.floor((y1 - y0 + 2 * margin) / spacing)) + 1
-        if nx * ny <= MOST_POINTS:
+        if most <= 0 or nx * ny <= most:
             break
         spacing *= 1.25
     xs = x0 - margin + spacing * np.arange(nx)

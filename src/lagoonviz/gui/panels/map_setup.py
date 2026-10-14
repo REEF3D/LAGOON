@@ -341,6 +341,14 @@ class MapTab(QWidget):
         self.resolution.currentIndexChanged.connect(lambda _i: self._resolution_changed())
         self.spacing = _spin(0.0, 1e5, 3, " m")
         self.spacing.setPlaceholderText("metres between points")
+        self.most_points = _spin(0.0, 1e9, 0, " points")
+        self.most_points.setText("4000000")
+        self.most_points.setToolTip(
+            "geo.dat gets coarser where it would have more points than this (0: no limit). "
+            "DIVEMesh reads, bins and interpolates every point and writes them out again "
+            "for ParaView; geo.dat takes some 35 bytes a point (4 million: about 140 MB)"
+        )
+        self.most_points.editingFinished.connect(self._describe_resolution)
         self.resolution_note = QLabel()
         self.resolution_note.setWordWrap(True)
         self.resolution_note.setEnabled(False)
@@ -376,6 +384,7 @@ class MapTab(QWidget):
         form.addRow("Resolution", self.resolution)
         self.spacing_label = QLabel("Spacing")
         form.addRow(self.spacing_label, self.spacing)
+        form.addRow("Most points", self.most_points)
         form.addRow(self.resolution_note)
         self.lat_label = QLabel("LAT below MSL")
         form.addRow(self.lat_label, self.lat_offset)
@@ -802,6 +811,13 @@ class MapTab(QWidget):
         self._start_geo_job(job, self.session.data.case_folder(self.case_id) / "geo.dat", then)
         return True
 
+    def _most_points(self) -> int | None:
+        """The most points asked for: None for the default (4 million), 0 no limit."""
+        from lagoonviz.core.geo.bathy import MOST_POINTS
+
+        most = int(self.most_points.value())
+        return None if most == MOST_POINTS else most
+
     def _spacing(self):
         """geo.dat's spacing as chosen: None (B 1), "finest", or metres."""
         key = self.resolution.currentData()
@@ -818,7 +834,9 @@ class MapTab(QWidget):
     def _describe_resolution(self) -> None:
         """What the resolution chosen gives here: the finest the sources have over the
         domain, and about how many points."""
-        from lagoonviz.core.geo.bathy import MOST_POINTS, WEB, finest_web
+        from lagoonviz.core.geo.bathy import WEB, finest_web
+
+        most = int(self.most_points.value())
 
         text = ""
         key = self.bathy_source.currentData()
@@ -836,13 +854,14 @@ class MapTab(QWidget):
                     )
                     points = area / finest**2
                     text = f"Finest here: {finest:g} m ({label}), about {points:,.0f} points"
-                    if points > MOST_POINTS:
-                        coarser = (area / MOST_POINTS) ** 0.5
+                    if most > 0 and points > most:
+                        coarser = (area / most) ** 0.5
                         text = (
                             f"Finest here: {finest:g} m ({label}); the domain needs every "
-                            f"{coarser:.1f} m or more to stay under {MOST_POINTS / 1e6:g} "
-                            "million points"
+                            f"{coarser:.1f} m or more to stay under {most:,} points"
                         )
+                    elif points * 35 > 1e9:
+                        text += f" (geo.dat about {points * 35 / 1e9:.1f} GB)"
             elif key == "file":
                 text = "The file's own spacing: its cells, or the distance between its points"
         self.resolution_note.setText(text)
@@ -868,6 +887,7 @@ class MapTab(QWidget):
                     spacing=spacing,
                     depths=self.depths.isChecked(),
                     case=self.case_id,
+                    most_points=self._most_points(),
                 )
             else:
                 job = self.session.geo_dat_job(
@@ -875,6 +895,7 @@ class MapTab(QWidget):
                     spacing=spacing,
                     case=self.case_id,
                     lat_below_msl=self.lat_offset.value() if key in ("best", "emodnet") else 0.0,
+                    most_points=self._most_points(),
                 )
         except (ValueError, OSError, CrsError) as error:
             self.message.emit(str(error), True)
@@ -947,7 +968,7 @@ class MapTab(QWidget):
         step = float(job.xs[1] - job.xs[0]) if len(job.xs) > 1 else 0.0
         every = f" every {step:g} m"
         if job.finest and step > job.finest * 1.001:
-            every += f" (the data has {job.finest:g} m; held to 4 million points)"
+            every += f" (the data has {job.finest:g} m; held to the most points asked for)"
         self.message.emit(
             f"geo.dat: {count:,} points{every} from {sources}, stored in {folder}{note}; "
             "G 10 1 in control.txt. Now Run DIVEMesh",
