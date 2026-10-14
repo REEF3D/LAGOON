@@ -287,7 +287,7 @@ class MainWindow(QMainWindow):
         )
         self.act_export_image = self._action(
             "Export &image...",
-            self.export_image,
+            lambda _checked=False: self.export_image(),  # triggered(checked): no path
             "Ctrl+Shift+I",
             tip="The 3D view alone as an image at a size of your choice (as on the screen, "
             "4K, 8K, a width in cm for print): PNG, JPEG or TIFF",

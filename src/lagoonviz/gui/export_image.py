@@ -284,6 +284,8 @@ def export_image(window, path: str | Path | None = None, **chosen) -> str | None
     from lagoonviz.gui.export_movie import movie_folder
     from lagoonviz.render.offscreen import IMAGE_SUFFIXES, render_image
 
+    if isinstance(path, bool):  # a menu's triggered(checked) passed on: ask
+        path = None
     session = window.session
     viewport = window.viewport
     canvas = getattr(viewport, "canvas", viewport)

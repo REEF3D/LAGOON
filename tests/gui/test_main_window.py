@@ -393,7 +393,7 @@ def test_export_image_sizes(window):
     assert again.size.currentData() == ("custom", None) and again.custom.value() == 1000
 
 
-def test_export_image(window, reef3d_run, tmp_path):
+def test_export_image(window, reef3d_run, tmp_path, monkeypatch):
     """The 3D view alone, drawn off screen at the size asked, as PNG or TIFF (its
     print resolution kept), with the time and colour bars, into the script."""
     pytest.importorskip("pygfx")
@@ -405,6 +405,19 @@ def test_export_image(window, reef3d_run, tmp_path):
     tif = window.export_image(tmp_path / "view.tif", size=(200, 100), scale=1.0, dpi=300)
     with Image.open(tif) as image:
         assert image.size == (200, 100) and round(image.info["dpi"][0]) == 300
+    # the menu asks where (its triggered(checked) is no file name)
+    from lagoonviz.gui import export_image
+
+    asked = []
+
+    def exec_(dialog):
+        asked.append(dialog.path.text())
+        dialog.path.setText(str(tmp_path / "menu.png"))
+        return export_image.QDialog.Accepted
+
+    monkeypatch.setattr(export_image.ExportImageDialog, "exec", exec_)
+    window.act_export_image.trigger()
+    assert asked and asked[0].endswith(".png") and (tmp_path / "menu.png").is_file()
     script = window.session.to_script()
     assert "File > Export image" in script and "render_image(" in script
     assert "legend=True" in script and "dpi=300.0" in script
