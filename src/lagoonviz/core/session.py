@@ -701,7 +701,7 @@ class Session:
         source: str | Path,
         crs: str | None = None,
         method: str = "tin",
-        spacing: float | None = None,
+        spacing: float | str | None = None,
         depths: bool = False,
         case: str | None = None,
         progress=None,
@@ -711,7 +711,10 @@ class Session:
         or its own; ``"model"``: already in model coordinates) interpolated (``"tin"``,
         ``"idw"``, ``"nearest"``) onto a grid over the domain and written as geo.dat
         in model coordinates, every ``spacing`` metres (default: DIVEMesh's cell size,
-        B 1). ``depths``: the file gives depths (positive down). Turns G 10 on.
+        B 1; ``"finest"``: the finest the data has, Kartverket's 1 m in Norway,
+        Copernicus' 30 m on land elsewhere, a file's own cells; at most 4 million
+        points, coarser if the domain needs more). ``depths``: the file gives depths
+        (positive down). Turns G 10 on.
 
         No file: ``source="best"`` downloads the bathymetry for the domain
         (Kartverket's land and sea model in Norway, EMODnet for the rest of
@@ -731,7 +734,7 @@ class Session:
         source: str | Path,
         crs: str | None = None,
         method: str = "tin",
-        spacing: float | None = None,
+        spacing: float | str | None = None,
         depths: bool = False,
         case: str | None = None,
         lat_below_msl: float = 0.0,
@@ -742,7 +745,14 @@ class Session:
         and records it. Checks what it can at once (raises ValueError)."""
         from lagoon_format.geo import Georef
 
-        from lagoonviz.core.geo.bathy import WEB, geo_grid
+        from lagoonviz.core.geo.bathy import (
+            FINEST,
+            WEB,
+            finest_file,
+            finest_web,
+            geo_grid,
+            load,
+        )
 
         case_id = self._case_id(case)
         folder = self.data.case_folder(case_id)
@@ -761,12 +771,21 @@ class Session:
         if domain is None:
             raise ValueError("the domain is not known: set B 10 first (set_domain)")
         given_spacing = spacing
-        if spacing is None:
-            spacing = self.input_file("control.txt", case_id).value("B 1") or 0.0
-        xs, ys = geo_grid(domain[:4], float(spacing or 0.0))
         web = isinstance(source, str) and source in WEB and not Path(source).exists()
         if web and crs == "model":
             raise ValueError("bathymetry from the web needs the case's georeference")
+        bathy = None
+        if spacing == FINEST:
+            if web:
+                spacing, _ = finest_web(str(source), georef, domain[:4])
+            else:
+                bathy = load(Path(source).expanduser(), None if crs == "model" else crs, depths)
+                if crs == "model":
+                    bathy.crs = "model"
+                spacing = finest_file(bathy)
+        elif spacing is None:
+            spacing = self.input_file("control.txt", case_id).value("B 1") or 0.0
+        xs, ys = geo_grid(domain[:4], float(spacing or 0.0))
         code = f"session.make_geo_dat({str(source)!r}"
         for key, value, default in (
             ("crs", crs, None),
@@ -778,7 +797,7 @@ class Session:
         ):
             if value != default:
                 code += f", {key}={value!r}"
-        return GeoDatJob(
+        job = GeoDatJob(
             self,
             case_id,
             case,
@@ -806,6 +825,9 @@ class Session:
                 "rotation_deg": georef.rotation_deg if crs != "model" else 0.0,
             },
         )
+        job.bathy = bathy  # read already (for its finest spacing): not read again
+        job.finest = float(spacing or 0.0) if given_spacing == FINEST else None
+        return job
 
     def geo_dat_state(self, case: str | None = None) -> str:
         """Why the case's geo.dat no longer fits it, or "" (fits, or not known): made
@@ -1481,6 +1503,10 @@ class GeoDatJob:
         self.method, self.depths, self.code = method, depths, code
         self.count = 0
         self.sources: list[str] = []
+        self.bathy = None
+        #: with spacing "finest": the finest the data has [m] (the grid's may be
+        #: coarser, at most MOST_POINTS points)
+        self.finest: float | None = None
 
     def run(self, progress=None) -> int:
         """Read or download the bathymetry, carry it onto the grid, write geo.dat
@@ -1504,7 +1530,7 @@ class GeoDatJob:
         else:
             tell(0.0, f"Reading {Path(self.source).name}…")
             crs = "model" if self.crs == "model" else self.crs
-            bathy = load(Path(self.source).expanduser(), crs, self.depths)
+            bathy = self.bathy or load(Path(self.source).expanduser(), crs, self.depths)
             if self.crs == "model":
                 bathy.crs = "model"
                 if bathy.raster is not None:

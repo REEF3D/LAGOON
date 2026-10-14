@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### geo.dat as fine as the data
+
+- **Resolution** in the Map tab: geo.dat as DIVEMesh's cells (B 1), *the finest the
+  data has* (Kartverket's 1 m in Norway, Copernicus' 30 m on land, EMODnet's 115 m;
+  a file's own cells or point spacing), or every so many metres; the tab says what
+  the finest is over the domain and about how many points it makes (at most 4
+  million). In scripts `make_geo_dat(..., spacing="finest")`.
+
 ### Iso-surfaces and iso-volumes of the right data
 
 - **Made of the data selected**: with a volume (or a slice or iso item of it)

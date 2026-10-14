@@ -77,6 +77,12 @@ DEFAULT_PLACE = Place("Trondheim", 63.4365, 10.3980, "town", "Trøndelag", "defa
 #: a search with no case placed yet prefers the places near this one
 _DEFAULT_NEAR = (DEFAULT_PLACE.lat, DEFAULT_PLACE.lon)
 METHODS = {"Linear (TIN)": "tin", "Inverse distance": "idw", "Nearest point": "nearest"}
+#: geo.dat's resolution: DIVEMesh's cell size, the finest the data has, or a spacing
+RESOLUTIONS = {
+    "As DIVEMesh's cells (B 1)": None,
+    "The finest the data has": "finest",
+    "Every … m": "every",
+}
 
 
 class _Runner(QObject):
@@ -323,8 +329,21 @@ class MapTab(QWidget):
         self.method.setToolTip(
             "How scattered soundings are carried onto the grid (a raster is sampled bilinearly)"
         )
+        self.resolution = _combo()
+        for label, key in RESOLUTIONS.items():
+            self.resolution.addItem(label, key)
+        self.resolution.setToolTip(
+            "How fine geo.dat is: as DIVEMesh's cells (B 1), the finest the data has here "
+            "(Kartverket 1 m in Norway, Copernicus 30 m on land, EMODnet 115 m, ETOPO and "
+            "GEBCO 450 m; a file's own cells), or every so many metres. At most 4 million "
+            "points: coarser where the domain would need more"
+        )
+        self.resolution.currentIndexChanged.connect(lambda _i: self._resolution_changed())
         self.spacing = _spin(0.0, 1e5, 3, " m")
-        self.spacing.setPlaceholderText("DIVEMesh's cell size (B 1)")
+        self.spacing.setPlaceholderText("metres between points")
+        self.resolution_note = QLabel()
+        self.resolution_note.setWordWrap(True)
+        self.resolution_note.setEnabled(False)
         self.depths = QCheckBox("The file gives depths (positive down)")
         self.lat_offset = _spin(0.0, 20.0, 2, " m")
         self.lat_offset.setPlaceholderText("0: as EMODnet has it")
@@ -354,7 +373,10 @@ class MapTab(QWidget):
         file_form.addRow("Interpolation", self.method)
         file_form.addRow(self.depths)
         form.addRow(self.file_row)
-        form.addRow("Spacing", self.spacing)
+        form.addRow("Resolution", self.resolution)
+        self.spacing_label = QLabel("Spacing")
+        form.addRow(self.spacing_label, self.spacing)
+        form.addRow(self.resolution_note)
         self.lat_label = QLabel("LAT below MSL")
         form.addRow(self.lat_label, self.lat_offset)
         row = QHBoxLayout()
@@ -500,6 +522,7 @@ class MapTab(QWidget):
         self.draft_box.setVisible(draft)
         web = self.bathy_source.currentData() != "file"
         self.file_row.setVisible(not web)
+        self._resolution_changed()
         emodnet = self.bathy_source.currentData() in ("best", "emodnet")
         self.lat_label.setVisible(emodnet)
         self.lat_offset.setVisible(emodnet)
@@ -779,6 +802,52 @@ class MapTab(QWidget):
         self._start_geo_job(job, self.session.data.case_folder(self.case_id) / "geo.dat", then)
         return True
 
+    def _spacing(self):
+        """geo.dat's spacing as chosen: None (B 1), "finest", or metres."""
+        key = self.resolution.currentData()
+        if key == "every":
+            return self.spacing.value() or None
+        return key
+
+    def _resolution_changed(self) -> None:
+        every = self.resolution.currentData() == "every"
+        self.spacing_label.setVisible(every)
+        self.spacing.setVisible(every)
+        self._describe_resolution()
+
+    def _describe_resolution(self) -> None:
+        """What the resolution chosen gives here: the finest the sources have over the
+        domain, and about how many points."""
+        from lagoonviz.core.geo.bathy import MOST_POINTS, WEB, finest_web
+
+        text = ""
+        key = self.bathy_source.currentData()
+        if self.case_id and self.resolution.currentData() == "finest":
+            georef = self.session.data.georef(self.case_id)
+            domain = self.session.data.backgrounds.domain(self.case_id)
+            if key in WEB and georef is not None and domain is not None:
+                try:
+                    finest, label = finest_web(key, georef, domain[:4])
+                except Exception:  # noqa: BLE001 (nothing known: nothing said)
+                    finest = None
+                if finest:
+                    area = (domain[1] - domain[0] + 4 * finest) * (
+                        domain[3] - domain[2] + 4 * finest
+                    )
+                    points = area / finest**2
+                    text = f"Finest here: {finest:g} m ({label}), about {points:,.0f} points"
+                    if points > MOST_POINTS:
+                        coarser = (area / MOST_POINTS) ** 0.5
+                        text = (
+                            f"Finest here: {finest:g} m ({label}); the domain needs every "
+                            f"{coarser:.1f} m or more to stay under {MOST_POINTS / 1e6:g} "
+                            "million points"
+                        )
+            elif key == "file":
+                text = "The file's own spacing: its cells, or the distance between its points"
+        self.resolution_note.setText(text)
+        self.resolution_note.setVisible(bool(text))
+
     def make_geo_dat(self) -> None:
         """Ask where geo.dat is stored (a draft case moves to that folder), then make
         it, downloaded for the domain or from the file chosen, in a worker thread with
@@ -789,7 +858,7 @@ class MapTab(QWidget):
         chosen = self._where_geo_dat()
         if chosen is None:
             return
-        spacing = self.spacing.value() or None
+        spacing = self._spacing()
         try:
             if key == "file":
                 job = self.session.geo_dat_job(
@@ -875,8 +944,12 @@ class MapTab(QWidget):
             except OSError as failed:
                 note = f" (the copy as {chosen} failed: {failed})"
         sources = " and ".join(self.session.geo_sources) or "the file"
+        step = float(job.xs[1] - job.xs[0]) if len(job.xs) > 1 else 0.0
+        every = f" every {step:g} m"
+        if job.finest and step > job.finest * 1.001:
+            every += f" (the data has {job.finest:g} m; held to 4 million points)"
         self.message.emit(
-            f"geo.dat: {count:,} points from {sources}, stored in {folder}{note}; "
+            f"geo.dat: {count:,} points{every} from {sources}, stored in {folder}{note}; "
             "G 10 1 in control.txt. Now Run DIVEMesh",
             False,
         )

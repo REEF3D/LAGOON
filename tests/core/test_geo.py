@@ -1033,3 +1033,38 @@ def test_the_location_of_a_case_and_a_search_near_it(monkeypatch):
     monkeypatch.setattr(places.search, "__defaults__", (_names_only_in_norway, None))
     place = session.place_case("Nidelva", case=case)  # Arendal's: the case is there
     assert place.where == "Arendal"
+
+
+def test_geo_dat_at_the_finest_the_data_has(fjord, terrain, tmp_path, monkeypatch):
+    """spacing="finest": Kartverket's 1 m in Norway, Copernicus' 30 m elsewhere on
+    land, a file's own cells or point spacing; never more than MOST_POINTS."""
+    from lagoonviz.core.geo import bathy, download
+
+    session = Session()
+    case = session.open_case(fjord)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0))
+    domain = session.data.backgrounds.domain(case)[:4]
+    georef = session.georef(case)
+    assert bathy.finest_web("best", georef, domain) == (1.0, "Kartverket, land and sea (Norway)")
+    assert bathy.finest_web("emodnet", georef, domain)[0] == 115.0
+    cape = Georef("EPSG:32734", (260000.0, 6245000.0))  # Cape Town: no Kartverket
+    assert bathy.finest_web("best", cape, domain)[0] == 30.0
+    # a GeoTIFF of 10 m cells
+    session.make_geo_dat(terrain, spacing="finest")
+    points = np.loadtxt(fjord / "geo.dat")
+    assert np.diff(np.unique(points[:, 0]))[0] == pytest.approx(10.0)
+    assert "spacing='finest'" in session.to_script()
+    # soundings 7 m apart, in longitude and latitude
+    xs, ys = np.meshgrid(np.arange(-80, 81) * 7.0, np.arange(-50, 51) * 7.0)
+    world = GEOREF.to_world(500.0 + xs.ravel(), 250.0 + ys.ravel())
+    lons, lats = transformer("EPSG:25833", "EPSG:4326")(*world)
+    soundings = tmp_path / "soundings.xyz"
+    np.savetxt(soundings, np.column_stack([lons, lats, plane(*world)]), fmt="%.8f")
+    assert bathy.finest_file(bathy.load(soundings, "EPSG:4326")) == pytest.approx(7.0, rel=0.02)
+    # the web at its finest: held to MOST_POINTS for a large domain
+    monkeypatch.setattr(bathy, "MOST_POINTS", 10_000)
+    monkeypatch.setenv("LAGOON_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setattr(download, "http_fetch", FakeWcs(tmp_path))
+    job = session.geo_dat_job("best", spacing="finest")
+    assert job.finest == 1.0 and len(job.xs) * len(job.ys) <= 10_000
+    assert job.xs[1] - job.xs[0] > 1.0

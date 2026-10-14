@@ -359,6 +359,58 @@ def coastal(layers: dict[str, np.ndarray], xs, ys, order=()) -> tuple[np.ndarray
     return out, used
 
 
+#: geo.dat's spacing asked for as the finest the data has
+FINEST = "finest"
+#: metres in a degree of latitude
+DEGREE = 111_320.0
+
+
+def finest_web(choice: str, georef: Georef, box) -> tuple[float, str]:
+    """The finest cell of the sources of a download choice that have data over a
+    model rectangle (x0, x1, y0, y1): (metres, the source's label)."""
+    from lagoonviz.core.geo.download import SOURCES, covers
+
+    found = [
+        (SOURCES[key].finest, SOURCES[key].label)
+        for key in WEB[choice]
+        if covers(SOURCES[key], georef, box)
+    ]
+    if not found:
+        raise RasterError("no bathymetry source has data for the domain")
+    return min(found)
+
+
+def finest_file(bathy: Bathymetry) -> float:
+    """The finest spacing a bathymetry file has [m]: a raster's cell, or the median
+    distance between scattered points (degrees taken as metres at their latitude)."""
+    from lagoonviz.core.geo.crs import is_geographic
+
+    geographic = bathy.crs not in (None, "model") and is_geographic(str(bathy.crs))
+    if bathy.raster is not None:
+        t = bathy.raster.transform
+        if geographic:
+            lat = float(np.mean(bathy.raster.bounds()[1::2]))
+            dx = abs(t[1]) * DEGREE * np.cos(np.radians(lat))
+            return float(np.sqrt(dx * abs(t[5]) * DEGREE))
+        return bathy.raster.cell_size()
+    points = np.asarray(bathy.points, float)[:, :2]
+    if len(points) < 2:
+        raise RasterError(f"{bathy.name}: too few points")
+    if len(points) > 200_000:  # a fair sample, round the middle
+        pick = np.random.default_rng(0).choice(len(points), 200_000, replace=False)
+        points = points[pick]
+    if geographic:
+        lat = float(np.median(points[:, 1]))
+        points = points * [DEGREE * np.cos(np.radians(lat)), DEGREE]
+    from scipy.spatial import cKDTree
+
+    distance, _ = cKDTree(points).query(points, k=2)
+    near = distance[:, 1][distance[:, 1] > 0]
+    if not len(near):
+        raise RasterError(f"{bathy.name}: its points all lie on one spot")
+    return float(np.median(near))
+
+
 def geo_grid(
     domain: tuple[float, float, float, float], spacing: float, margin: float | None = None
 ):

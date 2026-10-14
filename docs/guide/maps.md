@@ -130,8 +130,12 @@ GeoTIFF and only the part of a large one that is needed).
   store `geo.dat` (a draft case started on the map goes to that folder, with its
   input files and `georef.json`; for a case in its own folder the dialog starts
   there, and a place elsewhere gets a copy: DIVEMesh reads the one in the case
-  folder), carries the bathymetry onto a grid over the domain (every B 1 metres,
-  two cells beyond the domain) and writes it in model coordinates, with `G 10 1`
+  folder), carries the bathymetry onto a grid over the domain (two cells beyond
+  it) as fine as *Resolution* says: as DIVEMesh's cells (B 1, the default), *the
+  finest the data has* (Kartverket's 1 m in Norway, Copernicus' 30 m on land,
+  EMODnet's 115 m, ETOPO's and GEBCO's 450 m; a file's own cells or the distance
+  between its points; the tab says what that is over the domain), or every so many
+  metres; at most 4 million points, coarser where the domain would need more, and writes it in model coordinates, with `G 10 1`
   in `control.txt`. A progress bar shows how far it is; *Cancel* keeps the
   geo.dat there was. The *geo.dat points* item then shows the points written
   (zoom in to see their spacing). A raster
@@ -156,6 +160,7 @@ session.set_georef("EPSG:25833", origin=[270000.0, 7040000.0], rotation_deg=30.0
 session.set_domain(0.0, 2000.0, 0.0, 800.0)
 session.turn_model(35.0)  # about the domain's centre
 session.make_geo_dat("best")  # downloaded; or a file: "~/surveys/nidelva.tif"
+session.make_geo_dat("best", spacing="finest")  # as fine as the data is
 session.geo_dat_state()  # why geo.dat no longer fits the case, "" if it does
 session.remake_geo_dat()  # from the same source, for the model as it lies now
 session.add_background_map("Sentinel-2 2017 (satellite)", margin=1.0)
