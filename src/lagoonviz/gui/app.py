@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication
 import lagoonviz
 from lagoonviz.core import Session
 from lagoonviz.gui import gc_guard
-from lagoonviz.gui.macos import set_app_name
+from lagoonviz.gui.macos import bring_forward, set_app_name
 from lagoonviz.gui.main_window import MainWindow
 from lagoonviz.gui.resources import resource_path
 from lagoonviz.gui.theme import DEFAULT_THEME, apply_theme
@@ -51,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
 
     window = MainWindow(Session())
     window.show()
+    bring_forward()  # macOS, started from Terminal: a menu bar, a Dock icon, no App Nap
     if args.dev_remote:
         from lagoonviz.gui.devremote import DevRemote
 

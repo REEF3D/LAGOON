@@ -7,6 +7,9 @@
 - **Help → Record a performance report**: counts what every thread of LAGOON does
   while you use it; stopped, it saves a plain text report (per thread, where the
   time went), to send when LAGOON is sluggish.
+- macOS: LAGOON started from Terminal (`setup_lagoon.command`) had no menu bar and
+  no Dock icon and ran slowed down as a background process; it is now a regular
+  application, brought to the front, with App Nap off while it runs.
 
 ### geo.dat as fine as the data
 
