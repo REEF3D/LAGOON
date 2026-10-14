@@ -50,6 +50,12 @@
 
 ### Speed or memory
 
+- **Large cases open and play faster again**: grid lines are made only when they
+  are switched on (they were made for every surface and volume as it was read: 4 s
+  for a 1681 × 1101 free surface, at every opening and reload, and for every frame
+  of a store's volume); a store's surfaces take their normals from the grid's
+  slopes (ten times faster than from the triangles); the colour range samples a
+  store's variable alone, without points and normals.
 - **View → Memory use**: *Performance* (frames kept up to a quarter of the
   computer's memory, more read ahead, more threads), *Balanced* (as before) or *Low
   memory* (256 MB of frames, little read ahead, a volume's cells not kept: large

@@ -170,11 +170,13 @@ def test_surfaces_and_volumes_show_their_grid_lines(reef3d_run, tmp_path, kind):
     shown_there = stored.data.display(other, store_mesh)
     assert stored.data.patch_outlines(other, store_mesh, shown_there) is not None
 
-    def edges(found):  # each edge once (a store's volume draws the box's corners twice)
-        ends = np.round(found.points[found.outlines.astype(np.int64)].astype(float), 3)
+    def edges(data, item_id, found):  # each edge once (a store's box draws corners twice)
+        lines = data._grid_lines(item_id, found).astype(np.int64)  # made when asked for
+        ends = np.round(found.points[lines].astype(float), 3)
         return {tuple(sorted(map(tuple, pair))) for pair in ends}
 
-    assert edges(store_mesh) == edges(mesh)
+    assert edges(stored.data, other, store_mesh) == edges(s.data, item, mesh)
+    assert mesh.outlines is None  # not made with every frame
 
 
 def test_an_iso_volume_is_the_part_of_the_volume_in_a_range(reef3d_run):
@@ -208,3 +210,28 @@ def test_the_first_iso_volume_of_a_run(reef3d_run):
     props = s.scene.get(item).properties
     assert props["iso_by"] == "velocity" and props["iso_min"] < props["iso_max"]
     assert s.data.load(item).n_triangles > 0
+
+
+def test_normals_of_a_grid_from_its_slopes():
+    from lagoonviz.core.data.mesh import grid_normals
+
+    x = np.linspace(0.0, 4.0, 5)
+    y = np.linspace(0.0, 2.0, 3)
+    gx, _ = np.meshgrid(x, y)
+    n = grid_normals(0.5 * gx, x, y)  # a slope of 1:2 up along x
+    expected = np.array([-0.5, 0.0, 1.0]) / np.sqrt(1.25)
+    np.testing.assert_allclose(n.reshape(-1, 3), np.tile(expected, (15, 1)), atol=1e-6)
+    holes = 0.5 * gx
+    holes[1, 2] = np.nan
+    assert np.isfinite(grid_normals(holes, x, y)).all()
+
+
+def test_a_stores_surface_values_alone(reef3d_run):
+    from lagoonviz.core.convert import convert
+
+    convert(reef3d_run)
+    s = Session()
+    s.open_case(next(reef3d_run.glob("*.lagoon")))
+    dataset = s.data.dataset("free_surface-1")
+    values = dataset.read_values(1, "eta")
+    np.testing.assert_allclose(values, dataset.read(1, ["eta"]).scalar("eta"))

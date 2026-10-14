@@ -21,7 +21,7 @@ from lagoon_format.series import ProfileSet as StoredProfiles
 from lagoon_format.series import Table
 from lagoon_format.store import Output, Store, is_store, sigma_heights
 
-from lagoonviz.core.data.mesh import SurfaceMesh, face_edges
+from lagoonviz.core.data.mesh import SurfaceMesh, grid_normals, scalar_values, unique_edges
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import CELL_DATA_ROLES, Dataset, Frame, _joined
 from lagoonviz.core.data.series import SeriesFile, TimeSeries
@@ -84,7 +84,7 @@ def _face(points: np.ndarray, data: dict[str, np.ndarray], flip: bool) -> Surfac
         name: v.reshape(rows * cols, -1) if v.ndim == 3 else v.reshape(-1)
         for name, v in data.items()
     }
-    return SurfaceMesh(flat, triangles, values, outlines=face_edges(quads))  # grid lines
+    return SurfaceMesh(flat, triangles, values)
 
 
 class StoreDataset(Dataset):
@@ -238,16 +238,27 @@ class StoreDataset(Dataset):
         data = {name: output.read(name, index) for name in names}
         points = np.stack([gx, gy, z], axis=-1)
         with self._cells_lock:
-            cells = self._cells_cache.get("surface")
-            if cells is None:
-                face = _face(points, {}, False)
-                cells = self._cells_cache["surface"] = (face.triangles, face.outlines)
-        triangles, edges = cells
+            triangles = self._cells_cache.get("surface")
+            if triangles is None:
+                triangles = self._cells_cache["surface"] = _face(points, {}, False).triangles
         values = {
             n: v.reshape(z.size, -1) if v.ndim == 3 else v.reshape(-1) for n, v in data.items()
         }
         flat = points.reshape(-1, 3).astype(np.float32)
-        return SurfaceMesh(flat, triangles, values, outlines=edges).with_normals()
+        # the normals from the grid's slopes: much faster than from the triangles
+        normals = grid_normals(z, output.x, output.y).reshape(-1, 3)
+        return SurfaceMesh(flat, triangles, values, normals=normals)
+
+    def read_values(self, index: int, variable: str) -> np.ndarray | None:
+        """One variable of a surface output (sampling the colour range): its array
+        alone, no points, triangles or normals."""
+        output = self.output
+        name = variable.partition(".")[0]
+        if output.grid != "surface" or name not in output.variables:
+            return super().read_values(index, variable)
+        values = output.read(name, index)
+        values = values.reshape(-1, values.shape[-1]) if values.ndim == 3 else values.reshape(-1)
+        return scalar_values({name: values}, variable)
 
     def _side(self, t: int, axis: int, line: int, names: list[str]):
         """Heights (nz, n) and fields (nz, n[, 3]) on grid line ``line`` across ``axis``
@@ -368,13 +379,10 @@ class StoreDataset(Dataset):
             quads = quads[~missing[quads].any(axis=1)]
         triangles = np.concatenate([quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]])
         # the grid lines: the quads' edges, each once
-        edges = np.concatenate(
-            [quads[:, [0, 1]], quads[:, [1, 2]], quads[:, [2, 3]], quads[:, [3, 0]]]
+        edges = unique_edges(
+            np.concatenate([quads[:, [0, 1]], quads[:, [1, 2]], quads[:, [2, 3]], quads[:, [3, 0]]])
         )
-        edges = np.unique(np.sort(edges, axis=1), axis=0) if len(edges) else edges
-        return SurfaceMesh(
-            points, triangles.astype(np.uint32), data, outlines=edges.astype(np.uint32)
-        )
+        return SurfaceMesh(points, triangles.astype(np.uint32), data, outlines=edges)
 
     # ------------------------------------------------------------- probes
     def point_series(self, variable: str, x: float, y: float) -> tuple[tuple, np.ndarray]:

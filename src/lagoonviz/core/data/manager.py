@@ -837,11 +837,14 @@ class DataManager:
             colour = str(item.properties.get("grid_lines", "off"))
         else:
             return None
-        if colour == "off" or mesh.outlines is None:
+        if colour == "off" or shown.positions.shape[0] != mesh.n_points:
             return None
-        if not len(mesh.outlines) or shown.positions.shape[0] != mesh.n_points:
+        outlines = mesh.outlines
+        if outlines is None and item.kind not in ("amr", "slice"):
+            outlines = self._grid_lines(item_id, mesh)  # made when first asked for
+        if outlines is None or not len(outlines):
             return None
-        edges = mesh.outlines.astype(np.int64)
+        edges = outlines.astype(np.int64)
         if item.kind != "slice" and shown.triangles.size:  # not over hidden dry land
             used = np.zeros(mesh.n_points, bool)
             used[shown.triangles.ravel()] = True
@@ -867,6 +870,27 @@ class DataManager:
         return Trails(
             item_id, segments, shown.visible, "#ffffff" if colour == "white" else "#1e2833"
         )
+
+    def _grid_lines(self, item_id: str, mesh: SurfaceMesh) -> np.ndarray | None:
+        """The grid lines of a surface or a volume's outside: the edges of its
+        triangles without the cells' diagonals (mesh.grid_edges), made once for the
+        triangles of a dataset (they are shared by its frames) and only when shown."""
+        from lagoonviz.core.data.mesh import grid_edges
+
+        triangles = mesh.triangles
+        if not triangles.size:
+            return None
+        dataset = self.dataset(item_id)
+        across = dataset is None or dataset.surface_like
+        key = (id(triangles), triangles.shape[0], mesh.n_points, across)
+        cache = self.__dict__.setdefault("_grid_line_cache", {})
+        edges = cache.get(key)
+        if edges is None:
+            edges = grid_edges(triangles, mesh.points, across=across)
+            if len(cache) > 8:
+                cache.clear()
+            cache[key] = edges
+        return edges
 
     def contour_lines(
         self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
@@ -903,9 +927,11 @@ class DataManager:
             return found
         for index in np.unique(np.linspace(0, len(dataset) - 1, samples).round().astype(int)):
             try:
-                found.append(dataset.read(int(index), [array]).scalar(variable))
+                values = dataset.read_values(int(index), variable)
             except (OSError, ValueError, KeyError):
                 continue
+            if values is not None:
+                found.append(values)
         return found
 
     def automatic_range(self, item_id: str) -> tuple[float, float] | None:

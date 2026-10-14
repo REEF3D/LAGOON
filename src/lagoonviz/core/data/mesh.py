@@ -156,25 +156,33 @@ def polygon_edges(connectivity: np.ndarray, offsets: np.ndarray) -> np.ndarray:
     return unique_edges(np.concatenate(parts) if parts else np.zeros((0, 2), np.int64))
 
 
-def grid_edges(triangles: np.ndarray, points: np.ndarray) -> np.ndarray:
-    """The grid lines of a surface REEF3D wrote as triangles, two per grid cell: their
-    edges without the diagonals (an edge that is the longest, measured across, of
-    both triangles that share it), each once."""
+def grid_edges(triangles: np.ndarray, points: np.ndarray, across: bool = True) -> np.ndarray:
+    """The grid lines of a surface made of triangles, two per grid cell (as REEF3D
+    writes them, as LAGOON splits a grid's cells): their edges without the cells'
+    diagonals (an edge that is the longest of both triangles sharing it; measured
+    across, in x and y, with ``across``, else in 3D), each once."""
     triangles = np.asarray(triangles, np.int64)
     if not len(triangles):
         return np.zeros((0, 2), np.uint32)
-    xy = np.asarray(points, np.float64)[:, :2]
+    p = np.asarray(points, np.float64)
+    p = p[:, :2] if across else p
     edges = np.stack([triangles, np.roll(triangles, -1, axis=1)], axis=2)  # (m, 3, 2)
-    length = np.linalg.norm(xy[edges[..., 0]] - xy[edges[..., 1]], axis=2)
-    longest = np.sort(edges[np.arange(len(triangles)), length.argmax(axis=1)], axis=1)
-    keys, counts = np.unique(longest, axis=0, return_counts=True)
-    diagonals = keys[counts == 2]
-    every = unique_edges(edges.reshape(-1, 2)).astype(np.int64)
-    if not len(diagonals):
-        return every.astype(np.uint32)
-    span = int(max(every.max(), diagonals.max())) + 1
-    drop = np.isin(every[:, 0] * span + every[:, 1], diagonals[:, 0] * span + diagonals[:, 1])
-    return every[~drop].astype(np.uint32)
+    length = np.linalg.norm(p[edges[..., 0]] - p[edges[..., 1]], axis=2)
+    span = int(triangles.max()) + 1
+    longest = edges[np.arange(len(triangles)), length.argmax(axis=1)]
+    keys = _edge_keys(longest, span)
+    keys.sort()
+    twice = keys[1:][keys[1:] == keys[:-1]]  # diagonals: the longest edge of two triangles
+    every = np.unique(_edge_keys(edges.reshape(-1, 2), span))
+    if len(twice):
+        every = every[~np.isin(every, twice, assume_unique=False)]
+    return np.stack([every // span, every % span], axis=1).astype(np.uint32)
+
+
+def _edge_keys(edges: np.ndarray, span: int) -> np.ndarray:
+    """One int64 per edge, whichever way round (sorting rows of pairs is slow)."""
+    a, b = edges[:, 0].astype(np.int64), edges[:, 1].astype(np.int64)
+    return np.minimum(a, b) * span + np.maximum(a, b)
 
 
 def face_edges(faces: np.ndarray) -> np.ndarray:
@@ -190,7 +198,10 @@ def unique_edges(edges: np.ndarray) -> np.ndarray:
     """Point pairs each once, whichever way round, (k, 2) uint32."""
     if not len(edges):
         return np.zeros((0, 2), np.uint32)
-    return np.unique(np.sort(np.asarray(edges, np.int64), axis=1), axis=0).astype(np.uint32)
+    edges = np.asarray(edges, np.int64)
+    span = int(edges.max()) + 1
+    keys = np.unique(_edge_keys(edges, span))
+    return np.stack([keys // span, keys % span], axis=1).astype(np.uint32)
 
 
 # ----------------------------------------------------------------- volumes
@@ -268,8 +279,6 @@ class VolumePlan:
     take: tuple[np.ndarray, ...]  # per piece: local ids of the surface points
     first: np.ndarray  # stacked surface point -> merged point (unique, in order)
     triangles: np.ndarray  # (m, 3) uint32 on merged points
-    #: the cells' edges on the outer surface (its grid lines), (k, 2) uint32
-    edges: np.ndarray | None = None
 
     @classmethod
     def build(cls, pieces: list[Piece], decimals: int = 5) -> VolumePlan:
@@ -298,7 +307,7 @@ class VolumePlan:
         faces = compact.reshape(faces.shape)
         triangles = np.ascontiguousarray(faces_to_triangles(faces), dtype=np.uint32)
         sizes = tuple(p.points.shape[0] for p in pieces)
-        return cls(sizes, tuple(takes), first[order][kept], triangles, face_edges(faces))
+        return cls(sizes, tuple(takes), first[order][kept], triangles)
 
     def accepts(self, pieces: list[Piece]) -> bool:
         return tuple(p.points.shape[0] for p in pieces) == self.sizes
@@ -413,6 +422,24 @@ def exaggerate_normals(normals: np.ndarray, factor: float) -> np.ndarray:
     scaled = normals * np.array([factor, factor, 1.0], np.float32)
     length = np.linalg.norm(scaled, axis=1, keepdims=True)
     return (scaled / np.where(length > 0, length, 1.0)).astype(np.float32)
+
+
+def grid_normals(z: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Unit normals (ny, nx, 3) of a surface given as heights z (ny, nx) on a
+    rectilinear grid (x along the columns, y along the rows), pointing up: from the
+    slopes, with central differences (one-sided at the edges)."""
+    z = np.asarray(z, np.float64)
+    if z.shape[0] < 2 or z.shape[1] < 2:
+        out = np.zeros((*z.shape, 3), np.float32)
+        out[..., 2] = 1.0
+        return out
+    with np.errstate(invalid="ignore"):
+        dz_dy, dz_dx = np.gradient(z, np.asarray(y, np.float64), np.asarray(x, np.float64))
+    normals = np.stack([-dz_dx, -dz_dy, np.ones_like(z)], axis=-1)
+    normals /= np.linalg.norm(normals, axis=-1, keepdims=True)
+    bad = ~np.isfinite(normals).all(axis=-1)
+    normals[bad] = (0.0, 0.0, 1.0)  # dry points, holes
+    return normals.astype(np.float32)
 
 
 def vertex_normals(positions: np.ndarray, triangles: np.ndarray) -> np.ndarray:
