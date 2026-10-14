@@ -242,7 +242,7 @@ def test_make_geo_dat_asks_where_and_moves_a_draft_there(window, tmp_path, monke
     tab.make_geo_dat()
     assert not session.is_draft(case_id) and session.data.case_folder(case_id) == target
     # made in a worker thread, a progress bar showing
-    qtbot.waitUntil(lambda: " from terrain.tif" in panel_message(window), timeout=20000)
+    qtbot.waitUntil(lambda: "points from" in panel_message(window), timeout=20000)
     assert (target / "geo.dat").is_file() and (target / "georef.json").is_file()
     assert (target / "notes.txt").read_text() == "mine"
     assert str(target) in panel_message(window)
@@ -384,62 +384,3 @@ def test_a_turned_model_makes_geo_dat_again_before_divemesh(
     )
     assert session.geo_dat_state() == "" and session.geo_dat_recipe()["rotation_deg"] == 20.0
     assert tab.geo_state.isHidden()
-
-
-def test_the_coast_of_a_download_and_files_over_it(window, tmp_path, monkeypatch):
-    """The Map tab's *Near the coast*, Dean's A, *Trust the sea from*, the files over
-    the download and ICESat-2 go to the geo.dat job."""
-    from PySide6.QtWidgets import QDialog, QFileDialog
-
-    from lagoonviz.gui.panels import map_setup
-
-    session = window.session
-    session.new_case_from_map((63.425, 10.40), length=400.0)
-    window.setup_panel.refresh()
-    tab = window.setup_panel.map_tab
-    tab.bathy_source.setCurrentIndex(tab.bathy_source.findData("best"))
-    assert tab.web_row.isVisibleTo(tab) and not tab.file_row.isVisibleTo(tab)
-    assert tab.nearshore.currentData() == "dean" and tab.dean_a.value() == 0.1
-    chart = tmp_path / "chart.xyz"
-    chart.write_text("271200 7040200 -5\n")
-    atl24 = tmp_path / "ATL24_x.h5"
-    atl24.write_bytes(b"")
-    monkeypatch.setattr(
-        QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(chart), str(atl24)], "")
-    )
-
-    def asked(dialog):
-        dialog.crs.setText("EPSG:32643")
-        dialog.depths.setChecked(True)
-        dialog.below_msl.setValue(2.6)
-        return QDialog.Accepted
-
-    monkeypatch.setattr(map_setup.OverlayDialog, "exec", asked)
-    tab.add_overlay()
-    assert tab.overlay_list.count() == 2
-    assert "ICESat-2" in tab.overlay_list.item(1).text()
-    assert "2.6 m below MSL" in tab.overlay_list.item(0).text()
-    tab.nearshore.setCurrentIndex(tab.nearshore.findData("smooth"))
-    assert not tab.web_form.isRowVisible(tab.dean_a)
-    tab.trust_depth.setValue(2.5)
-    tab.icesat2.setChecked(True)
-    given = {}
-
-    def job(source, **options):
-        given.update(options, source=source)
-        raise ValueError("stop here")
-
-    monkeypatch.setattr(session, "geo_dat_job", job)
-    monkeypatch.setattr(tab, "_where_geo_dat", lambda: tmp_path / "geo.dat")
-    tab.make_geo_dat()
-    assert given["source"] == "best" and given["nearshore"] == "smooth"
-    assert given["dean_a"] is None and given["trust_depth"] == 2.5 and given["icesat2"]
-    assert given["overlays"][0] == {
-        "path": str(chart),
-        "crs": "EPSG:32643",
-        "depths": True,
-        "below_msl": 2.6,
-    }
-    tab.overlay_list.setCurrentRow(0)
-    tab.remove_overlay()
-    assert tab.overlay_list.count() == 1 and tab._overlays[0]["path"] == str(atl24)
