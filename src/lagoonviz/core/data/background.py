@@ -37,6 +37,69 @@ SOURCE_CHOICES = {
     "Tile server URL": "url",
 }
 PLACEMENTS = BASEMAP_PLACEMENTS
+#: the case's background map as last set, kept in its folder so the case opened
+#: again (its results in a new window, a script) has it too
+MAP_FILE = "LAGOON_map.json"
+#: the item's properties kept there
+MAP_KEYS = ("source", "file", "margin", "placement", "opacity", "pixels")
+
+
+def remembered_map(folder: Path | None) -> dict | None:
+    """The background map a case folder keeps ({"removed": True}: taken away), or
+    None: none kept."""
+    import json
+
+    if folder is None:
+        return None
+    try:
+        data = json.loads((Path(folder) / MAP_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("removed"):
+        return {"removed": True}
+    kept = {k: data[k] for k in MAP_KEYS if k in data}
+    kept["visible"] = bool(data.get("visible", True))
+    return kept if kept.get("source") in SOURCE_CHOICES else None
+
+
+def remember_map(folder: Path, properties: dict | None, visible: bool = True) -> None:
+    """Keep a case's background map in its folder (None: it was taken away)."""
+    import json
+
+    data = (
+        {"removed": True}
+        if properties is None
+        else {**{k: properties[k] for k in MAP_KEYS if k in properties}, "visible": visible}
+    )
+    try:
+        (Path(folder) / MAP_FILE).write_text(json.dumps(data, indent=1) + "\n", "utf-8")
+    except OSError:
+        pass  # a folder that cannot be written: nothing kept
+
+
+def map_for(folder: Path | None, georef) -> dict | None:
+    """The background map a case opened with this georeference gets: the one its
+    folder keeps, else the best map of the place (Kartverket's in Norway); None:
+    none (taken away before, or no georeference)."""
+    if georef is None:
+        return None
+    kept = remembered_map(folder)
+    if kept is not None:
+        return None if kept.get("removed") else kept
+    from lagoonviz.core.geo.crs import transformer
+    from lagoonviz.core.geo.tiles import source_for
+
+    try:
+        lon, lat = transformer(georef.crs, "EPSG:4326")(*georef.to_world(0.0, 0.0))
+        key = source_for(float(lon), float(lat)).key
+    except Exception:  # noqa: BLE001 (a CRS that does not transform: no map)
+        return None
+    label = next((name for name, k in SOURCE_CHOICES.items() if k == key), "OpenStreetMap")
+    return {"source": label}
+
+
 #: 2D: the map lies under the bed (PLAN_LAYERS["bathymetry"] = 0)
 PLAN_LEVEL = -0.5
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The map with the results
+
+- **A case opened again has its background map**: the map is kept with the case
+  (`LAGOON_map.json`: map, margin, placement, opacity, shown or not), so its
+  results opened anew show it too. A georeferenced case that keeps none opens with
+  the place's best map; a map taken away stays away.
+
 ### The coast of downloaded bathymetry
 
 - **The coast where Copernicus' 30 m land has it**: *Best available* no longer lets

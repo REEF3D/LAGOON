@@ -847,6 +847,52 @@ def test_a_place_far_from_the_cases_crs(fjord):
     assert session.data.georef(case).crs == "EPSG:3857"
 
 
+def test_a_case_opened_again_has_its_map(fjord):
+    """The background map is kept with the case (LAGOON_map.json): its results opened
+    anew, in another session, show it; a georeferenced case without one gets the
+    place's best map; a map taken away stays away."""
+    from lagoonviz.core.data.background import MAP_FILE
+
+    def maps(session):
+        return [i for i in session.scene if i.kind == "basemap"]
+
+    session = Session()
+    session.open_case(fjord)
+    assert maps(session) == []  # no georeference: no map
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0))
+    item = session.add_background_map("OpenStreetMap", margin=1.0)
+    session.set_property(item, "opacity", 0.6)
+    assert (fjord / MAP_FILE).is_file()
+    again = Session()
+    case = again.open_case(fjord)
+    found = maps(again)
+    assert len(found) == 1 and found[0].properties["source"] == "OpenStreetMap"
+    assert found[0].properties["margin"] == 1.0 and found[0].properties["opacity"] == 0.6
+    assert again.data.case_item(found[0].id).id == case
+    while case in again.scene:  # the opening undone: the map is not "taken away"
+        again.undo()
+    assert maps(again) == [] and len(maps(Session_open(fjord))) == 1
+    third = Session()
+    third.open_case(fjord)
+    third.set_visible(maps(third)[0].id, False)  # hidden: opens hidden
+    fourth = Session()
+    fourth.open_case(fjord)
+    assert not maps(fourth)[0].visible
+    fourth.remove_item(maps(fourth)[0].id)  # taken away: opens without
+    assert maps(Session_open(fjord)) == []
+    fourth.undo()  # back: kept again
+    assert len(maps(Session_open(fjord))) == 1
+    # no map kept: the place's best, Kartverket's in Norway
+    (fjord / MAP_FILE).unlink()
+    assert maps(Session_open(fjord))[0].properties["source"] == "Kartverket topo"
+
+
+def Session_open(folder):  # noqa: N802 (reads as a constructor)
+    session = Session()
+    session.open_case(folder)
+    return session
+
+
 def test_the_map_lies_under_the_results_too(fjord):
     session = Session()
     session.open_case(fjord)

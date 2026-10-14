@@ -97,7 +97,12 @@ GeoTIFF and only the part of a large one that is needed).
   turns the model on the map about the domain's centre: the domain turns, the map
   stays north up (B 10 keeps its numbers: the model's own axes turn). Esc stops.
   Or type the extent (*Set B 10*) or the rotation (*Turn*).
-- **Background map**: *Show map* adds a *Background map* item for the case.
+- **Background map**: *Show map* adds a *Background map* item for the case. The
+  case keeps it (`LAGOON_map.json` in its folder, as last set: map, margin,
+  placement, opacity, shown or not): opened again, its results in a new window or
+  from a script, it has its map. A georeferenced case that keeps none opens with
+  the place's best map (Kartverket's in Norway, else OpenStreetMap); one whose map
+  was taken away opens without.
 - **Bathymetry**: *From* **Download** needs no file: LAGOON asks the web for the
   bathymetry of the domain and its margin. *Best available* takes, the finest
   first, each filling what the ones before had no data for: Kartverket's

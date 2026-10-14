@@ -60,6 +60,10 @@ class Session:
         self._outputs: list[tuple[Command | None, str]] = []
         self._log_listeners: list[LogListener] = []
         self.stack.subscribe(self._on_stack)
+        #: background map item -> (its case folder, its case item), to keep it there
+        self._map_folders: dict = {}
+        self._maps_removed: list = []
+        self.scene.subscribe(self._remember_maps)
         #: where the last geo.dat came from (make_geo_dat): file name or web sources
         self.geo_sources: list[str] = []
         #: what the last sea_conditions could not read (NorKyst before 2017, ...)
@@ -74,6 +78,7 @@ class Session:
             callback(line)
 
     def _on_stack(self, kind: str, command: Command | None) -> None:
+        self._maps_taken_away()
         if command is None:
             return
         if kind == "do":
@@ -140,6 +145,7 @@ class Session:
             children.append(AddItem("series", series.name, {"source": series.key}))
         for profiles in case.main_profiles():
             children.append(AddItem("profile", profiles.name, {"source": profiles.key}))
+        children += self._background_for(case)
         command = OpenCase(path, name, children)
         if name is None:
             given = Path(path).expanduser()
@@ -160,6 +166,63 @@ class Session:
         if first is not None and self.scene.time < first:
             self.set_time(first)
         return command.item_id
+
+    def _background_for(self, case) -> list[AddItem]:
+        """The background map a georeferenced case opens with: as its folder keeps
+        it (LAGOON_map.json, from the last time it was set), else the place's best
+        map; none for a case without a georeference, or whose map was taken away."""
+        from lagoon_format.geo import FILE
+
+        from lagoonviz.core.data.background import Backgrounds, map_for
+
+        folder = Path(case.path)
+        folder = folder.parent if folder.is_file() or folder.suffix == ".lagoon" else folder
+        try:
+            georef, _ = Backgrounds._find_georef(folder, case, (folder / FILE).is_file())
+        except Exception:  # noqa: BLE001 (a georeference that does not read: no map)
+            return []
+        found = map_for(folder, georef)
+        if found is None:
+            return []
+        visible = bool(found.pop("visible", True))
+        return [AddItem("basemap", None, found, visible=visible)]
+
+    def _remember_maps(self, event: str, item_id: str | None) -> None:
+        """A background map set, shown or hidden, or taken away: kept in its case's
+        folder for the next time the case opens (LAGOON_map.json)."""
+        from lagoonviz.core.data.background import remember_map
+
+        folders = self._map_folders
+        if event in ("added", "changed") and item_id in self.scene:
+            item = self.scene.get(item_id)
+            if item.kind != "basemap":
+                return
+            folder = self.data.case_folder(item_id)
+            if folder is None or not folder.is_dir():
+                return
+            folders[item_id] = (folder, self.data.case_item(item_id))
+            remember_map(folder, item.properties, item.visible)
+        elif event == "removed" and item_id in folders:
+            # decided once the command is done: the map taken away, or its case closed
+            self._maps_removed.append(folders.pop(item_id))
+
+    def _maps_taken_away(self) -> None:
+        """After a command: a background map removed while its case stays open was
+        taken away (kept so, the case opens without it); with its case closed (or
+        the case's opening undone) nothing changes."""
+        from lagoonviz.core.data.background import remember_map
+
+        removed, self._maps_removed = self._maps_removed, []
+        for folder, case_item in removed:
+            if case_item is None or case_item.id not in self.scene:
+                continue
+            others = [
+                i
+                for i in self.scene
+                if i.kind == "basemap" and self.data.case_folder(i.id) == folder
+            ]
+            if not others:
+                remember_map(folder, None)
 
     def new_case(self, path: str | Path, name: str | None = None) -> str:
         """Start a case in a folder (made if needed): its control.txt and ctrl.txt are
