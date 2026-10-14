@@ -1006,9 +1006,12 @@ def test_geo_dat_from_the_world_outside_europe(tmp_path, monkeypatch):
     georef = session.georef(case)
     lon, lat = transformer(georef.crs, "EPSG:4326")(*georef.to_world(points[:, 0], points[:, 1]))
     land = lon > 18.405
-    sea = lon < 18.395
+    sea = lon < 18.391  # beyond 1.5 of ETOPO's 450 m cells from the coast: trusted
+    shore = (lon > 18.393) & (lon < 18.398)  # nearer: a beach profile up to the coast
     assert np.allclose(points[land, 2], (lon[land] - 18.40) * 1000.0, atol=0.5)
-    assert np.allclose(points[sea, 2], -20.0)
+    assert sea.any() and np.allclose(points[sea, 2], -20.0)
+    assert ((points[shore, 2] > -20.01) & (points[shore, 2] < -0.1)).all()
+    assert np.ptp(points[shore, 2]) > 5.0  # no flat 1 m, nor ETOPO's 20 m to the coast
     assert sum("copernicus" in u for u in server.asked) == 1  # the one tile there
 
 
