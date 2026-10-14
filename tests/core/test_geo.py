@@ -746,6 +746,8 @@ class FakeWcs:
         from urllib.parse import parse_qs, urlparse
 
         self.asked.append(url)
+        if "copernicus" in url:  # open sea: no land tile
+            raise OSError("HTTP Error 404: Not Found")
         if "geonorge" in url:
             q = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
             assert q["coverage"] == "nhm_dtm_topobathy_25833" and q["crs"] == "EPSG:25833"
@@ -787,10 +789,9 @@ def test_geo_dat_from_the_web(fjord, tmp_path, monkeypatch):
     session.open_case(fjord)
     session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=30.0)
     count = session.make_geo_dat("best")
-    assert len(server.asked) == 2 and session.geo_sources == [
-        "Kartverket, land and sea (Norway)",
-        "EMODnet (European seas)",
-    ]
+    # shallow sea: Copernicus asked for land where the coast could be (none: no tile)
+    assert len(server.asked) == 3 and "copernicus" in server.asked[-1]
+    assert session.geo_sources == ["Kartverket, land and sea (Norway)", "EMODnet (European seas)"]
     points = np.loadtxt(fjord / "geo.dat")
     assert count == len(points)
     world = GEOREF.to_world(points[:, 0], points[:, 1])
@@ -800,7 +801,7 @@ def test_geo_dat_from_the_web(fjord, tmp_path, monkeypatch):
     south = world[1] < 7040300
     assert np.allclose(points[south, 2], truth[south] - 1.0, atol=1.5)  # EMODnet's
     session.make_geo_dat("kartverket")
-    assert len(server.asked) == 2  # the same area: from the cache
+    assert len(server.asked) == 3  # the same area: from the cache
     assert "session.make_geo_dat('best'" in session.to_script()
 
 
@@ -913,8 +914,9 @@ class FakeWorld:
         depth = -30.0 if "GEBCO" in q else -20.0
         lat0, stride, lat1 = re.search(variable + r"\[\(([^)]+)\):(\d+):\(([^)]+)\)\]", q).groups()
         lon0, _, lon1 = re.search(r"\]\[\(([^)]+)\):(\d+):\(([^)]+)\)\]", q).groups()
-        lats = np.arange(float(lat0), float(lat1), 1 / 240 * int(stride))
-        lons = np.arange(float(lon0), float(lon1), 1 / 240 * int(stride))
+        step = 1 / 240 * int(stride)  # ERDDAP's answer includes both ends
+        lats = np.arange(float(lat0), float(lat1) + step / 2, step)
+        lons = np.arange(float(lon0), float(lon1) + step / 2, step)
         rows = [f"latitude,longitude,{variable}", "degrees_north,degrees_east,m"]
         rows += [f"{a},{o},{depth}" for a in lats for o in lons]
         return ("\n".join(rows) + "\n").encode()

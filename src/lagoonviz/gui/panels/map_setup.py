@@ -304,7 +304,8 @@ class MapTab(QWidget):
             "Download the bathymetry for the domain (no file needed). Best available: "
             "Kartverket in Norway (land and sea, to 1 m), EMODnet at sea in Europe "
             "(115 m), Copernicus on land (30 m, the world), NOAA ETOPO 2022 and GEBCO for "
-            "the rest (450 m, the world). Or a file of yours"
+            "the rest (450 m, the world); the coast where Copernicus' 30 m land has it. "
+            "Or a file of yours"
         )
         self.bathy_source.currentIndexChanged.connect(lambda _i: self._source_changed())
         self.file_label = QLabel("No file chosen")
@@ -325,6 +326,14 @@ class MapTab(QWidget):
         self.spacing = _spin(0.0, 1e5, 3, " m")
         self.spacing.setPlaceholderText("DIVEMesh's cell size (B 1)")
         self.depths = QCheckBox("The file gives depths (positive down)")
+        self.lat_offset = _spin(0.0, 20.0, 2, " m")
+        self.lat_offset.setPlaceholderText("0: as EMODnet has it")
+        self.lat_offset.setToolTip(
+            "EMODnet's depths are below the lowest astronomical tide (LAT); land heights "
+            "are over mean sea level. How far LAT lies below mean sea level here (tide "
+            "tables, the chart's datum notes; about half the spring tidal range) puts "
+            "both on one zero, so the coast lies where it should"
+        )
         self.geo_button = QPushButton("Make geo.dat")
         self.geo_button.setToolTip(
             "Interpolate the file onto a grid over the domain and write geo.dat in model "
@@ -346,6 +355,8 @@ class MapTab(QWidget):
         file_form.addRow(self.depths)
         form.addRow(self.file_row)
         form.addRow("Spacing", self.spacing)
+        self.lat_label = QLabel("LAT below MSL")
+        form.addRow(self.lat_label, self.lat_offset)
         row = QHBoxLayout()
         row.addStretch(1)
         row.addWidget(self.geo_button)
@@ -489,6 +500,9 @@ class MapTab(QWidget):
         self.draft_box.setVisible(draft)
         web = self.bathy_source.currentData() != "file"
         self.file_row.setVisible(not web)
+        emodnet = self.bathy_source.currentData() in ("best", "emodnet")
+        self.lat_label.setVisible(emodnet)
+        self.lat_offset.setVisible(emodnet)
         self.geo_button.setEnabled(
             has_case and (self._bathymetry is not None or (web and georef is not None))
         )
@@ -787,7 +801,12 @@ class MapTab(QWidget):
                     case=self.case_id,
                 )
             else:
-                job = self.session.geo_dat_job(key, spacing=spacing, case=self.case_id)
+                job = self.session.geo_dat_job(
+                    key,
+                    spacing=spacing,
+                    case=self.case_id,
+                    lat_below_msl=self.lat_offset.value() if key in ("best", "emodnet") else 0.0,
+                )
         except (ValueError, OSError, CrsError) as error:
             self.message.emit(str(error), True)
             return

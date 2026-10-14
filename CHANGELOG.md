@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The coast of downloaded bathymetry
+
+- **The coast where Copernicus' 30 m land has it**: *Best available* no longer lets
+  EMODnet's 115 m or ETOPO's and GEBCO's 450 m cells smear the coast. Land takes
+  Copernicus' heights, the sea the coarse depths held below zero next to the coast
+  (0.1 m, deeper by 2 cm per metre, to 1 m), polders behind dikes their own heights.
+- **EMODnet on mean sea level**: *LAT below MSL* in the Map tab (and
+  `make_geo_dat(..., lat_below_msl=...)`) moves EMODnet's depths, measured below
+  the lowest astronomical tide, onto the land's zero.
+
 ### geo.dat follows a turned model
 
 - **geo.dat made before the model was turned** (or moved on the map, given another

@@ -276,9 +276,12 @@ def download(key: str, georef: Georef, box, spacing: float, fetch=None) -> GeoIm
     return images[0]
 
 
-def download_all(key: str, georef: Georef, box, spacing: float, fetch=None) -> list[GeoImage]:
+def download_all(
+    key: str, georef: Georef, box, spacing: float, fetch=None, land_only: bool = True
+) -> list[GeoImage]:
     """As :func:`download`, as the GeoImages the source sends (Copernicus: one per
-    1° tile; none where it has no data)."""
+    1° tile; none where it has no data, the sea). ``land_only``: Copernicus's heights
+    at or below 0 left out (read as the sea); else all of them (its land mask)."""
     fetch = fetch or http_fetch
     if key not in SOURCES:
         raise ValueError(f"unknown bathymetry source {key!r}; known: {', '.join(SOURCES)}")
@@ -316,7 +319,8 @@ def download_all(key: str, georef: Georef, box, spacing: float, fetch=None) -> l
             image.crs = image.crs or "EPSG:4326"
             # land only: the sea is 0 in the model (left to the sea's sources)
             image = _heights(image, label)
-            image.data = np.where(image.data <= 0.0, np.nan, image.data)
+            if land_only:
+                image.data = np.where(image.data <= 0.0, np.nan, image.data)
             images.append(image)
         return images
     # etopo, gebco: CSV of latitude, longitude, height from ERDDAP

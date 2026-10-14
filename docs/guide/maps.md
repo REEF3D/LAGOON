@@ -107,9 +107,17 @@ GeoTIFF and only the part of a large one that is needed).
   land anywhere (30 m, heights to EGM2008; its 1° tiles are some 30 MB each,
   fetched once) NOAA's ETOPO 2022 for the rest of the world, land and sea
   (15 arc-seconds, about 450 m, EGM2008; at sea built on GEBCO 2022), and GEBCO
-  2020 (15 arc-seconds, public domain) last. Each can be chosen alone too. Land
-  below sea level (polders) is taken from ETOPO, as Copernicus' heights at or
-  below 0 are read as the sea. Or *A file of mine…*: a GeoTIFF, an Esri ASCII grid
+  2020 (15 arc-seconds, public domain) last. Each can be chosen alone too.
+  **The coast** of *Best available* lies where Copernicus' 30 m land has it (land
+  above 0), not where a coarse sea source smears it over its 115 or 450 m cells:
+  land takes Copernicus' heights; the sea (low ground joined to the open sea) the
+  sea sources' depths, at least 0.1 m deep at the coast and 2 cm deeper per metre
+  out, to 1 m, so a coarse cell over the coast no longer puts land into the sea or
+  sea onto the land. Low ground behind dikes (polders) keeps Copernicus' heights.
+  Kartverket's model, where it has data, goes over all of them. EMODnet's depths
+  are below the lowest astronomical tide (LAT): *LAT below MSL* (from tide tables
+  or the chart's datum notes, about half the spring tidal range) puts them on the
+  land's zero. Or *A file of mine…*: a GeoTIFF, an Esri ASCII grid
   (`.asc`) or an x y z text file (soundings: spaces, tabs, commas or semicolons;
   a header line is skipped). Give its CRS if the file does not name one
   (`EPSG:4326` for longitude and latitude, `model` for model coordinates) and

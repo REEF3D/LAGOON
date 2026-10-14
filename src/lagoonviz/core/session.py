@@ -642,6 +642,7 @@ class Session:
         depths: bool = False,
         case: str | None = None,
         progress=None,
+        lat_below_msl: float = 0.0,
     ) -> int:
         """Bathymetry for DIVEMesh: a GeoTIFF, ASCII grid or x y z file (in ``crs``,
         or its own; ``"model"``: already in model coordinates) interpolated (``"tin"``,
@@ -651,10 +652,14 @@ class Session:
 
         No file: ``source="best"`` downloads the bathymetry for the domain
         (Kartverket's land and sea model in Norway, EMODnet for the rest of
-        European seas), ``"kartverket"`` or ``"emodnet"`` one of them.
+        European seas), ``"kartverket"`` or ``"emodnet"`` one of them. With "best"
+        the coast lies where Copernicus' 30 m land has it, the coarser sea sources
+        held below zero there; ``lat_below_msl``: how far EMODnet's datum (the lowest
+        astronomical tide) lies below mean sea level here [m], so its depths share
+        the land's zero.
         ``progress(fraction, text)`` hears how far it is (and may raise
         ``bathy.Cancelled``). Returns the number of points written."""
-        job = self.geo_dat_job(source, crs, method, spacing, depths, case)
+        job = self.geo_dat_job(source, crs, method, spacing, depths, case, lat_below_msl)
         job.run(progress)
         return job.finish()
 
@@ -666,6 +671,7 @@ class Session:
         spacing: float | None = None,
         depths: bool = False,
         case: str | None = None,
+        lat_below_msl: float = 0.0,
     ) -> GeoDatJob:
         """:meth:`make_geo_dat` in two parts, for a GUI: ``job.run(progress)`` does
         the work (reading, downloading, writing geo.dat) and may run in a worker
@@ -705,6 +711,7 @@ class Session:
             ("spacing", given_spacing if given_spacing is not None else spacing, None),
             ("depths", depths, False),
             ("case", case, None),
+            ("lat_below_msl", float(lat_below_msl or 0.0), 0.0),
         ):
             if value != default:
                 code += f", {key}={value!r}"
@@ -728,6 +735,7 @@ class Session:
                 "file_crs": crs,
                 "method": method,
                 "depths": bool(depths),
+                "lat_below_msl": float(lat_below_msl or 0.0),
                 "spacing": float(xs[1] - xs[0]) if len(xs) > 1 else float(spacing or 0.0),
                 "domain": [float(v) for v in domain[:4]],
                 "crs": georef.crs if crs != "model" else "",
@@ -769,6 +777,7 @@ class Session:
             spacing=float(made.get("spacing") or 0.0) or None,
             depths=bool(made.get("depths", False)),
             case=case,
+            lat_below_msl=float(made.get("lat_below_msl", 0.0) or 0.0),
         )
 
     def remake_geo_dat(self, case: str | None = None, progress=None) -> int:
@@ -1427,6 +1436,7 @@ class GeoDatJob:
                 self.ys,
                 float(self.xs[1] - self.xs[0]),
                 progress=lambda f, t: tell(0.8 * f, t),
+                lat_below_msl=float((self.recipe or {}).get("lat_below_msl", 0.0) or 0.0),
             )
         else:
             tell(0.0, f"Reading {Path(self.source).name}…")

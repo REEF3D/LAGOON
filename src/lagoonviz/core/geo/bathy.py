@@ -184,6 +184,18 @@ WEB = {
 }
 
 
+#: the sources that give the sea (the bed under water), in no particular order
+SEA_SOURCES = ("emodnet", "etopo", "gebco")
+#: the sea next to the coast at least this deep [m], and deeper by SHORE_SLOPE per
+#: metre from the coast, up to SHORE_DEEPEST: the shoreline where the land mask has
+#: it, whatever a coarse sea source says there
+SHORE_DEPTH = 0.1
+SHORE_SLOPE = 0.02
+SHORE_DEEPEST = 1.0
+#: open sea for certain: a sea source this deep [m] (EMODnet: 1 m; it has no land)
+OPEN_SEA = 10.0
+
+
 def web_heights(
     choice: str,
     georef: Georef,
@@ -192,11 +204,18 @@ def web_heights(
     spacing: float,
     fetch=None,
     progress: Progress | None = None,
+    lat_below_msl: float = 0.0,
+    coastline: bool = True,
 ) -> tuple[np.ndarray, list[str]]:
     """Bed heights on a model grid from the web (lagoonviz.core.geo.download): the
     sources of a choice in turn, each filling what the ones before had no data for,
     the rest from the nearest data. Returns the heights (model z) and the labels of
-    the sources used."""
+    the sources used.
+
+    ``coastline`` (with land and sea sources, as "best"): Copernicus' 30 m heights
+    decide where the coast is (:func:`coastal`), not the coarser sea sources.
+    ``lat_below_msl``: how far EMODnet's datum, the lowest astronomical tide, lies
+    below mean sea level [m], to put its depths on the land's zero."""
     from lagoonviz.core.geo.download import SOURCES, covers, download_all
 
     if choice not in WEB:
@@ -204,34 +223,140 @@ def web_heights(
     xs = np.asarray(xs, float)
     ys = np.asarray(ys, float)
     box = (float(xs[0]), float(xs[-1]), float(ys[0]), float(ys[-1]))
-    heights = np.full((len(ys), len(xs)), np.nan)
-    used: list[str] = []
+    keys = WEB[choice]
+    coastline = coastline and "copernicus" in keys and any(k in SEA_SOURCES for k in keys)
+    layers: dict[str, np.ndarray] = {}
     errors: list[str] = []
     progress = progress or _no_progress
-    keys = WEB[choice]
     for n, key in enumerate(keys):
-        if np.isfinite(heights).all():
+        if _settled(layers, coastline):
             break
         progress(n / len(keys), f"Downloading from {SOURCES[key].label}…")
         if not covers(SOURCES[key], georef, box):
             errors.append(f"{SOURCES[key].label}: not here")
             continue
         try:
-            rasters = download_all(key, georef, box, spacing, fetch)
+            rasters = download_all(
+                key, georef, box, spacing, fetch, land_only=not (coastline and key == "copernicus")
+            )
         except (OSError, RasterError) as error:
             errors.append(str(error))
             continue
         progress((n + 0.8) / len(keys), f"Onto the grid: {SOURCES[key].label}")
+        layer = np.full((len(ys), len(xs)), np.nan)
         for raster in rasters:  # (Copernicus: one per 1° tile)
             found = warp(raster, georef, xs, ys)  # model z (z_offset taken away)
-            missing = ~np.isfinite(heights) & np.isfinite(found)
+            missing = ~np.isfinite(layer) & np.isfinite(found)
+            layer[missing] = found[missing]
+        if key == "emodnet" and lat_below_msl:
+            layer = layer - float(lat_below_msl)  # depths below LAT: heights over MSL
+        layers[key] = layer
+    if coastline and "copernicus" in layers:
+        heights, from_keys = coastal(layers, xs, ys, keys)
+    else:
+        heights = np.full((len(ys), len(xs)), np.nan)
+        from_keys = []
+        for key in keys:
+            layer = layers.get(key)
+            if layer is None:
+                continue
+            if key == "copernicus":  # land only: its 0 is the sea, left to the others
+                layer = np.where(layer > 0.0, layer, np.nan)
+            missing = ~np.isfinite(heights) & np.isfinite(layer)
             if missing.any():
-                heights[missing] = found[missing]
-                if SOURCES[key].label not in used:
-                    used.append(SOURCES[key].label)
+                heights[missing] = layer[missing]
+                from_keys.append(key)
     if not np.isfinite(heights).any():
         raise RasterError("no bathymetry for the domain: " + "; ".join(errors or ["no data"]))
-    return fill_holes(heights, xs, ys), used
+    return fill_holes(heights, xs, ys), [SOURCES[k].label for k in keys if k in from_keys]
+
+
+def _settled(layers: dict[str, np.ndarray], coastline: bool) -> bool:
+    """Whether the sources so far give every point: a height (with the coastline:
+    Kartverket's, Copernicus' land, or a sea source's depth; Copernicus first)."""
+    if not layers:
+        return False
+    shape = next(iter(layers.values())).shape
+    fine = layers.get("kartverket")
+    done = np.isfinite(fine) if fine is not None else np.zeros(shape, bool)
+    if not coastline:
+        for layer in layers.values():
+            done |= np.isfinite(layer)
+        return bool(done.all())
+    for key in SEA_SOURCES:  # the open sea, far from any coast: no mask needed
+        if key in layers:
+            with np.errstate(invalid="ignore"):
+                done |= layers[key] < -OPEN_SEA
+    if "copernicus" in layers:
+        cop = layers["copernicus"]
+        done |= np.isfinite(cop) & (cop > 0.0)
+        for key in SEA_SOURCES:
+            if key in layers:
+                done |= np.isfinite(layers[key])
+    return bool(done.all())
+
+
+def coastal(layers: dict[str, np.ndarray], xs, ys, order=()) -> tuple[np.ndarray, list[str]]:
+    """Heights where a fine land mask sets the coast (Copernicus GLO-30: land is above
+    0) and coarse sources give the sea's depths:
+
+    - land: Copernicus' heights;
+    - the sea (low ground joined to the open sea): the sea sources' depths, at least
+      SHORE_DEPTH deep at the coast, deeper by SHORE_SLOPE per metre out to
+      SHORE_DEEPEST, so the shoreline lies where Copernicus has it (a coarse cell
+      over the coast no longer puts land into the sea, or sea onto the land);
+    - low ground cut off from the sea (polders behind dikes): Copernicus' heights;
+    - Kartverket (land and sea at up to 1 m) over all of them where it has data.
+
+    ``layers``: key -> heights on the grid (NaN: no data; Copernicus NaN: no tile,
+    the open sea). Returns the heights and the keys used."""
+    from scipy import ndimage
+
+    cop = layers["copernicus"]
+    shape = cop.shape
+    sea_keys = [k for k in (order or SEA_SOURCES) if k in SEA_SOURCES and k in layers]
+    sea = np.full(shape, np.nan)
+    source = np.full(shape, -1)  # which sea source gave each point
+    for index, key in enumerate(sea_keys):
+        missing = ~np.isfinite(sea) & np.isfinite(layers[key])
+        sea[missing] = layers[key][missing]
+        source[missing] = index
+    land = np.isfinite(cop) & (cop > 0.0)
+    low = ~land
+    emodnet = layers.get("emodnet")
+    open_sea = ~np.isfinite(cop) | (np.isfinite(sea) & (sea < -OPEN_SEA))
+    if emodnet is not None:
+        open_sea |= np.isfinite(emodnet) & (emodnet < -1.0)
+    labels, _ = ndimage.label(low)  # joined along the grid's rows and columns
+    joined = np.unique(labels[low & open_sea])
+    water = np.isin(labels, joined[joined > 0])
+    dx = abs(float(xs[1] - xs[0])) if len(xs) > 1 else 1.0
+    dy = abs(float(ys[1] - ys[0])) if len(ys) > 1 else 1.0
+    if land.any():
+        distance = ndimage.distance_transform_edt(~land, sampling=(dy, dx))
+    else:
+        distance = np.full(shape, np.inf)
+    depths = sea
+    if water.any() and not np.isfinite(sea[water]).all():
+        if np.isfinite(sea).any():  # no sea data there: the nearest sea data's
+            _, (r, c) = ndimage.distance_transform_edt(~np.isfinite(sea), return_indices=True)
+            depths = sea[r, c]
+        else:
+            depths = np.zeros(shape)
+    shore = np.minimum(SHORE_DEPTH + SHORE_SLOPE * distance, SHORE_DEEPEST)
+    out = np.full(shape, np.nan)
+    out[land] = cop[land]
+    out[water] = np.minimum(depths, -shore)[water]
+    cut_off = low & ~water  # polders: their own heights, else the sea sources'
+    out[cut_off] = np.where(np.isfinite(cop), cop, sea)[cut_off]
+    used = ["copernicus"] if land.any() or (cut_off & np.isfinite(cop)).any() else []
+    taken = source[water | (cut_off & ~np.isfinite(cop))]
+    used += [k for i, k in enumerate(sea_keys) if (taken == i).any()]
+    fine = layers.get("kartverket")
+    if fine is not None and np.isfinite(fine).any():
+        out = np.where(np.isfinite(fine), fine, out)
+        used.append("kartverket")
+    return out, used
 
 
 def geo_grid(
