@@ -52,7 +52,7 @@ lines, at the current time: lines along x (P 52, `WSFLINE`), along y (P 56,
 `WSFLINE_Y`, *Free surface lines in y*) and NHFLOW's time-averaged lines (P 146,
 P 147: one item per line, at the end of its averaging window). They are drawn in
 the **Free surface lines** panel (a tab
-beside the plots), and as lines in the 3D view (*Profile in 3D*). *Lines* picks
+beside the plots), and as lines in the 3D view (*Lines in 3D*). *Lines* picks
 some of the lines (`1, 3`); with *Wave theory* on, the theory FNPF wrote is drawn
 dashed. The value axis stays fixed while playing, so the waves move through a
 steady frame.
