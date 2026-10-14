@@ -78,9 +78,10 @@ View
     [ ] Diorama (cinematic)
     [ ] Diorama classic (cinematic)
   Memory use >
-    [ ] Performance
+    [ ] Performance (in memory)
     [x] Balanced
     [ ] Low memory
+    [ ] Streaming (very large cases)
   White water in Cycles >
     [ ] None
     [ ] Light
