@@ -577,12 +577,22 @@ class MapTab(QWidget):
             self._place(place)
 
     def _place(self, place) -> None:
-        has_georef = self.session.data.georef(self.case_id) is not None
-        crs = None if has_georef else (self._crs_text() or None)
-        self._run(
-            lambda: self.session.place_case(place, case=self.case_id, crs=crs),
-            f"{place.name}: the domain's centre is there",
-        )
+        from lagoonviz.core.geo.crs import fits
+
+        before = self.session.data.georef(self.case_id)
+        crs = None if before is not None else (self._crs_text() or None)
+        if crs is not None and not fits(crs, place.lon, place.lat):
+            crs = None  # the CRS picker's (another place's): the place's UTM zone instead
+        done = f"{place.name}: the domain's centre is there"
+        if not self._run(lambda: self.session.place_case(place, case=self.case_id, crs=crs)):
+            return
+        after = self.session.data.georef(self.case_id)
+        if before is not None and after is not None and after.crs != before.crs:
+            done += (
+                f"; the CRS is now {after.crs} ({describe(after.crs)}): "
+                f"{before.crs} is not meant for this place"
+            )
+        self.message.emit(done, False)
 
     def create_case(self) -> None:
         """The draft case into a folder of its own."""

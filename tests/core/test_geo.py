@@ -2,6 +2,7 @@
 background maps and the session's georeference."""
 
 import io
+import math
 import sys
 
 import numpy as np
@@ -771,9 +772,40 @@ def test_north_in_model_coordinates(fjord):
     assert session.data.backgrounds.north(case) is None
     session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=30.0)
     north = session.data.backgrounds.north(case)
-    # the model point north of the origin lies due north on the map
-    big_x, big_y = GEOREF.to_world(100 * north[0], 100 * north[1])
-    assert big_x == pytest.approx(270000.0) and big_y == pytest.approx(7040100.0)
+    # the model point north of the domain's middle lies due north of it on the Earth:
+    # not along the CRS's y, which is 4° off true north 4.6° west of UTM 33's meridian
+    domain = session.data.backgrounds.domain(case)
+    cx, cy = (domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2
+    to_lonlat = transformer("EPSG:25833", "EPSG:4326")
+    lon0, lat0 = to_lonlat(*GEOREF.to_world(cx, cy))
+    lon1, lat1 = to_lonlat(*GEOREF.to_world(cx + 1000 * north[0], cy + 1000 * north[1]))
+    assert lon1 == pytest.approx(lon0, abs=1e-6) and lat1 > lat0
+    grid = (math.sin(math.radians(30.0)), math.cos(math.radians(30.0)))
+    turn = math.degrees(math.atan2(grid[0], grid[1]) - math.atan2(north[0], north[1]))
+    assert turn == pytest.approx(-(15.0 - lon0) * math.sin(math.radians(lat0)), abs=0.1)
+
+
+def test_a_place_far_from_the_cases_crs(fjord):
+    """Mumbai for a case georeferenced in Norway: the place's UTM zone (Norway's
+    would turn and stretch the map), and true north for the north-up view."""
+    from lagoonviz.core.geo.crs import fits
+    from lagoonviz.core.geo.places import Place
+
+    assert fits("EPSG:25833", 10.4, 63.4) and not fits("EPSG:25833", 72.8, 19.0)
+    assert not fits("EPSG:32633", 72.8, 19.0) and fits("EPSG:32643", 72.8, 19.0)
+    assert not fits("EPSG:32643", 72.8, -19.0) and fits("EPSG:3857", 72.8, 19.0)
+    session = Session()
+    case = session.open_case(fjord)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=0.0)
+    session.place_case(Place("Mumbai", 18.94, 72.84, "city"), case=case)
+    georef = session.data.georef(case)
+    assert georef.crs == "EPSG:32643" and georef.rotation_deg == 0.0
+    north = session.data.backgrounds.north(case)
+    # 2.2° west of UTM 43's meridian at 19° N: grid north 0.7° off true north
+    assert math.degrees(math.atan2(north[0], north[1])) == pytest.approx(0.71, abs=0.05)
+    # a CRS asked for is kept, fitting or not
+    session.place_case(Place("Mumbai", 18.94, 72.84, "city"), case=case, crs="EPSG:3857")
+    assert session.data.georef(case).crs == "EPSG:3857"
 
 
 def test_the_map_lies_under_the_results_too(fjord):

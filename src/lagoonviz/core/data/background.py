@@ -111,15 +111,37 @@ class Backgrounds:
         return found
 
     def north(self, item_id: str) -> tuple[float, float] | None:
-        """North as a unit (x, y) vector in the model coordinates of an item's case
-        (its georeference turned back), or None without a georeference."""
+        """True north as a unit (x, y) vector in the model coordinates of an item's
+        case, at the middle of its domain, or None without a georeference: the
+        georeference turned back, and the CRS's own turn there (its grid north is
+        true north only on its central meridian: a UTM zone's edge, or a place far
+        from the zone, turns it)."""
         import math
+
+        from lagoonviz.core.geo.crs import transformer
 
         georef = self.georef(item_id)
         if georef is None:
             return None
         r = math.radians(georef.rotation_deg)
-        return (math.sin(r), math.cos(r))
+        grid = (math.sin(r), math.cos(r))  # the CRS's y in the model
+        domain = self.domain(item_id)
+        cx, cy = ((domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2) if domain else (0, 0)
+        try:
+            x, y = (float(v) for v in georef.to_world(cx, cy))
+            lon, lat = (float(v) for v in transformer(georef.crs, "EPSG:4326")(x, y))
+            step = 0.001 if lat < 89.0 else -0.001  # about 110 m
+            x2, y2 = (float(v) for v in transformer("EPSG:4326", georef.crs)(lon, lat + step))
+        except Exception:  # noqa: BLE001 (a CRS that does not transform: its grid north)
+            return grid
+        dx, dy = (x2 - x) * math.copysign(1.0, step), (y2 - y) * math.copysign(1.0, step)
+        length = math.hypot(dx, dy)
+        if not math.isfinite(length) or length == 0:
+            return grid
+        # world to model: turned back by the rotation
+        mx = (dx * math.cos(r) + dy * math.sin(r)) / length
+        my = (-dx * math.sin(r) + dy * math.cos(r)) / length
+        return (mx, my)
 
     def georef_error(self, item_id: str) -> str:
         return self._georef(item_id)[1]

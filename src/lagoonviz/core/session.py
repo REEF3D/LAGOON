@@ -216,10 +216,11 @@ class Session:
     def place_case(self, place, case: str | None = None, crs: str | None = None):
         """Put the centre of a case's domain at a place on the Earth (a name or "lat,
         lon" searched for, the first place found; a Place; or (lat, lon)): its
-        georeference, in its CRS (the UTM zone of the place when it has none yet),
-        the rotation kept; ``crs``: another CRS in metres to use. Gives the case a
-        background map if it has none. Returns the place."""
-        from lagoonviz.core.geo.crs import is_geographic, transformer, utm_for
+        georeference, in its CRS (the UTM zone of the place when it has none yet, or
+        when the place lies outside the area its CRS is meant for: another UTM zone,
+        ETRS89 outside Europe), the rotation kept; ``crs``: another CRS in metres to
+        use. Gives the case a background map if it has none. Returns the place."""
+        from lagoonviz.core.geo.crs import fits, is_geographic, transformer, utm_for
         from lagoonviz.core.geo.places import Place, search
 
         if isinstance(place, str):
@@ -234,6 +235,8 @@ class Session:
         current = self.georef(case_id)
         if crs is None or is_geographic(crs):  # given: a CRS in metres, else the case's
             crs = current.crs if current is not None else None
+            if crs is not None and not fits(crs, place.lon, place.lat):
+                crs = None  # e.g. Norway's UTM zone for Mumbai: the place's own
         if crs is None or is_geographic(crs):
             crs = utm_for(place.lon, place.lat)
         rotation = current.rotation_deg if current is not None else 0.0

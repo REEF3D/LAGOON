@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Maps away from Europe
+
+- **North up is true north**: the view turns the map north up wherever the case
+  is, taking in its CRS's turn (grid convergence) at the middle of the domain;
+  *North up* now turns a view whose map was not north up (e.g. Mumbai in a
+  Norwegian UTM zone). A model lined up with a UTM grid away from the zone's
+  meridian lies a few degrees turned in the north-up view, as it does on the map.
+- **A place far from the case's CRS gets its own UTM zone** (WGS 84 outside
+  Europe): Mumbai found for a case set up in Norway no longer keeps UTM 33, whose
+  map there is turned and stretched.
+
 ### Legends
 
 - **Each item's colour bar**: on or off, its title (`$\eta$ [m]`), how its numbers

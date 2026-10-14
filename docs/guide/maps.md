@@ -157,7 +157,16 @@ The 2D view from the top shows north up: the map lies as on a map, and a turned
 model is drawn turned. Turning the model (*Turn*, Shift + drag) turns the domain
 and its grid, never the map, in 2D and in 3D. *North up* in the view's bar (or
 ++n++) turns any view, 2D or 3D, back so that north points up the screen (in 3D:
-away from you, the tilt kept), after you have turned it about.
+away from you, the tilt kept), after you have turned it about. North is true north
+at the middle of the domain: a CRS's grid north is true north only on its central
+meridian (in a UTM zone up to a few degrees off at its edges), so a model lined up
+with the CRS's grid lies a little turned in the north-up view, as on the map.
+
+Finding a place far from the case's CRS (Mumbai for a case set up in Norway)
+gives the case the place's UTM zone, as a CRS meant for one area turns and
+stretches the map far away from it (WGS 84 UTM outside Europe, ETRS89 UTM in it);
+the Map tab says so. A CRS chosen in the Map tab before the place is found is
+kept when it is meant for the place.
 
 In the 2D view from the top the map follows the view: zoom in and it is fetched
 again in finer detail, zoom out or pan and it covers the new area (once the view

@@ -167,6 +167,46 @@ def is_geographic(crs: str) -> bool:
     return False
 
 
+#: where ETRS89 is used: Europe (lon_min, lat_min, lon_max, lat_max)
+EUROPE = (-16.1, 32.9, 45.0, 84.2)
+#: how far from its central meridian a transverse Mercator CRS is used [deg]: a UTM
+#: zone and its neighbours (beyond, the map turns and stretches)
+TM_REACH = 6.0
+
+
+def fits(crs: str, lon: float, lat: float) -> bool:
+    """Whether a CRS is meant for a place: a UTM or NTM zone near it (and ETRS89 in
+    Europe), Web Mercator and geographic ones anywhere, others as pyproj's area of
+    use says (True without pyproj)."""
+    code = epsg_code(crs)
+    found = builtin(code) if code is not None else None
+    if found is not None:
+        if found.kind != "tm":
+            return found.kind == "geographic" or abs(lat) < 85.06
+        if found.name.startswith("ETRS89"):
+            lon0, lat0, lon1, lat1 = EUROPE
+            if not (lon0 <= lon <= lon1 and lat0 <= lat <= lat1):
+                return False
+        if found.name.endswith("N") and lat < -1.0:  # a northern zone south of the equator
+            return False
+        if "UTM" in found.name and found.name.endswith("S") and lat > 1.0:
+            return False
+        return abs(math.remainder(lon - found.lon0, 360.0)) <= TM_REACH
+    if has_pyproj():
+        try:
+            import pyproj
+
+            area = pyproj.CRS.from_user_input(crs).area_of_use
+        except Exception:  # noqa: BLE001 (pyproj raises its own errors)
+            return True
+        if area is None:
+            return True
+        west, south, east, north = area.bounds
+        inside_lon = west <= lon <= east if west <= east else (lon >= west or lon <= east)
+        return inside_lon and south - 1.0 <= lat <= north + 1.0
+    return True
+
+
 def utm_for(lon: float, lat: float, etrs89: bool = True) -> str:
     """The UTM CRS of a place (ETRS89 in Europe, else WGS 84): "EPSG:25833"."""
     zone = int(math.floor((lon + 180.0) / 6.0)) % 60 + 1
