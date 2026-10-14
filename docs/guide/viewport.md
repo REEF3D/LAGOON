@@ -103,12 +103,33 @@ with a note in place of the 3D view; plots, figures and scripts still work, and
 
 | | Frames kept | Read ahead while playing | |
 | --- | --- | --- | --- |
-| **Performance** | a quarter of the computer's memory (2 – 16 GB) | 16 frames, 6 threads | a volume's cells kept for slices and iso-surfaces |
+| **Performance (in memory)** | a quarter of the computer's memory (2 – 16 GB) | the whole play range, 6 threads | runs from memory from the second time round; a volume's cells kept for slices and iso-surfaces |
 | **Balanced** (the default) | 1 GB | 8 frames, 4 threads | as LAGOON always did |
 | **Low memory** | 256 MB | 2 frames, 2 threads | the cells read again for every slice: large volumes fit, playing is slower |
+| **Streaming (very large cases)** | 768 MB | 6 frames, 4 threads | surfaces of more than 2.5 million points shown coarser while playing or dragging the timeline, at full detail as soon as the time stands still |
 
 Frames played once come back from memory without reading the files again, as
-long as they fit; films read ahead in the same measure. The choice is kept for the
-next start and applies at once (frames beyond the new budget are let go). For
-`lagoon-render` and scripts, `LAGOON_MEMORY=low` (or `performance`) does the same.
+long as they fit; films read ahead in the same measure. Whatever the mode, LAGOON
+never reads further ahead than the frames fit (they would push out each other
+before being shown). The choice is kept for the next start and applies at once
+(frames beyond the new budget are let go). For `lagoon-render` and scripts,
+`LAGOON_MEMORY=low` (or `performance`, `streaming`) does the same.
+
+### Very large cases
+
+Cases of 100 million cells and more (a free surface of 10 million points and
+more) open in a moment: LAGOON reads a frame when it is shown, not before.
+
+- **Streaming** is for playing them. While the timeline plays or is dragged, a
+  free surface from a LAGOON store is read at every 2nd, 3rd, ... grid line, to
+  about 2.5 million points; when it stops, the frame comes in at full detail. The
+  bed and other surfaces that do not change are always at full detail. Films and
+  stills are always made at full detail, whatever the mode. Opening a case of
+  more than 5 million points a frame in another mode, the status bar says so.
+- Items that are **switched off** (the volume a case opens with, for one) are
+  not read at all, neither while playing nor for films: tick them to see them.
+- Fields that are the **same in every output** (FNPF's still water depth, its
+  coastline) are read once.
+- The **automatic colour range** of a large surface comes from tiles spread over
+  it in a few outputs, not from whole outputs.
 

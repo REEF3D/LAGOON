@@ -19,8 +19,8 @@ def _mesh(n: int) -> SurfaceMesh:
     return SurfaceMesh(np.zeros((n, 3), np.float32), np.zeros((0, 3), np.uint32), {})
 
 
-def test_the_three_modes():
-    fast, middle, small = (memory.profile(m) for m in memory.MODES)
+def test_the_modes():
+    fast, middle, small, _streaming = (memory.profile(m) for m in memory.MODES)
     assert fast.cache_bytes >= 2 * memory.GB > middle.cache_bytes == memory.GB > small.cache_bytes
     assert fast.play_ahead > middle.play_ahead > small.play_ahead
     assert fast.loader_workers >= middle.loader_workers > small.loader_workers

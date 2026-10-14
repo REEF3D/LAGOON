@@ -311,6 +311,8 @@ class TimelinePanel(QWidget):
         self.slider.valueChanged.connect(self._on_slider)
         # let go: the time is where the handle is, whatever happened meanwhile
         self.slider.sliderReleased.connect(lambda: self._on_slider(self.slider.value()))
+        self.slider.sliderPressed.connect(lambda: self._set_moving(True))
+        self.slider.sliderReleased.connect(lambda: self._set_moving(self.play_button.isChecked()))
         # the play range: dragged on the slider, kept in the session when let go
         self.slider.rangeReleased.connect(self._store_range)
 
@@ -553,7 +555,21 @@ class TimelinePanel(QWidget):
         self.play_button.setIcon(icon("pause" if playing else "play", COLORS["cursor"]))
 
     # ------------------------------------------------------------- playback
+    def _set_moving(self, moving: bool) -> None:
+        """The time starts or stops moving: streaming shows large surfaces coarser
+        meanwhile, and at full detail again once it stands still."""
+        data = self.session.data
+        if data.moving == moving:
+            return
+        data.moving = moving
+        if not moving:
+            from lagoonviz.core import memory
+
+            if memory.current().detail_points:
+                self.session.set_time(self.session.scene.time)  # full detail now
+
     def _toggle_play(self, playing: bool) -> None:
+        self._set_moving(playing or self.slider.isSliderDown())
         self.play_button.setText("Pause" if playing else "Play")
         self.play_button.setIcon(icon("pause" if playing else "play", COLORS["cursor"]))
         if playing:
@@ -601,9 +617,9 @@ class TimelinePanel(QWidget):
             self.go_to_frame(frame)
             if self.loader is not None:
                 self.loader.prefetch(
-                    self.session.data.data_items(),
+                    self.session.data.shown_items(),
                     self.session.scene.time,
-                    frames_ahead=_frames_ahead(self.fps.value()),
+                    frames_ahead=_frames_ahead(self.fps.value(), high - low + 1),
                     times=self.times,
                 )
             return
@@ -617,10 +633,13 @@ class TimelinePanel(QWidget):
         self.session.set_time(time)
 
 
-def _frames_ahead(fps: int) -> int:
+def _frames_ahead(fps: int, in_range: int = 0) -> int:
     """Frames to read ahead while playing: a quarter second at least, as many as the
-    memory use mode asks for (low memory: only those)."""
+    memory use mode asks for (low memory: only those; performance: the whole play
+    range). The loader reads no further than the frame budget holds."""
     from lagoonviz.core import memory
 
     use = memory.current()
+    if use.play_all and in_range:
+        return max(in_range, use.play_ahead)
     return use.play_ahead if use.mode == "low memory" else max(use.play_ahead, fps // 4)

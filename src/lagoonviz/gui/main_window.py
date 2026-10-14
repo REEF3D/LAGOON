@@ -448,7 +448,7 @@ class MainWindow(QMainWindow):
 
         self.memory_actions = {}
         for name in memory.MODES:
-            action = memory_menu.addAction(name.capitalize())
+            action = memory_menu.addAction(memory.LABELS.get(name, name.capitalize()))
             action.setCheckable(True)
             action.setChecked(name == memory.mode())
             action.setToolTip(memory.profile(name).describe())
@@ -649,9 +649,25 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 (the mode switches all the same)
             log.warning("view of the %s:\n%s", new, traceback.format_exc())
 
+    def _suggest_streaming(self, case) -> None:
+        """A very large case (millions of points a frame) opened while not streaming:
+        say that streaming plays it smoothly."""
+        from lagoonviz.core import memory
+
+        if memory.mode() == "streaming":
+            return
+        points = max((d.points_per_frame() or 0 for d in case.main_datasets().values()), default=0)
+        if points >= memory.LARGE_POINTS:
+            self.statusBar().showMessage(
+                f"A large case: {points / 1e6:.0f} million points a frame. View → Memory use "
+                "→ Streaming plays it at a coarser detail (full detail when it stops)",
+                20000,
+            )
+
     def set_memory_use(self, name: str) -> None:
-        """View → Memory use: performance (fast, more memory), balanced, or low memory
-        (large cases fit, slower); kept for the next start."""
+        """View → Memory use: performance (in memory, fast), balanced, low memory
+        (large cases fit, slower) or streaming (very large cases: coarser while
+        playing); kept for the next start."""
         from lagoonviz.core import memory
 
         use = memory.set_mode(name)
@@ -1009,6 +1025,7 @@ class MainWindow(QMainWindow):
         case = self.session.data.case(case_id)
         summary = ", ".join(f"{d.label} ({len(d)} frames)" for d in case.datasets.values())
         self.statusBar().showMessage(f"Opened {Path(path).name}: {summary}", 10000)
+        self._suggest_streaming(case)
         self.viewport.reframe()
         if self.viewport2 is not None:
             self.viewport2.reframe()

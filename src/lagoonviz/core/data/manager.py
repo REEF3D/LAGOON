@@ -201,6 +201,16 @@ class FrameKey:
     arrays: tuple[str, ...]
     #: what is read from the frame: () the surface, ("slice", axis, position) a section
     extra: tuple = ()
+    #: every how many grid lines a surface is read (1: full detail; more while
+    #: the time moves in the streaming memory mode)
+    detail: int = 1
+
+
+def _kind_of(key) -> tuple:
+    """What frames read alike share: case, dataset, what is read, detail."""
+    if isinstance(key, FrameKey):
+        return (key.case, key.dataset, key.extra, key.detail)
+    return (key,)
 
 
 class FrameCache:
@@ -214,6 +224,9 @@ class FrameCache:
         self._lock = threading.Lock()
         self.hits = 0
         self.misses = 0
+        #: the size of the last frame of each dataset (and detail): what reading
+        #: ahead would add (see BackgroundLoader.prefetch)
+        self._sizes: dict[tuple, int] = {}
 
     @staticmethod
     def size_of(mesh: SurfaceMesh) -> int:
@@ -249,8 +262,16 @@ class FrameCache:
             if key in self._items:
                 self._bytes -= self.size_of(self._items.pop(key))
             self._items[key] = mesh
-            self._bytes += self.size_of(mesh)
+            size = self.size_of(mesh)
+            self._bytes += size
+            self._sizes[_kind_of(key)] = size
             self._evict(1)
+
+    def size_hint(self, key: FrameKey) -> int | None:
+        """The size of the last frame read like ``key`` (same dataset and kind), if
+        any was."""
+        with self._lock:
+            return self._sizes.get(_kind_of(key))
 
     def trim(self) -> None:
         """Down to the budget (after the memory use mode changed)."""
@@ -278,6 +299,7 @@ class FrameCache:
         with self._lock:
             self._items.clear()
             self._bytes = 0
+            self._sizes.clear()
 
     def drop_case(self, case: str) -> int:
         """Forget the frames of one case (its files changed). Returns how many."""
@@ -305,7 +327,7 @@ class DataManager:
         #: particle trails: ids and their centres of each output read for them
         self._trail_centres: dict[FrameKey, tuple[np.ndarray, np.ndarray]] = {}
         self._still_water: dict[tuple, float] = {}
-        self._wet: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # item -> (base, wet)
+        self._wet: dict[str, tuple] = {}  # item -> (base, kept triangles[, depth])
         self._logged: tuple[tuple, np.ndarray | None] | None = None
         #: set-ups of case folders (their input files), by folder
         self._setups: dict[str, CaseSetup] = {}
@@ -314,6 +336,9 @@ class DataManager:
         self._lock = threading.Lock()
         #: background maps and the georeference of cases
         self.backgrounds = Backgrounds(self)
+        #: the time is moving (playing, the timeline dragged): in the streaming memory
+        #: mode, large surfaces are read coarser meanwhile (FrameKey.detail)
+        self.moving = False
 
     # ------------------------------------------------------------- cases
     def reload(self, case_item_id: str | None = None) -> list[str]:
@@ -696,7 +721,19 @@ class DataManager:
                 int(props.get("seeds", 60)),
                 str(props.get("lines_in", "volume")),
             )
-        return FrameKey(self._case_key(item_id), dataset.key, index, arrays, extra)
+        detail = self._detail(dataset) if not extra else 1
+        return FrameKey(self._case_key(item_id), dataset.key, index, arrays, extra, detail)
+
+    def _detail(self, dataset) -> int:
+        """Every how many grid lines a surface is read: coarser only while the time
+        moves in the streaming memory mode, and only surfaces that change with time
+        (a bed stays as it is)."""
+        if not self.moving or len(dataset) < 2:
+            return 1
+        from lagoonviz.core import memory
+
+        points = memory.current().detail_points
+        return dataset.detail_stride(points) if points else 1
 
     def _case_key(self, item_id: str) -> str:
         """The key of an item's case among the open cases: the path it was opened
@@ -729,6 +766,8 @@ class DataManager:
             mesh = dataset.read_streamlines(
                 key.index, vector, axis, position, count, list(key.arrays), lines_in
             )
+        elif key.detail > 1:
+            mesh = dataset.read(key.index, list(key.arrays), detail=key.detail)
         else:
             mesh = dataset.read(key.index, list(key.arrays))
             if dataset.surface_like and len(dataset) > 2:
@@ -945,7 +984,7 @@ class DataManager:
             return found
         for index in np.unique(np.linspace(0, len(dataset) - 1, samples).round().astype(int)):
             try:
-                values = dataset.read_values(int(index), variable)
+                values = dataset.sample_values(int(index), variable)
             except (OSError, ValueError, KeyError):
                 continue
             if values is None:
@@ -1273,8 +1312,22 @@ class DataManager:
 
     def _wet_triangles(self, item_id: str, mesh: SurfaceMesh) -> np.ndarray:
         """:func:`_wet_triangles`, reusing the last array while the shoreline stays put
-        (the renderer then skips re-uploading the triangle list)."""
-        return self._kept(item_id, mesh, _wet_triangles(mesh))
+        (the renderer then skips re-uploading the triangle list): at once when the
+        depth is the very array of before (a store's still water depth, read once)."""
+        depth = mesh.point_data.get("depth")
+        previous = self._wet.get(item_id)
+        if (
+            depth is not None
+            and previous is not None
+            and previous[0] is mesh.triangles
+            and len(previous) > 2
+            and previous[2] is depth
+        ):
+            return previous[1]
+        triangles = self._kept(item_id, mesh, _wet_triangles(mesh))
+        if depth is not None and triangles is not mesh.triangles:
+            self._wet[item_id] = (mesh.triangles, triangles, depth)
+        return triangles
 
     def _kept(self, item_id: str, mesh: SurfaceMesh, triangles: np.ndarray) -> np.ndarray:
         """A filtered triangle list, or the last one if it has not changed."""
@@ -1503,6 +1556,20 @@ class DataManager:
     def data_items(self) -> list[str]:
         """Ids of the scene items that show data."""
         return [item.id for item in self.scene if item.kind in DATA_KINDS]
+
+    def shown(self, item_id: str) -> bool:
+        """Whether an item is to be drawn: ticked, its case ticked, and drawn in the
+        current mode. Frames of other items are not read (a large volume switched
+        off costs nothing while playing)."""
+        item = self.scene.get(item_id)
+        if not item.visible or not self.drawn(item_id):
+            return False
+        case_item = self.case_item(item_id)
+        return case_item is None or case_item.visible
+
+    def shown_items(self) -> list[str]:
+        """The data items to be drawn (:meth:`shown`)."""
+        return [i for i in self.data_items() if self.shown(i)]
 
     # ------------------------------------------------------------- modes
     def item_mode(self, item_id: str) -> str:
@@ -1926,20 +1993,32 @@ class BackgroundLoader:
         time: float,
         frames_ahead: int = 4,
         times: np.ndarray | None = None,
-    ) -> None:
+    ) -> int:
         """Queue the next frames of the given items (used while playing): at the next
-        ``times`` of the timeline if given, otherwise every output interval."""
+        ``times`` of the timeline if given, otherwise every output interval. Never
+        more than the frame cache holds besides the frame shown (frames read further
+        ahead would push out each other before being shown). Returns how many
+        time steps were asked for."""
+        manager = self.manager
         if times is not None and len(times):
             start = int(np.searchsorted(times, time + 1e-9, side="right"))
             upcoming = [float(t) for t in times[start : start + frames_ahead]]
         else:
-            dt = self.manager.print_interval() or 1.0
+            dt = manager.print_interval() or 1.0
             upcoming = [time + ahead * dt for ahead in range(1, frames_ahead + 1)]
+        if not upcoming:
+            return 0
+        keys = [manager.frame_key(item_id, upcoming[0]) for item_id in item_ids]
+        step = sum(manager.cache.size_hint(k) or 0 for k in keys if k is not None)
+        if step:
+            fits = int(manager.cache.max_bytes // step) - 2  # the shown frame, one spare
+            upcoming = upcoming[: max(1, fits)]
         for when in upcoming:
             for item_id in item_ids:
-                key = self.manager.frame_key(item_id, when)
-                if key is not None and key not in self.manager.cache:
+                key = manager.frame_key(item_id, when)
+                if key is not None and key not in manager.cache:
                     self.request(key)
+        return len(upcoming)
 
     @property
     def busy(self) -> int:

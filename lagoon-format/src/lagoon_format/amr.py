@@ -71,25 +71,45 @@ class AmrGrid:
         return float(self.x[0]), float(self.x[-1]), float(self.y[0]), float(self.y[-1])
 
 
-def covered(grid, grids) -> np.ndarray:
+def covered(grid, grids, boxes: Boxes | None = None) -> np.ndarray:
     """(ny, nx) True for the cells of ``grid`` whose centre lies in a grid of a higher
     level among ``grids`` (anything with ``level``, ``x`` and ``y``): the cells that
-    are not leaf cells."""
+    are not leaf cells. ``boxes``: :class:`Boxes` of ``grids``, made once when
+    asking for all of them (thousands of patches: only the finer grids that
+    overlap are looked at, found for all at once)."""
     x = np.asarray(grid.x, np.float64)
     y = np.asarray(grid.y, np.float64)
     mask = np.zeros((y.size - 1, x.size - 1), bool)
     xc = 0.5 * (x[:-1] + x[1:])
     yc = 0.5 * (y[:-1] + y[1:])
-    for other in grids:
-        if other.level <= grid.level:
-            continue
-        x0, x1 = float(other.x[0]), float(other.x[-1])
-        y0, y1 = float(other.y[0]), float(other.y[-1])
+    if boxes is None:
+        boxes = Boxes(grids)
+    for other in boxes.finer_over(grid.level, x[0], x[-1], y[0], y[-1]):
+        x0, x1, y0, y1 = boxes.box[other]
         i0, i1 = np.searchsorted(xc, x0, "left"), np.searchsorted(xc, x1, "right")
         j0, j1 = np.searchsorted(yc, y0, "left"), np.searchsorted(yc, y1, "right")
         if i0 < i1 and j0 < j1:
             mask[j0:j1, i0:i1] = True
     return mask
+
+
+class Boxes:
+    """The extents and levels of a set of AMR grids, to find the finer grids over
+    a grid at once (:func:`covered`)."""
+
+    def __init__(self, grids) -> None:
+        self.level = np.array([int(g.level) for g in grids], np.int64)
+        self.box = np.array(
+            [(float(g.x[0]), float(g.x[-1]), float(g.y[0]), float(g.y[-1])) for g in grids],
+            np.float64,
+        ).reshape(-1, 4)
+
+    def finer_over(self, level: int, x0: float, x1: float, y0: float, y1: float) -> np.ndarray:
+        """Indices of the grids of a higher level whose box overlaps (x0..x1, y0..y1)."""
+        b = self.box
+        hit = (self.level > level) & (b[:, 1] >= x0) & (b[:, 0] <= x1)
+        hit &= (b[:, 3] >= y0) & (b[:, 2] <= y1)
+        return np.flatnonzero(hit)
 
 
 # ======================================================================== reading

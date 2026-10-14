@@ -352,6 +352,22 @@ class Dataset:
         reads the array alone."""
         return self.read(index, [variable]).scalar(variable)
 
+    def points_per_frame(self) -> int | None:
+        """How many points a frame has, if known without reading one (a LAGOON
+        store's grid; None otherwise)."""
+        return None
+
+    def detail_stride(self, points: int) -> int:
+        """Every how many grid lines to read a frame to show about ``points`` points
+        while playing (streaming); 1: always in full (a LAGOON store's surfaces can
+        be read coarser)."""
+        return 1
+
+    def sample_values(self, index: int, variable: str) -> np.ndarray | None:
+        """Values of a variable in a frame for a colour range: all of them (a large
+        LAGOON store: some spread over the grid, see :meth:`Output.sample`)."""
+        return self.read_values(index, variable)
+
     def _plain_piece(self, path: Path, arrays: list[str] | None, cell_data: bool):
         """One file of an object output (a store hands out its points instead)."""
         if path.suffix == ".vtk":
@@ -1256,8 +1272,15 @@ def _joined(parts: list[SurfaceMesh]) -> SurfaceMesh:
         outlines = np.concatenate(
             [p.outlines.astype(np.int64) + s for p, s in zip(parts, shift, strict=True)]
         ).astype(np.uint32)
+    normals = None
+    if parts and all(p.normals is not None for p in parts):  # known: not made again
+        normals = np.concatenate([p.normals for p in parts]).astype(np.float32, copy=False)
     mesh = SurfaceMesh(
-        points, np.ascontiguousarray(triangles, dtype=np.uint32), data, outlines=outlines
+        points,
+        np.ascontiguousarray(triangles, dtype=np.uint32),
+        data,
+        outlines=outlines,
+        normals=normals,
     )
     return mesh.with_normals()
 

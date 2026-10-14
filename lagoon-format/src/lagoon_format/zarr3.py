@@ -155,7 +155,8 @@ def _unshuffle(data: bytes, size: int):
         return data
     planes = np.frombuffer(data, np.uint8).reshape(size, -1)
     out = np.empty((planes.shape[1], size), np.uint8)
-    out[:] = planes.T
+    for byte in range(size):  # plane by plane: twice as fast as one transposed copy
+        out[:, byte] = planes[byte]
     return out
 
 
@@ -554,17 +555,23 @@ class Array:
         return slices, dropped
 
     def __getitem__(self, key) -> np.ndarray:
+        return self.get(key)
+
+    def get(self, key, parallel: bool = True) -> np.ndarray:
+        """``a[key]``; ``parallel=False`` decodes the chunks in this thread (when the
+        caller already reads several arrays at once: small chunks decoded on threads
+        within threads only wait for each other)."""
         slices, dropped = self._region(key)
         out = np.full([s.stop - s.start for s in slices], self.fill_value, self.dtype)
         if out.size == 0:
             return out.reshape([n for d, n in enumerate(out.shape) if d not in dropped])
         if self.inner is None:
-            self._gather(out, slices, self.chunks, self._read_plain_chunk)
+            self._gather(out, slices, self.chunks, self._read_plain_chunk, parallel)
         else:
-            self._gather_sharded(out, slices)
+            self._gather_sharded(out, slices, parallel)
         return out.reshape([n for d, n in enumerate(out.shape) if d not in dropped])
 
-    def _gather_sharded(self, out: np.ndarray, slices: list[slice]) -> None:
+    def _gather_sharded(self, out: np.ndarray, slices: list[slice], parallel: bool = True) -> None:
         """Read the inner chunks a selection needs: per shard file one read of the
         span that holds them (a writer puts the chunks of an output together), then
         decode them, in parallel for big selections."""
@@ -614,7 +621,7 @@ class Array:
                 dst.append(slice(lo - s.start, hi - s.start))
             out[tuple(dst)] = chunk[tuple(src)]
 
-        if len(jobs) > 1 and out.nbytes > (1 << 18):
+        if parallel and len(jobs) > 1 and out.nbytes > (1 << 18):
             list(_decoder_pool().map(place, jobs))
         else:
             for job in jobs:
@@ -632,7 +639,14 @@ class Array:
             return None
         return self._read_inner(file, index, local)
 
-    def _gather(self, out: np.ndarray, slices: list[slice], size: tuple[int, ...], read) -> None:
+    def _gather(
+        self,
+        out: np.ndarray,
+        slices: list[slice],
+        size: tuple[int, ...],
+        read,
+        parallel: bool = True,
+    ) -> None:
         ranges = [
             range(s.start // c, (s.stop - 1) // c + 1) for s, c in zip(slices, size, strict=True)
         ]
@@ -653,7 +667,7 @@ class Array:
             out[tuple(dst)] = chunk[tuple(src)]
 
         # zlib and NumPy copies release the GIL: big reads decode their chunks in parallel
-        if len(wanted) > 1 and out.nbytes > (1 << 18):
+        if parallel and len(wanted) > 1 and out.nbytes > (1 << 18):
             list(_decoder_pool().map(place, wanted))
         else:
             for chunk_coords in wanted:

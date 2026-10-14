@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -424,22 +426,119 @@ def exaggerate_normals(normals: np.ndarray, factor: float) -> np.ndarray:
     return (scaled / np.where(length > 0, length, 1.0)).astype(np.float32)
 
 
+def grid_triangles(ny: int, nx: int, missing: np.ndarray | None = None) -> np.ndarray:
+    """Two triangles (m, 3) per cell of a structured grid of ny x nx points (x
+    fastest), leaving out cells with a ``missing`` corner (a (ny, nx) mask)."""
+    if ny < 2 or nx < 2:
+        return np.zeros((0, 3), np.uint32)
+    base = (
+        np.arange(ny - 1, dtype=np.uint32)[:, None] * np.uint32(nx)
+        + np.arange(nx - 1, dtype=np.uint32)[None, :]
+    )
+    if missing is not None:
+        m = np.asarray(missing, bool)
+        gone = m[:-1, :-1] | m[:-1, 1:] | m[1:, :-1] | m[1:, 1:]
+        base = base[~gone] if gone.any() else base.ravel()
+    else:
+        base = base.ravel()
+    n = len(base)
+    out = np.empty((2 * n, 3), np.uint32)
+    out[:n, 0] = base
+    np.add(base, 1, out=out[:n, 1])
+    np.add(base, nx + 1, out=out[:n, 2])
+    out[n:, 0] = base
+    out[n:, 1] = out[:n, 2]
+    np.add(base, nx, out=out[n:, 2])
+    return out
+
+
+def grid_points(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> np.ndarray:
+    """Points (ny * nx, 3) float32 of a surface of heights z (ny, nx) over a
+    rectilinear grid, filled in place (no coordinate grids made first)."""
+    z = np.asarray(z)
+    out = np.empty((*z.shape, 3), np.float32)
+    out[..., 0] = np.asarray(x, np.float32)[None, :]
+    out[..., 1] = np.asarray(y, np.float32)[:, None]
+    out[..., 2] = z
+    return out.reshape(-1, 3)
+
+
 def grid_normals(z: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """Unit normals (ny, nx, 3) of a surface given as heights z (ny, nx) on a
     rectilinear grid (x along the columns, y along the rows), pointing up: from the
-    slopes, with central differences (one-sided at the edges)."""
-    z = np.asarray(z, np.float64)
-    if z.shape[0] < 2 or z.shape[1] < 2:
-        out = np.zeros((*z.shape, 3), np.float32)
-        out[..., 2] = 1.0
+    slopes, with central differences (one-sided at the edges). In single precision,
+    a few passes over the grid, large grids in bands on several threads: a surface
+    of 10 million points takes a fraction of a second."""
+    z = np.asarray(z, np.float32)
+    ny, nx = z.shape
+    out = np.empty((ny, nx, 3), np.float32)
+    if ny < 2 or nx < 2:
+        out[...] = (0.0, 0.0, 1.0)
         return out
-    with np.errstate(invalid="ignore"):
-        dz_dy, dz_dx = np.gradient(z, np.asarray(y, np.float64), np.asarray(x, np.float64))
-    normals = np.stack([-dz_dx, -dz_dy, np.ones_like(z)], axis=-1)
-    normals /= np.linalg.norm(normals, axis=-1, keepdims=True)
-    bad = ~np.isfinite(normals).all(axis=-1)
-    normals[bad] = (0.0, 0.0, 1.0)  # dry points, holes
-    return normals.astype(np.float32)
+    x = np.asarray(x, np.float64)
+    y = np.asarray(y, np.float64)
+    inv_x = np.empty(nx, np.float32)
+    inv_x[1:-1] = 1.0 / (x[2:] - x[:-2])
+    inv_x[0], inv_x[-1] = 1.0 / (x[1] - x[0]), 1.0 / (x[-1] - x[-2])
+    inv_y = np.empty(ny, np.float32)
+    inv_y[1:-1] = 1.0 / (y[2:] - y[:-2])
+    inv_y[0], inv_y[-1] = 1.0 / (y[1] - y[0]), 1.0 / (y[-1] - y[-2])
+    bands = _bands(ny, nx)
+    if len(bands) > 1:
+        list(_pool().map(lambda band: _normals_band(z, inv_x, inv_y, out, *band), bands))
+    else:
+        _normals_band(z, inv_x, inv_y, out, 0, ny)
+    return out
+
+
+def _normals_band(z, inv_x, inv_y, out, r0: int, r1: int) -> None:
+    """:func:`grid_normals` for rows r0..r1 (the rows around read from ``z``)."""
+    ny = z.shape[0]
+    band = out[r0:r1]
+    zb = z[r0:r1]
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        sx = band[..., 0]  # dz/dx, then the normal's x
+        np.subtract(zb[:, 2:], zb[:, :-2], out=sx[:, 1:-1])
+        sx[:, 0] = zb[:, 1] - zb[:, 0]
+        sx[:, -1] = zb[:, -1] - zb[:, -2]
+        sx *= inv_x
+        sy = band[..., 1]  # dz/dy, then the normal's y
+        below = np.maximum(np.arange(r0, r1) - 1, 0)
+        above = np.minimum(np.arange(r0, r1) + 1, ny - 1)
+        lo, hi = max(r0 - 1, 0), min(r1 + 1, ny)
+        rows = z[lo:hi]
+        np.subtract(rows[above - lo], rows[below - lo], out=sy)
+        sy *= inv_y[r0:r1, None]
+        scale = band[..., 2]  # 1 / |(-dz/dx, -dz/dy, 1)|, then the normal's z
+        np.multiply(sx, sx, out=scale)
+        scale += sy * sy
+        scale += 1.0
+        np.sqrt(scale, out=scale)
+        np.divide(1.0, scale, out=scale)
+        sx *= -scale
+        sy *= -scale
+    bad = ~np.isfinite(scale)
+    if bad.any():
+        band[bad] = (0.0, 0.0, 1.0)  # dry points, holes
+
+
+#: points from which a grid is worked on in bands on several threads
+BAND_POINTS = 1_000_000
+_POOL: ThreadPoolExecutor | None = None
+
+
+def _pool() -> ThreadPoolExecutor:
+    global _POOL
+    if _POOL is None:
+        _POOL = ThreadPoolExecutor(min(8, os.cpu_count() or 2), thread_name_prefix="mesh")
+    return _POOL
+
+
+def _bands(ny: int, nx: int) -> list[tuple[int, int]]:
+    """Row bands of a large grid, one per thread (one band for a small grid)."""
+    count = min(8, os.cpu_count() or 2) if ny * nx >= BAND_POINTS else 1
+    edges = np.linspace(0, ny, count + 1).round().astype(int)
+    return [(int(a), int(b)) for a, b in zip(edges[:-1], edges[1:], strict=True) if b > a]
 
 
 def vertex_normals(positions: np.ndarray, triangles: np.ndarray) -> np.ndarray:

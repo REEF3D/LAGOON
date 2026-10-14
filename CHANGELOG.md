@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Large cases
+
+- **Streaming**, a fourth *View → Memory use* mode for very large cases (100
+  million cells and more): frames are read as they are shown and few are kept;
+  while playing or dragging the timeline, free surfaces from a LAGOON store of
+  more than 2.5 million points are read at every 2nd, 3rd, ... grid line, and at
+  full detail as soon as the time stands still. Films and stills are always at
+  full detail. `LAGOON_MEMORY=streaming` for `lagoon-render` and scripts. Opening
+  a case of more than 5 million points a frame in another mode, the status bar
+  suggests it.
+- **Performance (in memory)** reads the whole play range ahead while playing
+  when it fits its budget, so playing runs from memory from the second time round.
+- **Reading ahead within the budget**: playing and films never read further ahead
+  than the frame cache holds; frames of 300 MB read eight ahead into a 1 GB cache
+  used to push out each other before being shown, and were read again.
+- **Switched-off items are not read**: the volume a case opens with (switched
+  off) was read with every frame while playing and filming.
+- **Faster frames from LAGOON stores**: the normals of a surface in single
+  precision on several threads (10x faster), points and triangles made in place,
+  the blocks of an array decoded without threads within threads, fields that are
+  the same in every output (FNPF's still water depth, its coastline) read once,
+  and the variables read while the points are made. A frame of the 1.85 million
+  point FNPF case: 0.44 s → 0.23 s; of a 10 million point surface: 2.5 s → 0.8 s;
+  the first frame 8 s → 2 s (the colour range sampled from tiles, not whole
+  outputs).
+- **AMR with thousands of patches**: the cells a finer patch covers are found
+  from the overlapping patches only, the normals from each grid's slopes: a frame
+  with 3000 patches 20 s → 1.7 s.
+- `tools/benchmark_large.py` writes a synthetic store of any size and times
+  opening, reading, showing and playing it.
+
 ### Fixes
 
 - **Only the case's own solids**: a `REEF3D_Solid.vtp` another case's DIVEMesh

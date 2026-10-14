@@ -106,8 +106,8 @@ class OffscreenView:
             session.set_time(time)
         for item_id in session.data.data_items():
             item = session.scene.get(item_id)
-            if not session.data.drawn(item_id):  # results items in the set-up
-                self.scene.remove(item_id)
+            if not session.data.shown(item_id):  # switched off, or results in the set-up
+                self.scene.remove(item_id)  # (and its frames not read)
                 continue
             mesh = session.data.load(item_id)
             if mesh is None:
@@ -241,6 +241,7 @@ def write_movie(
         folder = path.with_suffix("") if path.suffix else path
         folder.mkdir(parents=True, exist_ok=True)
     data = session.data
+    data.moving = False  # films at full detail, whatever the timeline did
     # reading several frames ahead, and encoding beside the drawing: the three used to
     # take turns, and reading one frame at a time was most of an export
     from lagoonviz.core import memory
@@ -253,7 +254,7 @@ def write_movie(
     started = time_module.perf_counter()
 
     def preload(when: float) -> None:
-        for item_id in data.data_items():
+        for item_id in data.shown_items():
             data.load(item_id, when)
 
     def write(number: int, image: np.ndarray) -> None:
@@ -265,6 +266,17 @@ def write_movie(
 
             write_png(folder / f"frame_{number:05d}.png", image)
 
+    if len(times):
+        # the first frame first: its size says how many fit in the frame budget (a
+        # frame read too far ahead is pushed out before it is drawn, and read again)
+        preload(times[0])
+        step = sum(
+            data.cache.size_hint(key) or 0
+            for key in (data.frame_key(i, times[0]) for i in data.shown_items())
+            if key is not None
+        )
+        if step:
+            read_ahead = max(1, min(read_ahead, int(data.cache.max_bytes // step) - 2))
     ahead = {i: readers.submit(preload, times[i]) for i in range(min(read_ahead, len(times)))}
     written = None
     done = 0

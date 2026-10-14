@@ -10,7 +10,9 @@ from the structured arrays. A probe reads one small chunk per output.
 
 from __future__ import annotations
 
+import math
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -21,13 +23,24 @@ from lagoon_format.series import ProfileSet as StoredProfiles
 from lagoon_format.series import Table
 from lagoon_format.store import Output, Store, is_store, sigma_heights
 
-from lagoonviz.core.data.mesh import SurfaceMesh, grid_normals, scalar_values, unique_edges
+from lagoonviz.core.data.mesh import (
+    SurfaceMesh,
+    grid_normals,
+    grid_points,
+    grid_triangles,
+    scalar_values,
+    unique_edges,
+)
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import CELL_DATA_ROLES, Dataset, Frame, _joined
 from lagoonviz.core.data.series import SeriesFile, TimeSeries
 from lagoonviz.core.data.vtkxml import Piece
 
 VTK_HEXAHEDRON = 12
+#: threads reading a surface's variables beside its heights
+_READS = ThreadPoolExecutor(4, thread_name_prefix="lagoon-store")
+#: surfaces up to this many points give all their values for a colour range
+SAMPLE_ALL = 500_000
 
 
 def _hexahedra(nz: int, ny: int, nx: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -67,24 +80,37 @@ def _quads(ny: int, nx: int, missing: np.ndarray | None) -> tuple[np.ndarray, np
     return corners.ravel().astype(np.int64), np.arange(1, len(corners) + 1, dtype=np.int64) * 4
 
 
-def _face(points: np.ndarray, data: dict[str, np.ndarray], flip: bool) -> SurfaceMesh:
-    """A structured face (rows, cols, 3) as triangles; ``flip`` turns its normals."""
+def _face(
+    points: np.ndarray, data: dict[str, np.ndarray], flip: bool, normals: np.ndarray | None = None
+) -> SurfaceMesh:
+    """A structured face (rows, cols, 3) as triangles; ``flip`` turns its normals.
+    ``normals``: (rows, cols, 3) or one (3,) for a flat face, else made from the
+    triangles later."""
     rows, cols = points.shape[:2]
-    r, c = np.meshgrid(np.arange(rows - 1), np.arange(cols - 1), indexing="ij")
-    base = (r * cols + c).ravel()
-    quads = np.stack([base, base + 1, base + cols + 1, base + cols], axis=1)
-    flat = points.reshape(-1, 3).astype(np.float32)
+    flat = points.reshape(-1, 3).astype(np.float32, copy=False)
     missing = ~np.isfinite(flat).all(axis=1)
-    if missing.any():
-        quads = quads[~missing[quads].any(axis=1)]
+    triangles = grid_triangles(rows, cols, missing.reshape(rows, cols) if missing.any() else None)
     if flip:
-        quads = quads[:, ::-1]
-    triangles = np.concatenate([quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]]).astype(np.uint32)
+        triangles = np.ascontiguousarray(triangles[:, ::-1])
     values = {
         name: v.reshape(rows * cols, -1) if v.ndim == 3 else v.reshape(-1)
         for name, v in data.items()
     }
-    return SurfaceMesh(flat, triangles, values)
+    if normals is not None:
+        normals = np.broadcast_to(np.asarray(normals, np.float32), (rows, cols, 3)).reshape(-1, 3)
+        normals = np.ascontiguousarray(normals)
+    return SurfaceMesh(flat, triangles, values, normals=normals)
+
+
+def _flat(values: np.ndarray, count: int) -> np.ndarray:
+    """A grid's values (ny, nx[, c]) per point: (count,) or (count, c). Values flat
+    already ((count,), or (count, c) vectors) are handed on as they are: the same
+    array object."""
+    if values.ndim == 1:
+        return values
+    if values.ndim == 2 and values.shape[0] == count and values.size != count:
+        return values  # flat vectors
+    return values.reshape(count, -1) if values.ndim == 3 else values.reshape(-1)
 
 
 class StoreDataset(Dataset):
@@ -97,6 +123,8 @@ class StoreDataset(Dataset):
         self.output = output
         self._cells_cache: dict[tuple, tuple] = {}
         self._cells_lock = threading.Lock()
+        #: surface variables the same in every output (a still water depth): read once
+        self._fixed: dict = {}
         frames = self._frames()
         super().__init__(key, store.solver, output.role, frames, output.group.path)
         self.times = output.times.copy()
@@ -127,7 +155,45 @@ class StoreDataset(Dataset):
         self.frames = self._frames()
         self.times = self.output.times.copy()
         self._step_array = None
+        with self._cells_lock:
+            self._fixed.clear()  # what stayed the same may not any more
         return True
+
+    def _surface_array(self, name: str, index: int, detail: int = 1) -> np.ndarray:
+        """A surface variable at an output (at a ``detail``, see :meth:`_surface`), as
+        a grid (ny, nx[, c]). One that is the same in the first and the last output
+        (FNPF's still water depth, its coastline) is read once and handed out again,
+        flat and read-only: the very same array every frame, saving a read and what
+        is worked out from it (the dry land)."""
+        output = self.output
+        rows, cols = self._lines(detail)
+
+        def coarse(values: np.ndarray) -> np.ndarray:
+            return values if rows is None else values[rows][:, cols]
+
+        if len(output.times) < 2:
+            return coarse(output.read(name, index))
+        with self._cells_lock:
+            known = name in self._fixed
+            fixed = self._fixed.get(name)
+            kept = self._fixed.get((name, detail))
+        if not known:
+            first = output.read(name, 0)
+            last = output.read(name, len(output.times) - 1)
+            fixed = first if np.array_equal(first, last, equal_nan=True) else None
+            with self._cells_lock:
+                self._fixed[name] = fixed
+        if fixed is None:
+            return coarse(output.read(name, index))
+        if kept is None:  # flat at this detail, made once
+            grid = coarse(fixed)
+            kept = np.ascontiguousarray(grid.reshape(grid.shape[0] * grid.shape[1], -1))
+            if kept.shape[1] == 1:
+                kept = kept.reshape(-1)
+            kept.flags.writeable = False
+            with self._cells_lock:
+                kept = self._fixed.setdefault((name, detail), kept)
+        return kept
 
     # ------------------------------------------------------------- description
     def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
@@ -195,14 +261,15 @@ class StoreDataset(Dataset):
         return Piece(self.kind, points, connectivity, offsets, types, data)
 
     # ------------------------------------------------------------- volume faces
-    def read(self, index: int, variables: list[str] | None = None) -> SurfaceMesh:
+    def read(self, index: int, variables: list[str] | None = None, detail: int = 1) -> SurfaceMesh:
         """The outer faces of a σ-grid volume straight from the store: the bottom and
         top levels and the four sides, so only those levels and the tiles along the
-        sides are read. Surfaces are read as their pieces."""
+        sides are read. Surfaces are read as their pieces (``detail``: every so many
+        grid lines, see :meth:`_surface`)."""
         output = self.output
         names = list(output.variables) if variables is None else self._arrays(variables) or []
         if output.grid == "surface":
-            return self._surface(index, names)
+            return self._surface(index, names, detail)
         if output.grid not in ("sigma", "cartesian"):
             return super().read(index, variables)
         nz, ny, nx = output.shape
@@ -211,43 +278,80 @@ class StoreDataset(Dataset):
         for level, flip in ((0, True), (nz - 1, False)):
             z = output.heights(index, level=level)
             data = {n: output.read(n, index, level=level) for n in names}
-            gx, gy = np.meshgrid(x, y)
-            faces.append(_face(np.stack([gx, gy, z], axis=-1), data, flip))
-        for axis, line, flip in (
-            (0, 0, True),
-            (0, nx - 1, False),
-            (1, 0, False),
-            (1, ny - 1, True),
+            # the bottom and top are height fields: normals from their slopes (from
+            # the triangles they took seconds for a large volume)
+            normals = grid_normals(z, x, y)
+            if flip:
+                normals *= -1.0
+            points = grid_points(x, y, z).reshape(ny, nx, 3)
+            faces.append(_face(points, data, flip, normals))
+        for axis, line, flip, outward in (
+            (0, 0, True, (-1.0, 0.0, 0.0)),
+            (0, nx - 1, False, (1.0, 0.0, 0.0)),
+            (1, 0, False, (0.0, -1.0, 0.0)),
+            (1, ny - 1, True, (0.0, 1.0, 0.0)),
         ):
             z, data = self._side(index, axis, line, names)
             along = y if axis == 0 else x
             a = np.broadcast_to(along[None, :], z.shape)
             p = np.full(z.shape, (x if axis == 0 else y)[line], np.float32)
             points = np.stack([p, a, z] if axis == 0 else [a, p, z], axis=-1)
-            faces.append(_face(points, data, flip))
+            faces.append(_face(points, data, flip, np.array(outward, np.float32)))
         return _joined(faces)
 
-    def _surface(self, index: int, names: list[str]) -> SurfaceMesh:
+    def _surface(self, index: int, names: list[str], detail: int = 1) -> SurfaceMesh:
         """A free surface or bed as one grid: the blocks joined, two triangles per
-        grid cell whose corners all have a point (made once)."""
+        grid cell whose corners all have a point (made once). ``detail`` > 1: every
+        so many grid lines only (the first and last always), for playing very large
+        surfaces (the streaming memory mode)."""
         output = self.output
         if self.role == "free_surface" and "eta" in output.variables and "eta" not in names:
             names = [*names, "eta"]  # needed for the vertical scale
+        rows, cols = self._lines(detail)
+        x, y = output.x, output.y
+        # the variables read beside the heights, and while the points and normals
+        # are made
+        reads = {name: _READS.submit(self._surface_array, name, index, detail) for name in names}
         z = output.heights(index)
-        gx, gy = np.meshgrid(output.x.astype(np.float32), output.y.astype(np.float32))
-        data = {name: output.read(name, index) for name in names}
-        points = np.stack([gx, gy, z], axis=-1)
+        if rows is not None:
+            z = z[rows][:, cols]
+            x, y = x[cols], y[rows]
         with self._cells_lock:
-            triangles = self._cells_cache.get("surface")
+            triangles = self._cells_cache.get(("surface", detail))
             if triangles is None:
-                triangles = self._cells_cache["surface"] = _face(points, {}, False).triangles
-        values = {
-            n: v.reshape(z.size, -1) if v.ndim == 3 else v.reshape(-1) for n, v in data.items()
-        }
-        flat = points.reshape(-1, 3).astype(np.float32)
+                missing = ~np.isfinite(z)
+                triangles = grid_triangles(*z.shape, missing if missing.any() else None)
+                self._cells_cache[("surface", detail)] = triangles
+        points = grid_points(x, y, z)
         # the normals from the grid's slopes: much faster than from the triangles
-        normals = grid_normals(z, output.x, output.y).reshape(-1, 3)
-        return SurfaceMesh(flat, triangles, values, normals=normals)
+        normals = grid_normals(z, x, y).reshape(-1, 3)
+        data = {name: future.result() for name, future in reads.items()}
+        values = {n: _flat(v, z.size) for n, v in data.items()}
+        return SurfaceMesh(points, triangles, values, normals=normals)
+
+    def _lines(self, detail: int) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """The rows and columns of the grid kept at a ``detail`` (None, None: all)."""
+        if detail <= 1:
+            return None, None
+        output = self.output
+
+        def every(n: int) -> np.ndarray:
+            kept = np.arange(0, n, detail)
+            return kept if kept[-1] == n - 1 else np.append(kept, n - 1)
+
+        return every(len(output.y)), every(len(output.x))
+
+    def points_per_frame(self) -> int | None:
+        output = self.output
+        return len(output.x) * len(output.y) * max(output.nlevels, 1)
+
+    def detail_stride(self, points: int) -> int:
+        """Every how many grid lines to read a surface to show about ``points``
+        points (1: it has no more than that)."""
+        if self.output.grid != "surface":
+            return 1
+        total = len(self.output.x) * len(self.output.y)
+        return max(1, math.ceil(math.sqrt(total / max(points, 1))))
 
     def read_values(self, index: int, variable: str) -> np.ndarray | None:
         """One variable of a surface output (sampling the colour range): its array
@@ -258,6 +362,18 @@ class StoreDataset(Dataset):
             return super().read_values(index, variable)
         values = output.read(name, index)
         values = values.reshape(-1, values.shape[-1]) if values.ndim == 3 else values.reshape(-1)
+        return scalar_values({name: values}, variable)
+
+    def sample_values(self, index: int, variable: str) -> np.ndarray | None:
+        """A large surface's values for a colour range: tiles spread over the grid
+        (a few percent of it, read in milliseconds), not the whole array."""
+        output = self.output
+        name = variable.partition(".")[0]
+        if output.grid != "surface" or name not in output.variables:
+            return super().sample_values(index, variable)
+        if len(output.x) * len(output.y) <= SAMPLE_ALL:
+            return self.read_values(index, variable)
+        values = output.sample(name, index)
         return scalar_values({name: values}, variable)
 
     def _side(self, t: int, axis: int, line: int, names: list[str]):

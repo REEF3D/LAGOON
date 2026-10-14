@@ -26,9 +26,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from lagoon_format.amr import covered
+from lagoon_format.amr import Boxes, covered
 
-from lagoonviz.core.data.mesh import SurfaceMesh
+from lagoonviz.core.data.mesh import SurfaceMesh, grid_normals, grid_points
 from lagoonviz.core.data.vtkxml import (
     VTK_TYPES,
     PieceHeader,
@@ -215,12 +215,17 @@ def read_frame(index: str | Path, arrays: list[str] | None = None) -> list[AmrGr
 # ======================================================================== surface
 def _nodes(cells: np.ndarray) -> np.ndarray:
     """Cell values (ny, nx[, c]) averaged to the nodes (ny + 1, nx + 1[, c])."""
-    padded = np.pad(
-        cells.astype(np.float64, copy=False),
-        ((1, 1), (1, 1)) + ((0, 0),) * (cells.ndim - 2),
-        mode="edge",
-    )
-    return 0.25 * (padded[:-1, :-1] + padded[1:, :-1] + padded[:-1, 1:] + padded[1:, 1:])
+    cells = np.asarray(cells, np.float32)
+    ny, nx = cells.shape[:2]
+    padded = np.empty((ny + 2, nx + 2, *cells.shape[2:]), np.float32)  # edges repeated
+    padded[1:-1, 1:-1] = cells
+    padded[0, 1:-1], padded[-1, 1:-1] = cells[0], cells[-1]
+    padded[:, 0], padded[:, -1] = padded[:, 1], padded[:, -2]
+    out = padded[:-1, :-1] + padded[1:, :-1]
+    out += padded[:-1, 1:]
+    out += padded[1:, 1:]
+    out *= 0.25
+    return out
 
 
 def _outline(nx: int, ny: int) -> np.ndarray:
@@ -245,19 +250,20 @@ def leaf_mesh(grids: list[AmrGrid]) -> SurfaceMesh:
     names = (
         set.intersection(*(set(g.cell_data) | set(g.point_data) for g in grids)) if grids else set()
     )
-    points, triangles, outlines = [], [], []
+    points, triangles, outlines, normals = [], [], [], []
     data: dict[str, list[np.ndarray]] = {name: [] for name in names}
     levels = []
     offset = 0
+    boxes = Boxes(grids)  # the finer grids over each found at once (thousands of patches)
     for grid in grids:
         nx, ny = grid.nx, grid.ny
         if nx < 1 or ny < 1:
             continue
-        hidden = covered(grid, grids)
+        hidden = covered(grid, grids, boxes)
         nodes = {}
         for name in names:
             if name in grid.point_data:
-                nodes[name] = grid.point_data[name].astype(np.float64)
+                nodes[name] = grid.point_data[name].astype(np.float32, copy=False)
             else:
                 nodes[name] = _nodes(grid.cell_data[name])
         if "elevation" in nodes:
@@ -265,13 +271,15 @@ def leaf_mesh(grids: list[AmrGrid]) -> SurfaceMesh:
         elif "eta" in nodes:
             z = nodes["eta"]
         else:
-            z = np.full((ny + 1, nx + 1), grid.z)
-        xx, yy = np.meshgrid(grid.x, grid.y)
-        points.append(np.stack([xx.ravel(), yy.ravel(), z.ravel()], axis=1))
+            z = np.full((ny + 1, nx + 1), grid.z, np.float32)
+        points.append(grid_points(grid.x, grid.y, z))
+        # each grid a height field: normals from its slopes (from all triangles at
+        # once they took seconds)
+        normals.append(grid_normals(z, grid.x, grid.y).reshape(-1, 3))
         width = nx + 1
         jj, ii = np.nonzero(~hidden)
-        n00 = jj * width + ii
-        quads = np.stack([n00, n00 + 1, n00 + width + 1, n00 + width], axis=1) + offset
+        n00 = (jj * width + ii + offset).astype(np.uint32)
+        quads = np.stack([n00, n00 + 1, n00 + width + 1, n00 + width], axis=1)
         triangles.append(np.concatenate([quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]]))
         for name in names:
             values = nodes[name]
@@ -289,13 +297,13 @@ def leaf_mesh(grids: list[AmrGrid]) -> SurfaceMesh:
     point_data["level"] = np.concatenate(levels)
     if "WL" in point_data and "depth" not in point_data:
         point_data["depth"] = point_data["WL"]
-    mesh = SurfaceMesh(
-        points=np.ascontiguousarray(np.concatenate(points), dtype=np.float32),
+    return SurfaceMesh(
+        points=np.concatenate(points),
         triangles=np.ascontiguousarray(np.concatenate(triangles), dtype=np.uint32),
         point_data=point_data,
         outlines=np.concatenate(outlines).astype(np.uint32) if outlines else None,
+        normals=np.concatenate(normals),
     )
-    return mesh.with_normals()
 
 
 def value_at(grids: list[AmrGrid], name: str, x: float, y: float) -> tuple[float, int] | None:

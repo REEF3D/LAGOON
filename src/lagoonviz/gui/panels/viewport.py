@@ -481,9 +481,16 @@ class Viewport3D(QWidget):
         for item_id in item_ids if item_ids is not None else sorted(current):
             if item_id not in current:
                 continue
-            key = data.frame_key(item_id)
             # a frame asked for before and not started is dropped (dragging the slider)
             owner = (id(self), item_id)
+            if not data.shown(item_id):
+                # switched off: its frames are not read (a large volume costs nothing)
+                self.loader.want(owner, None)
+                self.view.remove(item_id)
+                self._wanted.pop(item_id, None)
+                self._shown_keys.pop(item_id, None)
+                continue
+            key = data.frame_key(item_id)
             if key is None:
                 self.loader.want(owner, None)
                 self.view.remove(item_id)

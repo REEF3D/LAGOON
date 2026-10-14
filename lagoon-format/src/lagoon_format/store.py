@@ -86,6 +86,9 @@ def tile_size(n: int, most: int = 64) -> int:
     return math.ceil(n / math.ceil(n / most))
 
 
+#: threads reading the blocks of an array (more only waited for each other)
+READ_THREADS = 2
+
 #: values a chunk should hold at least, so it compresses well
 CHUNK_VALUES = 2048
 
@@ -229,17 +232,23 @@ class Output:
 
     # ------------------------------------------------------------- reading
     def read_block(
-        self, name: str, t: int, block: int | Block, level: int | None = None
+        self,
+        name: str,
+        t: int,
+        block: int | Block,
+        level: int | None = None,
+        parallel: bool = True,
     ) -> np.ndarray:
         """One block's array at output ``t``: (nz, ny_b, nx_b[, 3]) or (ny_b, nx_b[, 3]);
-        only one level of a volume field with ``level``."""
+        only one level of a volume field with ``level``. ``parallel=False``: its
+        chunks decoded in this thread (see :meth:`read`)."""
         if name == "z_offset" and not self.has("z_offset", _number(block)):
             shape = self._block_shape(block)
             return np.zeros(shape[1:] if level is not None else shape, np.float32)
         array = self.array(block, name)
         if level is not None and self._has_levels(name, array):
-            return array[t, level - self.blocks[_number(block)].k0]
-        return array[t]
+            return array.get((t, level - self.blocks[_number(block)].k0), parallel)
+        return array.get(t, parallel)
 
     def _has_levels(self, name: str, array: Array) -> bool:
         return bool(self.nlevels) and name not in ("z_bed", "z_surface") and array.ndim >= 4
@@ -250,10 +259,15 @@ class Output:
             return (b.nz, b.size[1], b.size[0])
         return (b.size[1], b.size[0])
 
-    def read(self, name: str, t: int, threads: int = 4, level: int | None = None) -> np.ndarray:
+    def read(
+        self, name: str, t: int, threads: int = READ_THREADS, level: int | None = None
+    ) -> np.ndarray:
         """An array of the whole grid at output ``t``, joined from the blocks:
         (nz, ny, nx[, 3]) for volume fields (one level: (ny, nx[, 3])), (ny, nx[, 3])
-        for surfaces and the column heights ``z_bed``, ``z_surface``."""
+        for surfaces and the column heights ``z_bed``, ``z_surface``. The blocks are
+        read on ``threads`` threads, each decoding its chunks itself: the chunks are
+        small, and spreading them over threads within threads was slower (Python's
+        lock between them) than this."""
         holders = [b.number for b in self.blocks if self.has(name, b.number)]
         if name == "z_offset" and not holders:
             return np.zeros(self.shape if level is None else self.shape[1:], np.float32)
@@ -270,15 +284,53 @@ class Output:
         ]
         if threads > 1 and len(wanted) > 1:
             with ThreadPoolExecutor(min(threads, len(wanted))) as pool:
-                parts = list(pool.map(lambda b: self.read_block(name, t, b, level), wanted))
+                parts = list(pool.map(lambda b: self.read_block(name, t, b, level, False), wanted))
         else:
-            parts = [self.read_block(name, t, b, level) for b in wanted]
+            parts = [self.read_block(name, t, b, level, len(wanted) == 1) for b in wanted]
         # the highest numbered first: where blocks overlap, the lowest numbered wins
         for block, values in sorted(zip(wanted, parts, strict=True), key=lambda bp: -bp[0].number):
             (i0, j0), (i1, j1) = block.start, block.stop
             lead = (slice(block.k0, block.k0 + values.shape[0]),) if head else ()
             out[lead + (slice(j0, j1), slice(i0, i1)) + rest] = values
         return out
+
+    def sample(self, name: str, t: int, chunks: int = 64) -> np.ndarray:
+        """Some values of an array at output ``t`` spread over the whole grid, read
+        cheaply: about ``chunks`` inner chunks (tiles) picked evenly from all
+        blocks, each read and decoded alone (a colour range from a large output
+        without reading all of it). A volume field gives its top level. Flat:
+        (n,) or (n, components)."""
+        holders = [b for b in self.blocks if self.has(name, b.number)]
+        if not holders:
+            return np.zeros(0, np.float32)
+        per_block = max(1, round(chunks / len(holders)))
+        side = max(1, round(math.sqrt(per_block)))
+        parts = []
+        for block in holders:
+            array = self.array(block, name)
+            levels = self._has_levels(name, array)
+            inner = array.inner or array.chunks
+            ty, tx = inner[2:4] if levels else inner[1:3]  # (time, [level], y, x, ...)
+            ny_b, nx_b = block.size[1], block.size[0]
+            # spread, each block shifted differently (a regular pattern could keep
+            # hitting the same phase of regular waves)
+            shift_y, shift_x = (block.number * 0.618034) % 1.0, (block.number * 0.754878) % 1.0
+            corners = sorted(
+                {
+                    (int(fy * ny_b) // ty * ty, int(fx * nx_b) // tx * tx)
+                    for fy in ((np.arange(side) + shift_y) / side) % 1.0
+                    for fx in ((np.arange(side) + shift_x) / side) % 1.0
+                }
+            )  # (a small block: the same tile once)
+            for j0, i0 in corners:
+                window = (slice(j0, min(j0 + ty, ny_b)), slice(i0, min(i0 + tx, nx_b)))
+                if levels:
+                    top = (block.nz or array.shape[1]) - 1
+                    values = array[(t, top, *window)]
+                else:
+                    values = array[(t, *window)]
+                parts.append(values.reshape(-1, *values.shape[2:]))
+        return np.concatenate(parts) if parts else np.zeros(0, np.float32)
 
     def heights(
         self, t: int, block: int | Block | None = None, level: int | None = None
