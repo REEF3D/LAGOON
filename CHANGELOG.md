@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Print-outs and several cases
+
+- **Slices for every case**: with several cases open, new slices, iso-surfaces,
+  iso-volumes and streamlines cut the case of the selected item (else the first
+  case with a volume), not always the first case; putting a slice on another case
+  moves it into that case's volume when its plane would miss it.
+- **NHFLOW and FNPF set-up grid as ParaView shows it**: REEF3D scales DIVEMesh's
+  heights to σ and stretches them from the bed to the still water (F 60); the
+  *DIVEMesh grid* item, its partition planes and the domain are drawn there, the
+  levels spaced as DIVEMesh spaced them, whatever heights B 10 gives.
+- **REEF3D's names**: wave profiles are *Free surface lines* (P 52); the time
+  series are named as the User Guide names the print-outs: Velocity probe, Point
+  probe, Pressure probe, Force box, Morison force, Run-up gauges, Cylinder run-up,
+  Bed level gauges, Wave gauges (theory), ...
+- **More print-outs read**: the probes' tables headed `t` (NHFLOW's velocity and
+  pressure probes, FNPF's, CFD's point probes, SFLOW's depth-averaged probes),
+  CFD's pressure probes (no header), NHFLOW's run-up gauges (no time in the
+  header), the bed level and bed shear stress gauges (`REEF3D_*_Sediment`), the
+  wave theory's time series (`REEF3D_Log-Wave`), free surface lines along y (P 56,
+  `WSFLINE_Y`) and NHFLOW's time-averaged free surface lines (P 146, P 147).
+
 ### Large cases
 
 - **Streaming**, a fourth *View → Memory use* mode for very large cases (100

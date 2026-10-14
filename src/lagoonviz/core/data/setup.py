@@ -102,6 +102,8 @@ COLORS = {
 }
 
 SOLVERS = {2: "SFLOW", 3: "FNPF", 5: "NHFLOW", 6: "CFD", 7: "SEASTATE"}
+#: solvers whose grid REEF3D scales to σ (0 - 1) and stretches from the bed to the water
+SIGMA_SOLVERS = ("FNPF", "NHFLOW")
 
 
 # ======================================================================== files
@@ -771,10 +773,12 @@ def _domain(setup: CaseSetup) -> tuple | None:
     """B 10 (several boxes: the box around them); else from geo.dat (G 20 with its
     margins G 21, G 22) or the STL (S 2 with S 3).
 
-    FNPF, NHFLOW and SFLOW have σ-grids from the bed to the free surface: when B 10's
-    heights do not reach the still water (F 60, e.g. 0 - 1 m for a bed of geo.dat
-    from 50 to 300 m), the domain reaches from the bed's lowest point (geo.dat, else
-    B 10's bottom) to it."""
+    FNPF, NHFLOW and SFLOW have σ-grids from the bed to the free surface: REEF3D
+    scales DIVEMesh's heights to 0 - 1 (σ) and stretches them from the bed to the
+    water, so the domain reaches from the bed's lowest point (geo.dat, else B 10's
+    bottom) to the still water (F 60), whatever B 10's heights (e.g. 0 - 1 m for a
+    bed of geo.dat from 50 to 300 m, or 0 - 0.8 m for water 0.5 m deep), as
+    ParaView shows the results."""
     boxes = [v[:6] for v in setup.control.all("B 10") if len(v) >= 6]
     if boxes:
         b = np.asarray(boxes, float)
@@ -788,7 +792,7 @@ def _domain(setup: CaseSetup) -> tuple | None:
         ]
         water = setup.ctrl.value("F 60")
         sigma = setup.ctrl.int("A 10", 6) in (2, 3, 5)
-        if sigma and water is not None and abs(water) < 1e18 and not box[4] <= water <= box[5]:
+        if sigma and water is not None and abs(water) < 1e18:
             if (setup.path / GEO).is_file() and setup.control.int("G 10", 0) > 0:
                 points = setup.geo_points()
                 if len(points):
@@ -823,6 +827,9 @@ def _cells(setup: CaseSetup) -> tuple[int, int, int] | None:
     dx = setup.control.value("B 1")
     if dx and dx > 0 and setup.domain is not None:
         xs, xe, ys, ye, zs, ze = setup.domain
+        boxes = [v[:6] for v in setup.control.all("B 10") if len(v) >= 6]
+        if boxes:  # DIVEMesh counts the levels in B 10's heights (σ-grids: stretched)
+            zs, ze = min(b[4] for b in boxes), max(b[5] for b in boxes)
         return (
             max(1, round((xe - xs) / dx)),
             max(1, round((ye - ys) / dx)),

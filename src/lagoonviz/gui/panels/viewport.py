@@ -634,7 +634,7 @@ class Viewport3D(QWidget):
             self._update_gauges_now()
 
     def _update_gauges_now(self) -> None:
-        """Wave gauge positions and wave profiles, in the colours of their plot lines."""
+        """Wave gauge positions and free surface lines, in the colours of their plot lines."""
         data = self.session.data
         profiles = {i for i in data.profile_items() if self._in_view(i)}
         wanted = {i for i in data.series_items() if self._in_view(i)} | profiles

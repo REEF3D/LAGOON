@@ -13,7 +13,7 @@ output, and LaTeX in labels.
 | Plots (time series) | the rows of the Plots panel, stacked, sharing the time axis |
 | Wave spectra of the plots | a spectrum per row, $H_{m0}$ and $T_p$ in the legend, over a time window |
 | Compare with measurements | a computed line against a column of a measured file |
-| Wave profiles | the wave profiles at the current time |
+| Free surface lines | the free surface lines at the current time |
 | 3D view | the 3D view as it is, rendered at the figure's resolution, with its colour bars |
 
 Then:
@@ -34,9 +34,9 @@ Labels may hold `$\eta$`-style mathematics without LaTeX installed.
 
 *File → Figure editor…* builds figures of several panels:
 
-- **Left**: what can be drawn: the time-series files and wave profiles of the open
+- **Left**: what can be drawn: the time-series files and free surface lines of the open
   cases, and measured files added with *Add measured file*.
-- **Middle**: the figure's panels (time series, spectra, wave profiles, 3D views)
+- **Middle**: the figure's panels (time series, spectra, free surface lines, 3D views)
   and their lines. Drag a column onto a panel, or double-click it, to add it; onto
   empty space for a new panel. Under it, the settings of what is selected: of the
   figure (style, size, a grid of columns, panel letters (a), (b), ...), of a panel
@@ -47,7 +47,7 @@ Labels may hold `$\eta$`-style mathematics without LaTeX installed.
 Notes are placed with `x, y: text` (fractions of the panel) and may hold
 `$LaTeX$`.
 
-![Wave profiles](../images/figure-profiles.png)
+![Free surface lines](../images/figure-profiles.png)
 
 ## Templates
 

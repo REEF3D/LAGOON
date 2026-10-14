@@ -1,7 +1,7 @@
 # Scene items
 
 Everything shown is an item in the **Scene** panel: the cases, the surfaces and
-volumes drawn from them, the time series and wave profiles plotted from them. The
+volumes drawn from them, the time series and free surface lines plotted from them. The
 *Add* menu (and the toolbar, for the common ones) adds items; ++delete++ removes
 the selected one (a case with all the items that show it), and *Edit → Undo*
 (++ctrl+z++) takes back any change. The check
@@ -30,7 +30,7 @@ script the session writes ([Scripting](../scripting.md)).
 | Iso-volume | the part of the volume where a variable lies in a range (the water of a CFD run: phi from 0 up) |
 | Streamlines | lines along a vector field, through the volume, in a plane or on the free surface |
 | Time series | wave gauges, 6DOF motions or forces, plotted under the 3D view |
-| Wave profile | the surface along the lines of `WSFLINE`, with the wave theory (FNPF) |
+| Free surface line | the surface along the lines of `WSFLINE`, with the wave theory (FNPF) |
 | Bodies, Mooring lines, Structures | floating bodies, their moorings (coloured by tension), fixed structures |
 | DEM elements, Ice floes, Rod trees, Particles | the objects of those modules, with trails for DEM and particles |
 
@@ -76,6 +76,11 @@ the orange marker stays where it was put and its values follow the time, and the
 Plots panel adds them over time. Click on empty space to remove it.
 
 ## Slices, iso-surfaces, streamlines
+
+With several cases open, a new slice, iso-surface, iso-volume or streamlines cut
+the case of the item selected in the scene tree (else the first case that has a
+volume); *Case* in its properties puts it on another case, through the middle of
+that case's volume if its plane would miss it.
 
 *Add → Slice* cuts the volume in the middle; set the *Normal* (x, y or z) and the
 *Position* in metres; *Grid lines* (dark or white) draws the edges of the cells it

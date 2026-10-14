@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Architect: Hans Bihs
 """The figure editor (File → Figure editor): build a paper figure by dragging time
-series and wave profiles onto panels, change its look live, keep it as a template.
+series and free surface lines onto panels, change its look live, keep it as a template.
 
-Left, what can be drawn: the time-series files and wave profiles of the open cases,
+Left, what can be drawn: the time-series files and free surface lines of the open cases,
 and measured files added with "Add measured file". In the middle, the figure: its
-panels (time series, spectra, wave profiles, 3D views) and their lines; drag a
+panels (time series, spectra, free surface lines, 3D views) and their lines; drag a
 column onto a panel (or double-click it) to add it, onto empty space for a new
 panel. Under it the settings of what is selected: of the figure (style, size, a
 grid of columns, panel letters), of a panel (title, columns it spans, notes, its
@@ -68,7 +68,7 @@ ROLE = Qt.UserRole
 PANEL_LABELS = {
     "time": "Time series",
     "spectrum": "Spectrum",
-    "profile": "Wave profiles",
+    "profile": "Free surface lines",
     "view": "3D view",
 }
 
@@ -270,7 +270,7 @@ class FigureEditor(QDialog):
         self.span_box.setToolTip("Columns of the figure's grid the panel takes")
         self.moment_box = _number(-1, 1e7, " s", "the scene's time")
         self.moment_box.setDecimals(3)
-        self.moment_box.setToolTip("The moment a wave profile or 3D view shows")
+        self.moment_box.setToolTip("The moment a free surface line or 3D view shows")
         self.notes_box = QPlainTextEdit()
         self.notes_box.setPlaceholderText(
             r"one note per line, $LaTeX$ allowed; '0.6, 0.9: text' places it"
@@ -444,7 +444,7 @@ class FigureEditor(QDialog):
 
     def add_line(self, line: Line, panel: int | None = None) -> None:
         """A line onto a panel; onto a new panel when there is none, or the panel does
-        not take it (a wave profile onto a time panel, anything onto a 3D view)."""
+        not take it (a free surface line onto a time panel, anything onto a 3D view)."""
         if (
             panel is None
             or not 0 <= panel < len(self.template.panels)

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Wave profiles along lines: REEF3D's ``REEF3D_*_WSFLINE`` output.
+"""Free surface lines: REEF3D's ``REEF3D_*_WSFLINE`` output (P 52, lines along x),
+``REEF3D_*_WSFLINE_Y`` (P 56, along y) and NHFLOW's time-averaged lines
+(``REEF3D_NHFLOW_TIME_AVG_WSFLINE``, ``..._Y``: P 146, P 147).
 
 Each file is one moment: ``simtime: t``, the number of lines and their y
 positions, then a table with, per line, ``X n`` (position along x), ``P n``
@@ -15,9 +17,11 @@ positions, then a table with, per line, ``X n`` (position along x), ``P n``
     0.0145833 0.4097076 0.4097319
     ...
 
+Lines along y have ``Y n`` (or one ``y_coord`` column, CFD) in place of ``X n``.
 Files are numbered by iteration, not by output, so the time comes from
-``simtime``. Only the headers are read when a case opens; a profile is read
-when it is shown.
+``simtime``. Only the headers are read when a case opens; a line is read when it
+is shown. Time-averaged lines are written once per line, at the end of their
+averaging window: one set per line.
 """
 
 from __future__ import annotations
@@ -29,19 +33,25 @@ from pathlib import Path
 
 import numpy as np
 
-_FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_WSFLINE$")
+_FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<avg>TIME_AVG_)?WSFLINE(?P<y>_Y)?$")
 _COLUMN = re.compile(r"([A-Za-z]+)\s+(\d+)")
 
 
 @dataclass
 class ProfileLine:
-    """One line of a profile file at one moment."""
+    """One line of a free surface line file at one moment."""
 
     number: int
-    y: float
-    x: np.ndarray  # (n,) along the line
+    y: float  # where the line lies across: its y (lines along x) or x (along y)
+    x: np.ndarray  # (n,) along the line: x (lines along x) or y (along y)
     eta: np.ndarray  # (n,) computed elevation
     theory: np.ndarray | None = None  # (n,) wave theory (FNPF), if written
+    axis: str = "x"  # the direction the line runs in
+
+    @property
+    def across(self) -> str:
+        """The coordinate that places the line ("y" for a line along x)."""
+        return "y" if self.axis == "x" else "x"
 
 
 @dataclass
@@ -77,28 +87,46 @@ def read_header(path: str | Path) -> tuple[float, dict[int, float]]:
                     ys[int(tokens[0])] = float(tokens[1])
                 except ValueError:
                     break  # e.g. "2  Wave Theory": the end of the table
-            elif tokens[0] == "X":
+            elif tokens[0] in ("X", "Y") or tokens[0].lower() in ("x_coord", "y_coord"):
                 break
     return time, ys
 
 
-def read_profile(path: str | Path) -> Profile:
-    """Read one WSFLINE file."""
+def read_profile(path: str | Path, axis: str = "x") -> Profile:
+    """Read one free surface line file (lines along ``axis``)."""
     path = Path(path)
     time, ys = read_header(path)
     lines = path.read_text(errors="replace").splitlines()
-    header_at = next((i for i, line in enumerate(lines) if line.split()[:1] == ["X"]), None)
+    header_at = None
+    for i, line in enumerate(lines):
+        first = line.split()[:1]
+        if first and (first[0] in ("X", "Y") or first[0].lower() in ("y_coord", "x_coord")):
+            header_at = i
+            break
     if header_at is None:
         raise ValueError(f"{path.name}: no 'X 1  P 1' header")
-    columns = [(kind.upper(), int(number)) for kind, number in _COLUMN.findall(lines[header_at])]
-    body = " ".join(lines[header_at + 1 :]).split()
-    values = np.array([_number(v) for v in body], dtype=np.float64)
+    found_columns = [(k.upper(), int(n)) for k, n in _COLUMN.findall(lines[header_at])]
+    if lines[header_at].split()[0].lower().endswith("_coord"):
+        # one coordinate column named for all lines (CFD's lines along y); the rows
+        # hold the coordinate and the elevation of every line
+        found_columns = [
+            c
+            for n in (num for kind, num in found_columns if kind == "P")
+            for c in (("X", n), ("P", n))
+        ]
+    columns = [("X" if kind == "Y" else kind, number) for kind, number in found_columns]
+    rows = [line.split() for line in lines[header_at + 1 :] if line.strip()]
+    numbers = sorted({c[1] for c in columns})
+    if rows and "W" not in {c[0] for c in columns}:
+        if sum(len(r) == len(columns) + len(numbers) for r in rows) > len(rows) // 2:
+            # the wave theory written (P 53) but not named
+            columns = [c for n in numbers for c in (("X", n), ("P", n), ("W", n))]
     n = len(columns)
-    rows = values.size // n
-    table = values[: rows * n].reshape(rows, n)
+    kept = [r for r in rows if len(r) == n]  # (a row a line has no point in: left out)
+    table = np.array([[_number(v) for v in r] for r in kept], np.float64).reshape(-1, n)
     table = np.where(np.abs(table) >= 1e19, np.nan, table)  # REEF3D's "no value"
     found: dict[int, ProfileLine] = {}
-    for number in sorted({c[1] for c in columns}):
+    for number in numbers:
         index = {kind: i for i, (kind, num) in enumerate(columns) if num == number}
         if "X" not in index or "P" not in index:
             continue
@@ -106,7 +134,7 @@ def read_profile(path: str | Path) -> Profile:
         keep = np.isfinite(x)
         theory = table[keep, index["W"]] if "W" in index else None
         found[number] = ProfileLine(
-            number, ys.get(number, 0.0), x[keep], table[keep, index["P"]], theory
+            number, ys.get(number, 0.0), x[keep], table[keep, index["P"]], theory, axis
         )
     return Profile(path, time, found)
 
@@ -120,7 +148,7 @@ def _number(token: str) -> float:
 
 @dataclass
 class ProfileSet:
-    """The WSFLINE files of a case folder, by time."""
+    """The free surface line files of a case folder, by time."""
 
     key: str
     folder: Path
@@ -128,6 +156,10 @@ class ProfileSet:
     paths: list[Path] = field(default_factory=list)
     times: np.ndarray = field(default_factory=lambda: np.zeros(0))
     ys: dict[int, float] = field(default_factory=dict)
+    #: the direction the lines run in
+    axis: str = "x"
+    #: time-averaged (P 146, P 147): one line, its number
+    averaged: int = 0
 
     def __post_init__(self) -> None:
         self._cache: dict[Path, Profile] = {}
@@ -135,11 +167,16 @@ class ProfileSet:
 
     @property
     def name(self) -> str:
-        return "Wave profiles"
+        """What REEF3D calls them (P 52, P 56, P 146, P 147)."""
+        if self.averaged:
+            name = f"Time-averaged free surface line {self.averaged}"
+        else:
+            name = "Free surface lines"
+        return name + (" in y" if self.axis == "y" else "")
 
     @property
     def label(self) -> str:
-        return f"{self.solver} wave profiles ({len(self.paths)} times, {self.folder.name})"
+        return f"{self.solver} {self.name.lower()} ({len(self.paths)} times, {self.folder.name})"
 
     def written_span(self) -> tuple[float, float]:
         """(first, last) modification time of the files."""
@@ -157,7 +194,7 @@ class ProfileSet:
         with self._lock:
             profile = self._cache.get(path)
         if profile is None:
-            profile = read_profile(path)
+            profile = read_profile(path, self.axis)
             with self._lock:
                 if len(self._cache) > 400:
                     self._cache.clear()
@@ -218,7 +255,8 @@ def _latest_run(paths: list[Path], short: float = 0.1) -> list[Path]:
 
 
 def find_profiles(case_dir: Path) -> dict[str, ProfileSet]:
-    """The ``REEF3D_*_WSFLINE`` folders of a case, with the time of every file."""
+    """The free surface line folders of a case (``REEF3D_*_WSFLINE``, ``..._Y`` and
+    NHFLOW's time-averaged ones), with the time of every file."""
     found: dict[str, ProfileSet] = {}
     if not case_dir.is_dir():
         return found
@@ -226,27 +264,38 @@ def find_profiles(case_dir: Path) -> dict[str, ProfileSet]:
         match = _FOLDER.match(folder.name)
         if not match or not folder.is_dir():
             continue
-        entries = []
-        ys: dict[int, float] = {}
-        for path in _latest_run(sorted(folder.glob("*.dat"), key=_iteration)):
-            try:
-                time, line_ys = read_header(path)
-            except (OSError, ValueError):
-                continue
-            if np.isfinite(time):
-                entries.append((time, path))
-                ys = line_ys or ys
-        if not entries:
-            continue
-        entries.sort(key=lambda e: e[0])
         solver = match.group("solver")
-        key = f"{solver.lower()}_wsfline"
-        found[key] = ProfileSet(
-            key,
-            folder,
-            solver,
-            [p for _, p in entries],
-            np.array([t for t, _ in entries]),
-            ys,
-        )
+        axis = "y" if match.group("y") else "x"
+        averaged = bool(match.group("avg"))
+        groups: dict[int, list[Path]] = {}
+        for path in sorted(folder.glob("*.dat"), key=_iteration):
+            # time-averaged: one file per line (REEF3D-NHFLOW-TimeAvgWsfLine-<line>-<it>)
+            numbers = re.findall(r"\d+", path.stem) if averaged else []
+            groups.setdefault(int(numbers[-2]) if len(numbers) >= 2 else 0, []).append(path)
+        for line, paths in sorted(groups.items()):
+            entries = []
+            ys: dict[int, float] = {}
+            for path in _latest_run(paths) if not averaged else paths:
+                try:
+                    time, line_ys = read_header(path)
+                except (OSError, ValueError):
+                    continue
+                if np.isfinite(time):
+                    entries.append((time, path))
+                    ys = line_ys or ys
+            if not entries:
+                continue
+            entries.sort(key=lambda e: e[0])
+            key = f"{solver.lower()}_{'time_avg_' if averaged else ''}wsfline"
+            key += ("_y" if axis == "y" else "") + (f"_{line}" if averaged else "")
+            found[key] = ProfileSet(
+                key,
+                folder,
+                solver,
+                [p for _, p in entries],
+                np.array([t for t, _ in entries]),
+                ys,
+                axis,
+                line if averaged else 0,
+            )
     return found

@@ -80,7 +80,7 @@ set-up* adds another one. Each group can be switched off in its properties:
 | Still water | the still water level, a faint plane | F 60 |
 | Relaxation zones | wave generation and numerical beach zones | B 96, B 107, B 108 |
 | Waves | wave direction, focus point, wavemakers | B 105, B 81, X 170 – X 172 |
-| Gauges | wave gauges and the lines of wave profiles, numbered | P 50 – P 58, P 121 – P 147 |
+| Gauges | wave gauges and the lines of free surface lines, numbered | P 50 – P 58, P 121 – P 147 |
 | Probes | point, line and velocity probes, numbered | P 61 – P 67, P 88, P 144 – P 148 |
 | Sections | discharge sections and flow files | P 167, P 168, P 230, P 240 |
 | Forces | force boxes and Morison cylinders | P 81, P 85 |
@@ -172,6 +172,12 @@ grid `control.txt` sets up (B 10 with B 1 or B 2); a stretched grid (B 101 –
 B 103) shows once DIVEMesh has made it. The item's properties give the number of
 cells and the smallest and largest cell sizes along x, y and z.
 
+FNPF and NHFLOW scale DIVEMesh's heights to σ (0 – 1) and stretch them from the bed
+to the water. Their grid, and the domain, are drawn from the bed's lowest point
+(geo.dat, else B 10's bottom) to the still water level (F 60), with the levels
+spaced as DIVEMesh spaced them: as ParaView shows the results at the start, whatever
+heights B 10 gives (0 – 1 m, or a box higher than the water).
+
 ## The set-up sketch
 
 *File → Export figure → Case set-up* draws the set-up as a paper figure:
@@ -195,8 +201,8 @@ cells and the smallest and largest cell sizes along x, y and z.
 - the legend.
 
 For FNPF, NHFLOW and SFLOW, whose σ-grids reach from the bed to the free surface,
-the heights come from the bed (geo.dat) and the still water level when B 10 gives
-placeholder heights (0 - 1 m). The same from the command line:
+the heights come from the bed (geo.dat) and the still water level, whatever
+heights B 10 gives. The same from the command line:
 
 ```bash
 lagoon-setup ~/runs/flume                  # flume-setup.pdf beside the case

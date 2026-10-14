@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Wave profiles along lines (WSFLINE) at the current time, under the 3D view.
+"""Free surface lines (WSFLINE, WSFLINE_Y) at the current time, under the 3D view.
 
 One row per profile item: the computed elevation along x for each of its lines,
 with the wave theory dashed where FNPF wrote it. The value axis is fixed from a
@@ -108,8 +108,8 @@ class ProfilesPanel(QWidget):
             painter.drawText(
                 self.rect(),
                 Qt.AlignCenter | Qt.TextWordWrap,
-                "No wave profiles. Open a case with WSFLINE output, "
-                "or add one with Add → Wave profile.",
+                "No free surface lines. Open a case with WSFLINE output, "
+                "or add one with Add → Free surface line.",
             )
             painter.end()
             return
@@ -140,10 +140,11 @@ class ProfilesPanel(QWidget):
                 Qt.AlignHCenter | Qt.AlignTop,
                 tick_label(tick, x_step),
             )
+        along = sorted({line.axis for _, lines in rows for line in lines}) or ["x"]
         painter.drawText(
             QRectF(self.width() - RIGHT - 60, rect.bottom() + 3, 60, BOTTOM - 4),
             Qt.AlignRight | Qt.AlignTop,
-            "x [m]",
+            f"{', '.join(along)} [m]",
         )
         painter.end()
 
@@ -200,7 +201,7 @@ class ProfilesPanel(QWidget):
         x += metrics.horizontalAdvance(title) + 14
         for index, line in enumerate(lines):
             color = QColor(SERIES_COLORS[index % len(SERIES_COLORS)])
-            text = f"line {line.number} (y = {line.y:g})"
+            text = f"line {line.number} ({line.across} = {line.y:g})"
             painter.fillRect(QRectF(x, rect.top() - TOP / 2 - 1, 10, 3), color)
             painter.setPen(QColor(COLORS["text"]))
             painter.drawText(

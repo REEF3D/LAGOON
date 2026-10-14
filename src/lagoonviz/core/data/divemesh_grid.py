@@ -59,6 +59,9 @@ class Grid:
     points: np.ndarray
     source: str  # "DIVEMesh" (the preview) or "control.txt" (uniform, not run yet)
     path: Path | None = None
+    #: σ-grids (FNPF, NHFLOW): DIVEMesh's lowest and highest level and where they
+    #: are drawn (bed, still water), see :func:`sigma_grid`; None: as DIVEMesh made it
+    heights: tuple[float, float, float, float] | None = None
 
     @property
     def cells(self) -> tuple[int, int, int]:
@@ -147,6 +150,28 @@ def uniform_grid(domain, cells) -> Grid | None:
             return np.stack([axes[0][i], axes[1][j], axes[2][k]], axis=-1)
 
     return Grid(shape, _Lazy(), "control.txt")  # type: ignore[arg-type]
+
+
+def sigma_grid(grid: Grid, bottom: float, top: float) -> Grid:
+    """A grid whose heights REEF3D scales to σ (0 - 1) and stretches from the bed to the
+    water (FNPF, NHFLOW): its levels between ``bottom`` and ``top``, spaced as
+    DIVEMesh spaced them."""
+    low, high = grid.bounds()
+    z0, z1 = float(low[2]), float(high[2])
+    if z1 <= z0 or (abs(z0 - bottom) < 1e-9 and abs(z1 - top) < 1e-9):
+        return grid
+    scale = (top - bottom) / (z1 - z0)
+    nodes = grid.points
+
+    class _Scaled:
+        def __getitem__(self, index):
+            points = np.array(nodes[index], np.float64)
+            points[..., 2] = bottom + (points[..., 2] - z0) * scale
+            return points
+
+    sigma = Grid(grid.shape, _Scaled(), grid.source, grid.path)  # type: ignore[arg-type]
+    sigma.heights = (z0, z1, bottom, top)
+    return sigma
 
 
 def _picked(n: int, every: int) -> np.ndarray:

@@ -809,7 +809,7 @@ class StoreSeriesFile(SeriesFile):
 
 
 class StoreProfileSet(ProfileSet):
-    """Wave profiles of a store, in place of the WSFLINE files."""
+    """Free surface lines of a store, in place of the WSFLINE files."""
 
     def __init__(self, key: str, folder: Path, solver: str, stored: StoredProfiles):
         times = np.asarray(stored.times, np.float64)
@@ -825,7 +825,7 @@ class StoreProfileSet(ProfileSet):
 
     @property
     def label(self) -> str:
-        return f"{self.solver} wave profiles ({len(self.paths)} times, LAGOON)"
+        return f"{self.solver} free surface lines ({len(self.paths)} times, LAGOON)"
 
     def written_span(self) -> tuple[float, float]:
         try:
@@ -858,7 +858,7 @@ def _unchanged(path: Path, info: dict) -> bool:
 
 
 def stored_series(stores: list[Path], series: dict, profiles: dict) -> tuple[dict, dict]:
-    """Time series and wave profiles from stores, in place of the text files they
+    """Time series and free surface lines from stores, in place of the text files they
     came from where those did not change since (or are gone)."""
     series, profiles = dict(series), dict(profiles)
     for path in stores:

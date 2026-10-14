@@ -60,6 +60,8 @@ SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
 LAYOUT_VERSION = 4
 #: the items the toolbar adds (the Add menu has them all)
+#: items that cut a case's volume (made for the case of the selected item)
+VOLUME_TOOLS = ("slice", "iso_surface", "iso_volume", "streamlines", "volume")
 #: the window setting of the memory use mode (lagoonviz.core.memory)
 MEMORY_KEY = "performance/memory"
 TOOLBAR_KINDS = (
@@ -143,8 +145,8 @@ class MainWindow(QMainWindow):
         self._dock("console", "Python console", self.console, Qt.BottomDockWidgetArea)
         self.splitDockWidget(self.docks["plots"], self.docks["timeline"], Qt.Vertical)
         self.splitDockWidget(self.docks["timeline"], self.docks["console"], Qt.Horizontal)
-        # wave profiles share the plots' place, as a tab next to them
-        self._dock("profiles", "Wave profiles", self.profiles, Qt.BottomDockWidgetArea)
+        # free surface lines share the plots' place, as a tab next to them
+        self._dock("profiles", "Free surface lines", self.profiles, Qt.BottomDockWidgetArea)
         self.tabifyDockWidget(self.docks["plots"], self.docks["profiles"])
         self.docks["plots"].raise_()
         self._default_state = self.saveState(LAYOUT_VERSION)
@@ -303,7 +305,8 @@ class MainWindow(QMainWindow):
             "Export &figure...",
             self.export_figure,
             "Ctrl+Shift+P",
-            tip="The plots, the wave profiles or the 3D view as a paper figure (PDF, SVG, PNG)",
+            tip="The plots, the free surface lines or the 3D view as a paper figure "
+            "(PDF, SVG, PNG)",
         )
         self.act_figure_editor = self._action(
             "Figure &editor...",
@@ -679,21 +682,49 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Memory use {use.describe()}", 8000)
 
     def add_item(self, kind: str) -> str:
-        """Add an item from the menu or toolbar (slices start in the middle of the volume)."""
+        """Add an item from the menu or toolbar (slices start in the middle of the volume).
+        With several cases open, slices, iso-surfaces and streamlines cut the case of
+        the selected item (or the one the active view shows), if it has a volume."""
+        case = self._target_case() if kind in VOLUME_TOOLS else {}
         if kind == "slice":
-            return self.session.add_slice("y")
+            return self.session.add_slice("y", **case)
         if kind == "iso_surface":
-            return self.session.add_iso_surface()
+            return self.session.add_iso_surface(**case)
         if kind == "iso_volume":
-            return self.session.add_iso_volume()
+            return self.session.add_iso_volume(**case)
         if kind == "streamlines":
-            return self.session.add_streamlines(**self._streamline_start())
+            return self.session.add_streamlines(**self._streamline_start(), **case)
         if kind == "volume":  # the volume a case opened with, switched off: show it
-            hidden = [i for i in self.session.scene if i.kind == "volume" and not i.visible]
+            wanted = case.get("case")
+            hidden = [
+                i
+                for i in self.session.scene
+                if i.kind == "volume"
+                and not i.visible
+                and (not wanted or self.session.data.case_item(i.id).id == wanted)
+            ]
             if hidden:
                 self.session.set_visible(hidden[0].id, True)
                 return hidden[0].id
+            return self.session.add_item(kind, **case)
         return self.session.add_item(kind)
+
+    def _target_case(self) -> dict:
+        """``{"case": id}`` for an item that cuts a volume, when several cases are
+        open: the selected item's case, else the case the second view shows when it
+        has the focus, if that case has a volume (else the first with one)."""
+        data = self.session.data
+        if sum(i.kind == "case" for i in self.session.scene) < 2:
+            return {}
+        prefer = self.scene_tree.selected_id()
+        second = self.viewport2
+        if second is not None and not second.isHidden() and second.case_filter:
+            if second.hasFocus() or second.isAncestorOf(self.focusWidget()):
+                prefer = second.case_filter
+        if prefer and prefer not in self.session.scene:
+            prefer = None
+        case_id = data.volume_case(prefer)
+        return {"case": case_id} if case_id else {}
 
     # ------------------------------------------------------------- compare
     def _views_busy(self) -> bool:

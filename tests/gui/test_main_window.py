@@ -967,8 +967,8 @@ def test_figure_editor_paper_figure(window, tmp_path, qtbot):
     names = [
         editor.sources.topLevelItem(i).text(0) for i in range(editor.sources.topLevelItemCount())
     ]
-    assert "Wave profiles" in names
-    profiles = editor.sources.topLevelItem(names.index("Wave profiles"))
+    assert "Free surface lines" in names
+    profiles = editor.sources.topLevelItem(names.index("Free surface lines"))
     first = profiles.child(0).data(0, Qt.UserRole)
     theory = profiles.child(1).data(0, Qt.UserRole)
     assert first.data == "profile" and theory.theory and theory.linestyle == "--"

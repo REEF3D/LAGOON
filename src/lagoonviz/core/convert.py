@@ -5,7 +5,7 @@
 The σ-grid volumes of FNPF and NHFLOW, CFD's Cartesian volume and the free surface
 and bed surfaces of any solver are converted; each MPI piece becomes a block of the
 store. Floating bodies keep their mesh once and a rigid motion per output; time
-series and wave profiles become tables. Converting a case again appends the
+series and free surface lines become tables. Converting a case again appends the
 outputs written since.
 
 Command line::
@@ -45,7 +45,7 @@ ROLES = {"volume": "sigma", "free_surface": "surface", "bed": "surface"}
 #: change in number from output to output, with cells for objects
 OBJECT_ROLES = ("particles", "dem", "ice", "rods", "mooring")
 #: what else is converted (format 0.2): floating bodies (mesh once, a rigid motion
-#: per output), particles and objects, time series tables and wave profiles
+#: per output), particles and objects, time series tables and free surface lines
 EXTRAS = ("bodies", *OBJECT_ROLES, "amr", "series", "profiles")
 SIGMA_SOLVERS = ("FNPF", "NHFLOW")
 #: solvers whose volume is converted: σ-grids, and CFD's Cartesian grid
@@ -296,8 +296,12 @@ def convert(
         lead = refined
     solver = lead.solver if lead is not None else _series_solver(case)
     series = {k: f for k, f in case.series.items() if f.solver == solver and "series" in roles}
+    # free surface lines along x (the format's line sets); lines along y and the
+    # time-averaged ones stay in their text files
     profiles = {
-        k: f for k, f in case.profiles.items() if f.solver == solver and "profiles" in roles
+        k: f
+        for k, f in case.profiles.items()
+        if f.solver == solver and "profiles" in roles and f.axis == "x" and not f.averaged
     }
     if not (datasets or bodies or objects or refined or series or profiles):
         raise ConvertError(
@@ -397,7 +401,7 @@ def _convert_series(files: dict, writer: StoreWriter) -> int:
 
 
 def _convert_profiles(sets: dict, writer: StoreWriter, progress: Progress | None) -> int:
-    """Wave profiles written since the last conversion, appended."""
+    """Free surface lines written since the last conversion, appended."""
     from lagoonviz.core.data.profiles import read_profile
 
     store = Store(writer.path)

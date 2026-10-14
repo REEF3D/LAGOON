@@ -3,10 +3,10 @@
 """Figure templates: what a figure shows, kept apart from the run it shows.
 
 A template names its lines by the time-series file key and column of a case
-(``nhflow_wsf_hg``, ``P1``) or the wave profile set and line number
+(``nhflow_wsf_hg``, ``P1``) or the free surface line set and line number
 (``nhflow_wsfline``, ``1``, ``1 theory``), so the same template draws the same
 figure for any run of a set-up; measured data is named by its file and column.
-Panels are time series, spectra, wave profiles or 3D views, laid out in a grid
+Panels are time series, spectra, free surface lines or 3D views, laid out in a grid
 of ``columns`` (a panel may span several), lettered (a), (b), ... if wanted, with
 notes (text or ``$LaTeX$``) on them. Templates are JSON files (``*.lagoonfig``);
 the figure editor makes them, the figure renderer
@@ -30,9 +30,9 @@ import numpy as np
 FORMAT = "lagoon-figure"
 VERSION = 1
 SUFFIX = ".lagoonfig"
-#: what a panel draws: lines over time, their spectra, wave profiles along x, the 3D view
+#: what a panel draws: lines over time, their spectra, free surface lines along x, the 3D view
 PANEL_KINDS = ("time", "spectrum", "profile", "view")
-#: what a line's data is: a time series column or a wave profile line (measured
+#: what a line's data is: a time series column or a free surface line line (measured
 #: files go with either)
 LINE_DATA = ("series", "profile")
 #: 3D view panels: the view as it was (camera) or from the top with axes in metres
@@ -54,7 +54,7 @@ class Line:
     linestyle: str = "-"
     marker: str = ""
     width: float = 0.0  # 0: the style's line width
-    data: str = "series"  # "series" (a time series column) or "profile" (a wave profile line)
+    data: str = "series"  # "series" (a time series column) or "profile" (a free surface line line)
 
     @property
     def measured(self) -> bool:
@@ -62,7 +62,7 @@ class Line:
 
     @property
     def theory(self) -> bool:
-        """A wave profile line's wave theory (``"1 theory"``), not the computed one."""
+        """A free surface line line's wave theory (``"1 theory"``), not the computed one."""
         return self.data == "profile" and self.column.endswith("theory")
 
     def title(self) -> str:
@@ -221,7 +221,7 @@ def series_columns(session) -> dict[str, tuple[str, list[str]]]:
 
 
 def profile_columns(session) -> dict[str, tuple[str, list[tuple[str, str]]]]:
-    """The wave profile sets of the open cases: key -> (name, [(column, label)]):
+    """The free surface line sets of the open cases: key -> (name, [(column, label)]):
     each line (``"1"``) and, where the files have it (FNPF), its wave theory
     (``"1 theory"``)."""
     found: dict[str, tuple[str, list[tuple[str, str]]]] = {}
@@ -241,7 +241,7 @@ def profile_columns(session) -> dict[str, tuple[str, list[tuple[str, str]]]]:
             columns = []
             for number in sorted(first.lines):
                 line = first.lines[number]
-                columns.append((str(number), f"line {number} (y = {line.y:g} m)"))
+                columns.append((str(number), f"line {number} ({line.across} = {line.y:g} m)"))
                 if line.theory is not None:
                     columns.append((f"{number} theory", f"line {number}, wave theory"))
             found[key] = (profiles.name, columns)
@@ -250,7 +250,7 @@ def profile_columns(session) -> dict[str, tuple[str, list[tuple[str, str]]]]:
 
 def resolve(session, line: Line, time: float | None = None) -> LineData:
     """The values of a line: from the first open case that has its file, or from
-    its measured file. Wave profile lines are taken at ``time`` (None: the
+    its measured file. Free surface line lines are taken at ``time`` (None: the
     scene's)."""
     if line.data == "profile" and not line.measured:
         return _resolve_profile(session, line, session.scene.time if time is None else time)
@@ -302,7 +302,7 @@ def _resolve_profile(session, line: Line, time: float) -> LineData:
             return LineData(line, found.x, found.theory, "m", line.label or "theory")
         name = line.label or (f"y = {found.y:g} m" if len(profile.lines) > 1 else r"$\eta$")
         return LineData(line, found.x, found.eta, "m", name)
-    raise KeyError(f"no open case has the wave profiles {line.source!r}")
+    raise KeyError(f"no open case has the free surface lines {line.source!r}")
 
 
 def layout(template: FigureTemplate) -> list[list[tuple[int, int, int]]]:
@@ -331,7 +331,7 @@ _PLACED = re.compile(r"^\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*:\s*(.*)$")
 
 def fits(line: Line, kind: str) -> bool:
     """Whether a line can go onto a panel of a kind: time series onto time and
-    spectrum panels, wave profiles onto profile panels, measured files onto any."""
+    spectrum panels, free surface lines onto profile panels, measured files onto any."""
     if kind == "view":
         return False
     if line.measured:

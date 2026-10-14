@@ -28,13 +28,14 @@ from lagoonviz.core.data.divemesh_grid import (
     grid_lines,
     read_partition,
     read_preview,
+    sigma_grid,
     uniform_grid,
 )
 from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import CASE_ROLES, ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
-from lagoonviz.core.data.setup import CaseSetup, has_inputs, read_setup
+from lagoonviz.core.data.setup import SIGMA_SOLVERS, CaseSetup, has_inputs, read_setup
 from lagoonviz.core.kinds import kind_spec
 from lagoonviz.core.scene import MODE_KINDS, SETUP_KINDS, Scene, SceneItem
 from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
@@ -70,7 +71,7 @@ PLAN_LAYERS = {
 POINT_KINDS = ("particles", "geodat")
 #: kinds drawn as the free surface: the still water level, dry land, the probe
 WATER_KINDS = ("free_surface", "amr")
-#: 2D: gauges and wave profiles on top of everything
+#: 2D: gauges and free surface lines on top of everything
 PLAN_MARKS = 4.0
 AXES = {"x": 0, "y": 1, "z": 2}
 
@@ -470,6 +471,20 @@ class DataManager:
         if kind == "streamlines" and properties.get("lines_in") == "free surface":
             role = "free_surface"  # streamlines on the free surface use its output
         return case.by_role(role) if role else None
+
+    def volume_case(self, prefer: str | None = None) -> str | None:
+        """The case new slices, iso-surfaces and streamlines cut: ``prefer`` (a case
+        item, or any item of it) if its case has a volume, else the first case
+        that has one; None if none has."""
+        cases = [item.id for item in self.scene if item.kind == "case"]
+        if prefer:
+            owner = self.case_item(prefer)
+            if owner is not None:
+                cases.insert(0, owner.id)
+        for case_id in dict.fromkeys(cases):
+            if self.dataset_for("slice", {"case": case_id}) is not None:
+                return case_id
+        return None
 
     # ------------------------------------------------------------- choices
     def dataset_choices(self, item_id: str) -> list[str]:
@@ -1238,7 +1253,7 @@ class DataManager:
         return self._planned(self._gauge_marks(item_id, palette))
 
     def profile_marks(self, item_id: str, palette: list[str] | None = None) -> GaugeMarks | None:
-        """Wave profile lines for the 3D view (flat on top in 2D)."""
+        """Free surface line lines for the 3D view (flat on top in 2D)."""
         return self._planned(self._profile_marks(item_id, palette))
 
     def _planned(self, marks: GaugeMarks | None) -> GaugeMarks | None:
@@ -1385,7 +1400,7 @@ class DataManager:
         """Still water level and vertical exaggeration for gauges and profiles."""
         return self.case_water_level(item_id), self.exaggeration(item_id)
 
-    # ------------------------------------------------------------- wave profiles
+    # ------------------------------------------------------------- free surface lines
     def profile_items(self) -> list[str]:
         return [item.id for item in self.scene if item.kind == "profile"]
 
@@ -1440,7 +1455,8 @@ class DataManager:
             # elevation above still water, or (some solvers) the surface height
             absolute = level and abs(float(np.median(eta)) - level) < 0.5 * abs(level)
             z = level + exaggeration * ((eta - level) if absolute else eta)
-            points = np.stack([x, np.full_like(x, line.y), z], axis=1)
+            across = np.full_like(x, line.y)
+            points = np.stack([x, across, z] if line.axis == "x" else [across, x, z], axis=1)
             segments.append(np.stack([points[:-1], points[1:]], axis=1))
             colors += [palette[index % len(palette)]] * (x.size - 1)
             names.append(f"line {line.number}")
@@ -1644,13 +1660,19 @@ class DataManager:
         if folder is None:
             return None
         grid = read_preview(folder)
-        if grid is not None:
-            return grid
         setup = self.case_setup(item_id)
-        if setup is None or setup.stretched:
-            return None
-        setup.refresh()
-        return uniform_grid(setup.domain, setup.cells)
+        if grid is None:
+            if setup is None or setup.stretched:
+                return None
+            setup.refresh()
+            grid = uniform_grid(setup.domain, setup.cells)
+        if grid is not None and setup is not None:
+            # FNPF and NHFLOW: REEF3D scales the heights to σ and stretches them from the
+            # bed to the still water: drawn there, as ParaView shows the results
+            setup.refresh()
+            if setup.solver in SIGMA_SOLVERS and setup.domain is not None:
+                grid = sigma_grid(grid, setup.domain[4], setup.domain[5])
+        return grid
 
     def _grid_marks(self, item_id: str) -> SetupMarks | None:
         item = self.scene.get(item_id)
@@ -1662,6 +1684,10 @@ class DataManager:
         folder = self.case_folder(item_id)
         if props.get("partition", True) and folder is not None and grid.source == "DIVEMesh":
             planes = read_partition(folder)
+            if len(planes) and grid.heights is not None:  # a σ-grid: its heights as drawn
+                z0, z1, bottom, top = grid.heights
+                planes = np.array(planes, np.float64, copy=True)
+                planes[..., 2] = bottom + (planes[..., 2] - z0) * (top - bottom) / (z1 - z0)
             if len(planes):
                 lines.append(("#d9822b", planes))
         setup = self.case_setup(item_id)

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Architect: Hans Bihs
 """File → Export figure: the plots, wave spectra, a comparison with measurements,
-the wave profiles or the 3D view as a paper figure (PDF, SVG, EPS, PNG, TIFF),
+the free surface lines or the 3D view as a paper figure (PDF, SVG, EPS, PNG, TIFF),
 drawn again with matplotlib at a journal width in a house style."""
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ CONTENTS = (
     ("series", "Plots (time series)"),
     ("spectra", "Wave spectra of the plots"),
     ("validation", "Compare with measurements"),
-    ("profiles", "Wave profiles"),
+    ("profiles", "Free surface lines"),
     ("view", "3D view"),
     ("setup", "Case set-up (plan and side view)"),
 )

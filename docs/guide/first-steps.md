@@ -17,7 +17,7 @@ lagoon ~/runs/flume
 
 LAGOON finds what the run wrote and fills the **Scene** panel on the left: the
 case, its free surface and its bed, and, if the run wrote them, the wave gauges,
-wave profiles, floating bodies and mooring lines.
+free surface lines, floating bodies and mooring lines.
 
 ![The flume in the 3D view](../images/view-studio.png)
 

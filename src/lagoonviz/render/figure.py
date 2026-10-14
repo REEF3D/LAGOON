@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Architect: Hans Bihs
-"""Publication figures: the plots, the wave profiles and the 3D view as paper figures.
+"""Publication figures: the plots, the free surface lines and the 3D view as paper figures.
 
 Drawn again with matplotlib (not a screenshot of the panels): a given width in mm,
 fonts in points, vector output (PDF, SVG, EPS) or PNG/TIFF at a given resolution,
@@ -205,27 +205,27 @@ def _row_name(session: Session, item_id: str) -> str:
     return session.scene.get(item_id).name if item_id in session.scene else item_id
 
 
-# ======================================================================== wave profiles
+# ======================================================================== free surface lines
 def profile_figure(session: Session, spec: FigureSpec | None = None, time: float | None = None):
-    """The wave profiles at a time: η along each line, the wave theory dashed."""
+    """The free surface lines at a time: η along each line, the wave theory dashed."""
     spec = spec or FigureSpec()
     data = session.data
     items = [i for i in data.profile_items() if session.scene.get(i).visible]
     lines = [(item_id, line) for item_id in items for line in data.profile_lines(item_id, time)]
     if not lines:
-        raise ValueError("no wave profiles to draw: add a wave profile item to the scene")
+        raise ValueError("no free surface lines to draw: add a free surface line item to the scene")
     with _context(spec):
         figure = _figure(spec, 50.0)
         ax = figure.subplots()
         for index, (_item, line) in enumerate(lines):
             color = spec.palette[index % len(spec.palette)]
-            label = f"y = {line.y:g} m" if len(lines) > 1 else r"$\eta$"
+            label = f"{line.across} = {line.y:g} m" if len(lines) > 1 else r"$\eta$"
             ax.plot(line.x, line.eta, color=color, label=label)
             if line.theory is not None:
                 ax.plot(line.x, line.theory, color=color, linestyle="--", linewidth=0.8)
         if any(line.theory is not None for _, line in lines):
             ax.plot([], [], color="0.3", linestyle="--", linewidth=0.8, label="theory")
-        ax.set_xlabel("x [m]")
+        ax.set_xlabel(f"{', '.join(sorted({line.axis for _, line in lines}))} [m]")
         ax.set_ylabel(r"$\eta$ [m]")
         ax.margins(x=0)
         if len(lines) > 1 or any(line.theory is not None for _, line in lines):
@@ -485,7 +485,7 @@ def template_figure(
 ):
     """A figure from a template (``lagoonviz.core.figure_template``): its panels in a
     grid of ``columns``, row by row. Time panels over time (measured lines as points),
-    spectrum panels with Hm0 and Tp, wave profile panels along x at their moment, 3D
+    spectrum panels with Hm0 and Tp, free surface line panels along x at their moment, 3D
     view panels rendered off screen at their moment and camera, with colour bars.
     ``images`` (panel index -> RGBA) skips rendering a view (tests, previews). What
     could not be drawn is named in the figure's ``missing`` list."""
@@ -578,7 +578,7 @@ def _letter(index: int) -> str:
 
 
 def _lines_panel(ax, session: Session, panel, spec: FigureSpec, missing: list[str]) -> str:
-    """The lines of a time, spectrum or wave profile panel; returns its default title."""
+    """The lines of a time, spectrum or free surface line panel; returns its default title."""
     from lagoonviz.core.analysis import compare, spectrum, wave_parameters
     from lagoonviz.core.figure_template import resolve
 

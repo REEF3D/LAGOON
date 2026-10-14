@@ -72,6 +72,26 @@ def test_a_case_that_has_not_run_shows_its_grid(tmp_path):
     assert len(session.data.setup_marks(grid.id).lines[0][1]) < len(lines)
 
 
+@pytest.mark.parametrize("solver, top", [(5, 0.6), (3, 0.6), (6, 1.0)])
+def test_sigma_grids_reach_from_the_bed_to_the_still_water(tmp_path, solver, top):
+    """NHFLOW and FNPF: REEF3D scales DIVEMesh's heights to σ and stretches them from
+    the bed to the still water (F 60): the grid drawn there, as ParaView shows it,
+    its levels spaced as DIVEMesh spaced them. CFD: as DIVEMesh made it."""
+    (tmp_path / "control.txt").write_text("B 10 0.0 10.0 0.0 2.0 0.0 1.0\nB 1 0.5\nM 10 2\n")
+    (tmp_path / "ctrl.txt").write_text(f"A 10 {solver}\nF 60 0.6\n")
+    levels = np.array([0.0, 0.1, 0.3, 0.6, 1.0])  # finer at the bed
+    write_grid_preview(tmp_path, np.linspace(0, 10, 21), np.linspace(0, 2, 5), levels)
+    session = Session()
+    session.open_case(tmp_path)
+    item = next(i for i in session.scene if i.kind == "grid")
+    grid = session.data.grid(item.id)
+    low, high = grid.bounds()
+    assert low[2] == pytest.approx(0.0) and high[2] == pytest.approx(top)
+    np.testing.assert_allclose(grid.axis(2), levels * top, atol=1e-6)
+    lines = session.data.setup_marks(item.id).lines[0][1]
+    assert lines[..., 2].max() == pytest.approx(top, abs=1e-6)
+
+
 def test_a_stretched_grid_waits_for_divemesh(tmp_path):
     (tmp_path / "control.txt").write_text(CONTROL + "B 101 1\nB 111 2.0\n")
     session = Session()

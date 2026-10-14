@@ -34,7 +34,35 @@ SERIES_FOLDERS = {
     "VRANS_Force": "VRANS forces",
     "Probes": "probes",
     "ProbePoint": "probes",
+    "PressureProbe": "probes",
+    "Runup": "run-up",
+    "RUNUP": "run-up",
+    "Sediment": "sediment",
 }
+#: REEF3D's folder of the wave theory's time series (P 58), of no solver
+WAVE_THEORY_FOLDER = "REEF3D_Log-Wave"
+#: what REEF3D calls its print-outs (the User Guide's names, P 50 - P 140), by file
+#: name (lower case); {n}: the number in the name
+REEF3D_NAMES = (
+    (r"wsf-hg-theory", "Wave gauges (theory)"),
+    (r"wsf-hg", "Wave gauges"),
+    (r"vel-probe-theory-(\d+)", "Velocity probe {n} (theory)"),
+    (r"vel-probe-(\d+)", "Velocity probe {n}"),
+    (r"probe[_-]press(?:ure)?-(\d+)", "Pressure probe {n}"),
+    (r"sflow-probe-point-(\d+)", "Depth-averaged point probe {n}"),
+    (r"probe-point-(\d+)", "Point probe {n}"),
+    (r"ale_force-(\d+)", "Morison force {n}"),
+    (r"vrans", "VRANS forces"),
+    (r"_force-(\d+)$", "Force box {n}"),
+    (r"runup-max-x", "Maximum run-up gauges"),
+    (r"runup-x", "Run-up gauges"),
+    (r"runup-(\d+)", "Cylinder run-up {n}"),
+    (r"sediment-point", "Bed level gauges"),
+    (r"sediment-max", "Maximum bed change"),
+    (r"sediment-bedshear-max", "Maximum bed shear stress"),
+    (r"sediment-bedshear", "Bed shear stress gauges"),
+    (r"wave-timeseries-(\d+)", "Theoretical wave time series {n}"),
+)
 _UNIT = re.compile(r"^(?P<name>.*?)\s*\[(?P<unit>[^\]]*)\]\s*$")
 
 
@@ -80,10 +108,14 @@ class SeriesFile:
 
     @property
     def name(self) -> str:
-        """A short name for the scene tree, e.g. "Body 0 forces" or "Wave gauges"."""
+        """A short name for the scene tree, as REEF3D calls the print-out ("Wave
+        gauges", "Velocity probe 1", "Run-up gauges"), or e.g. "Body 0 forces"."""
         stem = self.path.stem
-        if self.group == "wave gauges":
-            return "Wave gauges"
+        lower = stem.lower()
+        for pattern, name in REEF3D_NAMES:
+            found = re.search(pattern, lower)
+            if found:
+                return name.format(n=found.group(1) if found.groups() else "")
         number = re.search(r"(\d+)$", stem)
         index = number.group(1) if number else ""
         lower = stem.lower()
@@ -135,9 +167,10 @@ def _is_number(token: str) -> bool:
 
 
 def _locations(preamble: list[str]) -> dict[str, tuple[float, ...]]:
-    """Gauge positions: rows ``i x y [z]`` after an ``x_coord`` header."""
+    """Gauge positions: rows ``i x y [z]`` after an ``x_coord`` header (``x y [T]``
+    without the number in the wave theory's time series: numbered in order)."""
     found: dict[str, tuple[float, ...]] = {}
-    inside = False
+    inside = 0  # the header's number of names
     for line in preamble:
         tokens = line.split()
         if not tokens:
@@ -145,32 +178,65 @@ def _locations(preamble: list[str]) -> dict[str, tuple[float, ...]]:
                 break
             continue
         if tokens[0].lower().startswith("x_coord"):
-            inside = True
+            inside = len(tokens)
             continue
-        if inside and all(_is_number(t) for t in tokens) and len(tokens) >= 3:
-            found[f"P{int(float(tokens[0]))}"] = tuple(float(t) for t in tokens[1:])
+        if inside and all(_is_number(t) for t in tokens) and len(tokens) >= 2:
+            if len(tokens) > inside:  # numbered
+                found[f"P{int(float(tokens[0]))}"] = tuple(float(t) for t in tokens[1:])
+            else:
+                found[f"P{len(found) + 1}"] = tuple(float(t) for t in tokens)
     return found
 
 
+def _time_header(tokens: list[str]) -> bool:
+    """A header line: ``time ...``, ``t ...`` (the probes) or ``it time ...``."""
+    if not tokens:
+        return False
+    first = tokens[0].lower()
+    if first in ("time", "time[s]", "t", "t[s]"):
+        return len(tokens) == 1 or tokens[1] not in ("=", ":")
+    return first == "it" and len(tokens) > 1 and tokens[1].lower() == "time"
+
+
+def _numbers(line: str) -> int:
+    """How many numbers a line holds (0: empty or not all numbers)."""
+    tokens = line.split()
+    return len(tokens) if tokens and all(_is_number(t) for t in tokens) else 0
+
+
 def read_series(path: str | Path) -> TimeSeries:
-    """Read a REEF3D ``.dat`` time-series table."""
+    """Read a REEF3D ``.dat`` time-series table.
+
+    The table follows a header of column names that starts with ``time`` (``t`` in
+    the probes', ``it time`` in some force files). Without one (run-up gauges name
+    only their columns, the CFD pressure probes nothing), the table is the block of
+    numbers at the end of the file, its first column the time and the others named
+    by the line above it (else ``value 1``, ...)."""
     path = Path(path)
     text = path.read_text(errors="replace")
     lines = text.splitlines()
     header_at = None
     for number, line in enumerate(lines):
-        tokens = line.split()
-        if not tokens:
-            continue
-        first = tokens[0].lower()
-        if first == "time" or (first == "it" and len(tokens) > 1 and tokens[1].lower() == "time"):
+        if _time_header(line.split()):
             header_at = number
             break
-    if header_at is None:
-        raise ValueError(f"{path.name}: no header line starting with 'time'")
-    names = _split(lines[header_at])
-    body = "\n".join(lines[header_at + 1 :])
-    values = np.array(body.split(), dtype=np.float64) if body.strip() else np.zeros(0)
+    if header_at is not None:
+        names = _split(lines[header_at])
+        names[0] = "time" if names[0].lower() in ("t", "t[s]", "time[s]") else names[0]
+        body_from = header_at + 1
+        count = next((_numbers(line) for line in lines[body_from:] if line.strip()), 0)
+        if count and count != len(names):
+            # a header that does not fit the rows (NHFLOW's pressure probes are headed
+            # "t U V W" and hold the time and the pressure): named by their number
+            names = _generic(path, count)
+    else:
+        names, body_from = _untitled(path, lines)
+    body = "\n".join(lines[body_from:])
+    try:
+        values = np.array(body.split(), dtype=np.float64) if body.strip() else np.zeros(0)
+    except ValueError:  # words among the numbers: the rows of numbers only
+        rows = [line.split() for line in lines[body_from:] if _numbers(line) == len(names)]
+        values = np.array(rows, dtype=np.float64).ravel() if rows else np.zeros(0)
     n_columns = len(names)
     rows = values.size // n_columns
     if rows * n_columns != values.size:
@@ -192,7 +258,46 @@ def read_series(path: str | Path) -> TimeSeries:
         for i, name in enumerate(clean)
         if i != time_column and name.lower() != "it"
     }
-    return TimeSeries(path, time, columns, units, _locations(lines[:header_at]))
+    return TimeSeries(path, time, columns, units, _locations(lines[: max(body_from - 1, 0)]))
+
+
+def _untitled(path: Path, lines: list[str]) -> tuple[list[str], int]:
+    """Column names and the first row of a table without a time header: the block of
+    rows of numbers at the end of the file (two at least, the time rising)."""
+    end = len(lines)
+    while end and not lines[end - 1].strip():
+        end -= 1
+    if not end:
+        raise ValueError(f"{path.name}: no header line starting with 'time'")
+    count = _numbers(lines[end - 1])
+    if end >= 2 and _numbers(lines[end - 2]) and _numbers(lines[end - 2]) != count:
+        count = _numbers(lines[end - 2])  # the last row half written
+    start = end - 1  # (the last row, perhaps half written)
+    while start > 0 and _numbers(lines[start - 1]) == count:
+        start -= 1
+    rows = [lines[i].split() for i in range(start, end) if count and _numbers(lines[i]) == count]
+    times = [float(row[0]) for row in rows]
+    if count < 2 or len(rows) < 2 or any(b < a for a, b in zip(times, times[1:], strict=False)):
+        raise ValueError(f"{path.name}: no header line starting with 'time'")
+    above = start - 1
+    while above >= 0 and not lines[above].strip():
+        above -= 1
+    named = _split(lines[above]) if above >= 0 and not _numbers(lines[above]) else []
+    if len(named) == count:
+        names = ["time", *named[1:]]
+    elif len(named) == count - 1:  # the columns named, the time not
+        names = ["time", *named]
+    else:
+        names = _generic(path, count)
+    return names, start
+
+
+def _generic(path: Path, count: int) -> list[str]:
+    """Names of ``count`` columns without a header that fits: the time and the
+    pressure of a pressure probe, else the time and ``value 1``, ..."""
+    if count == 2 and "press" in path.stem.lower():
+        return ["time", "p"]
+    return ["time", *(f"value {i}" for i in range(1, count))]
 
 
 # ----------------------------------------------------------------- discovery
@@ -202,16 +307,19 @@ def find_series(case_dir: Path) -> dict[str, SeriesFile]:
     if not case_dir.is_dir():
         return found
     for folder in sorted(case_dir.iterdir()):
-        match = _FOLDER.match(folder.name)
-        if not match or not folder.is_dir():
-            continue
-        what = match.group("what")
-        group = SERIES_FOLDERS.get(what)
-        if group is None and what.endswith("Force"):
-            group = "forces"
-        if group is None:
-            continue
-        solver = match.group("solver")
+        if folder.name == WAVE_THEORY_FOLDER and folder.is_dir():
+            solver, group = "REEF3D", "wave theory"
+        else:
+            match = _FOLDER.match(folder.name)
+            if not match or not folder.is_dir():
+                continue
+            what = match.group("what")
+            group = SERIES_FOLDERS.get(what)
+            if group is None and what.endswith("Force"):
+                group = "forces"
+            if group is None:
+                continue
+            solver = match.group("solver")
         for path in sorted(folder.glob("*.dat")):
             try:
                 if path.stat().st_size < 8:

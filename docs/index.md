@@ -10,7 +10,7 @@ and Blender but made for hydrodynamics.
 <div class="grid cards" markdown>
 
 - **Open a run** — point LAGOON at a REEF3D case folder: free surface, bed,
-  volume, wave gauges, wave profiles, floating bodies and moorings appear by
+  volume, wave gauges, free surface lines, floating bodies and moorings appear by
   themselves. [Opening runs](guide/runs.md)
 - **Place** — start a case on the map, draw its domain there and make DIVEMesh's
   `geo.dat` from bathymetry downloaded for it (Norway, Europe, the world); maps
@@ -46,7 +46,7 @@ Then [First steps](guide/first-steps.md) walks through a run.
 
 REEF3D's NHFLOW, FNPF, SFLOW and CFD output, SEASTATE's sea state maps (VTU/VTP files, one per MPI rank and
 output, and their parallel `.pvtu`/`.pvtp` files), AMR surfaces, the wave gauge,
-wave profile, 6DOF, force and mooring files, DEM, ice and particle output, the
+free surface line, 6DOF, force and mooring files, DEM, ice and particle output, the
 run log, and LAGOON stores. Other codes can write the
 [LAGOON format](format/SPEC.md) to be read the same way.
 

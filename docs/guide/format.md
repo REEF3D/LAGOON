@@ -1,7 +1,7 @@
 # The LAGOON format
 
 A LAGOON store (`REEF3D_<SOLVER>.lagoon`) holds a whole REEF3D run in one folder:
-volume, free surface and bed, time series, wave profiles, floating bodies,
+volume, free surface and bed, time series, free surface lines, floating bodies,
 particles and objects, and AMR surfaces. It replaces the many VTU, VTP and `.dat`
 files of a run: 4 to 9 times smaller for grids, often a thousand times for
 floating bodies, and much faster to open, step through and probe. It is Zarr

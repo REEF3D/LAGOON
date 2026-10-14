@@ -48,8 +48,10 @@ def basin(tmp_path):
 
 def test_the_facts_of_the_input_files(basin):
     setup = read_setup(basin)
-    assert setup.domain == (0.0, 20.0, 0.0, 5.0, 0.0, 1.5)
-    assert setup.cells == (80, 20, 6) and setup.spacing == pytest.approx((0.25, 0.25, 0.25))
+    # NHFLOW: σ-levels from the bed to the still water (F 60), as REEF3D stretches B 10's
+    # six levels (0 - 1.5 m)
+    assert setup.domain == (0.0, 20.0, 0.0, 5.0, 0.0, 1.0)
+    assert setup.cells == (80, 20, 6) and setup.spacing == pytest.approx((0.25, 0.25, 1 / 6))
     assert setup.sides[1] == 6 and setup.sides[4] == 7 and setup.sides[2] == 21
     assert setup.water_level == 1.0 and setup.waves and setup.solver == "NHFLOW"
     text = setup.describe()
@@ -73,7 +75,7 @@ def test_the_marks_of_the_set_up(basin):
     gauges = [m for m in marks if m.code == "P 51"]
     assert [m.labels[0][0] for m in gauges] == ["1", "2"]
     staff = gauges[1].segments[0]
-    assert staff[0].tolist() == [8.0, 2.5, 0.0] and staff[1].tolist() == [8.0, 2.5, 1.5]
+    assert staff[0].tolist() == [8.0, 2.5, 0.0] and staff[1].tolist() == [8.0, 2.5, 1.0]
     line = legends["free surface line in x (P 52)"].segments[0]
     assert line[:, 0].tolist() == [0.0, 20.0] and line[0, 1] == 2.5
     assert legends["point probe (P 61)"].points.tolist() == [[9.0, 2.5, 0.5]]
@@ -82,7 +84,7 @@ def test_the_marks_of_the_set_up(basin):
     mooring = legends["mooring line (X 311)"].segments[0]
     assert mooring.tolist() == [[13.0, 2.5, 0.0], [14.0, 2.5, 0.8]]
     pile = legends["solid (S 33)"]
-    assert pile.group == "solids" and np.isclose(pile.segments[..., 2].max(), 1.5)
+    assert pile.group == "solids" and np.isclose(pile.segments[..., 2].max(), 1.0)  # (σ: water)
     assert "wave direction (B 105)" in legends  # along x from the middle of x min
 
 
@@ -313,7 +315,7 @@ def test_lagoon_setup_describes(basin, capsys):
     from lagoonviz.render.setup_sketch import main
 
     assert main([str(basin), "--describe"]) == 0
-    assert "domain: x 0 .. 20, y 0 .. 5, z 0 .. 1.5 m" in capsys.readouterr().out
+    assert "domain: x 0 .. 20, y 0 .. 5, z 0 .. 1 m" in capsys.readouterr().out
 
 
 def test_editing_the_input_files(basin):

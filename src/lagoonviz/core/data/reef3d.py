@@ -672,7 +672,7 @@ class Case:
     print_interval: float | None = None  # seconds between frames (ctrl.txt P 30)
     #: gauge, 6DOF and force tables (read on first use)
     series: dict[str, SeriesFile] = field(default_factory=dict)
-    #: wave profiles along lines (WSFLINE), by solver
+    #: free surface lines along lines (WSFLINE), by solver
     profiles: dict[str, ProfileSet] = field(default_factory=dict)
     #: not run yet: only the input files (control.txt, ctrl.txt), their set-up is shown
     setup_only: bool = False
@@ -700,7 +700,7 @@ class Case:
         return [d for d in self.main_datasets().values() if d.role not in CASE_ROLES]
 
     def main_profiles(self) -> list[ProfileSet]:
-        """Wave profiles written during the shown run (as for :meth:`main_series`)."""
+        """Free surface lines written during the shown run (as for :meth:`main_series`)."""
         shown = self._shown_run()
         if not shown:
             return list(self.profiles.values())
@@ -733,6 +733,8 @@ class Case:
                 word in item.path.stem for word in ("forces", "position")
             ):
                 continue  # velocities and mooring lines stay available, not shown
+            if item.group == "wave theory":
+                continue  # (REEF3D writes one even without P 58)
             picked.append(item)
         return picked[:limit]
 

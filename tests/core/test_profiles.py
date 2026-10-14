@@ -45,7 +45,7 @@ def test_profile_items_plot_and_draw_in_3d(run):
     s = Session()
     s.open_case(run)
     item = next(i for i in s.scene if i.kind == "profile")
-    assert item.name == "Wave profiles"
+    assert item.name == "Free surface lines"
     s.set_time(1.0)
     lines = s.data.profile_lines(item.id)
     assert [line.number for line in lines] == [1, 2]

@@ -361,7 +361,7 @@ KINDS: dict[str, KindSpec] = {
         },
     ),
     "profile": KindSpec(
-        "Wave profile",
+        "Free surface line",
         {
             "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
             "source": PropertySpec(

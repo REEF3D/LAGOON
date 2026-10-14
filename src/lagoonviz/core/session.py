@@ -729,12 +729,24 @@ class Session:
         """ "results" or "setup" (see :meth:`set_mode`)."""
         return self.scene.mode
 
+    def _volume_case(self, properties: dict[str, Any]) -> dict[str, Any]:
+        """Properties of a new item that cuts a volume, with the case it cuts: the one
+        given, else (several cases open) the first case that has a volume, named so
+        the script and the saved session cut the same one. One case: left unnamed."""
+        if properties.get("case") or sum(i.kind == "case" for i in self.scene) < 2:
+            return properties
+        case_id = self.data.volume_case()
+        return {**properties, "case": case_id} if case_id else properties
+
     def add_slice(self, normal: str = "y", position: float | None = None, **properties: Any) -> str:
         """Add a slice through the volume; without a position it cuts the middle.
+        With several cases open, ``case=`` names the one to cut (by default the
+        first that has a volume).
 
         The position is computed here and recorded, so the script and the saved
         session cut at exactly the same place.
         """
+        properties = self._volume_case(properties)
         if position is None:
             center = self.data.domain_center("slice", properties)
             position = round(center["xyz".index(normal)], 6) if center else 0.0
@@ -746,7 +758,8 @@ class Session:
         """Add an iso-surface of the volume where ``iso_by`` equals ``iso_value``;
         without a variable, a sensible first one (see :meth:`DataManager.iso_default`),
         recorded so the script repeats it. Other properties (e.g. ``variable`` to colour
-        by) as for :meth:`add_item`."""
+        by, ``case``) as for :meth:`add_item`."""
+        properties = self._volume_case(properties)
         if iso_by is None:
             chosen = self.data.iso_default(properties)
             iso_by, default = chosen if chosen else ("none", 0.0)
@@ -766,6 +779,7 @@ class Session:
         ``iso_min`` and ``iso_max``; without a variable a first one (phi >= 0, the water
         of a CFD run; see :meth:`DataManager.iso_volume_default`), recorded so the
         script repeats it."""
+        properties = self._volume_case(properties)
         if iso_by is None:
             chosen = self.data.iso_volume_default(properties)
             iso_by, low, high = chosen if chosen else ("none", 0.0, 1.0)
@@ -784,6 +798,7 @@ class Session:
     ) -> str:
         """Add streamlines of the volume's velocity, seeded on a plane through the
         middle of the volume (the position is recorded, like a slice's)."""
+        properties = self._volume_case(properties)
         if seed_position is None:
             center = self.data.domain_center("streamlines", properties)
             seed_position = round(center["xyz".index(seed_normal)], 6) if center else 0.0
@@ -815,7 +830,32 @@ class Session:
                         )
                     )
                     return
+        if key == "case" and self.scene.get(item_id).kind in ("slice", "streamlines"):
+            moved = self._cut_moved_to_case(item_id, str(value))
+            if moved:
+                self.stack.execute(SetProperties(self.scene, item_id, moved))
+                return
         self.stack.execute(SetProperty(self.scene, item_id, key, value), merge=merge)
+
+    def _cut_moved_to_case(self, item_id: str, case_id: str) -> dict[str, Any] | None:
+        """A slice (or streamlines' seed plane) put on another case: its new properties,
+        through the middle of that case's volume when its plane would miss it; None
+        when it cuts it where it is."""
+        item = self.scene.get(item_id)
+        props = {**item.properties, "case": case_id, "dataset": ""}
+        dataset = self.data.dataset_for(item.kind, props)
+        if dataset is None:
+            return None
+        axis_key, position_key = (
+            ("normal", "position") if item.kind == "slice" else ("seed_normal", "seed_position")
+        )
+        axis = "xyz".index(str(item.properties.get(axis_key, "y")))
+        low, high = dataset.bounds(0)
+        position = float(item.properties.get(position_key, 0.0))
+        if low[axis] <= position <= high[axis]:
+            return {"case": case_id, "dataset": ""}
+        middle = round(float(low[axis] + high[axis]) / 2, 6)
+        return {"case": case_id, "dataset": "", position_key: middle}
 
     def set_exaggeration(self, item_id: str, value: float, *, merge: bool = False) -> None:
         """Vertical exaggeration as an item's slider sets it: while its case has sync on

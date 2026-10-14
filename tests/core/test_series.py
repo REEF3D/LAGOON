@@ -60,7 +60,7 @@ def test_force_file_with_iteration_column(tmp_path):
     np.testing.assert_allclose(table.time, [0, 0.002])
     found = find_series(tmp_path)
     assert list(found) == ["fnpf_ale_force_1"]
-    assert found["fnpf_ale_force_1"].name == "Forces 1"
+    assert found["fnpf_ale_force_1"].name == "Morison force 1"  # (P 85)
 
 
 def test_not_a_series(tmp_path):

@@ -1,11 +1,31 @@
-# Plots and wave profiles
+# Plots and free surface lines
 
 ## Time series
 
 Each **Time series** item is a row in the **Plots** panel under the 3D view, all
-rows on one time axis: wave gauges (`WSF`), 6DOF motions and velocities, forces.
-A case opened with such files gets them as items by itself; *Add → Time series*
-adds more. In the item's properties:
+rows on one time axis: wave gauges (`WSF`), probes, 6DOF motions and velocities,
+forces, run-up and bed gauges. A case opened with such files gets them as items by
+itself; *Add → Time series* adds more. They are named as REEF3D's User Guide names
+the print-outs:
+
+| Name | Print-out | File |
+| --- | --- | --- |
+| Wave gauges, Wave gauges (theory) | P 51, P 50 | `REEF3D_*_WSF/...-WSF-HG(-THEORY).dat` |
+| Velocity probe n, ... (theory) | P 65, P 66 | `REEF3D_*_ProbePoint/...-Vel-Probe(-Theory)-n.dat` |
+| Point probe n | P 61 | `REEF3D_CFD_ProbePoint/...-Probe-Point-n.dat` |
+| Depth-averaged point probe n | P 63 | `REEF3D_SFLOW_ProbePoint/...` |
+| Pressure probe n | P 64 | `REEF3D_CFD_PressureProbe`, `REEF3D_NHFLOW_ProbePoint/...-Probe_Press-n.dat` |
+| Force box n | P 81 | `REEF3D_*_Force/..._Force-n.dat` |
+| Morison force n | P 85 | `REEF3D_*_Force_ALE/..._ALE_Force-n.dat` |
+| Run-up gauges, Maximum run-up gauges | P 133, P 134 | `REEF3D_NHFLOW_RUNUP` |
+| Cylinder run-up n | P 140 | `REEF3D_FNPF_Runup` |
+| Bed level gauges, Bed shear stress gauges, Maximum ... | P 121, P 125, P 122, P 126 | `REEF3D_*_Sediment` |
+| Theoretical wave time series n | P 58 | `REEF3D_Log-Wave` (not shown by itself: REEF3D always writes one) |
+| Body n forces, Body n motion, Mooring line n | 6DOF | `REEF3D_*_6DOF` |
+
+Tables headed `t` (the probes), headed without the time (the run-up gauges) or not
+headed at all (CFD's pressure probes) are read too: the time is their first
+column. In the item's properties:
 
 - **File**: which file of the case (gauges, a body's forces or motion, ...).
 - **Columns**: which of its columns, e.g. `P1, P4` or `Fx, Fz` (empty: all).
@@ -25,10 +45,13 @@ The legend shows each line's value at the current time. A point picked on a
 surface in the 3D view ([Reading values](scene.md#reading-values)) is plotted
 too, in orange.
 
-## Wave profiles
+## Free surface lines
 
-**Wave profile** items show the surface elevation along the lines of REEF3D's
-`WSFLINE` output, at the current time, in the **Wave profiles** panel (a tab
+**Free surface line** items show the surface elevation along REEF3D's free surface
+lines, at the current time: lines along x (P 52, `WSFLINE`), along y (P 56,
+`WSFLINE_Y`, *Free surface lines in y*) and NHFLOW's time-averaged lines (P 146,
+P 147: one item per line, at the end of its averaging window). They are drawn in
+the **Free surface lines** panel (a tab
 beside the plots), and as lines in the 3D view (*Profile in 3D*). *Lines* picks
 some of the lines (`1, 3`); with *Wave theory* on, the theory FNPF wrote is drawn
 dashed. The value axis stays fixed while playing, so the waves move through a
