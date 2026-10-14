@@ -103,4 +103,5 @@ View
   Save screenshot...  [F12]
   Reset layout
 Help
+  [ ] Record a performance report
   About LAGOON
