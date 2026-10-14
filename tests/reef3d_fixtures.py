@@ -453,8 +453,9 @@ def write_series(root: Path, solver: str, end: float, steps: int = 41) -> None:
 def write_run_log(root: Path, solver: str, runs: list[dict]) -> Path:
     """A REEF3D run log (lagoon-format RUN.md) for files already in ``root``.
 
-    ``runs``: dicts with ``id``, ``started`` and ``outputs`` = {stream: [(step, time)]};
-    the streams are the free surface and bed folders ``make_run`` writes.
+    ``runs``: dicts with ``id``, ``started`` and ``outputs`` = {stream: [(step, time)]},
+    optionally ``domain`` = {"min": [x, y, z], "max": [x, y, z]}; the streams are the
+    free surface and bed folders ``make_run`` writes.
     """
     import json
 
@@ -483,6 +484,7 @@ def write_run_log(root: Path, solver: str, runs: list[dict]) -> Path:
                 "solver": solver,
                 "started": run["started"],
                 "streams": streams,
+                **({"domain": run["domain"]} if "domain" in run else {}),
             }
         )
         for stream, outputs in run["outputs"].items():

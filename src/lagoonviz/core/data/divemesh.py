@@ -11,6 +11,9 @@ S 33), cones (S 41 - S 43), spheres (S 51), wedges (S 61 - S 63) and polyhedra f
 their corners (S 81 - S 84). Cylinders and cones without their own extent span the
 domain (B 10).
 
+Only a case's own solids are shown (:func:`find_solids`): in a folder where several
+cases run, the solid file there can be another case's.
+
 The faces of solids that make the bed lie in the bed REEF3D writes; they are left
 out (:func:`bed_faces`), so the two never fight over the same place on screen.
 """
@@ -27,20 +30,75 @@ log = logging.getLogger(__name__)
 
 #: where DIVEMesh writes its solids, relative to the case folder
 SOLID_VTP = Path("DIVEMesh_Paraview") / "REEF3D_Solid.vtp"
+#: what DIVEMesh writes at the end of every run (its partition and grid preview)
+RUN_MARKS = (
+    Path("DIVEMesh_Paraview") / "DIVEMesh_Partition.vtp",
+    Path("DIVEMesh_Paraview") / "DIVEMesh_grid-preview.vts",
+)
+#: seconds a solid or bed file may be older than a run's last files and still be its
+STALE_AFTER = 3600.0
 #: segments around cylinders, cones and spheres built from control.txt
 SEGMENTS = 48
 
 
 def find_solids(case_dir: str | Path) -> Path | None:
-    """DIVEMesh's solid file of a case, else its control.txt if that has solids."""
+    """DIVEMesh's solid file of a case, else its control.txt if that has solids.
+
+    Only the case's own: DIVEMesh leaves ``REEF3D_Solid.vtp`` alone when a case has
+    no solids, so in a folder where several cases run (the home folder) the file may
+    be another case's. It is passed over when DIVEMesh has run since without writing
+    it (:func:`left_over`), and when control.txt has no solid commands. With solids
+    in control.txt, the file is taken unless it is older than control.txt (DIVEMesh
+    not run since): then the solids are built from control.txt, if it has ones that
+    can be built. Without control.txt (results copied without their input), a file
+    that is not left over is taken.
+    """
     case_dir = Path(case_dir)
     vtp = case_dir / SOLID_VTP
-    if vtp.is_file():
-        return vtp
+    if vtp.is_file() and left_over(vtp, case_dir):
+        log.info("%s: not shown, DIVEMesh has run since without writing it", vtp)
+        vtp_found = False
+    else:
+        vtp_found = vtp.is_file()
     control = case_dir / "control.txt"
-    if control.is_file() and read_commands(control)[1]:
-        return control
-    return None
+    if not control.is_file():
+        return vtp if vtp_found else None
+    solids = read_commands(control)[1]
+    if not solids:
+        if vtp_found:
+            log.info("%s: not shown, control.txt has no solids", vtp)
+        return None
+    buildable = any(code in BUILDERS for code, _ in solids)
+    if vtp_found and (not buildable or not _older(vtp, control)):
+        return vtp
+    return control if buildable else None
+
+
+def left_over(path: Path, case_dir: str | Path, after: float = STALE_AFTER) -> bool:
+    """True if a file DIVEMesh writes only for some cases (``REEF3D_Solid.vtp``,
+    ``REEF3D_Topo.vtp``) is left over from an earlier DIVEMesh run: older than the
+    files it writes at the end of every run (:data:`RUN_MARKS`) by more than
+    ``after`` seconds (a run takes minutes; what is left over is usually days old)."""
+    times = []
+    for mark in RUN_MARKS:
+        try:
+            times.append((Path(case_dir) / mark).stat().st_mtime)
+        except OSError:
+            continue
+    if not times:
+        return False
+    try:
+        return path.stat().st_mtime < max(times) - after
+    except OSError:
+        return False
+
+
+def _older(path: Path, than: Path, tolerance: float = 2.0) -> bool:
+    """True if ``path`` was written before ``than`` (beyond ``tolerance`` seconds)."""
+    try:
+        return path.stat().st_mtime < than.stat().st_mtime - tolerance
+    except OSError:
+        return False
 
 
 def read_commands(control: Path) -> tuple[list[float] | None, list[tuple[int, list[float]]]]:

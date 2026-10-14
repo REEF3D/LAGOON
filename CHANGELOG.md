@@ -4,6 +4,13 @@
 
 ### Fixes
 
+- **Only the case's own solids**: a `REEF3D_Solid.vtp` another case's DIVEMesh
+  run left in the folder (e.g. a monopile case run before an FNPF case in the
+  home folder) is no longer opened as a structure. The solids are passed over
+  when `control.txt` has no solid commands, when DIVEMesh has run since without
+  writing them, or when they lie outside the domain of the run shown (run log);
+  solids older than `control.txt` are built from it. DIVEMesh's left-over bed
+  likewise.
 - **No crash when opening a large case**: Python's garbage collector ran in a
   loader thread while the window deleted a panel's widgets and walked a half-deleted
   Qt object (a segmentation fault in `SbkObject_tp_traverse`). It now runs on the

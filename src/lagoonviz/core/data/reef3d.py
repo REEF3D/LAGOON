@@ -660,6 +660,8 @@ class Case:
     profiles: dict[str, ProfileSet] = field(default_factory=dict)
     #: not run yet: only the input files (control.txt, ctrl.txt), their set-up is shown
     setup_only: bool = False
+    #: the domain of each run (lower, upper corner; from the run log), by run
+    domains: dict[str, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
 
     @property
     def solver(self) -> str:
@@ -765,10 +767,9 @@ class Case:
                         found[role] = matches[0]
                 return found
             chosen = {"volume": max(volumes, key=lambda d: d.written_span()[1])}
-            # DIVEMesh's solids belong to the case, not to a run: always shown
-            solids = [d for d in self.datasets.values() if d.role == "solid"]
-            if solids:
-                chosen = {"solid": solids[0], **chosen}
+            solid = self._solids_of(chosen["volume"])
+            if solid is not None:
+                chosen = {"solid": solid, **chosen}
             return chosen
         free = [d for d in surfaces if d.role == "free_surface"]
         lead = preferred(free or surfaces)
@@ -792,10 +793,9 @@ class Case:
         if options:
             chosen["amr"] = preferred(options)
             chosen.pop("free_surface", None)
-        # DIVEMesh's solids belong to the case, not to a run: always shown
-        solids = [d for d in self.datasets.values() if d.role == "solid"]
-        if solids:
-            chosen["solid"] = solids[0]
+        solid = self._solids_of(lead)
+        if solid is not None:
+            chosen["solid"] = solid
         # beds are drawn first, so a transparent free surface shows them
         order = (
             "bed",
@@ -811,6 +811,18 @@ class Case:
             "amr",
         )
         return {role: chosen[role] for role in order if role in chosen}
+
+    def _solids_of(self, lead: Dataset) -> Dataset | None:
+        """DIVEMesh's solids, shown with any run of the case (they belong to the
+        case, not to a run), unless they lie outside the domain of the run shown
+        (``lead``'s, from the run log): then they are another case's."""
+        solids = [d for d in self.datasets.values() if d.role == "solid"]
+        if not solids:
+            return None
+        domain = self.domains.get(lead.run_id) if lead.run_id else None
+        if domain is not None and not solids[0].reaches(*domain):
+            return None
+        return solids[0]
 
     def describe(self) -> str:
         lines = [f"REEF3D case {self.path}"]
@@ -834,6 +846,7 @@ class SolidDataset(Dataset):
         #: the bed whose faces the solids leave out (set when the case is opened)
         self.bed_source: Dataset | None = None
         self._mesh: SurfaceMesh | None = None
+        self._plan: tuple[np.ndarray, np.ndarray] | None = None
         super().__init__(
             "divemesh_solids", "DIVEMesh", "solid", [Frame(0, source, [source])], case_dir
         )
@@ -849,6 +862,36 @@ class SolidDataset(Dataset):
         if self._mesh is None:
             self._mesh = self._build()
         return self._mesh
+
+    def plan_extent(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Lower and upper corner of the solids seen from above (x, y); None if
+        there are none or they cannot be read."""
+        if self._plan is None:
+            from lagoonviz.core.data.divemesh import solids_from_control
+
+            try:
+                if self.source.suffix == ".vtp":
+                    points = read_piece(self.source, point_arrays=[], with_cells=False).points
+                else:
+                    points = solids_from_control(self.source)[0]
+            except (OSError, ValueError, KeyError, IndexError):
+                return None
+            points = np.asarray(points, np.float64).reshape(-1, 3)[:, :2]
+            points = points[np.isfinite(points).all(axis=1)]
+            if not len(points):
+                return None
+            self._plan = (points.min(axis=0), points.max(axis=0))
+        return self._plan
+
+    def reaches(self, low, high, margin: float = 0.05) -> bool:
+        """True if the solids reach into a domain (lower, upper corner; seen from
+        above, with a margin of a share of its size). True if they cannot be read."""
+        extent = self.plan_extent()
+        if extent is None:
+            return True
+        low, high = np.asarray(low, float)[:2], np.asarray(high, float)[:2]
+        pad = margin * float(np.max(high - low))
+        return bool((extent[0] <= high + pad).all() and (extent[1] >= low - pad).all())
 
     def _build(self) -> SurfaceMesh:
         from lagoonviz.core.data.divemesh import bed_faces, solids_from_control
@@ -1000,16 +1043,43 @@ class GeoDatDataset(Dataset):
 
 
 def solid_datasets(case_dir: Path) -> list[Dataset]:
-    """DIVEMesh's solids and bed of a case folder, and its geo.dat, when it has any."""
-    from lagoonviz.core.data.divemesh import find_solids
+    """DIVEMesh's solids and bed of a case folder, and its geo.dat, when it has any:
+    only the case's own (:func:`~lagoonviz.core.data.divemesh.find_solids`), not what
+    another case's DIVEMesh run left in the folder."""
+    from lagoonviz.core.data.divemesh import find_solids, left_over
     from lagoonviz.core.data.divemesh_grid import TOPO
 
+    found: list[Dataset] = []
     source = find_solids(case_dir)
-    found: list[Dataset] = [SolidDataset(source, case_dir)] if source is not None else []
-    if (case_dir / TOPO).is_file():
-        found.append(TopoDataset(case_dir / TOPO, case_dir))
+    if source is not None:
+        found.append(SolidDataset(source, case_dir))
+    topo = case_dir / TOPO
+    if topo.is_file() and not left_over(topo, case_dir):
+        found.append(TopoDataset(topo, case_dir))
     if (case_dir / "geo.dat").is_file():
         found.append(GeoDatDataset(case_dir / "geo.dat", case_dir))
+    return found
+
+
+def run_domains(case_dir: Path, run_ids) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """The domains (lower, upper corner) the run log gives for these runs, by run."""
+    run_ids = {r for r in run_ids if r}
+    if not run_ids:
+        return {}
+    try:
+        log_ = run_log(case_dir)
+    except (OSError, ValueError):
+        return {}
+    found = {}
+    for run in log_.runs if log_ is not None else []:
+        domain = run.record.get("domain") if run.id in run_ids else None
+        try:
+            low = np.asarray(domain["min"], np.float64)[:3]
+            high = np.asarray(domain["max"], np.float64)[:3]
+        except (TypeError, KeyError, ValueError, IndexError):
+            continue
+        if low.shape == high.shape == (3,):
+            found[run.id] = (low, high)
     return found
 
 
@@ -1457,6 +1527,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
         series=series,
         profiles=profiles,
         setup_only=setup_only,
+        domains=run_domains(case_dir, (d.run_id for d in datasets)),
     )
     for dataset in datasets:
         key = dataset.key

@@ -53,6 +53,19 @@ cylinders, cones, spheres, wedges and polyhedra: S 10, S 32, S 33, S 41 – S 43
 S 51, S 61 – S 63, S 81 – S 84). They are shown as one structure, *DIVEMesh
 solids*; the faces that lie in the bed REEF3D writes are left out.
 
+Only the case's own solids are opened. DIVEMesh leaves `REEF3D_Solid.vtp` alone
+when a case has no solids, so in a folder where several cases run (your home
+folder, say) the file can be another case's. LAGOON passes it over when:
+
+- `control.txt` has no solid commands (S): the case has none;
+- DIVEMesh has run since without writing it (its partition and grid preview in
+  `DIVEMesh_Paraview` are more than an hour newer);
+- the solids lie outside the domain of the run shown (from the run log).
+
+When `control.txt` has changed since DIVEMesh wrote the file, its solids are built
+from `control.txt` instead. DIVEMesh's bed (`REEF3D_Topo.vtp`) left over from an
+earlier DIVEMesh run is passed over in the same way.
+
 ## Time
 
 The timeline steps through REEF3D's outputs. Their times come from the run log
