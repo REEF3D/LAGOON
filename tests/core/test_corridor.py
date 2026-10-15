@@ -274,3 +274,26 @@ def test_a_corridor_drawn_over_an_area_resets_to_that_area(river):
         "points": 8,
         "area": [20.0, 180.0, 10.0, 50.0],
     }
+
+
+def test_the_bed_of_many_points_is_quick():
+    """geo.dat on a regular grid (as LAGOON writes it) is read bilinear, very many
+    scattered points by their nearest neighbours: a million points take a second,
+    not the half minute and more of triangulating them."""
+    import time
+
+    x, y = np.meshgrid(np.linspace(0, 30000, 1500), np.linspace(0, 15000, 750))
+    grid = np.column_stack([x.ravel(), y.ravel(), np.sin(x.ravel() / 1000)])
+    corridor = C.default((5000, 25000, 6000, 9000))
+    gx, gy = corridor.grid()
+    start = time.perf_counter()
+    z = C.interpolate_bed(grid, gx, gy)
+    assert time.perf_counter() - start < 5.0
+    assert np.abs(z - np.sin(gx / 1000)).max() < 1e-3
+    rng = np.random.default_rng(0)
+    scattered = rng.uniform((0, 0), (30000, 15000), (400_000, 2))
+    scattered = np.column_stack([scattered, np.sin(scattered[:, 0] / 1000)])
+    start = time.perf_counter()
+    z = C.interpolate_bed(scattered, gx, gy)
+    assert time.perf_counter() - start < 5.0
+    assert np.abs(z - np.sin(gx / 1000)).max() < 0.05

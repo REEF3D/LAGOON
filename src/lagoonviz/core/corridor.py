@@ -579,15 +579,50 @@ def quality(x: np.ndarray, y: np.ndarray) -> Quality:
     )
 
 
+#: scattered points beyond which the bed is not triangulated (slow): the nearest
+#: points' heights, weighted by distance, instead
+LINEAR_MOST = 150_000
+
+
 def interpolate_bed(points: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """Heights of scattered points (n, 3) at the nodes: linear on their triangles,
-    the nearest point's outside them."""
+    """Heights of geo.dat's points (n, 3) at the nodes: only the points round the
+    nodes are used; points on a regular grid (as LAGOON writes geo.dat) bilinear on
+    it, other points linear on their triangles (inverse distance of the nearest
+    six when there are very many), the nearest point's height outside them."""
     from scipy.spatial import cKDTree
 
+    points = np.asarray(points, float)
     points = points[np.isfinite(points).all(axis=1)]
-    targets = np.column_stack([x.ravel(), y.ravel()])
+    targets = np.column_stack([np.ravel(x), np.ravel(y)])
+    if len(points) == 0:
+        raise ValueError("no points with heights")
+    low, high = targets.min(axis=0), targets.max(axis=0)
+    pad = 0.05 * float(max(high - low)) + 1e-9
+    inside = ((points[:, :2] >= low - pad) & (points[:, :2] <= high + pad)).all(axis=1)
+    if inside.sum() >= 3:
+        nearby = points[inside]
+        step = _spacing(nearby)
+        if step is not None:  # widen to at least two spacings round the nodes
+            inside = (
+                (points[:, :2] >= low - pad - 2 * step) & (points[:, :2] <= high + pad + 2 * step)
+            ).all(axis=1)
+            nearby = points[inside]
+        points = nearby
     values = np.full(len(targets), np.nan)
-    if len(points) >= 3:
+    grid = _regular(points)
+    if grid is not None:
+        from scipy.interpolate import RegularGridInterpolator
+
+        xs, ys, heights = grid
+        values = RegularGridInterpolator((ys, xs), heights, bounds_error=False, fill_value=np.nan)(
+            targets[:, ::-1]
+        )
+    elif len(points) > LINEAR_MOST:
+        tree = cKDTree(points[:, :2])
+        distance, index = tree.query(targets, k=min(6, len(points)))
+        weight = 1.0 / np.maximum(distance, 1e-9) ** 2
+        values = (weight * points[index, 2]).sum(axis=1) / weight.sum(axis=1)
+    elif len(points) >= 3:
         from scipy.interpolate import LinearNDInterpolator
         from scipy.spatial import QhullError
 
@@ -598,7 +633,36 @@ def interpolate_bed(points: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndar
     holes = ~np.isfinite(values)
     if holes.any():
         values[holes] = points[cKDTree(points[:, :2]).query(targets[holes])[1], 2]
-    return values.reshape(x.shape)
+    return values.reshape(np.shape(x))
+
+
+def _regular(points: np.ndarray):
+    """(xs, ys, heights (ny, nx)) when the points fill a regular grid, else None."""
+    if len(points) < 4:
+        return None
+    span = float(np.ptp(points[:, :2])) or 1.0
+    key = np.round(points[:, :2] / (1e-7 * span)).astype(np.int64)
+    xs, xi = np.unique(key[:, 0], return_inverse=True)
+    ys, yi = np.unique(key[:, 1], return_inverse=True)
+    if len(xs) < 2 or len(ys) < 2 or len(xs) * len(ys) != len(points):
+        return None
+    heights = np.full((len(ys), len(xs)), np.nan)
+    heights[yi, xi] = points[:, 2]
+    if np.isnan(heights).any():  # a point given twice, another missing
+        return None
+    return xs * (1e-7 * span), ys * (1e-7 * span), heights
+
+
+def _spacing(points: np.ndarray) -> float | None:
+    """A typical distance between neighbouring points (a sample's median)."""
+    from scipy.spatial import cKDTree
+
+    if len(points) < 2:
+        return None
+    sample = points[:: max(1, len(points) // 2000), :2]
+    distance, _ = cKDTree(points[:, :2]).query(sample, k=2)
+    found = float(np.median(distance[:, 1]))
+    return found if found > 0 else None
 
 
 # ================================================================ curvgrid.dat
