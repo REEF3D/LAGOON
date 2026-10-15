@@ -45,6 +45,37 @@ AMR_INDEX = re.compile(r"^REEF3D-(?P<solver>[A-Z0-9]+)-AMR-(?P<step>\d+)\.vtm$")
 #: arrays read with every frame: the height of the surface, its water level, the depth
 SURFACE_ARRAYS = ("elevation", "eta", "WL")
 
+#: the velocity components an AMR output writes as scalars (SFLOW: u, v, w); LAGOON
+#: joins them into the vector ``velocity`` (its magnitude, components and arrows)
+VELOCITY_PARTS = ("u", "v", "w")
+
+
+def with_velocity(components: dict[str, int]) -> dict[str, int]:
+    """The variables of an AMR output with ``velocity`` (3 components) added when it
+    writes u and v (and w) as scalars but no velocity vector."""
+    if "velocity" not in components and all(components.get(n) == 1 for n in ("u", "v")):
+        components = {**components, "velocity": 3}
+    return components
+
+
+def wanted_arrays(names: set[str], present) -> list[str]:
+    """The arrays to read for these variables: ``velocity`` made of u, v, w when the
+    output has no velocity array of its own."""
+    names = set(names)
+    if "velocity" in names and "velocity" not in present:
+        names.discard("velocity")
+        names.update(n for n in VELOCITY_PARTS if n in present)
+    return sorted(n for n in names if n in present and n != "level")
+
+
+def series_name(variable: str, present) -> str:
+    """The array a point series of a variable reads: ``velocity.x`` is u when the
+    output writes u, v, w; else the variable's array."""
+    name, _, component = variable.partition(".")
+    if name == "velocity" and "velocity" not in present and component in ("x", "y", "z"):
+        return VELOCITY_PARTS["xyz".index(component)]
+    return name
+
 
 @dataclass
 class AmrGrid:
@@ -298,7 +329,13 @@ def leaf_mesh(grids: list[AmrGrid], max_level: int | None = None) -> SurfaceMesh
         for name, parts in data.items()
     }
     point_data["level"] = np.concatenate(levels)
-    if "WL" in point_data and "depth" not in point_data:
+    if "velocity" not in point_data and "u" in point_data and "v" in point_data:
+        u = point_data["u"]
+        w = point_data.get("w", np.zeros_like(u))
+        point_data["velocity"] = np.ascontiguousarray(np.stack([u, point_data["v"], w], axis=1))
+    if "WL" in point_data and "depth" not in point_data and "wetdry" not in point_data:
+        # the water depth hides dry land (NHFLOW); SFLOW says which cells are wet
+        # (wetdry), its WL is no depth to go by on dry land
         point_data["depth"] = point_data["WL"]
     return SurfaceMesh(
         points=np.concatenate(points),
@@ -309,11 +346,26 @@ def leaf_mesh(grids: list[AmrGrid], max_level: int | None = None) -> SurfaceMesh
     )
 
 
+def _cell_values(grid: AmrGrid, name: str) -> np.ndarray:
+    """A grid's cell values of a variable; ``velocity`` made of u, v, w if need be."""
+    if name in grid.cell_data:
+        return grid.cell_data[name]
+    u = grid.cell_data["u"]
+    w = grid.cell_data.get("w", np.zeros_like(u))
+    return np.stack([u, grid.cell_data["v"], w], axis=-1)
+
+
+def _has(grid: AmrGrid, name: str) -> bool:
+    if name in grid.cell_data:
+        return True
+    return name == "velocity" and "u" in grid.cell_data and "v" in grid.cell_data
+
+
 def value_at(grids: list[AmrGrid], name: str, x: float, y: float) -> tuple[float, int] | None:
     """A cell value at (x, y) from the finest grid there: (value, level), or None."""
     best = None
     for grid in grids:
-        if not grid.contains(x, y) or name not in grid.cell_data:
+        if not grid.contains(x, y) or not _has(grid, name):
             continue
         if best is not None and grid.level <= best.level:
             continue
@@ -322,7 +374,7 @@ def value_at(grids: list[AmrGrid], name: str, x: float, y: float) -> tuple[float
         return None
     i = int(np.clip(np.searchsorted(best.x, x, "right") - 1, 0, best.nx - 1))
     j = int(np.clip(np.searchsorted(best.y, y, "right") - 1, 0, best.ny - 1))
-    values = best.cell_data[name]
+    values = _cell_values(best, name)
     value = values[j, i]
     return float(np.linalg.norm(value) if np.ndim(value) else value), best.level
 
@@ -339,7 +391,9 @@ class AmrDataset(Dataset):
         self._files: dict[int, list[Path]] = {}
 
     def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
-        components = grid_arrays(first.pieces[0])
+        arrays = grid_arrays(first.pieces[0])
+        self._native_velocity = "velocity" in arrays
+        components = with_velocity(arrays)
         components["level"] = 1
         return "RectilinearGrid", components
 
@@ -368,7 +422,16 @@ class AmrDataset(Dataset):
             return None
         names = {v.partition(".")[0] for v in variables if v and v != "none"}
         names.update(SURFACE_ARRAYS)
-        return sorted(n for n in names if n in self.components and n != "level")
+        present = {n for n in self.components if n != "velocity" or self._own_velocity}
+        return wanted_arrays(names, present)
+
+    @property
+    def _own_velocity(self) -> bool:
+        """The output writes a velocity array (not only u, v, w)."""
+        native = getattr(self, "_native_velocity", None)
+        if native is None:
+            native = self._native_velocity = "velocity" in grid_arrays(self.frames[0].pieces[0])
+        return native
 
     def read(
         self, index: int, variables: list[str] | None = None, max_level: int | None = None
@@ -386,14 +449,16 @@ class AmrDataset(Dataset):
 
     def point_series(self, variable: str, x: float, y: float) -> tuple[tuple, np.ndarray]:
         """A variable over all frames at (x, y), from the finest grid there in each."""
-        name = variable.partition(".")[0]
-        if name not in self.components or name == "level":
-            raise KeyError(f"no variable {name!r} in {self.label}")
+        if variable.partition(".")[0] not in self.components or variable == "level":
+            raise KeyError(f"no variable {variable!r} in {self.label}")
+        present = {n for n in self.components if n != "velocity" or self._own_velocity}
+        name = series_name(variable, present)
+        arrays = wanted_arrays({name}, present)
         values = np.full(len(self.frames), np.nan)
         for index in range(len(self.frames)):
             grids = []
             for path in self.grid_files(index):
-                grid = read_grid(path, [name])
+                grid = read_grid(path, arrays)
                 if grid.contains(x, y):
                     grids.append(grid)
             found = value_at(grids, name, x, y)

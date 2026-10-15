@@ -724,7 +724,9 @@ class StoreAmrDataset(Dataset):
         return [Frame(int(step), path, [path / f"t{t}"]) for t, step in enumerate(self.amr.steps)]
 
     def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
-        components = {n: c for n, (c, _d) in self.amr.fields.items()}
+        from lagoonviz.core.data.amr import with_velocity
+
+        components = with_velocity({n: c for n, (c, _d) in self.amr.fields.items()})
         components["level"] = 1
         return "RectilinearGrid", components
 
@@ -759,27 +761,28 @@ class StoreAmrDataset(Dataset):
     def read(
         self, index: int, variables: list[str] | None = None, max_level: int | None = None
     ) -> SurfaceMesh:
-        from lagoonviz.core.data.amr import SURFACE_ARRAYS, leaf_mesh
+        from lagoonviz.core.data.amr import SURFACE_ARRAYS, leaf_mesh, wanted_arrays
 
         names = None
         if variables is not None:
             wanted = {v.partition(".")[0] for v in variables if v and v != "none"}
             wanted.update(SURFACE_ARRAYS)
-            names = sorted(n for n in wanted if n in self.amr.fields)
+            names = wanted_arrays(wanted, self.amr.fields)
         return leaf_mesh(self._grids(index, names), max_level)
 
     def read_slice(self, index, axis, position, variables=None) -> SurfaceMesh:
         raise ValueError(f"{self.label}: a surface cannot be sliced")
 
     def point_series(self, variable: str, x: float, y: float) -> tuple[tuple, np.ndarray]:
-        from lagoonviz.core.data.amr import value_at
+        from lagoonviz.core.data.amr import series_name, value_at, wanted_arrays
 
-        name = variable.partition(".")[0]
-        if name not in self.amr.fields:
-            raise KeyError(f"no variable {name!r} in {self.label}")
+        if variable.partition(".")[0] not in self.components or variable == "level":
+            raise KeyError(f"no variable {variable!r} in {self.label}")
+        name = series_name(variable, self.amr.fields)
+        arrays = wanted_arrays({name}, self.amr.fields)
         values = np.full(len(self.frames), np.nan)
         for index in range(len(self.frames)):
-            found = value_at(self._grids(index, [name]), name, x, y)
+            found = value_at(self._grids(index, arrays), name, x, y)
             if found is not None:
                 values[index] = found[0]
         return (float(x), float(y), 0.0), values

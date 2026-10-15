@@ -7,7 +7,13 @@
 - An AMR surface has **Grid lines** (off, dark, white): the edges of the cells of
   every level, beside the patch outlines in their own colour.
 - **AMR patches** off shows the base grid (level 0) alone, whole, without the
-  refined patches (their files are not read); on again, the patches come back.
+  refined patches; on again, the patches come back.
+- Grid lines and patch outlines lie on the surface (they floated over it in a
+  shallow case): lifted by 0.03 % of the model's size, not 0.25 %.
+- SFLOW's AMR surface has the **velocity** (magnitude, x, y, z) made of the u, v, w
+  it writes; also for a point's time series.
+- SFLOW's AMR surface hides dry land by its wet cells (`wetdry`); its `WL` was
+  taken for a water depth and kept dry land.
 
 ### Another case's geo.dat and place left out
 

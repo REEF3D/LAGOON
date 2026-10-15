@@ -965,7 +965,10 @@ class DataManager:
                 return None
         segments = np.array(shown.positions[edges], np.float32)
         span = np.ptp(shown.positions, axis=0)
-        lift = 0.06 if self.scene.flat else 2.5e-3 * float(max(span.max(), 1e-9))
+        # just off the surface (the lines are its cells' edges): far enough not to
+        # flicker into it, near enough not to float over it in a shallow case
+        share = 2.5e-3 if item.kind == "slice" else 3e-4
+        lift = 0.06 if self.scene.flat else share * float(max(span.max(), 1e-9))
         axis = AXES.get(str(item.properties.get("normal", "z")), 2) if item.kind == "slice" else 2
         if self.scene.flat or (item.kind in ("slice", "amr") and axis == 2):
             segments[..., 2] += lift

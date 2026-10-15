@@ -220,3 +220,89 @@ def test_convert_amr_to_the_store(tmp_path):
     report = convert(tmp_path)
     assert report.outputs["amr"] == 2
     assert len(Store(report.store).amr["nhflow_amr"]) == 5
+
+
+def test_sflow_amr_velocity_from_u_v_w(tmp_path):
+    """SFLOW writes u, v, w as scalars: LAGOON joins them into ``velocity`` (its
+    magnitude, components and a point's time series)."""
+    make_amr(tmp_path, "SFLOW", frames=3)
+    case = open_case(tmp_path)
+    dataset = case.datasets["sflow_amr"]
+    assert dataset.components["velocity"] == 3
+    assert {"velocity", "velocity.x", "velocity.y", "velocity.z"} <= set(dataset.variables())
+    mesh = dataset.read(1, ["velocity"])
+    u, v, w = (mesh.point_data[n] for n in ("u", "v", "w"))
+    assert np.allclose(mesh.scalar("velocity"), np.sqrt(u * u + v * v + w * w), atol=1e-6)
+    assert np.allclose(mesh.scalar("velocity.y"), v)
+    _, speed = dataset.point_series("velocity", 2.0, 1.5)
+    _, along = dataset.point_series("velocity.x", 2.0, 1.5)
+    assert np.all(np.isfinite(speed)) and np.all(speed >= np.abs(along) - 1e-9)
+    session = Session()
+    session.open_case(tmp_path)
+    item = next(i for i in session.scene if i.kind == "amr")
+    session.set_property(item.id, "variable", "velocity")
+    shown = session.data.display(item.id, session.data.load(item.id))
+    assert shown.values is not None and shown.variable == "velocity"
+    # NHFLOW writes no u, v: no velocity made up
+    other = tmp_path / "nh"
+    make_amr(other, "NHFLOW", frames=1)
+    assert "velocity" not in open_case(other).datasets["nhflow_amr"].components
+
+
+def test_sflow_amr_dry_land_by_wetdry():
+    """SFLOW's AMR output says which cells are wet (wetdry); dry land is hidden by it,
+    not by WL (no water depth on dry land)."""
+    from lagoonviz.core.data.amr import AmrGrid
+    from lagoonviz.core.data.manager import _wet_triangles
+
+    x, y = np.linspace(0.0, 4.0, 5), np.linspace(0.0, 1.0, 2)
+    wet = np.array([[1, 1, 0, 0]], np.int32)
+    cells = {"eta": np.zeros((1, 4)), "WL": np.full((1, 4), 0.3), "wetdry": wet}
+    mesh = leaf_mesh([AmrGrid(0, x, y, cell_data=cells)])
+    assert "depth" not in mesh.point_data
+    kept = _wet_triangles(mesh)
+    left = kept[(kept != 0).any(axis=1)]
+    assert len(left) == 4  # the two wet cells' triangles
+    assert mesh.points[left.ravel(), 0].max() <= 2.0 + 1e-6
+
+
+def test_sflow_amr_store_velocity_and_dry_land(tmp_path):
+    """The same from a LAGOON store, as REEF3D writes SFLOW's AMR into it."""
+    from lagoon_format.amr import AmrGrid as StoredGrid
+    from lagoon_format.store import StoreWriter
+
+    from lagoonviz.core.data.manager import _wet_triangles
+
+    path = tmp_path / "REEF3D_SFLOW.lagoon"
+    writer = StoreWriter.create(path, "SFLOW")
+    names = ("eta", "elevation", "WL", "u", "v", "w", "wetdry")
+    fields = {n: (1, "int32" if n == "wetdry" else "float32") for n in names}
+    amr = writer.amr_writer(
+        "sflow_amr",
+        {
+            "fields": fields,
+            "source": "REEF3D_SFLOW_AMR",
+            "attributes": {"dataset": "sflow_amr", "role": "amr", "refinement": 2},
+        },
+    )
+    x, y = np.linspace(0.0, 4.0, 5), np.linspace(0.0, 1.0, 2)
+    values = {
+        "eta": np.zeros((1, 4), np.float32),
+        "elevation": np.full((1, 4), 0.3, np.float32),
+        "WL": np.full((1, 4), 0.3, np.float32),
+        "u": np.full((1, 4), 0.3, np.float32),
+        "v": np.full((1, 4), 0.4, np.float32),
+        "w": np.zeros((1, 4), np.float32),
+        "wetdry": np.array([[1, 1, 0, 0]], np.int32),
+    }
+    for t in range(2):
+        amr.append(0.5 * t, t, [StoredGrid(0, x, y, values, 0)])
+    writer.close()
+    dataset = open_case(path).datasets["sflow_amr"]
+    assert dataset.components["velocity"] == 3
+    mesh = dataset.read(1, ["velocity", "eta", "depth", "wetdry"])
+    assert np.allclose(mesh.scalar("velocity"), 0.5)
+    _, speed = dataset.point_series("velocity", 1.0, 0.5)
+    assert np.allclose(speed, 0.5)
+    kept = _wet_triangles(mesh)
+    assert int((kept != 0).any(axis=1).sum()) == 4
