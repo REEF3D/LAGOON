@@ -87,6 +87,41 @@ class CorridorTab(QWidget):
             row.addWidget(button)
         row.addStretch(1)
 
+        # ---- a corridor along the thalweg of the bed (geo.dat)
+        self.margin = QDoubleSpinBox()
+        self.margin.setRange(0.0, 1e5)
+        self.margin.setDecimals(1)
+        self.margin.setValue(5.0)
+        self.margin.setSuffix(" m")
+        self.margin.setToolTip("How far the banks lie beyond the water's edge")
+        self.level = QDoubleSpinBox()
+        self.level.setRange(-1e5, 1e5)
+        self.level.setDecimals(2)
+        self.level.setSuffix(" m")
+        self.level.setMinimum(-1e5)
+        self.level.setSpecialValueText("F 60 (still water)")
+        self.level.setValue(-1e5)
+        self.level.setToolTip(
+            "The water level whose edge the banks follow (lowest value: F 60, else "
+            "halfway up the banks)"
+        )
+        self.auto_points = QSpinBox()
+        self.auto_points.setRange(corridors.MIN_POINTS, corridors.MAX_POINTS)
+        self.auto_points.setValue(12)
+        self.auto_points.setToolTip("Points on each bank, to drag afterwards")
+        self.auto_button = QPushButton("Follow thalweg")
+        self.auto_button.setToolTip(
+            "A corridor along the deepest channel of the bed (geo.dat), from the inflow "
+            "side to the outflow side, its banks at the water's edge plus the margin"
+        )
+        self.auto_button.clicked.connect(self.follow_thalweg)
+        self.auto_box = QGroupBox("Along the thalweg (geo.dat)")
+        auto_form = QFormLayout(self.auto_box)
+        auto_form.addRow("Margin", self.margin)
+        auto_form.addRow("Water level", self.level)
+        auto_form.addRow("Points per bank", self.auto_points)
+        auto_form.addRow("", self.auto_button)
+
         # ---- the banks
         self.points = QSpinBox()
         self.points.setRange(corridors.MIN_POINTS, corridors.MAX_POINTS)
@@ -186,6 +221,7 @@ class CorridorTab(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(self.note)
         layout.addLayout(row)
+        layout.addWidget(self.auto_box)
         layout.addWidget(scroll, 1)
 
     # ------------------------------------------------------------- the case
@@ -205,6 +241,10 @@ class CorridorTab(QWidget):
         solver = self.panel.solver() if has_case else ""
         for button in (self.start_button, self.draw_button):
             button.setEnabled(has_case)
+        setup = self.session.data.case_setup(self.panel.case_id) if has_case else None
+        has_bed = setup is not None and (setup.path / "geo.dat").is_file()
+        self.auto_box.setEnabled(has_bed)
+        self.auto_box.setToolTip("" if has_bed else "Needs geo.dat (Map tab: Make geo.dat)")
         for widget in (self.edit_button, self.remove_button, self.form):
             widget.setEnabled(corridor is not None)
         if corridor is None and self.edit_button.isChecked():
@@ -283,6 +323,28 @@ class CorridorTab(QWidget):
                     points=points, case=self.panel.case_id, **changed
                 )
             )
+
+    def follow_thalweg(self) -> None:
+        """A corridor along the thalweg of the bed, to drag afterwards."""
+        level = None if self.level.value() <= self.level.minimum() else self.level.value()
+        found = None
+
+        def follow():
+            nonlocal found
+            found = self.session.auto_corridor(
+                margin=self.margin.value(),
+                level=level,
+                points=self.auto_points.value(),
+                case=self.panel.case_id,
+            )
+
+        if self._run(follow) and found is not None:
+            self.message.emit(
+                f"A corridor along the thalweg (water at {found.level:.2f} m, banks "
+                f"{self.margin.value():g} m beyond its edge): drag its points",
+                False,
+            )
+            self.edit_button.setChecked(True)
 
     def start(self) -> None:
         self._run(

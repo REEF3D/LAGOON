@@ -7,7 +7,10 @@
 - The Set-up panel has a **River** tab: lay a river corridor and drag the points of
   its two banks in the 2D top view (12 per bank to start, 4 – 60). The banks are a
   spline through the points (centripetal Catmull-Rom) or a smoother B-spline the
-  points pull on. Start one along the domain or draw it over an area.
+  points pull on. Start one along the domain, draw it over an area, or let it
+  **follow the thalweg** of the bed (geo.dat): along the deepest channel from the
+  inflow to the outflow side, its banks at the water's edge plus a margin - then
+  drag the points. The banks and their points are drawn in yellow.
 - The corridor makes the curvilinear grid REEF3D's SFLOW and NHFLOW read with
   `G 50 2`: cells along and across, Winslow smoothing for bends, the bed sloping
   from the upstream end or from geo.dat. The set-up draws the grid as it changes and

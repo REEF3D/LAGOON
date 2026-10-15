@@ -657,6 +657,54 @@ class Session:
         script = f"session.start_corridor({area!r}, points={int(points)}"
         self._put_corridor(case, start, script, "Start river corridor")
 
+    def auto_corridor(
+        self,
+        margin: float = 0.0,
+        level: float | None = None,
+        points: int = 12,
+        width: float | None = None,
+        sides: tuple[int, int] | None = None,
+        case: str | None = None,
+    ):
+        """A corridor that follows the thalweg of the bed (geo.dat): from the deepest
+        point of the upstream side to the deepest of the downstream side (``sides``,
+        default: the inflow and outflow sides, C 1x = 1 and 2, else the ends of the
+        domain's longer axis), its banks where the water below ``level`` (default: F
+        60, else halfway up the banks) reaches, plus ``margin`` m (or ``width`` m
+        wide), ``points`` points on each bank. Returns the thalweg found."""
+        from lagoonviz.core import corridor as corridors
+
+        case_id = self._case_id(case)
+        setup = self.data.case_setup(case_id, create=True)
+        if setup is None or not (setup.path / "geo.dat").is_file():
+            raise ValueError("following the thalweg needs the bed: geo.dat (Map tab: Make geo.dat)")
+        domain = setup.domain
+        if domain is None:
+            raise ValueError("no domain yet (B 10)")
+        if sides is None:
+            inflow = [k for k, v in setup.sides.items() if v == 1 and k <= 4]
+            outflow = [k for k, v in setup.sides.items() if v == 2 and k <= 4]
+            if inflow and outflow:
+                sides = (inflow[0], outflow[0])
+            else:
+                sides = (1, 4) if domain[1] - domain[0] >= domain[3] - domain[2] else (3, 2)
+        if level is None:
+            level = setup.water_level
+        thalweg = corridors.find_thalweg(
+            setup.geo_points(), domain, level, int(sides[0]), int(sides[1])
+        )
+        made = corridors.from_thalweg(thalweg, float(margin), int(points), width)
+        words = [f"margin={float(margin)!r}"]
+        if level is not None:
+            words.append(f"level={float(level)!r}")
+        words.append(f"points={int(points)}")
+        if width is not None:
+            words.append(f"width={float(width)!r}")
+        words.append(f"sides={tuple(int(v) for v in sides)!r}")
+        script = "session.auto_corridor(" + ", ".join(words)
+        self._put_corridor(case, made, script, "Corridor along the thalweg")
+        return thalweg
+
     def move_corridor_point(
         self, side: str, index: int, x: float, y: float, case: str | None = None
     ) -> None:

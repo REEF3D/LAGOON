@@ -98,7 +98,7 @@ COLORS = {
     "regions": "#4fb3a9",
     "solids": "#a0a8b4",
     "bed": "#b08d57",
-    "corridor": "#2bc4b4",
+    "corridor": "#ffd84a",  # the banks and their points: yellow, as when dragged
     "curvgrid": "#7f9cc0",
     "refinement": "#e07b39",
 }

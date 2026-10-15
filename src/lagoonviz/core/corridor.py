@@ -314,6 +314,194 @@ def default(area, count: int = 12, along_x: bool | None = None, **options) -> Co
     return Corridor(left, right, **options)
 
 
+# ================================================================ the thalweg
+#: cells of the bed raster along the domain's longer side (thalweg search)
+RASTER = 300
+
+
+@dataclass(frozen=True)
+class Thalweg:
+    """What :func:`from_bed` found: the thalweg (n, 2), the bed along it, the wetted
+    half-widths on the left and right (n each) and the level they were taken at."""
+
+    line: np.ndarray
+    bed: np.ndarray
+    left: np.ndarray
+    right: np.ndarray
+    level: float
+
+
+def bed_raster(points: np.ndarray, domain, cells: int = RASTER):
+    """The bed on a regular raster over the domain: (xs, ys, z (ny, nx))."""
+    xs0, xe, ys0, ye = (float(v) for v in domain[:4])
+    step = max(xe - xs0, ye - ys0) / max(int(cells), 2)
+    xs = np.arange(xs0, xe + 0.5 * step, step)
+    ys = np.arange(ys0, ye + 0.5 * step, step)
+    gx, gy = np.meshgrid(xs, ys)
+    return xs, ys, interpolate_bed(np.asarray(points, float), gx, gy)
+
+
+def _side_cells(shape, side: int):
+    """The raster cells (row, column) along a side of the domain: 1 x min, 4 x max,
+    3 y min, 2 y max."""
+    ny, nx = shape
+    if side == 1:
+        return [(r, 0) for r in range(ny)]
+    if side == 4:
+        return [(r, nx - 1) for r in range(ny)]
+    if side == 3:
+        return [(0, c) for c in range(nx)]
+    return [(ny - 1, c) for c in range(nx)]
+
+
+def thalweg_path(z: np.ndarray, start: tuple[int, int], end: tuple[int, int]) -> np.ndarray:
+    """The least-cost path (rows, columns) between two raster cells, the cost of a
+    step rising steeply with the bed's height: it keeps to the deepest channel."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import dijkstra
+
+    ny, nx = z.shape
+    low, high = float(np.nanmin(z)), float(np.nanmax(z))
+    weight = 1.0 + 1000.0 * ((z - low) / max(high - low, 1e-12)) ** 2
+    index = np.arange(ny * nx).reshape(ny, nx)
+    rows, cols, costs = [], [], []
+    for dr, dc in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        a = index[max(0, -dr) : ny - max(0, dr), max(0, -dc) : nx - max(0, dc)]
+        b = index[max(0, dr) : ny + min(0, dr) or None, max(0, dc) : nx + min(0, dc) or None]
+        wa = weight.ravel()[a.ravel()]
+        wb = weight.ravel()[b.ravel()]
+        cost = 0.5 * (wa + wb) * math.hypot(dr, dc)
+        rows += [a.ravel(), b.ravel()]
+        cols += [b.ravel(), a.ravel()]
+        costs += [cost, cost]
+    graph = coo_matrix(
+        (np.concatenate(costs), (np.concatenate(rows), np.concatenate(cols))),
+        shape=(ny * nx, ny * nx),
+    ).tocsr()
+    first, last = index[start], index[end]
+    _, before = dijkstra(graph, indices=first, return_predecessors=True)
+    path = [last]
+    while path[-1] != first:
+        previous = before[path[-1]]
+        if previous < 0:
+            raise ValueError("no path between the two ends of the river")
+        path.append(previous)
+    path = np.asarray(path[::-1])
+    return np.column_stack([path // nx, path % nx])
+
+
+def _smooth(values: np.ndarray, width: float) -> np.ndarray:
+    """A Gaussian running mean over ``width`` samples (the ends kept in place)."""
+    from scipy.ndimage import gaussian_filter1d
+
+    if width <= 0 or len(values) < 3:
+        return values
+    return gaussian_filter1d(values, width, axis=0, mode="nearest")
+
+
+def _smooth_line(line: np.ndarray, width: float) -> np.ndarray:
+    """A polyline smoothed by a Gaussian running mean, its ends where they were (the
+    line continued past them by point reflection)."""
+    if width <= 0 or len(line) < 3:
+        return line
+    pad = min(len(line) - 1, int(4 * width) + 1)
+    head = 2 * line[0] - line[pad:0:-1]
+    tail = 2 * line[-1] - line[-2 : -pad - 2 : -1]
+    smooth = _smooth(np.vstack([head, line, tail]), width)
+    return smooth[pad : pad + len(line)]
+
+
+def find_thalweg(
+    points: np.ndarray,
+    domain,
+    level: float | None = None,
+    start_side: int = 1,
+    end_side: int = 4,
+    cells: int = RASTER,
+) -> Thalweg:
+    """The thalweg of the bed (geo.dat's points) from the deepest cell of one side
+    of the domain to the deepest of another, and how far the water (below
+    ``level``; default: halfway between the thalweg's bed and the top of the banks)
+    reaches to its left and right."""
+    from scipy.ndimage import map_coordinates
+
+    xs, ys, z = bed_raster(points, domain, cells)
+    step = float(xs[1] - xs[0]) if len(xs) > 1 else 1.0
+
+    def deepest(side):
+        cells_ = _side_cells(z.shape, side)
+        return min(cells_, key=lambda rc: z[rc])
+
+    path = thalweg_path(z, deepest(start_side), deepest(end_side))
+    line = np.column_stack([xs[path[:, 1]], ys[path[:, 0]]])
+    line = resample(_smooth_line(line, 3.0), max(len(line), 8))
+    line = resample(_smooth_line(line, 0.02 * len(line)), max(len(line) // 2, 8))
+    # the bed along it, and across it to both sides
+    to_index = lambda p: np.array([(p[:, 1] - ys[0]) / step, (p[:, 0] - xs[0]) / step])  # noqa: E731
+    bed = map_coordinates(z, to_index(line), order=1, mode="nearest")
+    if level is None:
+        level = float(np.median(bed) + 0.5 * (np.percentile(z, 75) - np.median(bed)))
+    tangent = np.gradient(line, axis=0)
+    tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
+    normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])  # to the left
+    reach = 0.5 * max(domain[1] - domain[0], domain[3] - domain[2])
+    distances = np.arange(0.0, reach, 0.5 * step)
+    widths = []
+    for sign in (1.0, -1.0):
+        found = np.full(len(line), np.nan)
+        for k, d in enumerate(distances):
+            probe = line + sign * d * normal
+            inside = (
+                (probe[:, 0] >= xs[0])
+                & (probe[:, 0] <= xs[-1])
+                & (probe[:, 1] >= ys[0])
+                & (probe[:, 1] <= ys[-1])
+            )
+            height = map_coordinates(z, to_index(probe), order=1, mode="nearest")
+            dry = (height > level) | ~inside
+            new = np.isnan(found) & dry
+            found[new] = d
+            if not np.isnan(found).any() or k == len(distances) - 1:
+                break
+        found[np.isnan(found)] = distances[-1]
+        widths.append(found)
+    return Thalweg(line, bed, widths[0], widths[1], float(level))
+
+
+def from_thalweg(
+    thalweg: Thalweg, margin: float = 0.0, count: int = 12, width: float | None = None, **options
+) -> Corridor:
+    """A corridor along the thalweg: its banks where the water reaches plus
+    ``margin`` (m) on each side (or ``width`` / 2 on each side), smoothed along the
+    river, ``count`` points on each bank."""
+    from scipy.ndimage import median_filter
+
+    line = thalweg.line
+    n = len(line)
+    if width is not None:
+        left = right = np.full(n, 0.5 * float(width))
+    else:
+        size = max(3, n // 15) | 1
+        left = median_filter(thalweg.left, size=size, mode="nearest") + float(margin)
+        right = median_filter(thalweg.right, size=size, mode="nearest") + float(margin)
+        left = _smooth(left, n / 30)
+        right = _smooth(right, n / 30)
+    tangent = np.gradient(line, axis=0)
+    tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
+    normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])
+    left_bank = line + left[:, None] * normal
+    right_bank = line - right[:, None] * normal
+    mean_width = float(np.mean(left + right))
+    options.setdefault("cells_across", 20)
+    options.setdefault("bed", "geo")
+    length = float(lengths(line)[-1])
+    options.setdefault(
+        "cells_along", max(int(round(length / max(mean_width / options["cells_across"], 1e-9))), 4)
+    )
+    count = int(min(max(count, MIN_POINTS), MAX_POINTS))
+    return Corridor(resample(left_bank, count), resample(right_bank, count), **options)
+
+
 # ==================================================================== the mesh
 def winslow(x: np.ndarray, y: np.ndarray, iterations: int) -> tuple[np.ndarray, np.ndarray]:
     """Interior nodes moved by Winslow's elliptic grid equations (Jacobi sweeps),

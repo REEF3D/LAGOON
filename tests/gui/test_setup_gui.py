@@ -547,3 +547,21 @@ def test_the_river_tab_lays_a_corridor_and_makes_its_grid(window, flume):
     assert window.session.corridor().left[0].tolist() == [1.0, 1.5]
     tab.remove()
     assert window.session.corridor() is None and not tab.form.isEnabled()
+
+
+def test_the_river_tab_follows_the_thalweg(window, flume):
+    import numpy as np
+
+    x, y = np.linspace(0, 10, 41), np.linspace(0, 2, 9)
+    gx, gy = np.meshgrid(x, y)
+    z = 0.2 + 0.5 * (gy - 1.0) ** 2  # a channel along y = 1
+    np.savetxt(flume / "geo.dat", np.column_stack([gx.ravel(), gy.ravel(), z.ravel()]))
+    window.open_case(flume)
+    tab = window.setup_panel.river_tab
+    assert tab.auto_box.isEnabled()
+    tab.margin.setValue(0.1)
+    tab.auto_points.setValue(10)
+    tab.follow_thalweg()
+    corridor = window.session.corridor()
+    assert corridor is not None and len(corridor.left) == 10 and tab.edit_button.isChecked()
+    assert abs(float(np.mean(corridor.left[:, 1] + corridor.right[:, 1])) / 2 - 1.0) < 0.2

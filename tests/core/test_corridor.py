@@ -164,3 +164,55 @@ def test_a_folding_grid_is_refused(river):
     other.open_case(river)
     with pytest.raises(ValueError, match="no river corridor"):
         other.make_corridor_grid()
+
+
+def valley():
+    """A valley 400 x 200 m: a channel 20 m wide meandering about y = 100 + 40 sin(2π x
+    / 250), its bed 1 m below 0 in the middle, the floodplain at 1 m and above."""
+    x, y = np.linspace(0, 400, 201), np.linspace(0, 200, 101)
+    gx, gy = np.meshgrid(x, y)
+    centre = 100 + 40 * np.sin(2 * np.pi * gx / 250)
+    d = np.abs(gy - centre)
+    z = np.where(d < 10, -1.0 + 0.5 * (d / 10) ** 2, 1.0 + 0.005 * (d - 10)) - 0.002 * gx
+    return np.column_stack([gx.ravel(), gy.ravel(), z.ravel()])
+
+
+def test_the_thalweg_and_a_corridor_along_it():
+    domain = (0, 400, 0, 200, -2, 3)
+    thalweg = C.find_thalweg(valley(), domain, level=0.0)
+    centre = 100 + 40 * np.sin(2 * np.pi * thalweg.line[:, 0] / 250)
+    assert np.abs(thalweg.line[:, 1] - centre).max() < 3.0  # in the channel all along
+    assert thalweg.line[0, 0] < 2 and thalweg.line[-1, 0] > 398  # from x min to x max
+    assert 7 < np.median(thalweg.left) < 12 and 7 < np.median(thalweg.right) < 12
+    corridor = C.from_thalweg(thalweg, margin=5.0, count=16, smoothing=50)
+    assert len(corridor.left) == 16 and corridor.bed == "geo"
+    offset = corridor.left[:, 1] - (100 + 40 * np.sin(2 * np.pi * corridor.left[:, 0] / 250))
+    assert (offset > 8).all() and (offset < 25).all()  # the water's edge and 5 m more
+    x, y = corridor.grid()
+    assert C.quality(x, y).folded == 0
+    wide = C.from_thalweg(thalweg, width=60.0)
+    across = np.linalg.norm(wide.bank_line("left") - wide.right[0], axis=1).min()
+    assert across == pytest.approx(60, rel=0.05)
+
+
+def test_a_case_gets_a_corridor_along_its_thalweg(river):
+    (river / "control.txt").write_text(
+        "C 11 1\nC 14 2\nB 1 2.0\nB 10 0.0 400.0 0.0 200.0 0.0 1.0\nG 10 1\nM 10 1\n"
+    )
+    (river / "ctrl.txt").write_text("A 10 2\nF 60 0.0\n")
+    session = Session()
+    session.open_case(river)
+    with pytest.raises(ValueError, match="geo.dat"):
+        session.auto_corridor()
+    np.savetxt(river / "geo.dat", valley(), fmt="%.4f")
+    session.input_file("control.txt")  # the set-up reads geo.dat again
+    session.data.case_setup(session._case_id(None)).geo_changed()
+    thalweg = session.auto_corridor(margin=5.0, points=14)
+    assert thalweg.level == 0.0  # F 60
+    corridor = session.corridor()
+    assert len(corridor.left) == 14 and corridor.left[0, 0] < 5
+    assert "session.auto_corridor(margin=5.0, level=0.0, points=14, sides=(1, 4))" in (
+        session.to_script()
+    )
+    session.move_corridor_point("left", 3, *corridor.left[3] + 2.0)  # then dragged
+    assert session.make_corridor_grid().folded == 0

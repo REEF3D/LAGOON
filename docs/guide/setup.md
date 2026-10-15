@@ -192,7 +192,14 @@ and the curvilinear grid between them that REEF3D's SFLOW and NHFLOW read with
 - **Start** lays a straight corridor along the domain (a tenth in from each side
   across), **Draw** one over an area you drag in the 2D top view; it flows along the
   area's longer side, with 12 points on each bank.
-- **Drag points** (on after Start and Draw): press on a point of a bank in the 2D
+- **Follow thalweg** (with geo.dat) lays the corridor along the river in the bed:
+  the thalweg, the path along the deepest channel, from the deepest point of the
+  inflow side (C 1x = 1) to the deepest of the outflow side (C 1x = 2; without
+  them, from end to end of the domain's longer axis), smoothed. Its banks lie where
+  the water reaches across it (*Water level*: F 60 by default) plus the *Margin*,
+  smoothed along the river, with *Points per bank* points to drag afterwards. The
+  bed of its grid comes from geo.dat.
+- **Drag points** (on after Start, Draw and Follow thalweg): press on a point of a bank in the 2D
   top view and drag it; the bank follows at once, drawn over everything while you
   drag. Pressing anywhere else pans the view as always; Esc stops. Each point moved
   is an undo step.
@@ -201,6 +208,7 @@ and the curvilinear grid between them that REEF3D's SFLOW and NHFLOW read with
 - **Curve**: *through the points* (a centripetal Catmull-Rom spline: the bank passes
   every point, without loops or overshoot between close points) or *smooth* (a
   clamped cubic B-spline the points pull on; it passes the first and the last).
+  The banks and their points are drawn in yellow.
 - **Reverse flow** swaps upstream and downstream. The bank on the left looking
   downstream is the *left* bank; "upstream" is written at the corridor's start.
 
@@ -225,7 +233,8 @@ where the nodes are, not DIVEMesh's logical box.
 The corridor is kept in `corridor.json` in the case folder. In a script:
 
 ```python
-session.start_corridor([0, 200, 0, 20], points=12)
+session.start_corridor([0, 200, 0, 20], points=12)   # or along the thalweg:
+session.auto_corridor(margin=5.0, points=12)
 session.move_corridor_point("left", 5, 90.0, 28.0)
 session.set_corridor_options(points=16, curve="bspline", cells_along=100,
                              cells_across=10, smoothing=100, slope=0.001)
