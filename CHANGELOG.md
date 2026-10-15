@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Porous structures in the set-up
+
+- The Set-up panel has a **Porous** tab: add, draw and change the porous structures
+  (VRANS) of a case. REEF3D::CFD: boxes (B 270), vertical cylinders (B 274),
+  wedges along x and y (B 281, B 282) and plates (B 291), each with its porosity,
+  d50, α and β. REEF3D::NHFLOW: boxes, cylinders, spheres and wedges (B 210 –
+  B 218), one material for all of them (B 201, added with the first one). *Add*
+  puts one in the middle of the domain from the bed to the still water, *Draw*
+  drags its plan in the 2D top view; the selected one lights up in the 3D view.
+  In a script: `session.add_porous("B 270", [...])`.
+- The set-up draws wedges (B 217, B 218, B 281, B 282) as wedges and B 274 and B 291
+  too, and the ctrl.txt tab names the values of B 270 – B 291.
+
 ### The frame number typed
 
 - The player's frame number can be typed: click it, type the frame and press

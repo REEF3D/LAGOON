@@ -63,11 +63,13 @@ class ViewportPlaceholder(QWidget):
     probeChanged = Signal(object)
     #: the domain drawn in the 2D top view (x0, x1, y0, y1); never sent here
     domainDrawn = Signal(object)
+    #: another area drawn there: (purpose, (x0, x1, y0, y1)); never sent here
+    areaDrawn = Signal(str, object)
     #: the model turned on the map (degrees, about the model point); never sent here
     modelTurned = Signal(float, object)
 
-    def start_domain_drawing(self, case_id: str = "") -> None:
-        self.statusMessage.emit("Drawing the domain needs the 3D view (no GPU here)")
+    def start_domain_drawing(self, case_id: str = "", purpose: str = "domain") -> None:
+        self.statusMessage.emit(f"Drawing the {purpose} needs the 3D view (no GPU here)")
 
     def stop_domain_drawing(self) -> None:
         pass
@@ -222,6 +224,9 @@ class Viewport3D(QWidget):
     _background_progress = Signal(str, int, int)
     #: the domain drawn in the 2D top view: (x0, x1, y0, y1) in model coordinates
     domainDrawn = Signal(object)
+    #: another area drawn there (start_domain_drawing with a purpose other than
+    #: "domain", e.g. "porous structure"): (purpose, (x0, x1, y0, y1))
+    areaDrawn = Signal(str, object)
     #: the model turned on the map with Shift + drag: degrees (counter-clockwise),
     #: about the model point (x, y)
     modelTurned = Signal(float, object)
@@ -943,8 +948,9 @@ class Viewport3D(QWidget):
         else:
             key, modifiers = getattr(event, "key", ""), getattr(event, "modifiers", ())
         if key == "Escape" and self._drawing is not None:
+            purpose = self._drawing.get("purpose", "domain")
             self.stop_domain_drawing()
-            self.statusMessage.emit("Stopped drawing the domain")
+            self.statusMessage.emit(f"Stopped drawing the {purpose}")
             return
         if key in KEY_VIEWS:
             view = KEY_VIEWS[key]
@@ -971,21 +977,26 @@ class Viewport3D(QWidget):
             self.redraw()
 
     # ------------------------------------------------------------- drawing the domain
-    def start_domain_drawing(self, case_id: str = "") -> None:
+    def start_domain_drawing(self, case_id: str = "", purpose: str = "domain") -> None:
         """The next drag in the 2D top view draws the domain (domainDrawn); with Shift
         it turns the model on the map about the domain's centre (modelTurned). Esc
-        stops."""
+        stops. With another ``purpose`` ("porous structure") the drag draws an area
+        for it (areaDrawn), Shift does nothing more."""
         if not (self.two_d and self.two_d_side == "top"):
             self.set_2d(True, "top")
-        self._drawing = {"start": None, "case": case_id}
+        self._drawing = {"start": None, "case": case_id, "purpose": purpose}
         try:
             self.controller.enabled = False  # the drag draws, it does not pan
         except AttributeError:
             pass
         self.canvas.setCursor(Qt.CrossCursor)
-        self.statusMessage.emit(
-            "Drag the domain in the 2D view · Shift + drag turns the model on the map · Esc stops"
-        )
+        if purpose == "domain":
+            self.statusMessage.emit(
+                "Drag the domain in the 2D view · Shift + drag turns the model on the map"
+                " · Esc stops"
+            )
+        else:
+            self.statusMessage.emit(f"Drag the {purpose} in the 2D view · Esc stops")
 
     def stop_domain_drawing(self) -> None:
         if self._drawing is None:
@@ -1027,7 +1038,9 @@ class Viewport3D(QWidget):
             modifiers = getattr(event, "modifiers", ()) or ()
             box = self._domain_box(drawing.get("case", ""))
             drawing["start"] = point
-            drawing["turn"] = "Shift" in modifiers and box is not None
+            drawing["turn"] = (
+                "Shift" in modifiers and box is not None and drawing.get("purpose") == "domain"
+            )
             drawing["box"] = box
             return
         start = drawing.get("start")
@@ -1053,9 +1066,10 @@ class Viewport3D(QWidget):
             outline = np.array(
                 [[sx, sy, level], [px, sy, level], [px, py, level], [sx, py, level]], float
             )
+            what = str(drawing.get("purpose", "domain"))
             self.statusMessage.emit(
-                f"Domain x {min(sx, px):.1f} … {max(sx, px):.1f} m, "
-                f"y {min(sy, py):.1f} … {max(sy, py):.1f} m"
+                f"{what[0].upper()}{what[1:]} x {min(sx, px):.2f} … {max(sx, px):.2f} m, "
+                f"y {min(sy, py):.2f} … {max(sy, py):.2f} m"
             )
         if kind == "pointer_move":
             self.view.set_outline(outline)
@@ -1063,6 +1077,7 @@ class Viewport3D(QWidget):
             return
         # released: the domain, or the turn
         turn, angle, centre = drawing.get("turn"), drawing.get("angle", 0.0), drawing.get("centre")
+        purpose = drawing.get("purpose", "domain")
         self.stop_domain_drawing()
         if turn:
             if angle:
@@ -1070,7 +1085,11 @@ class Viewport3D(QWidget):
             return
         (sx, sy), (px, py) = start, point
         if abs(px - sx) > 0 and abs(py - sy) > 0:
-            self.domainDrawn.emit((min(sx, px), max(sx, px), min(sy, py), max(sy, py)))
+            area = (min(sx, px), max(sx, px), min(sy, py), max(sy, py))
+            if purpose == "domain":
+                self.domainDrawn.emit(area)
+            else:
+                self.areaDrawn.emit(purpose, area)
 
     def _on_move(self, event) -> None:
         if self._drawing is not None and self._drawing.get("start") is not None:

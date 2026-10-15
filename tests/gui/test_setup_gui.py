@@ -161,7 +161,9 @@ def test_the_map_tab_places_the_case(window, flume, monkeypatch):
     window.open_case(flume)
     panel = window.setup_panel
     tab = panel.map_tab
-    assert panel.tabs.tabText(2) == "Map" and not tab.remove_button.isEnabled()
+    assert (
+        panel.tabs.tabText(panel.tabs.indexOf(tab)) == "Map" and not tab.remove_button.isEnabled()
+    )
     assert tab.place_button.isEnabled() and "Find the place" in tab.hint.text()
     assert not tab.session.is_draft()
     # the domain's centre at Trondheim: the UTM zone is chosen
@@ -443,3 +445,43 @@ def test_the_coast_of_a_download_and_files_over_it(window, tmp_path, monkeypatch
     tab.overlay_list.setCurrentRow(0)
     tab.remove_overlay()
     assert tab.overlay_list.count() == 1 and tab._overlays[0]["path"] == str(atl24)
+
+
+def test_the_porous_tab_adds_draws_and_changes_structures(window, flume):
+    window.open_case(flume)
+    panel = window.setup_panel
+    tab = panel.porous_tab
+    assert panel.tabs.tabText(panel.tabs.indexOf(tab)) == "Porous"
+    # NHFLOW (A 10 5): its shapes, one material for all (B 201)
+    assert tab.kind_box.count() == 6 and tab.kind_box.currentData() == "B 210"
+    assert "B 201" in tab.note.text() and not tab.remove_button.isEnabled()
+    assert tab.add() == 0
+    ctrl = window.session.input_file("ctrl.txt")
+    assert ctrl.values("B 201") == [0.4, 0.05, 500.0, 2.0] and len(ctrl.entries("B 210")) == 1
+    assert tab.tree.topLevelItemCount() == 1 and tab.remove_button.isEnabled()
+    assert len(tab._shape_fields) == 6 and tab._material_fields[0].text() == "0.4"
+    assert "B 201" in tab.material_box.title()
+    # a value changed in the form
+    tab._shape_fields[1].setText("6")
+    tab._commit_shape()
+    assert window.session.input_file("ctrl.txt").values("B 210")[1] == 6.0
+    tab._material_fields[0].setText("0.45")
+    tab._commit_material()
+    assert window.session.input_file("ctrl.txt").values("B 201")[0] == 0.45
+    tab._material_fields[0].setText("1.5")
+    tab._commit_material()
+    assert "porosity" in panel.message.text()
+    # drawn in the 2D view: a vertical cylinder in the area, snapped to the cells
+    index = tab.kind_box.findData("B 213")
+    tab.kind_box.setCurrentIndex(index)
+    tab.draw()
+    window.viewport.areaDrawn.emit("porous structure", (3.02, 4.1, 0.4, 1.6))
+    values = window.session.input_file("ctrl.txt").values("B 213")
+    assert values == [3.5, 1.0, 0.0, 0.6, 0.5]
+    assert tab.tree.topLevelItemCount() == 2 and tab.selected().kind.code == "B 213"
+    tab.remove_selected()
+    assert "B 213" not in window.session.input_file("ctrl.txt")
+    assert tab.tree.topLevelItemCount() == 1
+    # SFLOW has none
+    window.session.set_input("ctrl.txt", "A 10", [2])
+    assert not tab.add_button.isEnabled() and "no porous structures" in tab.note.text()

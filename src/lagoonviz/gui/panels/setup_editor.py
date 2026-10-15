@@ -11,7 +11,9 @@ Every change is a command of the session (undo, script); the files are written
 with *Save*. *Run DIVEMesh* saves control.txt and runs DIVEMesh in the case folder,
 its output in the last tab; its grid, solids and bed then show in the set-up.
 The *Map* tab places the case on the Earth: its georeference, the domain drawn on
-a background map, and geo.dat from a bathymetry file (``map_setup``).
+a background map, and geo.dat from a bathymetry file (``map_setup``). The *Porous*
+tab adds, draws and changes porous structures (``porous_setup``), the *Sea* tab
+reads the sea at the case (``sea_setup``).
 """
 
 from __future__ import annotations
@@ -47,6 +49,7 @@ from lagoonviz.core.data.controlfile import CommandInfo, catalog_for, format_val
 from lagoonviz.core.divemesh_run import LOG, divemesh_command, find_divemesh
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.panels.map_setup import MapTab
+from lagoonviz.gui.panels.porous_setup import PorousTab
 from lagoonviz.gui.panels.sea_setup import SeaTab
 from lagoonviz.gui.theme import COLORS
 
@@ -451,6 +454,9 @@ class SetupPanel(QWidget):
         for name, editor in self.editors.items():
             self.tabs.addTab(editor, TITLES[name])
             editor.selected.connect(lambda code, n, f=name: self._highlight(f, code, n))
+        self.porous_tab = PorousTab(self)
+        self.porous_tab.message.connect(self.status)
+        self.tabs.addTab(self.porous_tab, "Porous")
         self.map_tab = MapTab(self)
         self.map_tab.message.connect(self.status)
         self.tabs.addTab(self.map_tab, "Map")
@@ -508,6 +514,8 @@ class SetupPanel(QWidget):
         for index, name in enumerate(FILES):
             self.tabs.setTabText(index, TITLES[name] + (" *" if name in modified else ""))
         self.save_button.setEnabled(bool(modified))
+        if hasattr(self, "porous_tab"):
+            self.porous_tab.refresh()
         if hasattr(self, "map_tab"):
             self.map_tab.refresh()
         if hasattr(self, "sea_tab"):
@@ -549,7 +557,9 @@ class SetupPanel(QWidget):
             self.session.data.set_highlight(self.case_id, file, code, occurrence)
 
     def _tab_changed(self, index: int) -> None:
-        if index >= len(FILES) and self.case_id:
+        if self.tabs.widget(index) is self.porous_tab:
+            self.porous_tab.highlight()  # its selected structure
+        elif index >= len(FILES) and self.case_id:
             self.session.data.set_highlight(self.case_id, "", "")
         if self.tabs.widget(index) is self.map_tab and not self.case_id:
             self.map_tab.start_default()  # no case: start at Trondheim, on the map

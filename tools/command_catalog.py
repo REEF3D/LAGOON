@@ -350,6 +350,64 @@ def read_source(path: Path) -> dict[str, dict]:
     return found
 
 
+#: commands the guides do not describe yet, as REEF3D's reader and vrans_ini.cpp
+#: take them: (title, parameter names, modules, text)
+_MATERIAL = ["n", "d_50", "α", "β"]
+_VRANS = (
+    "Porosity n, mean grain diameter d_50 in m and the linear and nonlinear "
+    "resistance coefficients α and β follow the coordinates in m."
+)
+FROM_READER = {
+    "B 270": (
+        "VRANS porous box",
+        ["x_start", "x_end", "y_start", "y_end", "z_start", "z_end", *_MATERIAL],
+        "C",
+        _VRANS,
+    ),
+    "B 274": (
+        "VRANS porous vertical cylinder",
+        ["x_center", "y_center", "z_start", "z_end", "radius", *_MATERIAL],
+        "C",
+        _VRANS,
+    ),
+    "B 281": (
+        "VRANS porous wedge in x-direction",
+        ["x_start", "x_end", "y_start", "y_end", "z_start", "z_end", *_MATERIAL],
+        "C",
+        "The top runs from z_start at x_start to z_end at x_end, the base at the lower. " + _VRANS,
+    ),
+    "B 282": (
+        "VRANS porous wedge in y-direction",
+        ["x_start", "x_end", "y_start", "y_end", "z_start", "z_end", *_MATERIAL],
+        "C",
+        "The top runs from z_start at y_start to z_end at y_end, the base at the lower. " + _VRANS,
+    ),
+    "B 291": (
+        "VRANS porous plate in x-direction",
+        ["x_start", "x_end", "y_start", "y_end", "z_start", "z_end", "d", *_MATERIAL],
+        "C",
+        "A band of thickness d in m above the line from z_start at x_start to z_end at "
+        "x_end. " + _VRANS,
+    ),
+}
+
+
+def describe_from_reader(commands: dict) -> dict:
+    """Titles, names and texts for commands the guides do not describe yet
+    (FROM_READER); the guide's own description, once there, wins."""
+    for code, (title, names, modules, text) in FROM_READER.items():
+        entry = commands.get(code)
+        if entry is None or entry.get("documented", True):
+            continue
+        entry.update(
+            title=title,
+            params=[{"name": n, "type": "double"} for n in names],
+            modules=modules,
+            text=text + " Not in the user guide yet.",
+        )
+    return commands
+
+
 def merge(catalog: dict, source: dict[str, dict]) -> dict:
     """The guide's commands with the reader's counts; commands only the reader knows
     are added, undocumented; commands the reader no longer has are marked."""
@@ -375,6 +433,7 @@ def merge(catalog: dict, source: dict[str, dict]) -> dict:
             "text": "Not in the user guide yet.",
             "documented": False,
         }
+    describe_from_reader(commands)
     catalog["commands"] = dict(
         sorted(commands.items(), key=lambda kv: (kv[0].split()[0], int(kv[0].split()[1])))
     )
