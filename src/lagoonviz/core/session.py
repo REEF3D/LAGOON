@@ -1058,17 +1058,24 @@ class Session:
         self.data.backgrounds.set_preview(case_id, tried)
         self.scene.georef_tried(case_id)
 
-    def set_rotation(self, rotation_deg: float, case: str | None = None) -> None:
-        """Turn a case's georeference to ``rotation_deg`` about the model's origin
-        (its other values kept): the model turns on the map about its (0, 0)."""
+    def set_rotation(self, rotation_deg: float, about=None, case: str | None = None) -> None:
+        """Turn a case's georeference to ``rotation_deg`` about a model point (x, y):
+        that point stays where it is on the map (the Map tab's slider: the middle of
+        the view). Default: the model's origin."""
         case_id = self._case_id(case)
         current = self.georef(case_id)
         if current is None:
             raise ValueError(f"{case_id}: set the georeference first (set_georef)")
-        turned = current.replace(rotation_deg=float(rotation_deg))
+        if about is None:
+            turned = current.replace(rotation_deg=float(rotation_deg))
+        else:
+            about = [round(float(about[0]), 6), round(float(about[1]), 6)]
+            turned = current.rotated(float(rotation_deg), (about[0], about[1]))
         if turned == current:
             return
         script = f"session.set_rotation({float(rotation_deg)!r}"
+        if about is not None:
+            script += f", about={about!r}"
         script += f", case={case!r})" if case else ")"
         self._set_georef(case_id, turned, script, "Turn the georeference")
 

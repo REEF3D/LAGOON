@@ -92,8 +92,8 @@ GeoTIFF and only the part of a large one that is needed).
   offers the others, those near the case first.
 - **Georeference**: the CRS, the origin, the rotation, the vertical datum;
   *Apply* writes `georef.json`, *Remove* takes it away. The **rotation slider**
-  under the rotation turns the georeference about the model's origin as you drag
-  it: the map and north turn with it at once (the map made before, turned: nothing
+  under the rotation turns the georeference about the middle of the view as you
+  drag it (what is in the middle of the screen stays there on the map): the map and north turn with it at once (the map made before, turned: nothing
   is fetched or written while you drag), and it is written when you let go (the
   arrow keys: 1° at a time, page up and down: 15°). **North up** turns the 3D view
   so north points up the screen (as *North up* over the view, or N); from the top

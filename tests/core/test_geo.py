@@ -497,6 +497,13 @@ def test_a_rotation_tried_turns_the_map_and_north(fjord, tmp_path):
     assert session.to_script().splitlines()[-1] == "session.set_rotation(40.0)"
     session.undo()
     assert session.georef() == GEOREF
+    # about a point (the middle of the view): it stays where it is on the map
+    there = GEOREF.to_world(700.0, 100.0)
+    session.set_rotation(55.0, about=(700.0, 100.0))
+    assert session.georef().to_world(700.0, 100.0) == pytest.approx(there)
+    assert session.to_script().splitlines()[-1] == (
+        "session.set_rotation(55.0, about=[700.0, 100.0])"
+    )
 
 
 def test_a_store_converted_keeps_the_case_georeference(tmp_path):

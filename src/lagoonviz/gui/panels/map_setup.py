@@ -277,9 +277,13 @@ class MapTab(QWidget):
         self.rotation = _spin(-360.0, 360.0, 3, " °")
         self.rotation.setToolTip("Counter-clockwise from east to the model's x-axis")
         self.rotation.valueChanged.connect(self._describe_bearing)
+        #: the middle of the view (model x, y) or None: set by the window
+        self.view_centre = None
+        #: the point a rotation slider turns about while it is dragged
+        self._pivot = None
         self.rotation_slider = _rotation_slider(
-            "Drag to turn the georeference about the model's origin and see it on the map "
-            "as you go; it is written when let go"
+            "Drag to turn the georeference about the middle of the view and see it on the "
+            "map as you go; it is written when let go"
         )
         self.rotation_slider.valueChanged.connect(
             lambda v: self._slid(self.rotation_slider, v, about_origin=True)
@@ -905,9 +909,11 @@ class MapTab(QWidget):
 
     def _slid(self, slider: QSlider, value: int, about_origin: bool, released=False) -> None:
         """A rotation slider moved: while it is dragged the model is shown turned on
-        the map (the georeference's rotation about the model's origin, or the model
-        about the domain's centre); let go (or moved by the keys), it is written."""
+        the map (the georeference's rotation about the middle of the view, or the
+        model about the domain's centre); let go (or moved by the keys), it is
+        written."""
         if not self.case_id:
+            self._pivot = None
             return
         georef = self.session.data.georef(self.case_id)
         degrees = value / 10.0
@@ -919,12 +925,19 @@ class MapTab(QWidget):
             self._describe_bearing(degrees)
         if georef is None:
             return
-        about = None
-        if not about_origin:
-            domain = self.session.data.backgrounds.domain(self.case_id)
-            if domain is not None:
-                about = ((domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2)
-        if slider.isSliderDown() and not released:
+        domain = self.session.data.backgrounds.domain(self.case_id)
+        middle = ((domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2) if domain else None
+        if about_origin:  # the middle of the view, fixed for the whole drag
+            if self._pivot is None:
+                found = self.view_centre() if self.view_centre is not None else None
+                self._pivot = found if found is not None else middle
+            about = self._pivot
+        else:
+            about = middle
+        dragging = slider.isSliderDown() and not released
+        if not dragging:
+            self._pivot = None
+        if dragging:
             try:
                 self.session.try_rotation(degrees, about, case=self.case_id)
             except ValueError as error:
@@ -936,7 +949,7 @@ class MapTab(QWidget):
 
         def keep():
             if about_origin:
-                self.session.set_rotation(degrees, case=self.case_id)
+                self.session.set_rotation(degrees, about=about, case=self.case_id)
             else:
                 self.session.turn_model(degrees, case=self.case_id)
             self.session.try_rotation(None, case=self.case_id)

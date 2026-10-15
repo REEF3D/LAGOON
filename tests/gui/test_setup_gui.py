@@ -604,6 +604,12 @@ def test_the_rotation_sliders_show_the_turn_and_keep_it_when_let_go(window, flum
     tab.rotation_slider.setSliderDown(False)
     tab.rotation_slider.sliderReleased.emit()
     assert session.georef().rotation_deg == 40.0
+    # about the middle of the view (no 3D view here: the domain's centre)
+    tab.view_centre = lambda: (2.0, 0.5)
+    spot = session.georef().to_world(2.0, 0.5)
+    tab.rotation_slider.setValue(450)  # by the keys: kept at once
+    assert session.georef().rotation_deg == 45.0
+    assert session.georef().to_world(2.0, 0.5) == pytest.approx(spot)
     assert session.data.backgrounds.shown_georef(case) == session.georef()
     # the domain's slider: about the domain's centre
     centre = session.georef().to_world(5.0, 1.0)

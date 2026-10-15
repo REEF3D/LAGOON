@@ -4,12 +4,12 @@
 
 ### Turning the model on the map as you look
 
-- The Map tab has **sliders** for the georeference's rotation (about the model's
-  origin) and for turning the domain (about its centre): while one is dragged the
+- The Map tab has **sliders** for the georeference's rotation (about the middle of
+  the view) and for turning the domain (about its centre): while one is dragged the
   map and north turn at once (the map made before, turned; nothing fetched or
   written), and the turn is written when it is let go. From the top the view keeps
   north up, so the map stays and the model turns. **North up** sits beside the
-  rotation too. In a script: `session.set_rotation(40.0)`, and
+  rotation too. In a script: `session.set_rotation(40.0, about=[x, y])`, and
   `session.try_rotation(40.0)` shows a rotation without keeping it.
 - After the georeference changes, the map made before is shown turned to the new
   one until the new map is made, instead of the old one as it was.

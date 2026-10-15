@@ -82,6 +82,9 @@ class ViewportPlaceholder(QWidget):
     def start_corridor_editing(self, case_id: str = "") -> None:
         self.statusMessage.emit("Dragging the corridor's points needs the 3D view (no GPU here)")
 
+    def view_centre(self) -> tuple[float, float] | None:
+        return None
+
     def stop_corridor_editing(self) -> None:
         pass
 
@@ -1184,6 +1187,23 @@ class Viewport3D(QWidget):
                 self.corridorPointMoved.emit(edit["case"], drag["side"], drag["index"], x, y)
             return True
         return False
+
+    def view_centre(self) -> tuple[float, float] | None:
+        """The model point (x, y) in the middle of the view: from the top, the one
+        under the middle of the screen; else where the line of sight through it meets
+        the level of the middle of the model."""
+        try:
+            size = tuple(self.canvas.get_logical_size())
+        except AttributeError:
+            size = (self.canvas.width(), self.canvas.height())
+        point = self.view.plan_point(size[0] / 2, size[1] / 2, size)
+        if point is not None:
+            return point
+        try:
+            centre = self.view._view_centre()
+        except Exception:  # noqa: BLE001 (nothing shown yet)
+            return None
+        return float(centre[0]), float(centre[1])
 
     def _plan_point(self, event) -> tuple[float, float] | None:
         try:
