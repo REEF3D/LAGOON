@@ -25,6 +25,7 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
@@ -316,8 +317,20 @@ class TimelinePanel(QWidget):
         # the play range: dragged on the slider, kept in the session when let go
         self.slider.rangeReleased.connect(self._store_range)
 
+        # "t = 12.50 s  (frame [ 25 ] / 120)": the frame number can be typed (Return
+        # goes there); the time and the total around it are labels
         self.label = QLabel()
-        self.label.setMinimumWidth(150)
+        self.label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.frame_box = QSpinBox()
+        self.frame_box.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.frame_box.setKeyboardTracking(False)  # goes there on Return or leaving
+        self.frame_box.setCorrectionMode(QAbstractSpinBox.CorrectToNearestValue)
+        self.frame_box.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.frame_box.setToolTip("Type a frame number and press Return to go there")
+        self.frame_box.valueChanged.connect(self._on_frame_typed)
+        # typed and gone there: the box follows the time again (playing, stepping)
+        self.frame_box.editingFinished.connect(self.frame_box.clearFocus)
+        self.total_label = QLabel()
 
         self.fps = QSpinBox()
         self.fps.setRange(1, MAX_FPS)
@@ -342,6 +355,8 @@ class TimelinePanel(QWidget):
         layout.addWidget(self.path_button)
         layout.addWidget(self.slider, 1)
         layout.addWidget(self.label)
+        layout.addWidget(self.frame_box)
+        layout.addWidget(self.total_label)
         layout.addWidget(self.fps)
         layout.addWidget(self.end_label)
         layout.addWidget(self.end)
@@ -403,6 +418,11 @@ class TimelinePanel(QWidget):
         self.slider.setRange(self.first_frame, max(n - 1, 0) if n else STEPS)
         self.slider.setPageStep(max(1, self.steps.size // 20) if n else 50)
         self.slider.blockSignals(False)
+        self.frame_box.blockSignals(True)
+        self.frame_box.setRange(self.first_frame, max(n - 1, self.first_frame))
+        self.frame_box.blockSignals(False)
+        self.frame_box.setVisible(bool(n))
+        self.total_label.setVisible(bool(n))
         self._fit_label()
         self._show_time(self.session.scene.time)
         self.update_keys()
@@ -481,18 +501,36 @@ class TimelinePanel(QWidget):
         self.update_keys()
 
     def _fit_label(self) -> None:
-        """A fixed width for the time label, as wide as its longest text. When it took
-        the width of each text, the slider beside it changed width with every frame and
-        its handle jiggled back and forth while playing."""
+        """Fixed widths for the time label, the frame box and the total, as wide as
+        their longest texts. When they took the width of each text, the slider beside
+        them changed width with every frame and its handle jiggled back and forth
+        while playing."""
         end = max(self.end_time, 1.0)
-        last = max(self.n_frames - 1, 1)
+        last = "8" * len(str(max(self.n_frames - 1, 1)))
         digits = "8" * len(f"{end:.2f}".split(".")[0])
-        sample = (
-            f"t = {digits}.88 s  (frame {'8' * len(str(last))} / {'8' * len(str(last))})"
-            if self.unit == "s" or not self.has_frames
-            else f"frame {'8' * len(str(last))} / {'8' * len(str(last))}"
-        )
-        self.label.setFixedWidth(self.label.fontMetrics().horizontalAdvance(sample) + 12)
+        if not self.has_frames:
+            sample = f"t = {digits}.88 s"
+        else:
+            sample = f"t = {digits}.88 s  (frame" if self.unit == "s" else "frame"
+        metrics = self.label.fontMetrics()
+        self.label.setFixedWidth(metrics.horizontalAdvance(sample) + 8)
+        self.total_label.setFixedWidth(metrics.horizontalAdvance(f"/ {last})") + 8)
+        box = self.frame_box.fontMetrics().horizontalAdvance(last + "8")
+        self.frame_box.setFixedWidth(box + 12)
+
+    def position_text(self) -> str:
+        """Where the timeline is, as one line: "t = 1.00 s  (frame 2 / 2)"."""
+        if not self.has_frames:
+            return self.label.text()
+        frame = self.frame_box.value()
+        if self.unit == "s":
+            return f"{self.label.text()} {frame} {self.total_label.text()}"
+        return f"frame {frame} {self.total_label.text()}"
+
+    def _on_frame_typed(self, frame: int) -> None:
+        """A frame number typed (Return, or the box left): go there."""
+        if self.has_frames:
+            self.go_to_frame(frame)
 
     # ------------------------------------------------------------- time
     def _index_of(self, time: float) -> int:
@@ -531,8 +569,13 @@ class TimelinePanel(QWidget):
             frame = self.frame_of(time)
             if not held:
                 self.slider.setValue(frame)
-            where = f"frame {frame} / {self.n_frames - 1}"
-            self.label.setText(f"t = {time:.2f} s  ({where})" if self.unit == "s" else where)
+            if not self.frame_box.hasFocus():  # not while a number is being typed
+                self.frame_box.blockSignals(True)
+                self.frame_box.setValue(frame)
+                self.frame_box.blockSignals(False)
+            seconds = self.unit == "s"
+            self.label.setText(f"t = {time:.2f} s  (frame" if seconds else "frame")
+            self.total_label.setText(f"/ {self.n_frames - 1}" + (")" if seconds else ""))
         else:
             if not held:
                 self.slider.setValue(round(min(time / self.end_time, 1.0) * STEPS))

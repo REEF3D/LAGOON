@@ -104,7 +104,7 @@ class DevRemote(QObject):
             "scene": window.session.scene.to_dict(),
             "viewport": getattr(window.viewport, "info", None) and window.viewport.info.text(),
             "status": window.statusBar().currentMessage(),
-            "timeline": window.timeline.label.text(),
+            "timeline": window.timeline.position_text(),
             "cache": {
                 "frames": len(window.session.data.cache),
                 "megabytes": round(window.session.data.cache.nbytes / 1e6, 1),

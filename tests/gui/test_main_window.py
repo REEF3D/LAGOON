@@ -140,8 +140,10 @@ def test_slider_keeps_its_width_while_playing(window, reef3d_run):
     widths = set()
     for frame in range(3):
         timeline.go_to_frame(frame)
-        widths.add(timeline.label.width())
-        assert timeline.label.sizeHint().width() <= timeline.label.width() + 1
+        parts = (timeline.label, timeline.frame_box, timeline.total_label)
+        widths.add(tuple(part.width() for part in parts))
+        for part in (timeline.label, timeline.total_label):
+            assert part.sizeHint().width() <= part.width() + 1
     assert len(widths) == 1
 
 
@@ -209,7 +211,13 @@ def test_open_case_fills_scene_and_timeline(window, reef3d_run):
     assert window.session.scene.time == 1
     timeline.go_to_frame(10)
     assert window.session.scene.time == 2
-    assert timeline.label.text() == "frame 2 / 2"
+    assert timeline.position_text() == "frame 2 / 2"
+    # the frame number typed: Return goes there
+    timeline.frame_box.lineEdit().setText("1")
+    timeline.frame_box.interpretText()
+    assert window.session.scene.time == 1 and timeline.frame_box.value() == 1
+    timeline.frame_box.setValue(99)  # past the end: the last frame
+    assert window.session.scene.time == 2
     timeline.slider.setValue(0)
     assert window.session.scene.time == 0
     assert "Open run" in window.act_undo.text()
@@ -224,7 +232,7 @@ def test_timeline_in_seconds_with_print_interval(window, tmp_path):
     window.open_case(make_run(tmp_path / "timed", print_interval=0.5, volume=False))
     window.timeline.go_to_frame(2)
     assert window.session.scene.time == 1.0
-    assert window.timeline.label.text() == "t = 1.00 s  (frame 2 / 2)"
+    assert window.timeline.position_text() == "t = 1.00 s  (frame 2 / 2)"
 
 
 def test_camera_keyframes(window, reef3d_run):

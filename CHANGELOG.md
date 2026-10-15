@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### The frame number typed
+
+- The player's frame number can be typed: click it, type the frame and press
+  Return (`t = 12.50 s  (frame [25] / 120)`); a number past the end goes to the last
+  frame.
+
 ### Following a running simulation
 
 - The result no longer vanishes when reloading while REEF3D writes its LAGOON store:
