@@ -39,7 +39,7 @@ from lagoonviz.core.commands import (
 )
 from lagoonviz.core.data.manager import DataManager
 from lagoonviz.core.data.reef3d import ROLES
-from lagoonviz.core.data.setup import has_inputs
+from lagoonviz.core.data.setup import has_inputs, reads_geo_dat
 from lagoonviz.core.kinds import KINDS
 from lagoonviz.core.scene import MODES, Scene
 
@@ -167,7 +167,9 @@ class Session:
             children.append(AddItem("corridor", None, {}, visible=case.setup_only))
         if (Path(case.path) / "blocks.json").is_file():  # its multi-block grid
             children.append(AddItem("multiblock", None, {}, visible=case.setup_only))
-        if case.by_role("geodat") is not None:  # geo.dat's points: in the set-up
+        if case.by_role("geodat") is not None and reads_geo_dat(case.path):
+            # geo.dat's points, in the set-up (not when DIVEMesh leaves geo.dat out:
+            # then it is another case's, left in the folder)
             children.append(AddItem("geodat", None, {}, visible=case.setup_only))
         for series in case.main_series():
             children.append(AddItem("series", series.name, {"source": series.key}))
@@ -209,7 +211,7 @@ class Session:
             georef, _ = Backgrounds._find_georef(folder, case, (folder / FILE).is_file())
         except Exception:  # noqa: BLE001 (a georeference that does not read: no map)
             return []
-        found = map_for(folder, georef)
+        found = map_for(folder, georef, own=reads_geo_dat(folder))
         if found is None:
             return []
         visible = bool(found.pop("visible", True))
@@ -459,7 +461,11 @@ class Session:
                 continue
             if kind == "geodat":
                 case = self.data.case(case_id)
-                if case is not None and case.by_role("geodat") is not None:
+                if (
+                    case is not None
+                    and case.by_role("geodat") is not None
+                    and reads_geo_dat(case.path, self.input_file("control.txt", case_id))
+                ):
                     found.append(AddItem(kind, None, {"case": case_id}))
                 continue
             setup = self.data.case_setup(case_id)

@@ -953,9 +953,39 @@ def test_a_case_opened_again_has_its_map(fjord):
     assert maps(Session_open(fjord)) == []
     fourth.undo()  # back: kept again
     assert len(maps(Session_open(fjord))) == 1
-    # no map kept: the place's best, Kartverket's in Norway
+    # no map kept, and the case's bed not from geo.dat: the georeference may be
+    # another case's, left in the folder, so no map
     (fjord / MAP_FILE).unlink()
+    assert maps(Session_open(fjord)) == []
+    # the case reads its geo.dat (G 10 1): the place's best, Kartverket's in Norway
+    control = fjord / "control.txt"
+    control.write_text(control.read_text() + "\nG 10 1\n")
     assert maps(Session_open(fjord))[0].properties["source"] == "Kartverket topo"
+
+
+def test_another_cases_geo_dat_and_place_are_left_out(fjord):
+    """geo.dat and georef.json left in the folder by another case: a case whose
+    control.txt does not read geo.dat (no G 10 1) opens without geo.dat's points or
+    a map; with G 10 1 it has both."""
+    from lagoonviz.core.data.setup import reads_geo_dat
+
+    session = Session()
+    session.open_case(fjord)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0))
+    (fjord / "geo.dat").write_text("0 0 -5\n10 0 -5\n0 10 -4\n10 10 -3\n")
+    assert not reads_geo_dat(fjord)
+    again = Session_open(fjord)
+    kinds = {i.kind for i in again.scene}
+    assert "geodat" not in kinds and "basemap" not in kinds
+    case_id = next(i.id for i in again.scene if i.kind == "case")
+    assert not [a for a in again._missing_setup_items(case_id) if a.kind == "geodat"]
+    # turned on while editing: geo.dat's points are missing then
+    again.set_input("control.txt", "G 10", [1], case=case_id)
+    assert [a for a in again._missing_setup_items(case_id) if a.kind == "geodat"]
+    control = fjord / "control.txt"
+    control.write_text(control.read_text() + "\nG 10 1\n")
+    kinds = {i.kind for i in Session_open(fjord).scene}
+    assert "geodat" in kinds and "basemap" in kinds
 
 
 def Session_open(folder):  # noqa: N802 (reads as a constructor)

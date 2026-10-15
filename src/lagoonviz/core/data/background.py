@@ -82,15 +82,19 @@ def remember_map(folder: Path, properties: dict | None, visible: bool = True) ->
         pass  # a folder that cannot be written: nothing kept
 
 
-def map_for(folder: Path | None, georef) -> dict | None:
+def map_for(folder: Path | None, georef, own: bool = True) -> dict | None:
     """The background map a case opened with this georeference gets: the one its
     folder keeps, else the best map of the place (Kartverket's in Norway); None:
-    none (taken away before, or no georeference)."""
+    none (taken away before, or no georeference). ``own``: the georeference is the
+    case's (its geo.dat is read); else only a map kept for the folder is shown, as
+    the georeference may be another case's, left in the folder."""
     if georef is None:
         return None
     kept = remembered_map(folder)
     if kept is not None:
         return None if kept.get("removed") else kept
+    if not own:
+        return None
     from lagoonviz.core.geo.crs import transformer
     from lagoonviz.core.geo.tiles import source_for
 

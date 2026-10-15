@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### AMR: grid lines and patches shown or hidden
+
+- An AMR surface has **Grid lines** (off, dark, white): the edges of the cells of
+  every level, beside the patch outlines in their own colour.
+- **AMR patches** off shows the base grid (level 0) alone, whole, without the
+  refined patches (their files are not read); on again, the patches come back.
+
+### Another case's geo.dat and place left out
+
+- A case whose control.txt does not read geo.dat (no `G 10 1`) opens without the
+  *geo.dat points* and without a background map: a geo.dat and georef.json left in
+  the folder by another case (e.g. a home folder used for several cases) are not
+  this case's. A map kept for the folder (`LAGOON_map.json`) still opens.
+
 ### Multi-block grids
 
 - The Set-up panel has a **Blocks** tab: blocks of curvilinear cells that meet along

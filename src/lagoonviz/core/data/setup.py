@@ -113,6 +113,25 @@ SIGMA_SOLVERS = ("FNPF", "NHFLOW")
 
 
 # ======================================================================== files
+def reads_geo_dat(folder: str | Path, control: ControlFile | None = None) -> bool:
+    """Whether DIVEMesh reads the case's geo.dat: G 10 1 in its control.txt (``control``:
+    as it is being edited). A folder without control.txt: taken as yes. A geo.dat
+    DIVEMesh leaves out is another case's, left in the folder: not shown with this
+    one, nor its place's map."""
+    folder = Path(folder)
+    if folder.is_file() or folder.suffix == ".lagoon":
+        folder = folder.parent
+    path = folder / "control.txt"
+    if not path.is_file():
+        return True
+    if control is None:
+        try:
+            control = ControlFile.read(path)
+        except Exception:  # noqa: BLE001 (a control.txt that does not read: as before)
+            return True
+    return control.int("G 10", 0) > 0
+
+
 def has_inputs(case_dir: str | Path) -> bool:
     """True if a folder holds REEF3D or DIVEMesh input (ctrl.txt or control.txt, or
     the copies of ctrl.txt REEF3D keeps in REEF3D_Case)."""
