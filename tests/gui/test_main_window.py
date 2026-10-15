@@ -601,6 +601,36 @@ def test_add_slice_from_toolbar(window, reef3d_run):
     assert "pressure" in choices and "velocity.z" in choices
 
 
+def test_add_menus_choose_the_data(window, tmp_path):
+    """Add → Bed (iso-surface, ...) lists Automatic and the outputs of the open cases;
+    choosing one makes the item of it. The toolbar button keeps its click."""
+    from PySide6.QtWidgets import QToolButton
+    from reef3d_fixtures import make_run
+
+    root = make_run(tmp_path / "run", frames=2)
+    make_run(root, solver="SFLOW", frames=2, volume=False)
+    window.open_case(root)
+    action = window.add_actions["bathymetry"]
+    menu = action.menu()
+    assert menu is not None
+    menu.aboutToShow.emit()
+    texts = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert texts[0] == "Automatic" and len(texts) == 3
+    chosen = next(a for a in menu.actions() if "SFLOW" in a.text())
+    chosen.trigger()
+    beds = [i for i in window.session.scene if i.kind == "bathymetry"]
+    assert any(i.properties.get("dataset") == "sflow_bed" for i in beds)
+    iso = window.add_actions["iso_surface"].menu()
+    iso.aboutToShow.emit()
+    assert any("volume" in a.text().lower() for a in iso.actions())
+    button = window.toolbar.widgetForAction(action)
+    assert isinstance(button, QToolButton)
+    assert button.popupMode() == QToolButton.MenuButtonPopup
+    before = len(list(window.session.scene))
+    action.trigger()  # a click: automatic, as before
+    assert len(list(window.session.scene)) == before + 1
+
+
 def test_viewport_look_is_remembered(window):
     window.look_actions["ocean"].trigger()
     assert window.settings.value("view/look") == "ocean"

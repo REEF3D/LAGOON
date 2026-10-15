@@ -93,6 +93,13 @@ case may have several); with the free surface or the bed selected, an iso-surfac
 or iso-volume of that surface. *Dataset* in the properties chooses another (slices
 and streamlines: the volumes; iso items: the volumes and the surfaces).
 
+Or choose the data as you add the item: *Add → Iso-surface* (iso-volume, free
+surface, bed, slice, streamlines) lists *Automatic* (as above) and every output of
+the open cases the item can show: an iso-line on SFLOW's bed, an iso-volume of the
+NHFLOW volume, the SFLOW free surface beside the NHFLOW one. In the toolbar, the
+arrow beside the button opens the same list. In a script:
+`session.add_of("iso_surface", "sflow_bed")` (`case=` with several cases open).
+
 On a surface an **iso-surface** is the line where the variable has the *Value*
 (eta = 0: the still water line on the free surface; a depth contour on the bed),
 coloured as the item says, and an **iso-volume** the part of the surface where the

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Items added for the data chosen
+
+- *Add → Iso-surface*, *Iso-volume*, *Free surface*, *Bed*, *Slice* and
+  *Streamlines* list *Automatic* and every output of the open cases the item can
+  show (a volume; for iso items also the free surface, the bed, an AMR surface):
+  the item is made of the one chosen. The toolbar buttons have the same list on
+  their arrow. In a script `session.add_of(kind, dataset, case=...)`.
+
 ### AMR: grid lines and patches shown or hidden
 
 - An AMR surface has **Grid lines** (off, dark, white): the edges of the cells of

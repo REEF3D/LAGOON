@@ -500,17 +500,31 @@ class DataManager:
         if case is None:
             return []
         kind = self.scene.get(item_id).kind if item_id in self.scene else ""
-        if kind in ("slice", "streamlines"):
-            return [k for k, d in case.datasets.items() if d.kind == "UnstructuredGrid"]
-        if kind in ("iso_surface", "iso_volume"):
-            return [
-                k
-                for k, d in case.datasets.items()
-                if d.kind == "UnstructuredGrid"
-                or getattr(d, "surface_like", False)
-                or d.role == "amr"
-            ]
+        if kind in ("slice", "streamlines", "volume", "iso_surface", "iso_volume"):
+            return [k for k, d in case.datasets.items() if shows(kind, d)]
         return list(case.datasets)
+
+    def addable(self, kind: str) -> list[tuple[str, str, str]]:
+        """The data a new item of this kind can show, in every open case: (case item,
+        dataset key, label), e.g. an iso-surface of NHFLOW's volume, of SFLOW's free
+        surface or of its bed. The label names the case when several are open."""
+        cases = [i for i in self.scene if i.kind == "case"]
+        found = []
+        for case_item in cases:
+            try:
+                case = self.open(case_item.properties["path"])
+            except (KeyError, OSError, ValueError):
+                continue
+            for key, dataset in case.datasets.items():
+                if not shows(kind, dataset):
+                    continue
+                label = dataset.label + (f" [{key}]" if key != dataset.key else "")
+                if getattr(dataset, "earlier_run", False):
+                    label += " (earlier run)"
+                if len(cases) > 1:
+                    label = f"{case_item.name}: {label}"
+                found.append((case_item.id, key, label))
+        return found
 
     def variable_choices(self, item_id: str) -> list[str]:
         dataset = self.dataset(item_id)
@@ -1962,6 +1976,20 @@ def _results_extent(case: Case) -> tuple[np.ndarray, np.ndarray] | None:
         high = high.copy()
         high[2] = low[2] + 1e-3 * max(high[0] - low[0], high[1] - low[1])
     return low, high
+
+
+def shows(kind: str, dataset) -> bool:
+    """Whether a new item of this kind can show this dataset: slices, streamlines and
+    volumes a volume; iso-surfaces and iso-volumes a volume or a surface (free
+    surface, bed, AMR: iso-lines, iso-patches); a free surface, bed or AMR surface
+    the outputs of its role (a bed: DIVEMesh's too)."""
+    volume = dataset.kind == "UnstructuredGrid"
+    if kind in ("slice", "streamlines", "volume"):
+        return volume
+    if kind in ("iso_surface", "iso_volume"):
+        return volume or getattr(dataset, "surface_like", False) or dataset.role == "amr"
+    roles = {"free_surface": ("free_surface",), "bathymetry": ("bed", "topo"), "amr": ("amr",)}
+    return dataset.role in roles.get(kind, ())
 
 
 def _wet_triangles(mesh: SurfaceMesh) -> np.ndarray:

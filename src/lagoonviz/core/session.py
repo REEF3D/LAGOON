@@ -1766,6 +1766,46 @@ class Session:
         case_id = self.data.volume_case()
         return {**properties, "case": case_id} if case_id else properties
 
+    def add_of(self, kind: str, dataset: str, case: str | None = None) -> str:
+        """Add an item that shows a chosen output (see :meth:`DataManager.addable`): an
+        iso-surface or iso-volume of a volume, a free surface or a bed; a free surface
+        of SFLOW beside NHFLOW's; a slice of an earlier run's volume. ``case``: the
+        case item (several cases open). Returns the item id."""
+        properties: dict[str, Any] = {"dataset": dataset}
+        if case:
+            properties["case"] = case
+        elif sum(i.kind == "case" for i in self.scene) > 1:
+            raise ValueError("several cases are open: say which one (case=)")
+        from lagoonviz.core.data.manager import shows
+
+        found = self._case_datasets(case).get(dataset)
+        if found is None:
+            raise ValueError(f"no output {dataset!r} in the case")
+        if not shows(kind, found):
+            raise ValueError(f"{found.label}: not something a {KINDS[kind].label} shows")
+        if kind == "iso_surface":
+            return self.add_iso_surface(**properties)
+        if kind == "iso_volume":
+            return self.add_iso_volume(**properties)
+        if kind == "slice":
+            return self.add_slice("y", **properties)
+        if kind == "streamlines":
+            return self.add_streamlines(**properties)
+        variable = found.default_variable()
+        spec = KINDS[kind].properties.get("variable")
+        if spec is not None and variable != spec.default and variable in found.variables():
+            properties["variable"] = variable
+        return self.add_item(kind, **properties)
+
+    def _case_datasets(self, case: str | None) -> dict:
+        case_item = self.data._case_item_for(case or "")
+        if case_item is None:
+            return {}
+        try:
+            return self.data.open(case_item.properties["path"]).datasets
+        except (KeyError, OSError, ValueError):
+            return {}
+
     def add_slice(self, normal: str = "y", position: float | None = None, **properties: Any) -> str:
         """Add a slice through the volume; without a position it cuts the middle.
         With several cases open, ``case=`` names the one to cut (by default the

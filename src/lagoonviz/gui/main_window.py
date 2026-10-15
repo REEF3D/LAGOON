@@ -31,9 +31,11 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QSizePolicy,
     QSplitter,
+    QToolButton,
     QWidget,
 )
 
@@ -63,6 +65,9 @@ LAYOUT_VERSION = 4
 #: the items the toolbar adds (the Add menu has them all)
 #: items that cut a case's volume (made for the case of the selected item)
 VOLUME_TOOLS = ("slice", "iso_surface", "iso_volume", "streamlines", "volume")
+#: items added for an output chosen from a menu (Add menu, the toolbar button's
+#: arrow): which free surface or bed, and what an iso-surface or iso-volume is of
+CHOOSE_DATA = ("free_surface", "bathymetry", "iso_surface", "iso_volume", "slice", "streamlines")
 #: the window setting of the memory use mode (lagoonviz.core.memory)
 MEMORY_KEY = "performance/memory"
 TOOLBAR_KINDS = (
@@ -303,6 +308,10 @@ class MainWindow(QMainWindow):
             )
             for kind, spec in KINDS.items()
         }
+        for kind in CHOOSE_DATA:  # automatic, or the output chosen
+            menu = QMenu(KINDS[kind].label, self)
+            menu.aboutToShow.connect(lambda k=kind, m=menu: self._fill_data_menu(k, m))
+            self.add_actions[kind].setMenu(menu)
         self.act_screenshot = self._action(
             "Save &screenshot...",
             self.save_screenshot_dialog,
@@ -561,6 +570,10 @@ class MainWindow(QMainWindow):
         bar.addSeparator()
         for kind in TOOLBAR_KINDS:
             bar.addAction(self.add_actions[kind])
+            button = bar.widgetForAction(self.add_actions[kind])
+            if kind in CHOOSE_DATA and isinstance(button, QToolButton):
+                # a click adds as before; the arrow chooses the output
+                button.setPopupMode(QToolButton.MenuButtonPopup)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
@@ -765,6 +778,34 @@ class MainWindow(QMainWindow):
                 return hidden[0].id
             return self.session.add_item(kind, **case)
         return self.session.add_item(kind)
+
+    def _fill_data_menu(self, kind: str, menu: QMenu) -> None:
+        """The outputs a new item of this kind can show, in every open case:
+        automatic first (the selected item's data, else the case's own)."""
+        menu.clear()
+        auto = menu.addAction("Automatic")
+        auto.setStatusTip("The data of the selected item, else the case's own")
+        auto.triggered.connect(lambda _=False, k=kind: self.add_item(k))
+        choices = self.session.data.addable(kind)
+        several = sum(i.kind == "case" for i in self.session.scene) > 1
+        if choices:
+            menu.addSeparator()
+        else:
+            none = menu.addAction("No output of this kind in the open cases")
+            none.setEnabled(False)
+        for case_id, key, label in choices:
+            action = menu.addAction(label)
+            action.setStatusTip(f"Add a {KINDS[kind].label.lower()} of {label}")
+            action.triggered.connect(
+                lambda _=False, k=kind, d=key, c=case_id: self._add_of(k, d, c if several else None)
+            )
+
+    def _add_of(self, kind: str, dataset: str, case: str | None) -> str | None:
+        try:
+            return self.session.add_of(kind, dataset, case=case)
+        except ValueError as error:
+            self.statusBar().showMessage(str(error), 8000)
+            return None
 
     def _target_dataset(self, kind: str) -> dict:
         """``{"case": id, "dataset": key}`` of the data the selected item shows, when
