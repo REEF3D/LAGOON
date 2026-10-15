@@ -1,3 +1,3 @@
 # Authors
 
-- Hans Bihs (NTNU), project lead
+- Hans Bihs, project lead
