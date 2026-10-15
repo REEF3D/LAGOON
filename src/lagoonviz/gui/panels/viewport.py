@@ -58,6 +58,41 @@ TOP = QColor(COLORS["viewport_top"])
 BOTTOM = QColor(COLORS["viewport_bottom"])
 
 
+def _edges_near(box, point, reach: float) -> set[str]:
+    """The edges of a rectangle (x0, x1, y0, y1) within ``reach`` of a point (along
+    their length, and a little beyond their ends): one, or two at a corner."""
+    x0, x1, y0, y1 = box
+    px, py = point
+    edges = set()
+    if y0 - reach <= py <= y1 + reach:
+        near = {"x0": abs(px - x0), "x1": abs(px - x1)}
+        side = min(near, key=near.get)
+        if near[side] <= reach:
+            edges.add(side)
+    if x0 - reach <= px <= x1 + reach:
+        near = {"y0": abs(py - y0), "y1": abs(py - y1)}
+        side = min(near, key=near.get)
+        if near[side] <= reach:
+            edges.add(side)
+    return edges
+
+
+def _moved_edges(box, edges, point) -> tuple[float, float, float, float]:
+    """A rectangle with its grabbed edges at the pointer: still a rectangle, its
+    sides in order (an edge dragged past the other one swaps them)."""
+    x0, x1, y0, y1 = box
+    px, py = point
+    if "x0" in edges:
+        x0 = px
+    if "x1" in edges:
+        x1 = px
+    if "y0" in edges:
+        y0 = py
+    if "y1" in edges:
+        y1 = py
+    return min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+
+
 class ViewportPlaceholder(QWidget):
     """Shown when no GPU canvas is available (tests, remote sessions without GPU)."""
 
@@ -1026,8 +1061,8 @@ class Viewport3D(QWidget):
         self.canvas.setCursor(Qt.CrossCursor)
         if purpose == "domain":
             self.statusMessage.emit(
-                "Drag the domain in the 2D view · Shift + drag turns the model on the map"
-                " · Esc stops"
+                "Drag the domain in the 2D view, or its edges and corners · Shift + drag "
+                "turns the model on the map · Esc stops"
             )
         else:
             self.statusMessage.emit(f"Drag the {purpose} in the 2D view · Esc stops")
@@ -1237,9 +1272,32 @@ class Viewport3D(QWidget):
                 "Shift" in modifiers and box is not None and drawing.get("purpose") == "domain"
             )
             drawing["box"] = box
+            # pressed on an edge (or a corner) of the domain: that edge is dragged
+            drawing["edges"] = (
+                self._domain_edges(event, point, box)
+                if box is not None and drawing.get("purpose") == "domain" and not drawing["turn"]
+                else set()
+            )
             return
         start = drawing.get("start")
         if start is None:
+            return
+        if drawing.get("edges"):
+            x0, x1, y0, y1 = _moved_edges(drawing["box"], drawing["edges"], point)
+            outline = np.array(
+                [[x0, y0, level], [x1, y0, level], [x1, y1, level], [x0, y1, level]], float
+            )
+            self.statusMessage.emit(
+                f"Domain x {x0:.2f} … {x1:.2f} m, y {y0:.2f} … {y1:.2f} m "
+                f"({x1 - x0:.2f} x {y1 - y0:.2f} m)"
+            )
+            if kind == "pointer_move":
+                self.view.set_outline(outline)
+                self.redraw()
+                return
+            self.stop_domain_drawing()
+            if x1 > x0 and y1 > y0:
+                self.domainDrawn.emit((x0, x1, y0, y1))
             return
         if drawing.get("turn"):
             x0, x1, y0, y1 = drawing["box"]
@@ -1286,9 +1344,49 @@ class Viewport3D(QWidget):
             else:
                 self.areaDrawn.emit(purpose, area)
 
+    #: how near (pixels) a press must be to an edge of the domain to drag it
+    EDGE_PICK = 10.0
+    #: the cursor over the edges grabbed: x, y, both (corners)
+    EDGE_CURSORS = {
+        frozenset({"x0"}): Qt.SizeHorCursor,
+        frozenset({"x1"}): Qt.SizeHorCursor,
+        frozenset({"y0"}): Qt.SizeVerCursor,
+        frozenset({"y1"}): Qt.SizeVerCursor,
+        frozenset({"x0", "y0"}): Qt.SizeBDiagCursor,
+        frozenset({"x1", "y1"}): Qt.SizeBDiagCursor,
+        frozenset({"x0", "y1"}): Qt.SizeFDiagCursor,
+        frozenset({"x1", "y0"}): Qt.SizeFDiagCursor,
+    }
+
+    def _reach(self, event, pixels: float) -> float | None:
+        """How far ``pixels`` on the screen reach in the model, at the pointer."""
+        point = self._plan_point(event)
+        if point is None:
+            return None
+        x, y = getattr(event, "x", 0.0), getattr(event, "y", 0.0)
+        try:
+            size = tuple(self.canvas.get_logical_size())
+        except AttributeError:
+            size = (self.canvas.width(), self.canvas.height())
+        beside = self.view.plan_point(x + pixels, y, size)
+        return None if beside is None else math.hypot(beside[0] - point[0], beside[1] - point[1])
+
+    def _domain_edges(self, event, point, box) -> set[str]:
+        """The edges of the domain (x0, x1, y0, y1) under the pointer: one, or two at a
+        corner; none away from them."""
+        reach = self._reach(event, self.EDGE_PICK)
+        if reach is None or box is None:
+            return set()
+        return _edges_near(box, point, reach)
+
     def _on_move(self, event) -> None:
         if self._drawing is not None and self._drawing.get("start") is not None:
             self._draw_domain("pointer_move", event)
+        elif self._drawing is not None and self._drawing.get("purpose") == "domain":
+            point = self._plan_point(event)  # over an edge: the cursor says it can be dragged
+            box = self._domain_box(self._drawing.get("case", ""))
+            edges = self._domain_edges(event, point, box) if point is not None else set()
+            self.canvas.setCursor(self.EDGE_CURSORS.get(frozenset(edges), Qt.CrossCursor))
         elif self._corridor_edit is not None:
             self._edit_corridor("pointer_move", event)
 

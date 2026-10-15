@@ -11,6 +11,8 @@
   north up, so the map stays and the model turns. **North up** sits beside the
   rotation too. In a script: `session.set_rotation(40.0, about=[x, y])`, and
   `session.try_rotation(40.0)` shows a rotation without keeping it.
+- *Draw on the map*: the domain's edges and corners can be dragged (the cursor
+  shows them); it stays a rectangle, snapped to the cell size.
 - After the georeference changes, the map made before is shown turned to the new
   one until the new map is made, instead of the old one as it was.
 

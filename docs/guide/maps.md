@@ -99,7 +99,9 @@ GeoTIFF and only the part of a large one that is needed).
   so north points up the screen (as *North up* over the view, or N); from the top
   the view keeps north up while you drag, so the map stays and the model turns.
 - **Domain**: *Draw on the map* turns the view to 2D from the top; drag the
-  domain's rectangle there (B 10, snapped to the cell size B 1). **Shift + drag**
+  domain's rectangle there (B 10, snapped to the cell size B 1), or drag an **edge**
+  of the domain there is (the cursor shows it over one) to move that side, or a
+  **corner** to move two: it stays a rectangle. **Shift + drag**
   turns the model on the map about the domain's centre: the domain turns, the map
   stays north up (B 10 keeps its numbers: the model's own axes turn). Esc stops.
   Or type the extent (*Set B 10*) or the rotation (*Turn*), or drag the **slider**
