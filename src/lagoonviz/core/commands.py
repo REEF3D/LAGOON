@@ -345,6 +345,74 @@ class SetGeoref(Command):
         return self.script
 
 
+class WriteCaseFile(Command):
+    """A file of a case folder written (or removed, ``after`` None) at once, as
+    REEF3D reads it from there (corridor.json, curvgrid.dat); undo puts back what was
+    there (or no file). ``changed`` is called after each write (the set-up reads the
+    file again)."""
+
+    def __init__(
+        self,
+        path: Any,
+        case_id: str,
+        after: str | None,
+        script: str,
+        label: str,
+        changed: Callable[[], None] | None = None,
+    ):
+        from pathlib import Path
+
+        self.path = Path(path)
+        self.case_id = case_id
+        self.after = after
+        self.before: str | None = None
+        self._read = False
+        self.script = script
+        self.label = label
+        self.changed = changed
+
+    def _put(self, text: str | None, scene: Scene) -> None:
+        if text is None:
+            self.path.unlink(missing_ok=True)
+        else:
+            self.path.write_text(text, encoding="utf-8")
+        if self.changed is not None:
+            self.changed()
+        scene.inputs_changed(self.case_id)
+
+    def do(self, scene: Scene) -> None:
+        if not self._read:
+            self.before = self.path.read_text(encoding="utf-8") if self.path.is_file() else None
+            self._read = True
+        self._put(self.after, scene)
+
+    def undo(self, scene: Scene) -> None:
+        self._put(self.before, scene)
+
+    def to_script(self) -> str:
+        return self.script
+
+
+class Batch(Command):
+    """Several commands as one undo step (and one line of script)."""
+
+    def __init__(self, commands: list[Command], script: str, label: str):
+        self.commands = list(commands)
+        self.script = script
+        self.label = label
+
+    def do(self, scene: Scene) -> None:
+        for command in self.commands:
+            command.do(scene)
+
+    def undo(self, scene: Scene) -> None:
+        for command in reversed(self.commands):
+            command.undo(scene)
+
+    def to_script(self) -> str:
+        return self.script
+
+
 class SetMode(Command):
     """Switch between the results of a run and its set-up (see ``scene.MODES``).
 

@@ -1718,8 +1718,10 @@ class DataManager:
         folder = self.case_folder(item_id)
         if folder is None:
             return None
-        grid = read_preview(folder)
         setup = self.case_setup(item_id)
+        if setup is not None and setup.curvgrid is not None:
+            return None  # DIVEMesh's is the logical box: the set-up draws the curvilinear grid
+        grid = read_preview(folder)
         if grid is None:
             if setup is None or setup.stretched:
                 return None
@@ -1791,6 +1793,7 @@ class DataManager:
             id(setup),
             setup.control.revision if setup else None,
             setup.ctrl.revision if setup else None,
+            setup.files_revision if setup else None,
             setup.domain if setup else None,
             self.exaggeration(item_id),
             self._setup_water_level(item_id, setup) if setup else 0.0,

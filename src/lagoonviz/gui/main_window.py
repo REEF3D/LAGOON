@@ -136,6 +136,14 @@ class MainWindow(QMainWindow):
         for tab in (self.setup_panel.porous_tab, self.setup_panel.solids_tab):
             tab.drawArea.connect(self.viewport.start_domain_drawing)
             self.viewport.areaDrawn.connect(tab.area_drawn)
+        # the River tab: an area drawn, the banks' points dragged there
+        river = self.setup_panel.river_tab
+        river.drawArea.connect(self.viewport.start_domain_drawing)
+        self.viewport.areaDrawn.connect(river.area_drawn)
+        river.editPoints.connect(self.viewport.start_corridor_editing)
+        river.stopEditing.connect(self.viewport.stop_corridor_editing)
+        self.viewport.corridorPointMoved.connect(river.point_moved)
+        self.viewport.corridorEditingStopped.connect(river.editing_stopped)
         self.setup_panel.map_tab.newCase.connect(self.new_case_from_map_dialog)
 
         self.docks: dict[str, QDockWidget] = {}

@@ -183,6 +183,55 @@ domain ends at the still water, up to half the water depth above it). DIVEMesh's
 solids are meshed by *Run DIVEMesh*; NHFLOW takes them as A 580 says (0: they raise
 the bed, 1: immersed). In a script: `session.add_structure("S 33", [12.0, 2.5, 0.4])`.
 
+## A river corridor
+
+The panel's *River* tab lays a river corridor: two banks shaped by points you drag,
+and the curvilinear grid between them that REEF3D's SFLOW and NHFLOW read with
+`G 50 2` (`curvgrid.dat`).
+
+- **Start** lays a straight corridor along the domain (a tenth in from each side
+  across), **Draw** one over an area you drag in the 2D top view; it flows along the
+  area's longer side, with 12 points on each bank.
+- **Drag points** (on after Start and Draw): press on a point of a bank in the 2D
+  top view and drag it; the bank follows at once, drawn over everything while you
+  drag. Pressing anywhere else pans the view as always; Esc stops. Each point moved
+  is an undo step.
+- **Points per bank** (4 – 60) spaces that many points along the banks as they are
+  now: more for a winding river, fewer for a calm one.
+- **Curve**: *through the points* (a centripetal Catmull-Rom spline: the bank passes
+  every point, without loops or overshoot between close points) or *smooth* (a
+  clamped cubic B-spline the points pull on; it passes the first and the last).
+- **Reverse flow** swaps upstream and downstream. The bank on the left looking
+  downstream is the *left* bank; "upstream" is written at the corridor's start.
+
+The grid has *Cells along* x *Cells across* cells: each bank is cut into equal
+lengths and the nodes between them lie on straight lines across. *Smoothing* runs
+that many sweeps of Winslow's elliptic grid equations over the inner nodes (the
+banks and the two ends stay): smoother, more even cells in bends. The set-up draws
+the grid as it changes, and the tab says how large its cells are, their smallest
+angle and whether any fold (REEF3D stops on a folded cell: move the points, use
+fewer cells along or more smoothing). The bed (zb at the nodes) slopes down from the
+upstream end (*Bed at upstream end*, *Bed slope* in m/m), or comes from geo.dat's
+points.
+
+**Make grid** writes `curvgrid.dat` (`ni nj`, then x y zb of every node, i fastest),
+sets `G 50 2` in ctrl.txt and makes DIVEMesh's grid the logical box of the
+curvilinear one (B 10's x and y and B 1: ni x nj cells; its heights kept), one undo
+step. Then *Save* and *Run DIVEMesh*. The sides keep their numbers: 1 is the
+upstream end (i = 0), 4 the downstream end, 3 and 2 the banks. With `G 50 2`, the
+set-up draws the domain, its sides and the grid (*Curvilinear grid*, on the bed)
+where the nodes are, not DIVEMesh's logical box.
+
+The corridor is kept in `corridor.json` in the case folder. In a script:
+
+```python
+session.start_corridor([0, 200, 0, 20], points=12)
+session.move_corridor_point("left", 5, 90.0, 28.0)
+session.set_corridor_options(points=16, curve="bspline", cells_along=100,
+                             cells_across=10, smoothing=100, slope=0.001)
+session.make_corridor_grid()
+```
+
 ## On the map
 
 The panel's *Map* tab places the case on the Earth: its georeference

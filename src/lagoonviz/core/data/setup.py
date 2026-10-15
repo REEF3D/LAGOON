@@ -98,6 +98,8 @@ COLORS = {
     "regions": "#4fb3a9",
     "solids": "#a0a8b4",
     "bed": "#b08d57",
+    "corridor": "#2bc4b4",
+    "curvgrid": "#7f9cc0",
     "refinement": "#e07b39",
 }
 
@@ -327,10 +329,16 @@ class CaseSetup:
     notes: list[str] = field(default_factory=list)
     #: where the domain came from when control.txt does not give it ("the results")
     domain_from: str = ""
+    #: the river corridor (corridor.json; a lagoonviz.core.corridor.Corridor) or None
+    corridor: object | None = None
+    #: the curvilinear grid REEF3D reads with G 50 2: (x, y, zb) of curvgrid.dat
+    curvgrid: tuple | None = None
+    #: counts the writes of corridor.json and curvgrid.dat (files_changed)
+    files_revision: int = 0
     _bed: tuple | None = None
     _marks: list[Mark] | None = None
     _meshes: dict = field(default_factory=dict)
-    _revisions: tuple[int, int] = (-1, -1)
+    _revisions: tuple[int, int, int] | None = (-1, -1, -1)
 
     # ------------------------------------------------------------- facts
     @property
@@ -376,9 +384,10 @@ class CaseSetup:
 
     def refresh(self) -> bool:
         """Read the facts again after the files were edited (True if they changed)."""
-        revisions = (self.control.revision, self.ctrl.revision)
+        revisions = (self.control.revision, self.ctrl.revision, self.files_revision)
         if revisions == self._revisions:
             return False
+        _read_curvilinear(self)
         if not self.domain_from or "B 10" in self.control:  # the results' extent stays
             self.domain = _domain(self)
             if self.domain is not None:
@@ -401,6 +410,10 @@ class CaseSetup:
             pick = np.random.default_rng(0).choice(len(points), limit, replace=False)
             points = points[np.sort(pick)]
         return points
+
+    def files_changed(self) -> None:
+        """corridor.json or curvgrid.dat was written: read them when next asked."""
+        self.files_revision += 1
 
     def geo_changed(self) -> None:
         """geo.dat was written again: read it when next asked."""
@@ -787,12 +800,24 @@ def read_setup(case_dir: str | Path) -> CaseSetup:
     ctrl_path = ctrl_file(case_dir)
     ctrl = read_commands(ctrl_path) if ctrl_path is not None else Commands(case_dir / CTRL)
     setup = CaseSetup(case_dir, control, ctrl)
+    _read_curvilinear(setup)
     setup.domain = _domain(setup)
     setup.cells = _cells(setup)
     setup.sides = _sides(setup)
     setup.water_level = _water_level(setup)
-    setup._revisions = (control.revision, ctrl.revision)
+    setup._revisions = (control.revision, ctrl.revision, setup.files_revision)
     return setup
+
+
+def _read_curvilinear(setup: CaseSetup) -> None:
+    """The river corridor (corridor.json) and, with G 50 2 in ctrl.txt, the
+    curvilinear grid (curvgrid.dat)."""
+    from lagoonviz.core import corridor
+
+    setup.corridor = corridor.read(setup.path)
+    setup.curvgrid = None
+    if setup.ctrl.int("G 50", 0) == 2:
+        setup.curvgrid = corridor.read_grid(setup.path / corridor.GRID_FILE)
 
 
 # ------------------------------------------------------------------ facts
@@ -826,6 +851,9 @@ def _domain(setup: CaseSetup) -> tuple | None:
                     box[4] = float(points[:, 2].min())
             box[4] = min(box[4], water)
             box[5] = max(water, box[4] + 1e-6)
+        if setup.curvgrid is not None:  # B 10 is the logical box: the nodes are where
+            x, y, _ = setup.curvgrid
+            box[:4] = [float(x.min()), float(x.max()), float(y.min()), float(y.max())]
         return tuple(box)
     control = setup.control
     if control.int("G 20", 0) > 0 and (setup.path / GEO).is_file():
@@ -1082,6 +1110,18 @@ def _marks(setup: CaseSetup) -> list[Mark]:
         raw = (min(b[4] for b in boxes), max(b[5] for b in boxes))
         if raw != (domain[4], domain[5]):  # a σ-grid from the bed to the still water
             boxes = [list(b[:4]) + [domain[4], domain[5]] for b in boxes]
+    if setup.curvgrid is not None and domain is not None:
+        boxes = []  # the curvilinear grid's outline instead of the logical box
+        marks.append(
+            Mark(
+                "domain",
+                "domain (curvilinear, curvgrid.dat)",
+                COLORS["domain"],
+                segments=_curvilinear_outline(setup.curvgrid, domain[4], domain[5]),
+                code="B 10",
+                file=CONTROL,
+            )
+        )
     for index, box in enumerate(boxes):
         marks.append(
             Mark(
@@ -1106,7 +1146,20 @@ def _marks(setup: CaseSetup) -> list[Mark]:
             axis, at_end, _ = SIDES[side]
             if axis == 1 and setup.two_d:
                 continue
-            if axis == 0:
+            if setup.curvgrid is not None:  # along the curvilinear grid's boundary
+                line = _boundary(setup.curvgrid, axis, at_end)
+                segments = np.concatenate(
+                    [
+                        _polyline(line, zs),
+                        _polyline(line, ze),
+                        _segments(
+                            [((*line[0], zs), (*line[0], ze)), ((*line[-1], zs), (*line[-1], ze))]
+                        ),
+                    ]
+                )
+                middle = line[len(line) // 2]
+                where = (float(middle[0]), float(middle[1]), ze)
+            elif axis == 0:
                 x = xe if at_end else xs
                 segments = _segments(
                     [
@@ -1212,6 +1265,9 @@ def _marks(setup: CaseSetup) -> list[Mark]:
                 )
             )
 
+    # ---- the river corridor and the curvilinear grid
+    marks.extend(_corridor_marks(setup, water_z))
+
     # ---- ctrl.txt commands
     span_z = (low_z, high_z) if low_z is not None else (water_z - 1.0, water_z + 0.5)
     span_x = (domain[0], domain[1]) if domain is not None else None
@@ -1289,6 +1345,112 @@ def _marks(setup: CaseSetup) -> list[Mark]:
     # geo.dat's points are an item of their own ("geo.dat points", GeoDatDataset)
     if skipped:
         setup.notes.append("not drawn: " + ", ".join(sorted(set(skipped))))
+    return marks
+
+
+#: the most grid lines drawn each way (every n-th line of a finer grid)
+GRID_LINES = 120
+
+
+def _polyline(line, z: float | np.ndarray) -> np.ndarray:
+    """Segments (n - 1, 2, 3) of a polyline (n, 2) at height(s) z."""
+    line = np.asarray(line, float)
+    zs = np.broadcast_to(np.asarray(z, float), (len(line),))
+    points = np.column_stack([line, zs])
+    return np.stack([points[:-1], points[1:]], axis=1)
+
+
+def _boundary(curvgrid, axis: int, at_end: bool) -> np.ndarray:
+    """A side of the curvilinear grid (n, 2): side 1 is i = 0 (upstream), 4 i = ni,
+    3 j = 0, 2 j = nj."""
+    x, y, _ = curvgrid
+    if axis == 0:
+        k = -1 if at_end else 0
+        return np.column_stack([x[:, k], y[:, k]])
+    k = -1 if at_end else 0
+    return np.column_stack([x[k], y[k]])
+
+
+def _curvilinear_outline(curvgrid, zs: float, ze: float) -> np.ndarray:
+    parts = []
+    for axis, at_end in ((0, False), (0, True), (1, False), (1, True)):
+        line = _boundary(curvgrid, axis, at_end)
+        parts += [_polyline(line, zs), _polyline(line, ze)]
+    x, y, _ = curvgrid
+    for j, i in ((0, 0), (0, -1), (-1, 0), (-1, -1)):
+        parts.append(_segments([((x[j, i], y[j, i], zs), (x[j, i], y[j, i], ze))]))
+    return np.concatenate(parts)
+
+
+def _grid_lines(x, y, z) -> np.ndarray:
+    """The lines of a curvilinear grid (every n-th, its boundary always)."""
+    nj, ni = x.shape[0] - 1, x.shape[1] - 1
+    z = np.broadcast_to(np.asarray(z, float), x.shape)
+    parts = []
+    for count, take in (
+        (ni, lambda k: (x[:, k], y[:, k], z[:, k])),
+        (nj, lambda k: (x[k], y[k], z[k])),
+    ):
+        step = max(1, math.ceil(count / GRID_LINES))
+        for k in sorted(set(range(0, count + 1, step)) | {count}):
+            a, b, c = take(k)
+            parts.append(_polyline(np.column_stack([a, b]), c))
+    return np.concatenate(parts) if parts else np.zeros((0, 2, 3))
+
+
+def _corridor_marks(setup: CaseSetup, water_z: float) -> list[Mark]:
+    """The river corridor: its banks, the points that shape them and the grid it
+    makes; the curvilinear grid of curvgrid.dat (G 50 2) on the bed."""
+    marks = []
+    if setup.curvgrid is not None:
+        x, y, z = setup.curvgrid
+        marks.append(
+            Mark(
+                "curvgrid",
+                "curvilinear grid (curvgrid.dat)",
+                COLORS["curvgrid"],
+                segments=_grid_lines(x, y, z),
+            )
+        )
+    corridor = setup.corridor
+    if corridor is None:
+        return marks
+    color = COLORS["corridor"]
+    left, right = corridor.bank_line("left"), corridor.bank_line("right")
+    ends = _segments(
+        [
+            ((*right[0], water_z), (*left[0], water_z)),
+            ((*right[-1], water_z), (*left[-1], water_z)),
+        ]
+    )
+    handles = np.vstack([corridor.left, corridor.right])
+    start = 0.5 * (left[0] + right[0])
+    marks.append(
+        Mark(
+            "corridor",
+            "river corridor (corridor.json)",
+            color,
+            segments=np.concatenate([_polyline(left, water_z), _polyline(right, water_z), ends]),
+            points=np.column_stack([handles, np.full(len(handles), water_z)]),
+            labels=[("upstream", (float(start[0]), float(start[1]), water_z))],
+            file="corridor.json",
+        )
+    )
+    ni, nj = corridor.cells_along, corridor.cells_across
+    if (ni + 1) * (nj + 1) <= 400_000:
+        try:
+            gx, gy = corridor.grid()
+        except (ValueError, FloatingPointError):
+            return marks
+        marks.append(
+            Mark(
+                "corridor",
+                "grid of the corridor",
+                COLORS["curvgrid"],
+                segments=_grid_lines(gx, gy, water_z),
+                file="corridor.json",
+            )
+        )
     return marks
 
 

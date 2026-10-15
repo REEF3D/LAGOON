@@ -205,6 +205,8 @@ SETUP_GROUPS = {
     "regions": "Regions",
     "solids": "Solids",
     "bed": "Bed",
+    "corridor": "River corridor",
+    "curvgrid": "Curvilinear grid",
 }
 #: faces of the domain the "DIVEMesh grid" item draws its lines on
 GRID_FACES = ("bottom and back", "bottom", "back", "outside")
@@ -225,6 +227,8 @@ _SETUP_TIPS = {
     "regions": "Refinement boxes, wind areas and other regions (A 276, A 372, F 72, S 74)",
     "solids": "Outlines of DIVEMesh's solids (S); the solids themselves are a structure item",
     "bed": "The bed's topo objects (T); geo.dat's points are an item of their own",
+    "corridor": "The river corridor: its banks, the points that shape them, its grid",
+    "curvgrid": "The curvilinear grid of curvgrid.dat (G 50 2), on the bed",
 }
 
 

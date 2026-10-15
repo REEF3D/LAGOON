@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### River corridors and their curvilinear grids
+
+- The Set-up panel has a **River** tab: lay a river corridor and drag the points of
+  its two banks in the 2D top view (12 per bank to start, 4 – 60). The banks are a
+  spline through the points (centripetal Catmull-Rom) or a smoother B-spline the
+  points pull on. Start one along the domain or draw it over an area.
+- The corridor makes the curvilinear grid REEF3D's SFLOW and NHFLOW read with
+  `G 50 2`: cells along and across, Winslow smoothing for bends, the bed sloping
+  from the upstream end or from geo.dat. The set-up draws the grid as it changes and
+  says if cells fold; **Make grid** writes `curvgrid.dat`, `G 50 2` and DIVEMesh's
+  logical box. Kept in `corridor.json`; in a script `session.start_corridor()`,
+  `move_corridor_point()`, `set_corridor_options()`, `make_corridor_grid()`.
+- A case with `G 50 2` and its `curvgrid.dat` is drawn where its nodes are: the
+  domain, its sides and the grid (*Curvilinear grid*), not DIVEMesh's logical box.
+
 ### Porous structures and solids in the set-up
 
 - The Set-up panel has a **Porous** tab: add, draw and change the porous structures

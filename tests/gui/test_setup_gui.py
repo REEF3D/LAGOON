@@ -513,3 +513,37 @@ def test_the_solids_tab_adds_divemesh_and_direct_forcing_solids(window, flume):
     assert tab.tree.topLevelItemCount() == 2
     tab.remove_selected()
     assert "A 584" not in window.session.input_file("ctrl.txt")
+
+
+def test_the_river_tab_lays_a_corridor_and_makes_its_grid(window, flume):
+    window.open_case(flume)
+    panel = window.setup_panel
+    tab = panel.river_tab
+    assert panel.tabs.tabText(panel.tabs.indexOf(tab)) == "River"
+    assert not tab.form.isEnabled() and tab.start_button.isEnabled()
+    tab.start()
+    corridor = window.session.corridor()
+    assert corridor is not None and tab.edit_button.isChecked() and tab.form.isEnabled()
+    assert tab.points.value() == 12 and "cells" in tab.quality.text()
+    # a point dragged in the 2D view
+    window.viewport.corridorPointMoved.emit(panel.case_id, "left", 5, 5.0, 1.9)
+    assert tuple(window.session.corridor().left[5]) == (5.0, 1.9)
+    tab.points.setValue(16)
+    assert len(window.session.corridor().left) == 16
+    tab.curve.setCurrentIndex(tab.curve.findData("bspline"))
+    tab.curve.activated.emit(tab.curve.currentIndex())
+    assert window.session.corridor().curve == "bspline"
+    tab.across.setValue(8)
+    tab.along.setValue(40)
+    assert window.session.corridor().cells_across == 8
+    tab.make_grid()
+    assert "curvgrid.dat written (40 x 8 cells)" in panel.message.text()
+    assert window.session.input_file("ctrl.txt").values("G 50") == [2.0]
+    # Esc in the 3D view: the button follows
+    window.viewport.corridorEditingStopped.emit()
+    assert not tab.edit_button.isChecked()
+    # an area drawn for the corridor
+    window.viewport.areaDrawn.emit("river corridor", (1.0, 9.0, 0.5, 1.5))
+    assert window.session.corridor().left[0].tolist() == [1.0, 1.5]
+    tab.remove()
+    assert window.session.corridor() is None and not tab.form.isEnabled()

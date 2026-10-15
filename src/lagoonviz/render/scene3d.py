@@ -314,6 +314,8 @@ class SceneRenderer:
         #: outside ``content`` so they do not change the framed bounds
         self._backgrounds: dict[str, tuple[gfx.Mesh, int]] = {}
         self._outline: gfx.Line | None = None
+        #: the sketch over everything (a river bank being dragged): a group or None
+        self._sketch: gfx.Group | None = None
         #: north in model coordinates (set_north), None: the model's y
         self.north: tuple[float, float] | None = None
         #: whether the camera has seen north (a camera set from a session has not: the
@@ -1073,6 +1075,38 @@ class SceneRenderer:
                 pass
         self._outline = gfx.Line(gfx.Geometry(positions=segments), material)
         self.scene.add(self._outline)
+
+    def set_sketch(
+        self,
+        segments: np.ndarray | None,
+        points: np.ndarray | None = None,
+        color: str = HIGHLIGHT,
+        point_size: float = 11.0,
+    ) -> None:
+        """Lines (n, 2, 3) and dots (m, 3) drawn over everything, in one colour (a
+        river bank being dragged); None for none."""
+        if self._sketch is not None:
+            self.scene.remove(self._sketch)
+            self._sketch = None
+        if segments is None and points is None:
+            return
+        group = gfx.Group()
+        line_material = gfx.LineSegmentMaterial(thickness=2.0, color=color)
+        dot_material = gfx.PointsMaterial(size=point_size, color=color)
+        for material, queue in ((line_material, 3950), (dot_material, 4000)):
+            for name, value in (("depth_test", False), ("render_queue", queue)):
+                try:
+                    setattr(material, name, value)
+                except (AttributeError, ValueError, TypeError):
+                    pass
+        if segments is not None and len(segments):
+            positions = np.ascontiguousarray(np.asarray(segments, np.float32).reshape(-1, 3))
+            group.add(gfx.Line(gfx.Geometry(positions=positions), line_material))
+        if points is not None and len(points):
+            positions = np.ascontiguousarray(np.asarray(points, np.float32).reshape(-1, 3))
+            group.add(gfx.Points(gfx.Geometry(positions=positions), dot_material))
+        self.scene.add(group)
+        self._sketch = group
 
     def plan_point(
         self, x: float, y: float, size: tuple[float, float]

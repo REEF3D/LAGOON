@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import html
 import logging
+import math
 import os
 import threading
 import traceback
@@ -50,6 +51,8 @@ from lagoonviz.gui.theme import COLORS, SERIES_COLORS
 log = logging.getLogger("lagoon.viewport")
 #: the probe marker's colour (the dot in the 3D view and before its values in the header)
 PROBE_COLOR = "#e07b39"
+#: the river corridor being edited, drawn over everything
+HIGHLIGHT_SKETCH = "#ffd84a"
 
 TOP = QColor(COLORS["viewport_top"])
 BOTTOM = QColor(COLORS["viewport_bottom"])
@@ -68,8 +71,19 @@ class ViewportPlaceholder(QWidget):
     #: the model turned on the map (degrees, about the model point); never sent here
     modelTurned = Signal(float, object)
 
+    #: a river corridor's point dragged: (case, side, index, x, y); never sent here
+    corridorPointMoved = Signal(str, str, int, float, float)
+    #: editing the river corridor stopped (Esc, another view); never sent here
+    corridorEditingStopped = Signal()
+
     def start_domain_drawing(self, case_id: str = "", purpose: str = "domain") -> None:
         self.statusMessage.emit(f"Drawing the {purpose} needs the 3D view (no GPU here)")
+
+    def start_corridor_editing(self, case_id: str = "") -> None:
+        self.statusMessage.emit("Dragging the corridor's points needs the 3D view (no GPU here)")
+
+    def stop_corridor_editing(self) -> None:
+        pass
 
     def stop_domain_drawing(self) -> None:
         pass
@@ -230,6 +244,10 @@ class Viewport3D(QWidget):
     #: the model turned on the map with Shift + drag: degrees (counter-clockwise),
     #: about the model point (x, y)
     modelTurned = Signal(float, object)
+    #: a river corridor's point dragged in the 2D top view: (case, side, index, x, y)
+    corridorPointMoved = Signal(str, str, int, float, float)
+    #: editing the river corridor stopped (Esc, another view)
+    corridorEditingStopped = Signal()
 
     def __init__(
         self,
@@ -280,6 +298,9 @@ class Viewport3D(QWidget):
         self._press: tuple[float, float, object, dict] | None = None
         #: drawing the domain (start_domain_drawing): where the drag began, or None
         self._drawing: dict | None = None
+        #: editing a river corridor (start_corridor_editing): the case, the point being
+        #: dragged, or None
+        self._corridor_edit: dict | None = None
         self.renderer.add_event_handler(self._on_move, "pointer_move")
         self._probe_at: tuple[str, int, tuple[float, ...]] | None = None
         #: the last probe (values where the user clicked), shown in the header
@@ -915,6 +936,7 @@ class Viewport3D(QWidget):
         self.two_d, self.two_d_side = on, side
         if not (on and side == "top"):
             self.stop_domain_drawing()  # the domain is drawn in the 2D top view only
+            self.stop_corridor_editing()
         self.two_d_button.blockSignals(True)
         self.two_d_button.setChecked(on)
         self.two_d_button.blockSignals(False)
@@ -951,6 +973,10 @@ class Viewport3D(QWidget):
             purpose = self._drawing.get("purpose", "domain")
             self.stop_domain_drawing()
             self.statusMessage.emit(f"Stopped drawing the {purpose}")
+            return
+        if key == "Escape" and self._corridor_edit is not None:
+            self.stop_corridor_editing()
+            self.statusMessage.emit("Stopped editing the river corridor")
             return
         if key in KEY_VIEWS:
             view = KEY_VIEWS[key]
@@ -1009,6 +1035,150 @@ class Viewport3D(QWidget):
         self.canvas.unsetCursor()
         self.view.set_outline(None)
         self.redraw()
+
+    # ------------------------------------------------------------- the river corridor
+    #: how near (pixels) a press must be to a point of a bank to drag it
+    CORRIDOR_PICK = 12.0
+    #: the sketch's height in the flat 2D view (over the set-up's marks)
+    SKETCH_Z = 5.0
+
+    def start_corridor_editing(self, case_id: str = "") -> None:
+        """Drag the points of a case's river corridor in the 2D top view (a press near
+        a point takes it, elsewhere the view pans as always); Esc stops."""
+        if not (self.two_d and self.two_d_side == "top"):
+            self.set_2d(True, "top")
+        self._corridor_edit = {"case": case_id, "drag": None}
+        self.statusMessage.emit(
+            "Drag the points of the banks in the 2D view · elsewhere the view pans · Esc stops"
+        )
+
+    def stop_corridor_editing(self) -> None:
+        if self._corridor_edit is None:
+            return
+        self._corridor_edit = None
+        try:
+            self.controller.enabled = True
+        except AttributeError:
+            pass
+        self.canvas.unsetCursor()
+        self.view.set_sketch(None)
+        self.redraw()
+        self.corridorEditingStopped.emit()
+
+    def _corridor(self):
+        edit = self._corridor_edit
+        try:
+            return self.session.corridor(edit["case"] or None) if edit else None
+        except ValueError:
+            return None
+
+    def _corridor_pick(self, event):
+        """The point of a bank under the pointer: (side, index), or None."""
+        corridor = self._corridor()
+        point = self._plan_point(event)
+        if corridor is None or point is None:
+            return None
+        x, y = getattr(event, "x", 0.0), getattr(event, "y", 0.0)
+        try:
+            size = tuple(self.canvas.get_logical_size())
+        except AttributeError:
+            size = (self.canvas.width(), self.canvas.height())
+        beside = self.view.plan_point(x + self.CORRIDOR_PICK, y, size)
+        if beside is None:
+            return None
+        reach = math.hypot(beside[0] - point[0], beside[1] - point[1])
+        best = None
+        for side in ("left", "right"):
+            bank = corridor.bank(side)
+            distance = np.hypot(bank[:, 0] - point[0], bank[:, 1] - point[1])
+            index = int(np.argmin(distance))
+            if distance[index] <= reach and (best is None or distance[index] < best[0]):
+                best = (float(distance[index]), side, index)
+        return None if best is None else best[1:]
+
+    def _corridor_sketch(self, corridor, side: str | None = None) -> None:
+        """The corridor drawn over everything (the bank being dragged in full), or the
+        point under the pointer, larger."""
+        z = self.SKETCH_Z
+        if corridor is None:
+            self.view.set_sketch(None)
+            return
+        sides = (side,) if side else ()
+        lines = []
+        for name in sides:
+            line = corridor.bank_line(name)
+            points = np.column_stack([line, np.full(len(line), z)])
+            lines.append(np.stack([points[:-1], points[1:]], axis=1))
+        handles = np.vstack([corridor.left, corridor.right])
+        self.view.set_sketch(
+            np.concatenate(lines) if lines else None,
+            np.column_stack([handles, np.full(len(handles), z)]),
+            color=HIGHLIGHT_SKETCH,
+            point_size=9.0,
+        )
+
+    def _edit_corridor(self, kind: str, event) -> bool:
+        """Press, drag and release on a point of a bank; True if the event was the
+        corridor's (not the view's)."""
+        edit = self._corridor_edit
+        if edit is None:
+            return False
+        drag = edit.get("drag")
+        if kind == "pointer_down":
+            if getattr(event, "button", 1) != 1:
+                return False
+            picked = self._corridor_pick(event)
+            if picked is None:
+                return False  # the view pans
+            corridor = self._corridor()
+            edit["drag"] = {
+                "side": picked[0],
+                "index": picked[1],
+                "corridor": corridor,
+                "moved": None,
+            }
+            try:
+                self.controller.enabled = False  # cancels the pan just begun
+            except AttributeError:
+                pass
+            self.canvas.setCursor(Qt.ClosedHandCursor)
+            self._corridor_sketch(corridor, picked[0])
+            self.redraw()
+            return True
+        if kind == "pointer_move":
+            if drag is None:  # hovering: the hand over a point
+                over = self._corridor_pick(event) is not None
+                if over:
+                    self.canvas.setCursor(Qt.OpenHandCursor)
+                else:
+                    self.canvas.unsetCursor()
+                return False
+            point = self._plan_point(event)
+            if point is None:
+                return True
+            moved = drag["corridor"].moved(drag["side"], drag["index"], *point)
+            drag["moved"] = point
+            self._corridor_sketch(moved, drag["side"])
+            self.statusMessage.emit(
+                f"{drag['side']} bank, point {drag['index'] + 1}: "
+                f"x {point[0]:.2f}, y {point[1]:.2f} m"
+            )
+            self.redraw()
+            return True
+        if kind == "pointer_up" and drag is not None:
+            edit["drag"] = None
+            try:
+                self.controller.enabled = True
+            except AttributeError:
+                pass
+            self.canvas.setCursor(Qt.OpenHandCursor)
+            self.view.set_sketch(None)
+            self.redraw()
+            if drag["moved"] is not None:
+                x, y = drag["moved"]
+                self.corridorPointMoved.emit(edit["case"], drag["side"], drag["index"], x, y)
+            return True
+        return False
 
     def _plan_point(self, event) -> tuple[float, float] | None:
         try:
@@ -1094,12 +1264,16 @@ class Viewport3D(QWidget):
     def _on_move(self, event) -> None:
         if self._drawing is not None and self._drawing.get("start") is not None:
             self._draw_domain("pointer_move", event)
+        elif self._corridor_edit is not None:
+            self._edit_corridor("pointer_move", event)
 
     def _on_pointer(self, event) -> None:
         """A click (press and release without dragging) on a surface probes its values."""
         kind = getattr(event, "type", "")
         if self._drawing is not None:
             self._draw_domain(kind, event)
+            return
+        if self._corridor_edit is not None and self._edit_corridor(kind, event):
             return
         x, y = getattr(event, "x", 0.0), getattr(event, "y", 0.0)
         if kind == "pointer_down":

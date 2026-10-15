@@ -22,6 +22,7 @@ from typing import Any
 
 from lagoonviz.core.commands import (
     AddItem,
+    Batch,
     Command,
     CommandStack,
     EditInput,
@@ -34,6 +35,7 @@ from lagoonviz.core.commands import (
     SetProperties,
     SetProperty,
     SetVisible,
+    WriteCaseFile,
 )
 from lagoonviz.core.data.manager import DataManager
 from lagoonviz.core.data.reef3d import ROLES
@@ -466,15 +468,21 @@ class Session:
         return found
 
     def _edit_input(self, file: str, case: str | None, change, script: str, label: str) -> None:
+        command = self._input_edit(file, case, change, script, label)
+        if command is not None:
+            self.stack.execute(command)
+
+    def _input_edit(self, file: str, case: str | None, change, script: str, label: str):
+        """The command that changes an input file (None: no change)."""
         case_id = self._case_id(case)
         current = self.input_file(file, case_id)
         changed = current.copy()
         change(changed)
         if changed.text() == current.text():
-            return
+            return None
         call = script + (f", case={case!r})" if case else ")")
-        self.stack.execute(
-            EditInput(lambda: self.input_file(file, case_id), case_id, changed.text(), call, label)
+        return EditInput(
+            lambda: self.input_file(file, case_id), case_id, changed.text(), call, label
         )
 
     def set_input(
@@ -577,6 +585,171 @@ class Session:
         two_d = bool(setup is not None and setup.two_d)
         area = area if area is not None else structures.default_area(domain, two_d)
         return structures.from_area(kind, area, (bottom, top))
+
+    # ------------------------------------------------------------- river corridor
+    def corridor(self, case: str | None = None):
+        """A case's river corridor (:class:`lagoonviz.core.corridor.Corridor`, from its
+        corridor.json) or None."""
+        setup = self.data.case_setup(self._case_id(case))
+        return setup.corridor if setup is not None else None
+
+    def _case_file(self, case_id: str, name: str, text: str | None, script: str, label: str):
+        folder = self.data.case_folder(case_id)
+        if folder is None:
+            raise ValueError(f"{case_id}: no case folder")
+        setup = self.data.case_setup(case_id, create=True)
+
+        def changed():
+            if setup is not None:
+                setup.files_changed()
+
+        return WriteCaseFile(folder / name, case_id, text, script, label, changed)
+
+    def set_corridor(self, corridor, case: str | None = None) -> None:
+        """Give a case a river corridor (a Corridor or its dict as in corridor.json;
+        None removes it). Written to corridor.json at once; one undo step."""
+        from lagoonviz.core import corridor as corridors
+
+        if isinstance(corridor, dict):
+            corridor = corridors.Corridor.from_dict(corridor)
+        data = corridor.to_dict() if corridor is not None else None
+        self._put_corridor(case, corridor, f"session.set_corridor({data!r}", "Set river corridor")
+
+    def _put_corridor(self, case: str | None, corridor, script: str, label: str) -> None:
+        from lagoonviz.core import corridor as corridors
+
+        case_id = self._case_id(case)
+        text = corridor.text() if corridor is not None else None
+        current = self.corridor(case_id)
+        if (current.text() if current is not None else None) == text:
+            return
+        if case:
+            script += ("" if script.endswith("(") else ", ") + f"case={case!r}"
+        script += ")"
+        self.stack.execute(self._case_file(case_id, corridors.FILE, text, script, label))
+
+    def _corridor_of(self, case_id: str):
+        current = self.corridor(case_id)
+        if current is None:
+            raise ValueError(f"{case_id}: no river corridor yet (start_corridor)")
+        return current
+
+    def start_corridor(self, area=None, points: int = 12, case: str | None = None) -> None:
+        """A straight river corridor over a plan area (x0, x1, y0, y1; default the
+        domain without a tenth on each side across), flowing along its longer side,
+        ``points`` points on each bank."""
+        from lagoonviz.core import corridor as corridors
+
+        case_id = self._case_id(case)
+        setup = self.data.case_setup(case_id, create=True)
+        domain = setup.domain if setup is not None else None
+        if area is None:
+            if domain is None:
+                raise ValueError("no domain yet: give the area of the corridor")
+            xs, xe, ys, ye = domain[:4]
+            if xe - xs >= ye - ys:
+                area = (xs, xe, ys + 0.1 * (ye - ys), ye - 0.1 * (ye - ys))
+            else:
+                area = (xs + 0.1 * (xe - xs), xe - 0.1 * (xe - xs), ys, ye)
+        area = [round(float(v), 6) for v in area]
+        options = {"z_start": float(domain[4])} if domain is not None else {}
+        start = corridors.default(area, int(points), **options)
+        script = f"session.start_corridor({area!r}, points={int(points)}"
+        self._put_corridor(case, start, script, "Start river corridor")
+
+    def move_corridor_point(
+        self, side: str, index: int, x: float, y: float, case: str | None = None
+    ) -> None:
+        """Move a point of a bank ("left" or "right" looking downstream; index 0
+        upstream) to (x, y): the bank follows it."""
+        moved = self._corridor_of(self._case_id(case)).moved(side, int(index), x, y)
+        script = f"session.move_corridor_point({side!r}, {int(index)}, {float(x)!r}, {float(y)!r}"
+        self._put_corridor(case, moved, script, "Move corridor point")
+
+    def set_corridor_options(
+        self, points: int | None = None, case: str | None = None, **options
+    ) -> None:
+        """Change the corridor: ``points`` per bank (the banks resampled), ``curve``
+        ("through", "bspline"), ``cells_along``, ``cells_across``, ``smoothing``
+        (Winslow iterations), ``bed`` ("slope", "geo"), ``z_start``, ``slope``."""
+        from dataclasses import replace
+
+        current = self._corridor_of(self._case_id(case))
+        changed = replace(current, **options) if options else current
+        if points is not None and int(points) != len(current.left):
+            changed = changed.with_points(int(points))
+        words = ([f"points={int(points)}"] if points is not None else []) + [
+            f"{k}={v!r}" for k, v in options.items()
+        ]
+        script = "session.set_corridor_options(" + ", ".join(words)
+        self._put_corridor(case, changed, script, "Change river corridor")
+
+    def reverse_corridor(self, case: str | None = None) -> None:
+        """The river flowing the other way (upstream and downstream swapped)."""
+        reversed_ = self._corridor_of(self._case_id(case)).reversed()
+        self._put_corridor(case, reversed_, "session.reverse_corridor(", "Reverse river corridor")
+
+    def remove_corridor(self, case: str | None = None) -> None:
+        """Remove a case's corridor.json (curvgrid.dat and the input files stay)."""
+        self._put_corridor(case, None, "session.remove_corridor(", "Remove river corridor")
+
+    def corridor_grid(self, case: str | None = None):
+        """The grid the corridor makes: (x, y, zb, quality)."""
+        from lagoonviz.core import corridor as corridors
+
+        case_id = self._case_id(case)
+        current = self._corridor_of(case_id)
+        x, y = current.grid()
+        setup = self.data.case_setup(case_id)
+        points = None
+        if current.bed == "geo" and setup is not None and (setup.path / "geo.dat").is_file():
+            points = setup.geo_points(limit=10**9)
+        z = current.bed_heights(x, y, points)
+        return x, y, z, corridors.quality(x, y)
+
+    def make_corridor_grid(self, case: str | None = None):
+        """Write the corridor's grid as curvgrid.dat and set the case up for it, one
+        undo step: G 50 2 in ctrl.txt, and DIVEMesh's grid the logical box of ni x nj
+        cells (B 10's x and y, B 1; its heights kept). Refused if cells fold. Returns
+        the grid's :class:`~lagoonviz.core.corridor.Quality`."""
+        from lagoonviz.core import corridor as corridors
+
+        case_id = self._case_id(case)
+        x, y, z, quality = self.corridor_grid(case_id)
+        if quality.folded:
+            raise ValueError(
+                f"{quality.folded} cells of the corridor's grid fold: move the points, "
+                "use fewer cells along or more smoothing"
+            )
+        ni, nj = quality.cells
+        mean = 0.5 * (sum(quality.along) / 2 + sum(quality.across) / 2)
+        step = corridors.nice_step(mean)
+        x0, x1, y0, y1 = corridors.logical_box(ni, nj, step)
+        control = self.input_file("control.txt", case_id)
+        old = control.values("B 10") or [0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
+        box = [x0, x1, y0, y1, *(old + [0.0, 1.0])[4:6]]
+
+        def logical(f):
+            f.set("B 10", box)
+            f.set("B 1", [step])
+            if "B 2" in f:
+                f.remove("B 2")
+
+        commands = [
+            self._case_file(
+                case_id, corridors.GRID_FILE, corridors.grid_text(x, y, z), "", "curvgrid.dat"
+            )
+        ]
+        for file, change in (
+            ("ctrl.txt", lambda f: f.set("G 50", [2], kinds="int")),
+            ("control.txt", logical),
+        ):
+            command = self._input_edit(file, case_id, change, "", file)
+            if command is not None:
+                commands.append(command)
+        script = "session.make_corridor_grid(" + (f"case={case!r})" if case else ")")
+        self.stack.execute(Batch(commands, script, "Make corridor grid"))
+        return quality
 
     def set_input_text(self, file: str, text: str, case: str | None = None) -> None:
         """Replace the whole text of an input file (the text editor)."""

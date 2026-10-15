@@ -13,7 +13,8 @@ its output in the last tab; its grid, solids and bed then show in the set-up.
 The *Map* tab places the case on the Earth: its georeference, the domain drawn on
 a background map, and geo.dat from a bathymetry file (``map_setup``). The *Porous*
 and *Solids* tabs add, draw and change porous structures and solids
-(``structures_setup``), the *Sea* tab reads the sea at the case (``sea_setup``).
+(``structures_setup``), the *River* tab lays a river corridor and its curvilinear
+grid (``corridor_setup``), the *Sea* tab reads the sea at the case (``sea_setup``).
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ from PySide6.QtWidgets import (
 from lagoonviz.core.data.controlfile import CommandInfo, catalog_for, format_value
 from lagoonviz.core.divemesh_run import LOG, divemesh_command, find_divemesh
 from lagoonviz.gui.bridge import SessionBridge
+from lagoonviz.gui.panels.corridor_setup import CorridorTab
 from lagoonviz.gui.panels.map_setup import MapTab
 from lagoonviz.gui.panels.sea_setup import SeaTab
 from lagoonviz.gui.panels.structures_setup import StructuresTab
@@ -459,6 +461,9 @@ class SetupPanel(QWidget):
         for tab, title in ((self.porous_tab, "Porous"), (self.solids_tab, "Solids")):
             tab.message.connect(self.status)
             self.tabs.addTab(tab, title)
+        self.river_tab = CorridorTab(self)
+        self.river_tab.message.connect(self.status)
+        self.tabs.addTab(self.river_tab, "River")
         self.map_tab = MapTab(self)
         self.map_tab.message.connect(self.status)
         self.tabs.addTab(self.map_tab, "Map")
@@ -519,6 +524,8 @@ class SetupPanel(QWidget):
         if hasattr(self, "solids_tab"):
             self.porous_tab.refresh()
             self.solids_tab.refresh()
+        if hasattr(self, "river_tab"):
+            self.river_tab.refresh()
         if hasattr(self, "map_tab"):
             self.map_tab.refresh()
         if hasattr(self, "sea_tab"):

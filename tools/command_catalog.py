@@ -392,9 +392,36 @@ FROM_READER = {
 }
 
 
+#: commands newer than the reader the catalogue was made from: their whole entry
+NEWER = {
+    "G 50": {
+        "title": "Curvilinear horizontal grid",
+        "repeat": False,
+        "params": [{"name": "", "type": "int"}],
+        "values": 1,
+        "options": {
+            "0": "Cartesian",
+            "1": "nodes of the CURV section of grid-geometry.dat",
+            "2": "nodes of curvgrid.dat",
+        },
+        "default": ["0"],
+        "text": (
+            "Curvilinear horizontal grid for SFLOW and NHFLOW. The DIVEMesh grid is its "
+            "logical box (ni x nj cells); curvgrid.dat holds ni nj, then x y zb of every "
+            "node, i fastest. Not in the user guide yet."
+        ),
+        "modules": "SN",
+        "documented": False,
+    },
+}
+
+
 def describe_from_reader(commands: dict) -> dict:
     """Titles, names and texts for commands the guides do not describe yet
-    (FROM_READER); the guide's own description, once there, wins."""
+    (FROM_READER, NEWER); the guide's own description, once there, wins."""
+    for code, entry in NEWER.items():
+        if code not in commands or not commands[code].get("documented", True):
+            commands[code] = dict(entry)
     for code, (title, names, modules, text) in FROM_READER.items():
         entry = commands.get(code)
         if entry is None or entry.get("documented", True):
