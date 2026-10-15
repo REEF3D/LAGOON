@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### A new SFLOW run, not the one before
+
+- A LAGOON store REEF3D started on top of an earlier run's (SFLOW before REEF3D's
+  fix of 2026-10-15: no volume output, so the store was not moved aside) shows the
+  latest run only: an output the run log has from an earlier run into the store,
+  and not from the latest (e.g. the earlier run's AMR surface), is left out, and
+  the others count as the latest run's.
+
 ### The wheel scrolls the panels
 
 - Over a number box, a choice list or a slider in the Properties and Set-up panels

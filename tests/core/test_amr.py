@@ -306,3 +306,74 @@ def test_sflow_amr_store_velocity_and_dry_land(tmp_path):
     assert np.allclose(speed, 0.5)
     kept = _wet_triangles(mesh)
     assert int((kept != 0).any(axis=1).sum()) == 4
+
+
+def test_a_store_written_over_by_a_new_run_shows_that_run_only(tmp_path):
+    """REEF3D before 2026-10-15 started SFLOW's store on top of the earlier one: the
+    new run wrote its free surface over the old one and left the earlier run's AMR
+    surface. By the run log's streams LAGOON shows the latest run's outputs only."""
+    import json
+
+    from lagoon_format.amr import AmrGrid as StoredGrid
+    from lagoon_format.store import StoreWriter
+
+    path = tmp_path / "REEF3D_SFLOW.lagoon"
+    writer = StoreWriter.create(path, "SFLOW", run={"type": "run", "run": "run-a"})
+    x, y = np.arange(5.0), np.arange(3.0)
+    surface = writer.add_output("free_surface", "surface", x, y, {"eta": 1}, [((0, 0), (5, 3))])
+    for t in range(2):
+        surface.append(0.5 * t, t, [{"z": np.zeros((3, 5)), "eta": np.zeros((3, 5))}])
+    amr = writer.amr_writer(
+        "sflow_amr",
+        {
+            "fields": {"eta": (1, "float32")},
+            "source": "REEF3D_SFLOW_AMR",
+            "attributes": {"dataset": "sflow_amr", "role": "amr", "refinement": 2},
+        },
+    )
+    grid = StoredGrid(0, np.linspace(0, 4, 5), np.linspace(0, 2, 3), {"eta": np.zeros((2, 4))}, 0)
+    amr.append(0.0, 0, [grid])
+    writer.close()
+
+    def stream(run, name, group):
+        folder = "REEF3D_SFLOW.lagoon"
+        return {
+            "type": "stream",
+            "run": run,
+            "name": name,
+            "stream": {"folder": folder, "group": group},
+        }
+
+    def log(*runs):
+        (tmp_path / "REEF3D_Case").mkdir(exist_ok=True)
+        lines = []
+        for run, started, groups in runs:
+            lines.append(
+                {
+                    "type": "run",
+                    "format": "reef3d-run",
+                    "version": 1,
+                    "run": run,
+                    "solver": "SFLOW",
+                    "started": started,
+                }
+            )
+            lines += [stream(run, f"lagoon_{g}", g) for g in groups]
+        text = "".join(json.dumps(line) + "\n" for line in lines)
+        (tmp_path / "REEF3D_Case" / "REEF3D_SFLOW_run.jsonl").write_text(text)
+
+    # run a wrote both: both shown
+    log(("run-a", "2026-10-15T17:31:19Z", ["free_surface", "amr/sflow_amr"]))
+    assert {"sflow_free_surface", "sflow_amr"} <= set(open_case(tmp_path).datasets)
+    # run b wrote its free surface into the store, no AMR (yet): the AMR is run a's
+    log(
+        ("run-a", "2026-10-15T17:31:19Z", ["free_surface", "amr/sflow_amr"]),
+        ("run-b", "2026-10-15T21:13:17Z", ["free_surface"]),
+    )
+    case = open_case(tmp_path)
+    assert "sflow_amr" not in case.datasets
+    assert case.datasets["sflow_free_surface"].run_id == "run-b"
+    assert "amr" not in case.main_datasets()
+    # without the groups in the run log: as stored
+    log(("run-b", "2026-10-15T21:13:17Z", []))
+    assert "sflow_amr" in open_case(tmp_path).datasets

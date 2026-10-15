@@ -1456,6 +1456,54 @@ def _prefer_stores(datasets: list[Dataset], stored: list[Dataset]) -> list[Datas
     return kept
 
 
+def _current_in_stores(stored: list[Dataset], stores: list[Path], case_dir: Path) -> list[Dataset]:
+    """The outputs of a store that are its latest run's, by the run log's streams.
+
+    A store holds one run, but REEF3D before 2026-10-15 started SFLOW's store (no
+    volume output) on top of the earlier one: the new run wrote its free surface and
+    bed over the old ones and left the rest, e.g. the AMR surface of the run before,
+    and the root's run id. An output the run log has from an earlier run into the
+    store, but not from the latest, is left out; the others get the latest run's id.
+    Without a run log, or with one that does not name the groups: as stored."""
+    if not stored or not stores:
+        return stored
+    try:
+        history = run_log(case_dir)
+    except (OSError, ValueError):
+        return stored
+    if history is None or not history.runs:
+        return stored
+    kept = list(stored)
+    for store in stores:
+        writers = []  # (run, groups it wrote into this store)
+        for run in history.runs:
+            groups = {
+                str(stream.get("group", ""))
+                for stream in run.streams.values()
+                if isinstance(stream, dict)
+                and Path(str(stream.get("folder", ""))).name == store.name
+                and stream.get("group")
+            }
+            if groups:
+                writers.append((run, groups))
+        if not writers:
+            continue
+        latest, current = max(writers, key=lambda w: w[0].started)
+        earlier = set().union(*(g for r, g in writers if r is not latest))
+        for dataset in stored:
+            try:
+                group = Path(dataset.folder).resolve().relative_to(store.resolve()).as_posix()
+            except ValueError:
+                continue  # another store's
+            if group in current:
+                dataset.run_id = latest.id
+                dataset.run_started = latest.started
+            elif group in earlier:
+                log.info("%s/%s: left by an earlier run, not shown", store.name, group)
+                kept.remove(dataset)
+    return kept
+
+
 def _store_solver(path: Path) -> str:
     """The solver a LAGOON store says it holds (upper case), or "" if it cannot say."""
     from lagoon_format.store import Store
@@ -1531,6 +1579,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
         if not datasets and not stored:
             # a plain folder with VTU/VTP files
             datasets = _dataset_from_folder(path)
+    stored = _current_in_stores(stored, store_paths, case_dir)
     datasets = _prefer_stores(datasets, stored)
     if path == case_dir or store_paths:  # the case itself: its solids too
         datasets += solid_datasets(case_dir)
