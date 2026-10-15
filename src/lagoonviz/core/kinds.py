@@ -271,7 +271,10 @@ KINDS: dict[str, KindSpec] = {
             **_vectors(),
             **_exaggeration("Scales the surface elevation about the still water level"),
             "hide_dry": PropertySpec(
-                True, "Hide dry land", tip="Leave out the surface where the depth is zero"
+                True,
+                "Hide dry land",
+                tip="Show only the wet free surface: leave it out over dry land (FNPF: no "
+                "water depth; NHFLOW, SFLOW: dry cells, wetdry)",
             ),
         },
     ),
@@ -290,7 +293,10 @@ KINDS: dict[str, KindSpec] = {
                 "the refinement levels)",
             ),
             "hide_dry": PropertySpec(
-                True, "Hide dry land", tip="Leave out the surface where the depth is zero"
+                True,
+                "Hide dry land",
+                tip="Show only the wet free surface: leave it out over dry land (FNPF: no "
+                "water depth; NHFLOW, SFLOW: dry cells, wetdry)",
             ),
         },
     ),

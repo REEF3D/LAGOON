@@ -701,7 +701,8 @@ class DataManager:
             if variable and variable != "none":
                 arrays.add(variable.partition(".")[0])
         if item.kind in WATER_KINDS:
-            arrays.update(("eta", "depth"))  # depth: dry land is hidden (FNPF writes it)
+            # dry land is hidden: FNPF writes the depth, NHFLOW and SFLOW wetdry
+            arrays.update(("eta", "depth", "wetdry"))
         if item.kind == "bathymetry":
             arrays.add("depth")  # still water depth: the level for vertical exaggeration
         if int(item.properties.get("trail_outputs", 0) or 0) > 0:
@@ -1357,6 +1358,8 @@ class DataManager:
         (the renderer then skips re-uploading the triangle list): at once when the
         depth is the very array of before (a store's still water depth, read once)."""
         depth = mesh.point_data.get("depth")
+        if depth is None:
+            depth = mesh.point_data.get("wetdry")
         previous = self._wet.get(item_id)
         if (
             depth is not None
@@ -1900,17 +1903,29 @@ def _results_extent(case: Case) -> tuple[np.ndarray, np.ndarray] | None:
 def _wet_triangles(mesh: SurfaceMesh) -> np.ndarray:
     """The free surface without dry land, so the bed shows there.
 
-    A triangle goes when all its corners have no water depth. It stays in the index
-    list as a degenerate triangle, so the list keeps its length as the shoreline moves
-    and the renderer only updates its buffer.
+    FNPF writes the water ``depth``: a triangle goes when all its corners have none.
+    NHFLOW and SFLOW write ``wetdry``, at a point the share of its four cells that are
+    wet (0, 0.25, ... 1): a triangle goes when its corners are wet by half or less on
+    average, so the surface ends at the wet cells' edge (a wet cell keeps both its
+    triangles, a dry one next to it loses them). A triangle that goes stays in the
+    index list as a degenerate triangle, so the list keeps its length as the
+    shoreline moves and the renderer only updates its buffer.
     """
     depth = mesh.point_data.get("depth")
-    if depth is None or depth.ndim != 1:
+    wetdry = mesh.point_data.get("wetdry")
+    if depth is not None and depth.ndim == 1:
+        dry = depth <= 0.0
+        if not dry.any():
+            return mesh.triangles
+        gone = dry[mesh.triangles].all(axis=1)
+    elif wetdry is not None and wetdry.ndim == 1:
+        wet = np.asarray(wetdry, np.float32)
+        if bool((wet >= 1.0).all()):
+            return mesh.triangles
+        corners = wet[mesh.triangles]
+        gone = ~(corners.sum(axis=1) > 1.5)  # mean > 0.5 (NaN: gone)
+    else:
         return mesh.triangles
-    dry = depth <= 0.0
-    if not dry.any():
-        return mesh.triangles
-    gone = dry[mesh.triangles].all(axis=1)
     if not gone.any():
         return mesh.triangles
     triangles = mesh.triangles.copy()

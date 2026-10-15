@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Only the wet free surface
+
+- **Hide dry land** now also works for NHFLOW and SFLOW (their free surface and AMR
+  surface): it leaves out the surface over dry cells (`wetdry`), so only the wet
+  free surface shows and the bed is seen on dry land. It is on by default, as it
+  was for FNPF; switch it off in the item's properties to see the whole surface.
+
 ### SFLOW and curvilinear grids in LAGOON stores
 
 - **Curvilinear grids** (REEF3D's `G 50`, NHFLOW and SFLOW) in LAGOON stores:

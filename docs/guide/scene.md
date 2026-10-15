@@ -71,8 +71,10 @@ rock, ice, wood): its colour, and how the [cinematic looks](cinematic.md) draw i
 Waves are small next to the length of a domain. The case's *Vertical scale*
 stretches the heights of all its items about the still water level (surface, bed,
 bodies, slices, gauges alike). With *Sync* off on an item, that item gets its own
-scale. The free surface can leave out dry land (*Hide dry land*), the bed what is
-under still water (*Hide wet land*).
+scale. The free surface can leave out dry land (*Hide dry land*, on by default),
+so only the wet free surface shows: FNPF's surface where it has no water depth,
+NHFLOW's and SFLOW's over their dry cells (`wetdry`), the AMR surface likewise.
+The bed can leave out what is under still water (*Hide wet land*).
 
 ## Reading values
 

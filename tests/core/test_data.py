@@ -491,6 +491,20 @@ def test_dry_land_is_left_out_of_the_free_surface(reef3d_run):
     wet = SurfaceMesh(points, triangles, {"depth": np.ones(4)})
     assert _wet_triangles(wet) is triangles  # nothing dry: no copy
 
+    # NHFLOW and SFLOW: wetdry, the share of a point's four cells that are wet. Two
+    # columns of cells, the left wet, the right dry: the surface ends at their edge
+    from lagoonviz.core.data.mesh import grid_triangles
+
+    wetdry = np.tile(np.array([1.0, 0.5, 0.0], np.float32), 3)  # 3 x 3 points, x fastest
+    grid = grid_triangles(3, 3)
+    shore = SurfaceMesh(np.zeros((9, 3), np.float32), grid, {"wetdry": wetdry})
+    kept = _wet_triangles(shore)
+    assert kept.shape == grid.shape
+    shown = kept[(kept != 0).any(axis=1)]
+    assert len(shown) == 4 and (np.isin(shown, [0, 1, 3, 4, 6, 7])).all()  # the left cells
+    soaked = SurfaceMesh(np.zeros((9, 3), np.float32), grid, {"wetdry": np.ones(9, np.float32)})
+    assert _wet_triangles(soaked) is grid
+
     s = Session()
     s.open_case(reef3d_run)
     mesh = s.data.load("free_surface-1")
