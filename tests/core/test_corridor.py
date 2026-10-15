@@ -371,3 +371,16 @@ def test_the_default_water_level_and_the_widest_bank():
     thalweg = C.Thalweg(line, np.zeros(101), left, np.full(101, 50.0), 0.0)
     corridor = C.from_thalweg(thalweg, margin=0.0, count=12)
     assert corridor.left[:, 1].max() <= C.WIDEST * 50.0 + 1e-6
+
+
+def test_a_fine_grid_is_drawn_too(river):
+    """A grid of more than 400,000 nodes was not drawn (and so vanished after Make
+    grid): it is, every n-th line."""
+    session = Session()
+    case_id = session.open_case(river)
+    session.start_corridor()
+    session.set_corridor_options(cells_along=2320, cells_across=200)
+    session.make_corridor_grid()
+    marks = session.data.case_setup(case_id).marks()
+    grid = [m for m in marks if m.group == "corridor_grid"]
+    assert grid and 0 < len(grid[0].segments) < 2 * 121 * 2400
