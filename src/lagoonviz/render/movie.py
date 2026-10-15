@@ -129,6 +129,9 @@ class OffscreenView:
                 self.scene.update_outlines(
                     item_id, session.data.patch_outlines(item_id, mesh, shown)
                 )
+                self.scene.update_grid_lines(
+                    item_id, session.data.amr_grid_lines(item_id, mesh, shown)
+                )
         profiles = set(session.data.profile_items())
         for item_id in session.data.series_items() + sorted(profiles):
             data = session.data

@@ -1281,6 +1281,7 @@ def _frame_objects(
             ("contours", data.contour_lines(item_id, mesh, shown), CONTOUR_WIDTH, None),
             ("vectors", data.vector_arrows(item_id, mesh, shown), VECTOR_WIDTH, None),
             ("trails", data.particle_trails(item_id, mesh), TRAIL_WIDTH, "color"),
+            ("grid", data.amr_grid_lines(item_id, mesh, shown), OUTLINE_WIDTH * 0.6, "color"),
             ("outlines", data.patch_outlines(item_id, mesh, shown), OUTLINE_WIDTH, "color"),
         )
         for label, lines, width, own in overlays:

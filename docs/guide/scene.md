@@ -21,7 +21,7 @@ script the session writes ([Scripting](../scripting.md)).
 | geo.dat points | the points of `geo.dat`, coloured by height, with their number and spacing ([Case set-up](setup.md#the-points-of-geodat)) |
 | Background map | a map or satellite image round a georeferenced case, under the set-up and the results ([Maps](maps.md#background-maps)) |
 | Free surface | the water surface, coloured by a variable or plain |
-| AMR surface | the surface of an adaptive-mesh run, finer patches over coarser ones, with the patch outlines |
+| AMR surface | the surface of an adaptive-mesh run, finer patches over coarser ones, with the patch outlines; *AMR patches* off shows the base grid (level 0) alone, *Grid lines* draws the cells of every level |
 | Bed | the bathymetry (sand coloured by default) |
 | Volume | the outside of the volume output |
 | Slice | the volume cut by an x, y or z plane |

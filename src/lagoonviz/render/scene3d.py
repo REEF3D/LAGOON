@@ -1160,6 +1160,7 @@ class SceneRenderer:
         self.update_vectors(item_id, None)
         self.update_trails(item_id, None)
         self.update_outlines(item_id, None)
+        self.update_grid_lines(item_id, None)
 
     def update_contours(self, item_id: str, lines: ContourLines | None) -> None:
         """Contour lines of an item (None or no segments: none), thin and dark."""
@@ -1179,6 +1180,12 @@ class SceneRenderer:
         """Borders of an AMR surface's refined patches (None: none), in their colour."""
         self._update_overlay_lines(
             f"{item_id}#outlines", outlines, 1.3, outlines.color if outlines is not None else None
+        )
+
+    def update_grid_lines(self, item_id: str, lines) -> None:
+        """An AMR surface's grid lines (None: none), thinner than its patch outlines."""
+        self._update_overlay_lines(
+            f"{item_id}#grid", lines, 0.8, lines.color if lines is not None else None
         )
 
     def _update_overlay_lines(

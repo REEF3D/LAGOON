@@ -756,7 +756,9 @@ class StoreAmrDataset(Dataset):
             for g in self.amr.grids(index, names)
         ]
 
-    def read(self, index: int, variables: list[str] | None = None) -> SurfaceMesh:
+    def read(
+        self, index: int, variables: list[str] | None = None, max_level: int | None = None
+    ) -> SurfaceMesh:
         from lagoonviz.core.data.amr import SURFACE_ARRAYS, leaf_mesh
 
         names = None
@@ -764,7 +766,7 @@ class StoreAmrDataset(Dataset):
             wanted = {v.partition(".")[0] for v in variables if v and v != "none"}
             wanted.update(SURFACE_ARRAYS)
             names = sorted(n for n in wanted if n in self.amr.fields)
-        return leaf_mesh(self._grids(index, names))
+        return leaf_mesh(self._grids(index, names), max_level)
 
     def read_slice(self, index, axis, position, variables=None) -> SurfaceMesh:
         raise ValueError(f"{self.label}: a surface cannot be sliced")

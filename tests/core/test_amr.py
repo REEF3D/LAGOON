@@ -94,6 +94,36 @@ def test_other_solvers(tmp_path, solver):
         assert stored.fields["eta"] == (1, np.dtype(np.float32))
 
 
+def test_amr_grid_lines_and_patches_can_be_hidden(tmp_path):
+    make_amr(tmp_path, "NHFLOW", frames=3)
+    session = Session()
+    session.open_case(tmp_path)
+    item = next(i for i in session.scene if i.kind == "amr")
+    session.set_time(1.0)
+    mesh = session.data.load(item.id)
+    shown = session.data.display(item.id, mesh)
+    # grid lines: off by default, then every leaf cell's edges (no diagonals)
+    assert session.data.amr_grid_lines(item.id, mesh, shown) is None
+    session.set_property(item.id, "grid_lines", "white")
+    lines = session.data.amr_grid_lines(item.id, mesh, shown)
+    assert lines is not None and lines.color == "#ffffff"
+    outlines = session.data.patch_outlines(item.id, mesh, shown)
+    assert len(lines.segments) > len(outlines.segments)
+    step = lines.segments[:, 1, :2] - lines.segments[:, 0, :2]
+    assert (np.abs(step).min(axis=1) < 1e-6).all()  # along x or y only
+    # the refined patches hidden: the base grid alone, whole, without outlines
+    session.set_property(item.id, "patches", False)
+    base = session.data.load(item.id)
+    assert set(np.unique(base.point_data["level"])) == {0.0}
+    assert base.outlines is None
+    assert base.triangles.shape[0] < mesh.triangles.shape[0]
+    shown = session.data.display(item.id, base)
+    assert session.data.patch_outlines(item.id, base, shown) is None
+    assert session.data.amr_grid_lines(item.id, base, shown) is not None
+    session.set_property(item.id, "patches", True)
+    assert session.data.load(item.id).outlines is not None
+
+
 def test_case_with_amr(tmp_path):
     make_run(tmp_path, frames=3, print_interval=0.5)
     make_amr(tmp_path, "NHFLOW", frames=3)

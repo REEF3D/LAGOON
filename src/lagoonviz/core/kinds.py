@@ -287,6 +287,11 @@ KINDS: dict[str, KindSpec] = {
             **_colouring("eta", "reef3d"),
             **_contours(),
             **_exaggeration("Scales the surface elevation about the still water level"),
+            "patches": PropertySpec(
+                True,
+                "AMR patches",
+                tip="Show the refined patches; off: the base grid (level 0) alone",
+            ),
             "outlines": PropertySpec(
                 "dark",
                 "Patch outlines",
@@ -294,6 +299,7 @@ KINDS: dict[str, KindSpec] = {
                 tip="Draw the borders of the refined patches (colour by 'level' to see "
                 "the refinement levels)",
             ),
+            **_grid_lines("of every level"),
             "hide_dry": PropertySpec(
                 True,
                 "Hide dry land",

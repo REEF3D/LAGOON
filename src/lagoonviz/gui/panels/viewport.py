@@ -783,6 +783,7 @@ class Viewport3D(QWidget):
                 self.view.update_vectors(item_id, data.vector_arrows(item_id, mesh, shown))
                 self.view.update_trails(item_id, data.particle_trails(item_id, mesh))
                 self.view.update_outlines(item_id, data.patch_outlines(item_id, mesh, shown))
+                self.view.update_grid_lines(item_id, data.amr_grid_lines(item_id, mesh, shown))
         except Exception:  # noqa: BLE001 (a bad frame must not take the window down)
             log.error("showing %s failed:\n%s", item_id, traceback.format_exc())
             self.statusMessage.emit(f"Could not show {item.name}; see the log")

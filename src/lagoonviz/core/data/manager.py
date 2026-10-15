@@ -758,6 +758,8 @@ class DataManager:
                 int(props.get("seeds", 60)),
                 str(props.get("lines_in", "volume")),
             )
+        elif item.kind == "amr" and not item.properties.get("patches", True):
+            extra = ("levels", 0)  # the base grid alone, without the refined patches
         detail = self._detail(dataset) if not extra else 1
         return FrameKey(self._case_key(item_id), dataset.key, index, arrays, extra, detail)
 
@@ -803,6 +805,8 @@ class DataManager:
             mesh = dataset.read_streamlines(
                 key.index, vector, axis, position, count, list(key.arrays), lines_in
             )
+        elif key.extra and key.extra[0] == "levels":
+            mesh = dataset.read(key.index, list(key.arrays), max_level=key.extra[1])
         elif key.detail > 1:
             mesh = dataset.read(key.index, list(key.arrays), detail=key.detail)
         else:
@@ -929,11 +933,32 @@ class DataManager:
         outlines = mesh.outlines
         if outlines is None and item.kind not in ("amr", "slice"):
             outlines = self._grid_lines(item_id, mesh)  # made when first asked for
-        if outlines is None or not len(outlines):
+        return self._lines_on(item_id, outlines, shown, colour)
+
+    def amr_grid_lines(
+        self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
+    ) -> Trails | None:
+        """An AMR surface's grid lines: the edges of the cells shown, of every level
+        (drawn beside its patch outlines, so both can be shown in their own colours);
+        None for other items or when off."""
+        item = self.scene.get(item_id)
+        if item.kind != "amr":
             return None
-        edges = outlines.astype(np.int64)
+        colour = str(item.properties.get("grid_lines", "off"))
+        if colour == "off" or shown.positions.shape[0] != mesh.n_points:
+            return None
+        return self._lines_on(item_id, self._grid_lines(item_id, mesh), shown, colour)
+
+    def _lines_on(
+        self, item_id: str, edges: np.ndarray | None, shown: DisplaySurface, colour: str
+    ) -> Trails | None:
+        """Edges (node pairs) drawn on a surface as shown, lifted off it."""
+        if edges is None or not len(edges):
+            return None
+        item = self.scene.get(item_id)
+        edges = edges.astype(np.int64)
         if item.kind != "slice" and shown.triangles.size:  # not over hidden dry land
-            used = np.zeros(mesh.n_points, bool)
+            used = np.zeros(shown.positions.shape[0], bool)
             used[shown.triangles.ravel()] = True
             edges = edges[used[edges].all(axis=1)]
             if not len(edges):

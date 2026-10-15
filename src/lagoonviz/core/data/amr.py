@@ -241,15 +241,18 @@ def _outline(nx: int, ny: int) -> np.ndarray:
     return np.stack([ring[:-1], ring[1:]], axis=1)
 
 
-def leaf_mesh(grids: list[AmrGrid]) -> SurfaceMesh:
+def leaf_mesh(grids: list[AmrGrid], max_level: int | None = None) -> SurfaceMesh:
     """The surface of the leaf cells of all grids: each grid on its node lattice,
-    without the cells a finer grid covers. The height is ``elevation`` (else
+    without the cells a finer grid covers (grids finer than ``max_level`` left out:
+    0 gives the base grid alone). The height is ``elevation`` (else
     ``eta``); point data are the cell data averaged to the nodes, the grid's
     ``level``, and the water ``depth`` from ``WL`` (to hide dry land). The
     borders of the refined patches are the mesh's ``outlines``."""
     names = (
         set.intersection(*(set(g.cell_data) | set(g.point_data) for g in grids)) if grids else set()
     )
+    if max_level is not None:
+        grids = [g for g in grids if g.level <= max_level]
     points, triangles, outlines, normals = [], [], [], []
     data: dict[str, list[np.ndarray]] = {name: [] for name in names}
     levels = []
@@ -367,9 +370,16 @@ class AmrDataset(Dataset):
         names.update(SURFACE_ARRAYS)
         return sorted(n for n in names if n in self.components and n != "level")
 
-    def read(self, index: int, variables: list[str] | None = None) -> SurfaceMesh:
+    def read(
+        self, index: int, variables: list[str] | None = None, max_level: int | None = None
+    ) -> SurfaceMesh:
+        """A frame's surface; with ``max_level`` without the finer patches (their
+        files, named by level, are not read)."""
         arrays = self._arrays(variables)
-        return leaf_mesh([read_grid(path, arrays) for path in self.grid_files(index)])
+        files = self.grid_files(index)
+        if max_level is not None:
+            files = [path for path in files if _file_level(path) <= max_level]
+        return leaf_mesh([read_grid(path, arrays) for path in files], max_level)
 
     def read_slice(self, index, axis, position, variables=None) -> SurfaceMesh:
         raise ValueError(f"{self.label}: a surface cannot be sliced")
@@ -390,6 +400,16 @@ class AmrDataset(Dataset):
             if found is not None:
                 values[index] = found[0]
         return (float(x), float(y), 0.0), values
+
+
+_LEVEL = re.compile(r"-L(\d+)-")
+
+
+def _file_level(path: Path) -> int:
+    """A grid file's refinement level from its name (``...-AMR-L2-...``); 0 when the
+    name does not say (it is then read, and left out by its level inside)."""
+    found = _LEVEL.search(path.name)
+    return int(found.group(1)) if found else 0
 
 
 def amr_datasets(folder: Path) -> list[Dataset]:
