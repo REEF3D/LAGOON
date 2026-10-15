@@ -367,6 +367,11 @@ it is the only codec outside the Zarr v3 core.
 - A block's array `zarr.json` files are rewritten with the new `shape[0]` by the
   rank that owns the block (write to a temporary file, then rename).
 - Rank 0 extends `time` and `step` (and their `shape`) last.
+- A reader of a store being written may find a shard whose end is not a valid
+  index yet (its writer is appending an output; REEF3D's index carries a CRC-32C):
+  it reads the shard again until it is (milliseconds). The outputs already in the
+  shard are counted in `time` and must not be read as missing; a shard that stays
+  invalid is damaged.
 
 ## 6. Converting REEF3D VTK output
 

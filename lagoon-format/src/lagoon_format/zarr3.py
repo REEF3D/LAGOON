@@ -20,6 +20,7 @@ import math
 import os
 import struct
 import threading
+import time
 import zlib
 from collections import OrderedDict
 from collections.abc import Sequence
@@ -30,6 +31,11 @@ from typing import Any
 import numpy as np
 
 ZARR_JSON = "zarr.json"
+#: a shard whose end is not a valid index is read again for up to this long [s] while
+#: it changes (its writer is appending outputs); one that has stayed so for
+#: INDEX_SETTLE is damaged (a writer that stopped half way)
+INDEX_WAIT = 5.0
+INDEX_SETTLE = 0.5
 #: index entry of an inner chunk that is not written
 EMPTY = 2**64 - 1
 
@@ -427,32 +433,50 @@ class Array:
             return self.path.joinpath("c", *[str(c) for c in coords])
         return self.path / self._separator.join(["c", *[str(c) for c in coords]])
 
-    def _read_index(self, file: Path, data: bytes | None = None) -> np.ndarray | None:
-        """The shard's index: (*inner chunks per shard, 2) offsets and sizes."""
+    def _read_index(self, file: Path) -> np.ndarray | None:
+        """The shard's index: (*inner chunks per shard, 2) offsets and sizes; None
+        when the shard is not there.
+
+        A writer adds outputs to a shard by appending their chunks and then a new
+        index (with its CRC-32C): read in between, the end of the file is not an
+        index yet. The shard's outputs written before are still there, so it is read
+        again until the writer is done (milliseconds; a run being followed reads it
+        while REEF3D writes it). A shard that stays so (a writer that stopped half
+        way) is an error: its outputs are not read as missing values (NaN), which
+        drew the surface as nothing."""
         count = math.prod(self._per_shard)
         size = 16 * count + (4 if self._index_crc else 0)
-        try:
-            stat = file.stat()
-        except FileNotFoundError:
-            return None
-        key = (str(file), stat.st_mtime_ns, stat.st_size)
-        if data is None:
+        started = time.monotonic()
+        last = None
+        steady = started
+        while True:
+            try:
+                stat = file.stat()
+            except FileNotFoundError:
+                return None
+            key = (str(file), stat.st_mtime_ns, stat.st_size)
             cached = _INDEXES.get(key)
             if cached is not None:
                 return cached
             with open(file, "rb") as handle:
                 if self._index_at_end:
-                    handle.seek(stat.st_size - size)
+                    handle.seek(max(stat.st_size - size, 0))
                 raw = handle.read(size)
-        else:
-            raw = data[-size:] if self._index_at_end else data[:size]
-        if len(raw) != size:
-            raise ZarrError(f"{file}: shard index is cut short")
-        if self._index_crc and struct.unpack("<I", raw[-4:])[0] != crc32c(raw[:-4]):
-            return None  # being written (the writer appends a new index): not there yet
-        index = np.frombuffer(raw[: 16 * count], "<u8").reshape(*self._per_shard, 2)
-        _INDEXES.put(key, index)
-        return index
+            whole = len(raw) == size
+            valid = whole and not (
+                self._index_crc and struct.unpack("<I", raw[-4:])[0] != crc32c(raw[:-4])
+            )
+            if valid:
+                index = np.frombuffer(raw[: 16 * count], "<u8").reshape(*self._per_shard, 2)
+                _INDEXES.put(key, index)
+                return index
+            now = time.monotonic()
+            if key != last:
+                last, steady = key, now  # still being written
+            elif now - steady > INDEX_SETTLE or now - started > INDEX_WAIT:
+                what = "cut short" if not whole else "not valid (its writer stopped half way?)"
+                raise ZarrError(f"{file}: the shard's index is {what}")
+            time.sleep(0.005)
 
     def _read_inner(self, file: Path, index: np.ndarray, local: tuple[int, ...]):
         offset, nbytes = (int(v) for v in index[local])
@@ -474,10 +498,10 @@ class Array:
             return self.pipeline.decode(data, self.chunks)
         if not file.is_file():
             return None
-        data = file.read_bytes()
-        index = self._read_index(file, data)
+        index = self._read_index(file)
         if index is None:
             return None
+        data = file.read_bytes()  # after the index: a shard only grows, its chunks stay
         out = np.full(self.chunks, self.fill_value, self.dtype)
         for local in np.ndindex(*self._per_shard):
             offset, nbytes = (int(v) for v in index[local])

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Following a running simulation
+
+- The result no longer vanishes when reloading while REEF3D writes its LAGOON store:
+  an output read just as REEF3D appended the next one to the same shard came back
+  as missing values (the surface drawn as nothing until the time moved). The
+  shard is now read again once its new index is written (milliseconds); one left
+  half written is reported as an error instead of drawn as nothing.
+
 ### Only the wet free surface
 
 - **Hide dry land** now also works for NHFLOW and SFLOW (their free surface and AMR

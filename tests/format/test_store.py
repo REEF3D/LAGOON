@@ -243,8 +243,11 @@ def test_stores_open_in_zarr_python(tmp_path):
 
 
 def test_shard_index_checksum(tmp_path):
-    """A shard whose index does not match its CRC-32C (REEF3D is appending to it)
-    reads as not written yet, instead of as garbage."""
+    """A shard whose index does not match its CRC-32C and stays so (a writer that
+    stopped half way) is an error, not garbage, nor missing values (while REEF3D
+    appends to it, it is read again: test_a_shard_read_while_its_writer_appends)."""
+    from lagoon_format.zarr3 import ZarrError
+
     a = Array.create(tmp_path / "c", [2, 4], "float32", [2, 4], inner=[1, 4], index_crc=True)
     a[:] = np.arange(8, dtype=np.float32).reshape(2, 4)
     np.testing.assert_array_equal(Array(tmp_path / "c")[1], [4, 5, 6, 7])
@@ -252,7 +255,8 @@ def test_shard_index_checksum(tmp_path):
     data = bytearray(shard.read_bytes())
     data[-1] ^= 0xFF
     shard.write_bytes(bytes(data))
-    assert np.isnan(Array(tmp_path / "c")[:]).all()
+    with pytest.raises(ZarrError, match="not valid"):
+        Array(tmp_path / "c")[:]
 
 
 def test_paraview_reader_grids(tmp_path):
@@ -312,3 +316,38 @@ def test_paraview_reader_bodies_and_particles(tmp_path):
     assert np.array_equal(arrays["age"], [1, 1, 1])
     kind, connectivity, offsets, arrays, cells = reader.particle_cells(store.particles["m"], 2)
     assert kind == "lines" and list(offsets) == [2, 4] and list(cells["id"]) == [7, 8]
+
+
+def test_a_shard_read_while_its_writer_appends(tmp_path):
+    """A writer adds outputs to a shard by appending their chunks, then a new index:
+    read in between, the outputs before are still read (once the index is there),
+    not taken as missing (NaN: the surface vanished while following a run)."""
+    import threading
+    import time
+
+    import lagoon_format.zarr3 as zarr3
+
+    data = np.arange(2 * 4 * 6, dtype=np.float32).reshape(2, 4, 6)
+    a = Array.create(
+        tmp_path / "s", [4, 4, 6], "float32", [4, 4, 6], inner=[1, 4, 6], index_crc=True
+    )
+    a[0:2] = data
+    shard = tmp_path / "s" / "c" / "0" / "0" / "0"
+    index = shard.read_bytes()[-(16 * 4 + 4) :]
+    with open(shard, "ab") as f:
+        f.write(b"\x01" * 100)  # the next output's chunks: no index at the end yet
+
+    def finish():
+        time.sleep(0.1)
+        with open(shard, "ab") as f:
+            f.write(index)  # the new index (here: the old one again, still valid)
+
+    writer = threading.Thread(target=finish)
+    writer.start()
+    np.testing.assert_array_equal(Array(tmp_path / "s")[0:2], data)
+    writer.join()
+    # a writer that stopped half way: an error, not missing values
+    with open(shard, "ab") as f:
+        f.write(b"\x02" * 50)
+    with pytest.raises(zarr3.ZarrError, match="index"):
+        Array(tmp_path / "s")[0]
