@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Multi-block grids
+
+- The Set-up panel has a **Blocks** tab: blocks of curvilinear cells that meet along
+  their faces, node on node, for SFLOW and NHFLOW (`G 50 1`, DIVEMesh `R 20 1`).
+  Start one block over the domain, draw one, or make the river corridor block 0;
+  then, in the 2D top view, drag corners and points, cut edges and add blocks
+  outside an edge. Cells go on through the blocks so the faces always match; each
+  block is meshed by transfinite interpolation and Winslow smoothing, its wall nodes
+  sliding along the walls.
+- The faces of a block are walls or open: a discharge in through a -i face, a water
+  level at a +i face (`G 54` for the blocks 1.., `B 60`, `W 10`, `F 62` for block 0).
+- The tab lists the rules the grid breaks (faces that do not join up or do not
+  match, folded cells, block 0's interfaces on part of a face, too few cells behind
+  an interface, open faces in the wrong place, ...) and the set-up marks them where
+  they are; it draws the blocks, their grids and the quality of the cells. **Make
+  grid** waits for the errors, then writes `blocks.dat`, control.txt and ctrl.txt.
+- Kept in `blocks.json`; a **Multi-block grid** item of the scene. In a script
+  `session.start_multiblock()`, `extrude_block()`, `move_block_vertex()`,
+  `set_block_face()`, `make_multiblock_grid()`.
+- The catalogue knows `G 50 1`, `G 54` (REEF3D), `R 20` and `R 21` (DIVEMesh).
+- Without a GPU, the set-up's placeholder view no longer stops on *North up*.
+
 ### Tidy river grids
 
 - The River tab's grid can have its **cross-sections across the river**: straight

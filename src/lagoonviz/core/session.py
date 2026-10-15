@@ -98,6 +98,8 @@ class Session:
         corridor, laid out first if it has none, :meth:`add_corridor`)."""
         if kind == "corridor" and not self._replaying_corridor(properties):
             return self.add_corridor(case=properties.get("case") or None)
+        if kind == "multiblock" and not self._replaying_multiblock(properties):
+            return self.add_multiblock(case=properties.get("case") or None)
         command = AddItem(kind, name, properties)
         self.stack.execute(command)
         assert command.item_id is not None
@@ -111,6 +113,14 @@ class Session:
         except ValueError:
             return True
         return self.corridor(case_id) is not None and not self._corridor_items(case_id)
+
+    def _replaying_multiblock(self, properties: dict) -> bool:
+        """An item of blocks there are already (added by itself): just the item."""
+        try:
+            case_id = self._case_id(properties.get("case") or None)
+        except ValueError:
+            return True
+        return self.multiblock(case_id) is not None and not self._multiblock_items(case_id)
 
     def open_case(self, path: str | Path, name: str | None = None) -> str:
         """Open a REEF3D case and show its free surface and bed (its volume is there,
@@ -155,6 +165,8 @@ class Session:
             children.append(AddItem("setup", None, {}, visible=False))
         if (Path(case.path) / "corridor.json").is_file():  # its river corridor
             children.append(AddItem("corridor", None, {}, visible=case.setup_only))
+        if (Path(case.path) / "blocks.json").is_file():  # its multi-block grid
+            children.append(AddItem("multiblock", None, {}, visible=case.setup_only))
         if case.by_role("geodat") is not None:  # geo.dat's points: in the set-up
             children.append(AddItem("geodat", None, {}, visible=case.setup_only))
         for series in case.main_series():
@@ -441,7 +453,7 @@ class Session:
         it has none yet."""
         cases = [i for i in self.scene if i.kind == "case"]
         found = []
-        for kind in ("setup", "grid", "geodat", "corridor"):
+        for kind in ("setup", "grid", "geodat", "corridor", "multiblock"):
             named = {str(i.properties.get("case", "")) for i in self.scene if i.kind == kind}
             if case_id in named or (len(cases) == 1 and "" in named):
                 continue
@@ -454,6 +466,8 @@ class Session:
             if setup is None or (kind == "grid" and not setup.control.exists):
                 continue
             if kind == "corridor" and setup.corridor is None:
+                continue
+            if kind == "multiblock" and setup.multiblock is None:
                 continue
             found.append(AddItem(kind, None, {"case": case_id}))
         return found
@@ -895,6 +909,266 @@ class Session:
         script = "session.make_corridor_grid(" + (f"case={case!r})" if case else ")")
         self.stack.execute(Batch(commands, script, "Make corridor grid"))
         return quality
+
+    # ------------------------------------------------------------- multi-block grid
+    def multiblock(self, case: str | None = None):
+        """A case's multi-block grid (:class:`lagoonviz.core.multiblock.Topology`, from
+        its blocks.json) or None."""
+        setup = self.data.case_setup(self._case_id(case))
+        return setup.multiblock if setup is not None else None
+
+    def _multiblock_of(self, case_id: str):
+        current = self.multiblock(case_id)
+        if current is None:
+            raise ValueError(f"{case_id}: no multi-block grid yet (start_multiblock)")
+        return current
+
+    def _multiblock_items(self, case_id: str) -> list[str]:
+        """The "Multi-block grid" items of a case."""
+        found = []
+        for item in self.scene:
+            if item.kind != "multiblock":
+                continue
+            owner = self.data.case_item(item.id)
+            if owner is not None and owner.id == case_id:
+                found.append(item.id)
+        return found
+
+    def _put_multiblock(self, case: str | None, topology, script: str, label: str) -> None:
+        from lagoonviz.core import multiblock as mb
+
+        case_id = self._case_id(case)
+        text = topology.text() if topology is not None else None
+        current = self.multiblock(case_id)
+        if (current.text() if current is not None else None) == text:
+            return
+        if case:
+            script += ("" if script.endswith("(") else ", ") + f"case={case!r}"
+        script += ")"
+        commands = [self._case_file(case_id, mb.FILE, text, script, label)]
+        items = self._multiblock_items(case_id)
+        if topology is not None and not items:  # the grid is an item of the scene
+            commands.append(AddItem("multiblock", None, {"case": case_id}))
+        elif topology is None:
+            commands += [RemoveItem(i) for i in items]
+        self.stack.execute(commands[0] if len(commands) == 1 else Batch(commands, script, label))
+
+    def _change_multiblock(self, case, change, script: str, label: str) -> None:
+        current = self._multiblock_of(self._case_id(case))
+        self._put_multiblock(case, change(current), script, label)
+
+    def set_multiblock(self, topology, case: str | None = None) -> None:
+        """Give a case a multi-block grid (a Topology or its dict as in blocks.json;
+        None removes it). Written to blocks.json at once; one undo step."""
+        from lagoonviz.core import multiblock as mb
+
+        if isinstance(topology, dict):
+            topology = mb.Topology.from_dict(topology)
+        data = topology.to_dict() if topology is not None else None
+        self._put_multiblock(case, topology, f"session.set_multiblock({data!r}", "Set blocks")
+
+    def add_multiblock(self, case: str | None = None) -> str:
+        """A "Multi-block grid" item: the case's blocks, started first if it has none
+        (from its river corridor, else one block over the domain). Returns its id."""
+        case_id = self._case_id(case)
+        if self.multiblock(case_id) is None:
+            if self.corridor(case_id) is not None:
+                self.multiblock_from_corridor(case=case)
+            else:
+                self.start_multiblock(case=case)
+        items = self._multiblock_items(case_id)
+        if items:
+            return items[0]
+        return self.add_item("multiblock", case=case_id)
+
+    def start_multiblock(self, area=None, cells=None, case: str | None = None) -> None:
+        """One block over a plan area (x0, x1, y0, y1; default the domain), i along x,
+        ``cells`` (ni, nj) (default: about 40 along the longer side, square cells)."""
+        from lagoonviz.core import multiblock as mb
+
+        case_id = self._case_id(case)
+        given = area
+        if area is None:
+            setup = self.data.case_setup(case_id, create=True)
+            domain = setup.domain if setup is not None else None
+            if domain is None:
+                raise ValueError("no domain yet: give the area of the block")
+            area = domain[:4]
+        area = [round(float(v), 6) for v in area]
+        if cells is None:
+            lx, ly = abs(area[1] - area[0]), abs(area[3] - area[2])
+            step = max(lx, ly) / 40.0 or 1.0
+            cells = (max(4, round(lx / step)), max(4, round(ly / step)))
+        cells = (int(cells[0]), int(cells[1]))
+        script = "session.start_multiblock(" + (f"{area!r}, " if given is not None else "")
+        script += f"cells={cells!r}"
+        self._put_multiblock(case, mb.from_box(area, cells), script, "Start blocks")
+
+    def multiblock_from_corridor(self, case: str | None = None) -> None:
+        """The case's river corridor as block 0 of a multi-block grid (its banks the
+        j faces, its ends the i faces; cells and smoothing of its grid)."""
+        from lagoonviz.core import multiblock as mb
+
+        case_id = self._case_id(case)
+        made = mb.from_corridor(self._corridor_of(case_id))
+        script = "session.multiblock_from_corridor("
+        self._put_multiblock(case, made, script, "Blocks from corridor")
+
+    def move_block_vertex(self, name: str, x: float, y: float, case: str | None = None) -> None:
+        """Move a corner (vertex) of the blocks: every edge from it follows."""
+        script = f"session.move_block_vertex({name!r}, {float(x)!r}, {float(y)!r}"
+        self._change_multiblock(
+            case, lambda t: t.moved_vertex(name, x, y), script, "Move block corner"
+        )
+
+    def move_block_point(
+        self, edge: str, index: int, x: float, y: float, case: str | None = None
+    ) -> None:
+        """Move a point that shapes an edge (index 0: the first after its start)."""
+        script = f"session.move_block_point({edge!r}, {int(index)}, {float(x)!r}, {float(y)!r}"
+        self._change_multiblock(
+            case, lambda t: t.moved_point(edge, int(index), x, y), script, "Move edge point"
+        )
+
+    def set_block_edge(self, edge: str, case: str | None = None, **options) -> None:
+        """Change an edge: ``cells`` (carried on to the opposite faces of the blocks),
+        ``curve`` ("straight", "through", "bspline"), ``ratio`` (last cell / first)."""
+        words = ", ".join(f"{k}={v!r}" for k, v in options.items())
+        script = f"session.set_block_edge({edge!r}" + (f", {words}" if words else "")
+        self._change_multiblock(
+            case, lambda t: t.with_edge(edge, **options), script, "Change block edge"
+        )
+
+    def set_block_face(
+        self, block: int, face: str, kind: str, value: float | None = None, case: str | None = None
+    ) -> None:
+        """The boundary of a face without an interface: "wall", "inflow" (a discharge
+        in m3/s) or "outflow" (a water level in m)."""
+        script = f"session.set_block_face({int(block)}, {face!r}, {kind!r}"
+        if value is not None:
+            script += f", {float(value)!r}"
+        self._change_multiblock(
+            case,
+            lambda t: t.with_bc(int(block), face, kind, value),
+            script,
+            "Set block boundary",
+        )
+
+    def set_block_options(self, block: int, case: str | None = None, **options) -> None:
+        """Change a block: ``name``, ``smoothing`` (Winslow sweeps)."""
+        words = ", ".join(f"{k}={v!r}" for k, v in options.items())
+        script = f"session.set_block_options({int(block)}" + (f", {words}" if words else "")
+        self._change_multiblock(
+            case, lambda t: t.with_block(int(block), **options), script, "Change block"
+        )
+
+    def extrude_block(
+        self, edge: str, length: float, cells: int = 10, case: str | None = None
+    ) -> None:
+        """One more block outside a boundary edge, ``length`` m deep, ``cells`` cells."""
+        script = f"session.extrude_block({edge!r}, {float(length)!r}, cells={int(cells)}"
+        self._change_multiblock(
+            case, lambda t: t.extruded(edge, length, int(cells)), script, "Add block"
+        )
+
+    def split_block_edge(self, edge: str, x: float, y: float, case: str | None = None) -> None:
+        """Cut an edge in two at its node nearest to (x, y) (a block then meets only
+        one part, e.g. a river entering a harbour)."""
+        script = f"session.split_block_edge({edge!r}, {float(x)!r}, {float(y)!r}"
+        self._change_multiblock(case, lambda t: t.split_edge(edge, x, y), script, "Cut block edge")
+
+    def add_block(self, area, cells=(10, 10), case: str | None = None) -> None:
+        """One more block over a rectangle (x0, x1, y0, y1), with its own edges."""
+        area = [round(float(v), 6) for v in area]
+        cells = (int(cells[0]), int(cells[1]))
+        script = f"session.add_block({area!r}, cells={cells!r}"
+        self._change_multiblock(case, lambda t: t.added_box(area, cells), script, "Add block")
+
+    def remove_block(self, block: int, case: str | None = None) -> None:
+        """Take a block out (with the edges and corners only it used)."""
+        script = f"session.remove_block({int(block)}"
+        self._change_multiblock(case, lambda t: t.removed_block(int(block)), script, "Remove block")
+
+    def make_native_block(self, block: int, case: str | None = None) -> None:
+        """Make a block block 0, the grid of the run (DIVEMesh's box)."""
+        script = f"session.make_native_block({int(block)}"
+        self._change_multiblock(case, lambda t: t.with_native(int(block)), script, "Block 0")
+
+    def scale_multiblock(self, factor: float, case: str | None = None) -> None:
+        """Every edge with ``factor`` times its cells (2: twice as fine)."""
+        script = f"session.scale_multiblock({float(factor)!r}"
+        self._change_multiblock(case, lambda t: t.scaled(float(factor)), script, "Scale blocks")
+
+    def remove_multiblock(self, case: str | None = None) -> None:
+        """Remove a case's blocks.json (blocks.dat and the input files stay)."""
+        self._put_multiblock(case, None, "session.remove_multiblock(", "Remove blocks")
+
+    def multiblock_check(self, case: str | None = None):
+        """What DIVEMesh and REEF3D would say about the blocks: (issues, quality)
+        (:func:`lagoonviz.core.multiblock.check`, :func:`~lagoonviz.core.multiblock.quality`)."""
+        from lagoonviz.core import multiblock as mb
+
+        topology = self._multiblock_of(self._case_id(case))
+        issues = mb.check(topology)
+        quality = None if any(i.level == "error" for i in issues) else mb.quality(topology)
+        return issues, quality
+
+    def make_multiblock_grid(self, case: str | None = None):
+        """Write the blocks as blocks.dat and set the case up for them, one undo step:
+        R 20 1 and the sides of block 0 (C 11 - C 14) in control.txt, its box (B 10's x
+        and y; its heights and B 1 kept); G 50 1, the native in- and outflow (B 60 1,
+        W 10, F 62) and the open faces of the other blocks (G 54) in ctrl.txt. Refused
+        while a rule is broken. Returns the grid's quality."""
+        from lagoonviz.core import multiblock as mb
+
+        case_id = self._case_id(case)
+        topology = self._multiblock_of(case_id)
+        issues = [i for i in mb.check(topology) if i.level == "error"]
+        if issues:
+            raise ValueError(
+                "the blocks break a rule: "
+                + issues[0].text
+                + (f" (and {len(issues) - 1} more)" if len(issues) > 1 else "")
+            )
+        setup = self.data.case_setup(case_id)
+        points = None
+        if topology.bed == "geo" and setup is not None and (setup.path / "geo.dat").is_file():
+            points = setup.geo_points(limit=10**9)
+        nodes = []
+        for x, y in topology.grids():
+            nodes.append((x, y, mb.bed_heights(topology, x, y, points)))
+        found = mb.settings(topology)
+        control = self.input_file("control.txt", case_id)
+        old = control.values("B 10") or [0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
+        box = [*found.box, *(old + [0.0, 1.0])[4:6]]
+
+        def divemesh(f):
+            f.set("R 20", [1], kinds="int")
+            f.set("B 10", box)
+            if "B 1" not in f and "B 2" not in f:
+                f.set("B 1", [mb.curvi.nice_step(found.spacing)])
+            for code, kind in found.sides.items():
+                f.set(code, [kind], kinds="int")
+
+        def reef3d(f):
+            f.set("G 50", [1], kinds="int")
+            f.remove("G 54")
+            for b, kind, value in found.g54:
+                f.add("G 54", [b, kind, value], kinds=["int", "int", "double"])
+            if found.inflow is not None:
+                f.set("B 60", [1], kinds="int")
+                f.set("W 10", [found.inflow])
+            if found.level is not None:
+                f.set("F 62", [found.level])
+
+        commands = [self._case_file(case_id, mb.GRID_FILE, mb.blocks_text(nodes), "", "blocks.dat")]
+        for file, change in (("ctrl.txt", reef3d), ("control.txt", divemesh)):
+            command = self._input_edit(file, case_id, change, "", file)
+            if command is not None:
+                commands.append(command)
+        script = "session.make_multiblock_grid(" + (f"case={case!r})" if case else ")")
+        self.stack.execute(Batch(commands, script, "Make multi-block grid"))
+        return mb.quality(topology)
 
     def set_input_text(self, file: str, text: str, case: str | None = None) -> None:
         """Replace the whole text of an input file (the text editor)."""
@@ -1566,6 +1840,17 @@ class Session:
                     self._case_file(owner.id, corridors.FILE, None, "", "corridor.json")
                 ]
                 self.stack.execute(Batch(commands, script, "Remove river corridor"))
+                return
+        if item.kind == "multiblock":  # the blocks go: their blocks.json too
+            owner = self.data.case_item(item_id)
+            if owner is not None and self.multiblock(owner.id) is not None:
+                from lagoonviz.core import multiblock as mb
+
+                script = f"session.remove_item({item_id!r})"
+                commands = [RemoveItem(i) for i in self._multiblock_items(owner.id)] + [
+                    self._case_file(owner.id, mb.FILE, None, "", "blocks.json")
+                ]
+                self.stack.execute(Batch(commands, script, "Remove blocks"))
                 return
         self.stack.execute(RemoveItem(item_id))
 

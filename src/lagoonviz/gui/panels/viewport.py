@@ -110,6 +110,20 @@ class ViewportPlaceholder(QWidget):
     corridorPointMoved = Signal(str, str, int, float, float)
     #: editing the river corridor stopped (Esc, another view); never sent here
     corridorEditingStopped = Signal()
+    #: the blocks edited: a corner, a point of an edge, an edge picked; never sent here
+    blockVertexMoved = Signal(str, str, float, float)
+    blockPointMoved = Signal(str, str, int, float, float)
+    blockEdgePicked = Signal(str, str, str, float, float)
+    blocksEditingStopped = Signal()
+
+    def start_blocks_editing(self, case_id: str = "", mode: str = "drag") -> None:
+        self.statusMessage.emit("Editing the blocks needs the 3D view (no GPU here)")
+
+    def stop_blocks_editing(self) -> None:
+        pass
+
+    def point_north(self) -> None:
+        pass
 
     def start_domain_drawing(self, case_id: str = "", purpose: str = "domain") -> None:
         self.statusMessage.emit(f"Drawing the {purpose} needs the 3D view (no GPU here)")
@@ -286,6 +300,14 @@ class Viewport3D(QWidget):
     corridorPointMoved = Signal(str, str, int, float, float)
     #: editing the river corridor stopped (Esc, another view)
     corridorEditingStopped = Signal()
+    #: a corner of the blocks dragged in the 2D top view: (case, vertex, x, y)
+    blockVertexMoved = Signal(str, str, float, float)
+    #: a point shaping an edge of the blocks dragged: (case, edge, index, x, y)
+    blockPointMoved = Signal(str, str, int, float, float)
+    #: an edge of the blocks clicked ("cut" or "extend" mode): (case, mode, edge, x, y)
+    blockEdgePicked = Signal(str, str, str, float, float)
+    #: editing the blocks stopped (Esc, another view)
+    blocksEditingStopped = Signal()
 
     def __init__(
         self,
@@ -339,6 +361,9 @@ class Viewport3D(QWidget):
         #: editing a river corridor (start_corridor_editing): the case, the point being
         #: dragged, or None
         self._corridor_edit: dict | None = None
+        #: editing the blocks (start_blocks_editing): the case, the mode ("drag", "cut",
+        #: "extend") and what is being dragged
+        self._blocks_edit: dict | None = None
         self.renderer.add_event_handler(self._on_move, "pointer_move")
         self._probe_at: tuple[str, int, tuple[float, ...]] | None = None
         #: the last probe (values where the user clicked), shown in the header
@@ -980,6 +1005,7 @@ class Viewport3D(QWidget):
         if not (on and side == "top"):
             self.stop_domain_drawing()  # the domain is drawn in the 2D top view only
             self.stop_corridor_editing()
+            self.stop_blocks_editing()
         self.two_d_button.blockSignals(True)
         self.two_d_button.setChecked(on)
         self.two_d_button.blockSignals(False)
@@ -1020,6 +1046,10 @@ class Viewport3D(QWidget):
         if key == "Escape" and self._corridor_edit is not None:
             self.stop_corridor_editing()
             self.statusMessage.emit("Stopped editing the river corridor")
+            return
+        if key == "Escape" and self._blocks_edit is not None:
+            self.stop_blocks_editing()
+            self.statusMessage.emit("Stopped editing the blocks")
             return
         if key in KEY_VIEWS:
             view = KEY_VIEWS[key]
@@ -1223,6 +1253,181 @@ class Viewport3D(QWidget):
             return True
         return False
 
+    # ------------------------------------------------------------- the blocks
+    #: what each mode of editing the blocks says in the status bar
+    BLOCK_MODES = {
+        "drag": "Drag the corners and the points of the edges in the 2D view",
+        "cut": "Click an edge to cut it in two there",
+        "extend": "Click an edge on the outline to add a block outside it",
+    }
+
+    def start_blocks_editing(self, case_id: str = "", mode: str = "drag") -> None:
+        """Edit a case's blocks in the 2D top view: drag their corners and the points
+        of their edges (``mode`` "drag"), or click an edge to cut it ("cut") or to add a
+        block outside it ("extend"). Elsewhere the view pans as always; Esc stops."""
+        if not (self.two_d and self.two_d_side == "top"):
+            self.set_2d(True, "top")
+        self.stop_corridor_editing()
+        self._blocks_edit = {"case": case_id, "mode": mode, "drag": None}
+        self.statusMessage.emit(
+            self.BLOCK_MODES.get(mode, "") + " · elsewhere the view pans · Esc stops"
+        )
+
+    def stop_blocks_editing(self) -> None:
+        if self._blocks_edit is None:
+            return
+        self._blocks_edit = None
+        try:
+            self.controller.enabled = True
+        except AttributeError:
+            pass
+        self.canvas.unsetCursor()
+        self.view.set_sketch(None)
+        self.redraw()
+        self.blocksEditingStopped.emit()
+
+    def _blocks(self):
+        edit = self._blocks_edit
+        try:
+            return self.session.multiblock(edit["case"] or None) if edit else None
+        except ValueError:
+            return None
+
+    def _blocks_pick(self, event):
+        """The handle under the pointer: ("vertex", name) or ("point", edge, index); in
+        the "cut" and "extend" modes the edge under it: ("edge", name, x, y)."""
+        topology = self._blocks()
+        point = self._plan_point(event)
+        reach = self._reach(event, self.CORRIDOR_PICK) if point is not None else None
+        if topology is None or point is None or reach is None:
+            return None
+        if self._blocks_edit.get("mode", "drag") != "drag":
+            outline = (
+                set(topology.boundary_edges())
+                if self._blocks_edit["mode"] == "extend"
+                else set(topology.edges)
+            )
+            best = None
+            for name in outline:
+                line = topology.edges[name].line(topology.vertices)
+                d = np.hypot(line[:, 0] - point[0], line[:, 1] - point[1])
+                k = int(np.argmin(d))
+                if d[k] <= 2 * reach and (best is None or d[k] < best[0]):
+                    best = (float(d[k]), name)
+            return None if best is None else ("edge", best[1], *point)
+        best = None
+        for name, (vx, vy) in topology.vertices.items():
+            d = math.hypot(vx - point[0], vy - point[1])
+            if d <= reach and (best is None or d < best[0]):
+                best = (d, ("vertex", name))
+        for name, edge in topology.edges.items():
+            if not len(edge.points):
+                continue
+            d = np.hypot(edge.points[:, 0] - point[0], edge.points[:, 1] - point[1])
+            k = int(np.argmin(d))
+            if d[k] <= reach and (best is None or d[k] < best[0]):
+                best = (float(d[k]), ("point", name, k))
+        return None if best is None else best[1]
+
+    def _blocks_sketch(self, topology, picked=None) -> None:
+        """The blocks' edges touching what is dragged, and every handle, over all."""
+        z = self.SKETCH_Z
+        if topology is None:
+            self.view.set_sketch(None)
+            return
+        lines = []
+        for name, edge in topology.edges.items():
+            touched = picked is not None and (
+                (picked[0] == "vertex" and picked[1] in (edge.start, edge.end))
+                or (picked[0] in ("point", "edge") and picked[1] == name)
+            )
+            if touched:
+                line = edge.line(topology.vertices)
+                p = np.column_stack([line, np.full(len(line), z)])
+                lines.append(np.stack([p[:-1], p[1:]], axis=1))
+        handles = [np.asarray(v, float) for v in topology.vertices.values()]
+        for edge in topology.edges.values():
+            handles += list(edge.points)
+        handles = np.asarray(handles, float).reshape(-1, 2)
+        self.view.set_sketch(
+            np.concatenate(lines) if lines else None,
+            np.column_stack([handles, np.full(len(handles), z)]),
+            color=HIGHLIGHT_SKETCH,
+            point_size=9.0,
+        )
+
+    def _edit_blocks(self, kind: str, event) -> bool:
+        """Press, drag and release on a handle (or a click on an edge); True if the
+        event was the blocks' (not the view's)."""
+        edit = self._blocks_edit
+        if edit is None:
+            return False
+        drag = edit.get("drag")
+        if kind == "pointer_down":
+            if getattr(event, "button", 1) != 1:
+                return False
+            picked = self._blocks_pick(event)
+            if picked is None:
+                return False  # the view pans
+            if picked[0] == "edge":
+                self.blockEdgePicked.emit(edit["case"], edit["mode"], picked[1], *picked[2:])
+                return True
+            edit["drag"] = {"picked": picked, "topology": self._blocks(), "moved": None}
+            try:
+                self.controller.enabled = False  # cancels the pan just begun
+            except AttributeError:
+                pass
+            self.canvas.setCursor(Qt.ClosedHandCursor)
+            self._blocks_sketch(edit["drag"]["topology"], picked)
+            self.redraw()
+            return True
+        if kind == "pointer_move":
+            if drag is None:  # hovering: the hand over a handle, a cross over an edge
+                over = self._blocks_pick(event)
+                if over is None:
+                    self.canvas.unsetCursor()
+                elif over[0] == "edge":
+                    self.canvas.setCursor(Qt.PointingHandCursor)
+                else:
+                    self.canvas.setCursor(Qt.OpenHandCursor)
+                return False
+            point = self._plan_point(event)
+            if point is None:
+                return True
+            picked = drag["picked"]
+            try:
+                if picked[0] == "vertex":
+                    moved = drag["topology"].moved_vertex(picked[1], *point)
+                    what = f"corner {picked[1]}"
+                else:
+                    moved = drag["topology"].moved_point(picked[1], picked[2], *point)
+                    what = f"edge {picked[1]}, point {picked[2] + 1}"
+            except (ValueError, IndexError):
+                return True
+            drag["moved"] = point
+            self._blocks_sketch(moved, picked)
+            self.statusMessage.emit(f"{what}: x {point[0]:.2f}, y {point[1]:.2f} m")
+            self.redraw()
+            return True
+        if kind == "pointer_up" and drag is not None:
+            edit["drag"] = None
+            try:
+                self.controller.enabled = True
+            except AttributeError:
+                pass
+            self.canvas.setCursor(Qt.OpenHandCursor)
+            self.view.set_sketch(None)
+            self.redraw()
+            if drag["moved"] is not None:
+                x, y = drag["moved"]
+                picked = drag["picked"]
+                if picked[0] == "vertex":
+                    self.blockVertexMoved.emit(edit["case"], picked[1], x, y)
+                else:
+                    self.blockPointMoved.emit(edit["case"], picked[1], picked[2], x, y)
+            return True
+        return False
+
     def view_centre(self) -> tuple[float, float] | None:
         """The model point (x, y) in the middle of the view: from the top, the one
         under the middle of the screen; else where the line of sight through it meets
@@ -1389,6 +1594,8 @@ class Viewport3D(QWidget):
             self.canvas.setCursor(self.EDGE_CURSORS.get(frozenset(edges), Qt.CrossCursor))
         elif self._corridor_edit is not None:
             self._edit_corridor("pointer_move", event)
+        elif self._blocks_edit is not None:
+            self._edit_blocks("pointer_move", event)
 
     def _on_pointer(self, event) -> None:
         """A click (press and release without dragging) on a surface probes its values."""
@@ -1397,6 +1604,8 @@ class Viewport3D(QWidget):
             self._draw_domain(kind, event)
             return
         if self._corridor_edit is not None and self._edit_corridor(kind, event):
+            return
+        if self._blocks_edit is not None and self._edit_blocks(kind, event):
             return
         x, y = getattr(event, "x", 0.0), getattr(event, "y", 0.0)
         if kind == "pointer_down":

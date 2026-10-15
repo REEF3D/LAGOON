@@ -226,7 +226,7 @@ _SETUP_TIPS = {
     "regions": "Refinement boxes, wind areas and other regions (A 276, A 372, F 72, S 74)",
     "solids": "Outlines of DIVEMesh's solids (S); the solids themselves are a structure item",
     "bed": "The bed's topo objects (T); geo.dat's points are an item of their own",
-    "curvgrid": "The curvilinear grid of curvgrid.dat (G 50 2), on the bed",
+    "curvgrid": "The curvilinear grid of curvgrid.dat (G 50 2) or blocks.dat (G 50 1), on the bed",
 }
 
 
@@ -528,6 +528,30 @@ KINDS: dict[str, KindSpec] = {
             ),
             "show_grid": PropertySpec(
                 True, "Grid", tip="The curvilinear grid the corridor makes (Make grid writes it)"
+            ),
+        },
+    ),
+    "multiblock": KindSpec(
+        "Multi-block grid",
+        {
+            "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
+            "show_points": PropertySpec(
+                True,
+                "Points",
+                tip="The corners and the points that shape the edges (dragged in the 2D view)",
+            ),
+            "show_grid": PropertySpec(
+                True, "Grid", tip="The cells of the blocks (Make grid writes them)"
+            ),
+            "show_quality": PropertySpec(
+                True,
+                "Quality",
+                tip="Fair (orange), poor (red) and folded (dark red) cells, as dots",
+            ),
+            "show_issues": PropertySpec(
+                True,
+                "Rules",
+                tip="Where a rule of DIVEMesh and REEF3D is broken (red), or warned about",
             ),
         },
     ),

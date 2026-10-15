@@ -266,6 +266,78 @@ session.reset_corridor()     # as it was made, the dragged points dropped
 session.make_corridor_grid()
 ```
 
+## A multi-block grid
+
+The panel's *Blocks* tab lays a multi-block grid: blocks of curvilinear cells that
+meet along their faces, node on node, for REEF3D's SFLOW and NHFLOW (`G 50 1`,
+DIVEMesh `R 20 1`, `blocks.dat`). Block 0 is the grid of the run (DIVEMesh's
+logical box); the blocks 1.. lie beside it, a river reach and the harbour it runs
+into, say.
+
+The topology is kept in `blocks.json` in the case folder: the *corners*, the
+*edges* between two corners (cells, a grading ratio, straight or curved through
+their points) and the *blocks*, each with its four faces `i0`, `i1`, `j0`, `j1`
+(-i, +i, -j, +j) as chains of edges (`"-e"` runs edge `e` backwards). Blocks that
+share an edge share its nodes: that is the interface. Each block is meshed by
+transfinite interpolation from its faces, then *Smoothing* sweeps of Winslow's
+equations; the nodes of a wall slide along it, so cells stay square at the banks.
+
+- **Start** lays one block over the domain, **Draw** one over an area you drag in
+  the 2D top view (a further one when there are blocks), **From corridor** makes
+  the River tab's corridor block 0. **Remove** takes the blocks away with
+  `blocks.json`.
+- In the 2D top view: **Drag points** moves corners and the points of curved
+  edges; **Cut edge** cuts the edge clicked in two at that point (a new corner);
+  **Add block** puts a block outside the edge clicked, *Depth* deep with *Cells*
+  across, sharing that edge. Esc stops. Each change is an undo step.
+- **Block**: its name, smoothing and four faces. A face shows its edges, cells and
+  interfaces; a face without an interface is a wall, or open: *Inflow* (a
+  discharge, m3/s) on the -i face, *Outflow* (a water level, m) on the +i face.
+  **Block 0** makes the block chosen the grid of the run; **Remove block**.
+- **Edge**: cells (they go on to the opposite face and through the blocks beyond,
+  so the counts always match), curve and grading. **Finer** and **Coarser** double
+  or halve every edge.
+
+The tab lists the **rules** the grid breaks, and the set-up marks them where they
+are (red: errors, Make grid waits; orange: warnings):
+
+- the edges of a face must join up, corner to corner, and opposite faces have the
+  same number of cells; no folded or left-handed cells;
+- block 0's interfaces cover whole faces (blocks 1.. may meet several blocks on a
+  face), and the block behind an interface is at least 5 cells deep (8 next to
+  block 0: DIVEMesh `R 21`, a warning below that);
+- inflow only on a -i face, outflow only on a +i face, never on an interface, and
+  with a value; block 0 has at most one of each;
+- warnings: corners with 3 or 5 blocks around them, poor cells.
+
+The set-up draws the blocks in yellow with their corners and names, the grid of
+each and the quality of its cells (*good*: angles of 45° or more and a size jump
+of at most 1.3 to the neighbour; *fair*: 30°, 2; *poor*; *folded*).
+
+**Make grid** writes `blocks.dat` (the number of blocks, then per block `ni nj`
+and x y zb of every node, i fastest; the bed from geo.dat or flat), `R 20 1` and
+block 0's box and sides (B 10's x and y, C 11 – C 14) in control.txt, and in
+ctrl.txt `G 50 1`, one `G 54 b t v` per open face of the blocks 1.. and, for an
+open face of block 0, `B 60 1` with `W 10` or `F 62`: one undo step. Then *Save*
+and *Run DIVEMesh*.
+
+The blocks are an item of the scene, **Multi-block grid** (*Add → Multi-block
+grid*); *Points*, *Grid*, *Quality* and *Rules* in its properties switch the marks
+off. In a script:
+
+```python
+session.start_multiblock([0, 100, 0, 50], cells=(20, 10))   # or:
+session.multiblock_from_corridor()
+session.extrude_block("b0_e", 60.0, cells=12)     # a block outside edge b0_e
+session.split_block_edge("b0_n", 50.0, 50.0)
+session.move_block_vertex("b0_ne", 102.0, 55.0)
+session.set_block_edge("b0_e", cells=16, curve="through", ratio=1.0)
+session.set_block_face(0, "i0", "inflow", 50.0)
+session.set_block_face(1, "i1", "outflow", 2.5)
+issues, quality = session.multiblock_check()
+session.make_multiblock_grid()
+```
+
 ## On the map
 
 The panel's *Map* tab places the case on the Earth: its georeference

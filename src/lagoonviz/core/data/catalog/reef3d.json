@@ -10639,13 +10639,37 @@
    "values": 1,
    "options": {
     "0": "Cartesian",
-    "1": "nodes of the CURV section of grid-geometry.dat",
+    "1": "multi-block grid (blocks.dat, DIVEMesh R 20 1)",
     "2": "nodes of curvgrid.dat"
    },
    "default": [
     "0"
    ],
-   "text": "Curvilinear horizontal grid for SFLOW and NHFLOW. The DIVEMesh grid is its logical box (ni x nj cells); curvgrid.dat holds ni nj, then x y zb of every node, i fastest. Not in the user guide yet.",
+   "text": "Curvilinear horizontal grid for SFLOW and NHFLOW. The DIVEMesh grid is its logical box (ni x nj cells); curvgrid.dat holds ni nj, then x y zb of every node, i fastest. With 1, blocks.dat holds the blocks of a multi-block grid (block 0 the DIVEMesh grid, the blocks 1.. beside it, point matching along their interfaces). Not in the user guide yet.",
+   "modules": "SN",
+   "documented": false
+  },
+  "G 54": {
+   "title": "Open face of a block of a multi-block grid",
+   "repeat": true,
+   "params": [
+    {
+     "name": "b",
+     "type": "int"
+    },
+    {
+     "name": "t",
+     "type": "int"
+    },
+    {
+     "name": "v",
+     "type": "double"
+    }
+   ],
+   "values": 3,
+   "options": {},
+   "default": [],
+   "text": "Multi-block grid (G 50 1): block b (1..) gets an open face, t 1: the discharge v (m3/s) in through its -i face, t 2: the water level v (m) at its +i face (ramped from F 60 as F 64). One line per face; the face must have no interface. The in- and outflow of block 0 stay B 60, W 10, F 62. Not in the user guide yet.",
    "modules": "SN",
    "documented": false
   },

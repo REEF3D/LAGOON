@@ -1,0 +1,10 @@
+QWidget
+  Name: text 'Multi-block grid'
+  Kind: label 'Multi-block grid'
+  Visible: checkbox '' on
+  Case: choice 'run [case-1]' of ['first case', 'run [case-1]']
+  Points: checkbox '' on
+  Grid: checkbox '' on
+  Quality: checkbox '' on
+  Rules: checkbox '' on
+  label '1 block, 4 edges / 1 block, 800 cells (40 x 20); smallest angle 90°, size jump up to 1.00 / Edit the blocks in Set-up → Blocks' (disabled)

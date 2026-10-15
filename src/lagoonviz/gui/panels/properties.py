@@ -270,6 +270,28 @@ class PropertiesPanel(QWidget):
                 lines.append(f"No grid: {error}")
             lines.append("Drag its points in Set-up → River (Drag points)")
             return "\n".join(lines)
+        if item.kind == "multiblock":
+            setup = data.case_setup(item_id)
+            topology = setup.multiblock if setup is not None else None
+            if topology is None:
+                return "No blocks.json in the case folder: Set-up → Blocks → Start"
+            from lagoonviz.core import multiblock as mb
+
+            issues = mb.check(topology)
+            errors = [i for i in issues if i.level == "error"]
+            lines = [
+                f"{mb.count(len(topology.blocks), 'block')}, "
+                f"{mb.count(len(topology.edges), 'edge')}"
+            ]
+            if errors:
+                lines.append(f"{mb.count(len(errors), 'rule')} broken: {errors[0].text}")
+            else:
+                lines.append(mb.quality(topology).text())
+            warnings = len(issues) - len(errors)
+            if warnings:
+                lines.append(f"{mb.count(warnings, 'warning')} (Set-up → Blocks → Rules)")
+            lines.append("Edit the blocks in Set-up → Blocks")
+            return "\n".join(lines)
         if item.kind == "geodat":
             dataset = data.dataset(item_id)
             if dataset is None:
@@ -323,7 +345,8 @@ class PropertiesPanel(QWidget):
         if event in ("removed", "reset") and self.item_id not in self.session.scene:
             self.show_item("")
         elif event == "inputs" and self.item_id in self.session.scene:
-            if self.session.scene.get(self.item_id).kind in ("setup", "grid", "geodat", "corridor"):
+            kinds = ("setup", "grid", "geodat", "corridor", "multiblock")
+            if self.session.scene.get(self.item_id).kind in kinds:
                 self.info.setText(self._data_info(self.item_id))  # the set-up's facts
         elif event == "changed" and item_id == self.item_id:
             self._refresh()

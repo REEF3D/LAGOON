@@ -36,7 +36,7 @@ from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import CASE_ROLES, ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
 from lagoonviz.core.data.setup import (
-    CORRIDOR_GROUPS,
+    ITEM_GROUPS,
     SIGMA_SOLVERS,
     CaseSetup,
     has_inputs,
@@ -1826,11 +1826,24 @@ class DataManager:
                     shown.append(mark)
                 elif mark.group == "corridor_grid" and props.get("show_grid", True):
                     shown.append(mark)
+        elif item.kind == "multiblock":  # the blocks: outlines, points, cells, quality, rules
+            shown = []
+            for mark in setup.marks():
+                if mark.group == "multiblock":
+                    if not props.get("show_points", True):
+                        mark = replace(mark, points=np.zeros((0, 3)))
+                    shown.append(mark)
+                elif mark.group == "multiblock_grid" and props.get("show_grid", True):
+                    shown.append(mark)
+                elif mark.group == "multiblock_quality" and props.get("show_quality", True):
+                    shown.append(mark)
+                elif mark.group == "multiblock_issues" and props.get("show_issues", True):
+                    shown.append(mark)
         else:
             shown = [
                 m
                 for m in setup.marks()
-                if m.group not in CORRIDOR_GROUPS and props.get(f"show_{m.group}", True)
+                if m.group not in ITEM_GROUPS and props.get(f"show_{m.group}", True)
             ]
         lines: dict[str, list[np.ndarray]] = {}
         points: dict[str, list[np.ndarray]] = {}

@@ -332,7 +332,9 @@ class CorridorTab(QWidget):
             return
         text = quality.text()
         setup = self.session.data.case_setup(self.panel.case_id)
-        if setup is not None and setup.curvgrid is not None:
+        if setup is not None and setup.blocksgrid:
+            text += ". The case has a multi-block grid (G 50 1): Make grid writes G 50 2"
+        elif setup is not None and setup.curvgrid is not None:
             gx, gy, _ = setup.curvgrid
             same = (
                 gx.shape == x.shape

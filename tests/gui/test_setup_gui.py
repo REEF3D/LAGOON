@@ -549,6 +549,49 @@ def test_the_river_tab_lays_a_corridor_and_makes_its_grid(window, flume):
     assert window.session.corridor() is None and not tab.form.isEnabled()
 
 
+def test_the_blocks_tab_lays_blocks_and_makes_their_grid(window, flume):
+    window.open_case(flume)
+    panel = window.setup_panel
+    tab = panel.blocks_tab
+    assert panel.tabs.tabText(panel.tabs.indexOf(tab)) == "Blocks"
+    assert not tab.form.isEnabled() and tab.start_button.isEnabled()
+    tab.start()
+    topology = window.session.multiblock()
+    assert topology is not None and tab.drag_button.isChecked() and tab.form.isEnabled()
+    assert len(topology.blocks) == 1 and "cells" in tab.quality.text()
+    # Add block: an edge clicked in the 2D view
+    tab.extend_button.setChecked(True)
+    assert not tab.drag_button.isChecked()
+    tab.depth.setValue(3.0)
+    tab.depth_cells.setValue(8)
+    window.viewport.blockEdgePicked.emit(panel.case_id, "extend", "b0_e", 10.0, 1.0)
+    topology = window.session.multiblock()
+    assert len(topology.blocks) == 2 and tab.block.count() == 2
+    # a corner dragged
+    corner = topology.edges["b0_e_x"].end
+    window.viewport.blockVertexMoved.emit(panel.case_id, corner, 13.2, 2.2)
+    assert tuple(window.session.multiblock().vertices[corner]) == (13.2, 2.2)
+    # the water level on block 1's +i face
+    tab.block.setCurrentIndex(1)
+    row = tab.faces["i1"]
+    assert row.isEnabled() and row.kind.isEnabled()
+    row.value.setValue(0.6)
+    row.kind.setCurrentIndex(row.kind.findData("outflow"))
+    row.kind.activated.emit(row.kind.currentIndex())
+    assert window.session.multiblock().blocks[1].bc_value("i1") == 0.6
+    assert tab.make_button.isEnabled()
+    tab.make_grid()
+    assert "blocks.dat written (2 blocks" in panel.message.text()
+    assert (flume / "blocks.dat").is_file()
+    assert window.session.input_file("ctrl.txt").values("G 50") == [1.0]
+    assert window.session.input_file("control.txt").values("R 20") == [1.0]
+    # Esc in the 3D view: the buttons follow
+    window.viewport.blocksEditingStopped.emit()
+    assert not any(b.isChecked() for b in (tab.drag_button, tab.cut_button, tab.extend_button))
+    tab.remove()
+    assert window.session.multiblock() is None and not tab.form.isEnabled()
+
+
 def test_the_river_tab_follows_the_thalweg(window, flume):
     import numpy as np
 

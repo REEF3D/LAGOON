@@ -1945,6 +1945,45 @@
    "text": "Not in the user guide yet.",
    "documented": false
   },
+  "R 20": {
+   "title": "Multi-block grid",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {
+    "0": "off",
+    "1": "blocks from blocks.dat"
+   },
+   "default": [
+    "0"
+   ],
+   "text": "Multi-block grid from blocks.dat (REEF3D G 50 1): block 0 is the grid of the run (its ni x nj cells the logical box), the blocks 1.. meet it and each other along whole edges, node on node. Not in the user guide yet.",
+   "modules": "",
+   "documented": false
+  },
+  "R 21": {
+   "title": "Ring cells of block 0 at its interfaces",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "8"
+   ],
+   "text": "Multi-block grid (R 20 1): the cells of the neighbour blocks kept around block 0 on its interface faces; REEF3D needs at least its ghost cells plus 3. Not in the user guide yet.",
+   "modules": "",
+   "documented": false
+  },
   "S 1": {
    "title": "read STL file and generate solid. Name the file as `solid.stl'",
    "repeat": false,

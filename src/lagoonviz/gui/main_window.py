@@ -146,6 +146,16 @@ class MainWindow(QMainWindow):
         river.stopEditing.connect(self.viewport.stop_corridor_editing)
         self.viewport.corridorPointMoved.connect(river.point_moved)
         self.viewport.corridorEditingStopped.connect(river.editing_stopped)
+        # the Blocks tab: an area drawn, corners and points dragged, edges clicked there
+        blocks = self.setup_panel.blocks_tab
+        blocks.drawArea.connect(self.viewport.start_domain_drawing)
+        self.viewport.areaDrawn.connect(blocks.area_drawn)
+        blocks.editBlocks.connect(self.viewport.start_blocks_editing)
+        blocks.stopEditing.connect(self.viewport.stop_blocks_editing)
+        self.viewport.blockVertexMoved.connect(blocks.vertex_moved)
+        self.viewport.blockPointMoved.connect(blocks.point_moved)
+        self.viewport.blockEdgePicked.connect(blocks.edge_picked)
+        self.viewport.blocksEditingStopped.connect(blocks.editing_stopped)
         self.setup_panel.map_tab.newCase.connect(self.new_case_from_map_dialog)
 
         self.docks: dict[str, QDockWidget] = {}
@@ -628,9 +638,9 @@ class MainWindow(QMainWindow):
         kind = self.session.scene.get(item_id).kind
         if self.session.mode == "setup" and kind in ("case", "setup", "grid"):
             return
-        if self.session.mode == "setup" and kind == "corridor":  # edited in the River tab
-            panel = self.setup_panel
-            panel.tabs.setCurrentWidget(panel.river_tab)
+        if self.session.mode == "setup" and kind in ("corridor", "multiblock"):
+            panel = self.setup_panel  # edited in the River or the Blocks tab
+            panel.tabs.setCurrentWidget(panel.river_tab if kind == "corridor" else panel.blocks_tab)
             if "setup" in self.docks:
                 self.docks["setup"].show()
                 self.docks["setup"].raise_()

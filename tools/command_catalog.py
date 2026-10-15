@@ -392,34 +392,92 @@ FROM_READER = {
 }
 
 
-#: commands newer than the reader the catalogue was made from: their whole entry
+#: commands newer than the reader the catalogue was made from, per program: their
+#: whole entry
 NEWER = {
-    "G 50": {
-        "title": "Curvilinear horizontal grid",
-        "repeat": False,
-        "params": [{"name": "", "type": "int"}],
-        "values": 1,
-        "options": {
-            "0": "Cartesian",
-            "1": "nodes of the CURV section of grid-geometry.dat",
-            "2": "nodes of curvgrid.dat",
+    "reef3d": {
+        "G 50": {
+            "title": "Curvilinear horizontal grid",
+            "repeat": False,
+            "params": [{"name": "", "type": "int"}],
+            "values": 1,
+            "options": {
+                "0": "Cartesian",
+                "1": "multi-block grid (blocks.dat, DIVEMesh R 20 1)",
+                "2": "nodes of curvgrid.dat",
+            },
+            "default": ["0"],
+            "text": (
+                "Curvilinear horizontal grid for SFLOW and NHFLOW. The DIVEMesh grid is its "
+                "logical box (ni x nj cells); curvgrid.dat holds ni nj, then x y zb of every "
+                "node, i fastest. With 1, blocks.dat holds the blocks of a multi-block grid "
+                "(block 0 the DIVEMesh grid, the blocks 1.. beside it, point matching along "
+                "their interfaces). Not in the user guide yet."
+            ),
+            "modules": "SN",
+            "documented": False,
         },
-        "default": ["0"],
-        "text": (
-            "Curvilinear horizontal grid for SFLOW and NHFLOW. The DIVEMesh grid is its "
-            "logical box (ni x nj cells); curvgrid.dat holds ni nj, then x y zb of every "
-            "node, i fastest. Not in the user guide yet."
-        ),
-        "modules": "SN",
-        "documented": False,
+        "G 54": {
+            "title": "Open face of a block of a multi-block grid",
+            "repeat": True,
+            "params": [
+                {"name": "b", "type": "int"},
+                {"name": "t", "type": "int"},
+                {"name": "v", "type": "double"},
+            ],
+            "values": 3,
+            "options": {},
+            "default": [],
+            "text": (
+                "Multi-block grid (G 50 1): block b (1..) gets an open face, t 1: the "
+                "discharge v (m3/s) in through its -i face, t 2: the water level v (m) at "
+                "its +i face (ramped from F 60 as F 64). One line per face; the face must "
+                "have no interface. The in- and outflow of block 0 stay B 60, W 10, F 62. "
+                "Not in the user guide yet."
+            ),
+            "modules": "SN",
+            "documented": False,
+        },
+    },
+    "divemesh": {
+        "R 20": {
+            "title": "Multi-block grid",
+            "repeat": False,
+            "params": [{"name": "", "type": "int"}],
+            "values": 1,
+            "options": {"0": "off", "1": "blocks from blocks.dat"},
+            "default": ["0"],
+            "text": (
+                "Multi-block grid from blocks.dat (REEF3D G 50 1): block 0 is the grid of "
+                "the run (its ni x nj cells the logical box), the blocks 1.. meet it and "
+                "each other along whole edges, node on node. Not in the user guide yet."
+            ),
+            "modules": "",
+            "documented": False,
+        },
+        "R 21": {
+            "title": "Ring cells of block 0 at its interfaces",
+            "repeat": False,
+            "params": [{"name": "", "type": "int"}],
+            "values": 1,
+            "options": {},
+            "default": ["8"],
+            "text": (
+                "Multi-block grid (R 20 1): the cells of the neighbour blocks kept around "
+                "block 0 on its interface faces; REEF3D needs at least its ghost cells "
+                "plus 3. Not in the user guide yet."
+            ),
+            "modules": "",
+            "documented": False,
+        },
     },
 }
 
 
-def describe_from_reader(commands: dict) -> dict:
+def describe_from_reader(commands: dict, program: str = "reef3d") -> dict:
     """Titles, names and texts for commands the guides do not describe yet
     (FROM_READER, NEWER); the guide's own description, once there, wins."""
-    for code, entry in NEWER.items():
+    for code, entry in NEWER.get(program, {}).items():
         if code not in commands or not commands[code].get("documented", True):
             commands[code] = dict(entry)
     for code, (title, names, modules, text) in FROM_READER.items():
@@ -435,7 +493,7 @@ def describe_from_reader(commands: dict) -> dict:
     return commands
 
 
-def merge(catalog: dict, source: dict[str, dict]) -> dict:
+def merge(catalog: dict, source: dict[str, dict], program: str = "reef3d") -> dict:
     """The guide's commands with the reader's counts; commands only the reader knows
     are added, undocumented; commands the reader no longer has are marked."""
     commands = catalog["commands"]
@@ -460,7 +518,7 @@ def merge(catalog: dict, source: dict[str, dict]) -> dict:
             "text": "Not in the user guide yet.",
             "documented": False,
         }
-    describe_from_reader(commands)
+    describe_from_reader(commands, program)
     catalog["commands"] = dict(
         sorted(commands.items(), key=lambda kv: (kv[0].split()[0], int(kv[0].split()[1])))
     )
@@ -484,7 +542,7 @@ def main(argv: list[str] | None = None) -> int:
         catalog = {"program": program, "file": file, "source": path} | catalog
         reader = trees[name] / "src" / "read_control.cpp"
         if reader.is_file():
-            catalog = merge(catalog, read_source(reader))
+            catalog = merge(catalog, read_source(reader), name)
         else:
             print(f"{reader} not found: counts from the guide only")
         target = OUT / f"{name}.json"
