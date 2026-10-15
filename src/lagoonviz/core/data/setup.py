@@ -1348,6 +1348,8 @@ def _marks(setup: CaseSetup) -> list[Mark]:
     return marks
 
 
+#: the groups of marks the "River corridor" item draws (not the "Case set-up" item)
+CORRIDOR_GROUPS = ("corridor", "corridor_grid")
 #: the most grid lines drawn each way (every n-th line of a finer grid)
 GRID_LINES = 120
 
@@ -1444,7 +1446,7 @@ def _corridor_marks(setup: CaseSetup, water_z: float) -> list[Mark]:
             return marks
         marks.append(
             Mark(
-                "corridor",
+                "corridor_grid",
                 "grid of the corridor",
                 COLORS["curvgrid"],
                 segments=_grid_lines(gx, gy, water_z),

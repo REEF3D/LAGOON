@@ -17,6 +17,10 @@
   says if cells fold; **Make grid** writes `curvgrid.dat`, `G 50 2` and DIVEMesh's
   logical box. Kept in `corridor.json`; in a script `session.start_corridor()`,
   `move_corridor_point()`, `set_corridor_options()`, `make_corridor_grid()`.
+- The corridor is a **River corridor** item of the scene: *Add → River corridor*
+  lays one out, *Remove* takes it away (with corridor.json), *Reset* lays it out
+  again as it was made (along the domain, over the area drawn or along the
+  thalweg), dropping the dragged points. Its points and grid can be switched off.
 - A case with `G 50 2` and its `curvgrid.dat` is drawn where its nodes are: the
   domain, its sides and the grid (*Curvilinear grid*), not DIVEMesh's logical box.
 

@@ -230,6 +230,16 @@ upstream end (i = 0), 4 the downstream end, 3 and 2 the banks. With `G 50 2`, th
 set-up draws the domain, its sides and the grid (*Curvilinear grid*, on the bed)
 where the nodes are, not DIVEMesh's logical box.
 
+The corridor is an item of the scene, **River corridor** (*Add → River corridor*
+lays one out at once: along the thalweg with geo.dat, else along the domain). It
+draws the banks and their points in yellow and the grid it makes; *Points* and
+*Grid* in its properties switch them off. Selecting it in the set-up brings the
+River tab forward. **Remove** (in the scene, or in the River tab) takes the
+corridor away with its `corridor.json`; **Reset** (in its properties, or in the
+River tab) lays it out again the way it was made - along the domain, over the area
+drawn, or along the thalweg with its margin - dropping the dragged points and
+keeping the grid's settings. Each is one undo step.
+
 The corridor is kept in `corridor.json` in the case folder. In a script:
 
 ```python
@@ -238,6 +248,7 @@ session.auto_corridor(margin=5.0, points=12)
 session.move_corridor_point("left", 5, 90.0, 28.0)
 session.set_corridor_options(points=16, curve="bspline", cells_along=100,
                              cells_across=10, smoothing=100, slope=0.001)
+session.reset_corridor()     # as it was made, the dragged points dropped
 session.make_corridor_grid()
 ```
 

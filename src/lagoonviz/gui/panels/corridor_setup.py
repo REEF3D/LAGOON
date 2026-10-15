@@ -78,12 +78,24 @@ class CorridorTab(QWidget):
             "Drag the points of the banks in the 2D top view (elsewhere the view pans; Esc stops)"
         )
         self.edit_button.toggled.connect(self._edit_toggled)
+        self.reset_button = QPushButton("Reset")
+        self.reset_button.setToolTip(
+            "Lay the corridor out again as it was made: the dragged points are dropped, "
+            "the grid's settings kept"
+        )
+        self.reset_button.clicked.connect(self.reset)
         self.remove_button = QPushButton("Remove")
         self.remove_button.setToolTip("Remove the corridor (corridor.json)")
         self.remove_button.clicked.connect(self.remove)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
-        for button in (self.start_button, self.draw_button, self.edit_button, self.remove_button):
+        for button in (
+            self.start_button,
+            self.draw_button,
+            self.edit_button,
+            self.reset_button,
+            self.remove_button,
+        ):
             row.addWidget(button)
         row.addStretch(1)
 
@@ -245,7 +257,7 @@ class CorridorTab(QWidget):
         has_bed = setup is not None and (setup.path / "geo.dat").is_file()
         self.auto_box.setEnabled(has_bed)
         self.auto_box.setToolTip("" if has_bed else "Needs geo.dat (Map tab: Make geo.dat)")
-        for widget in (self.edit_button, self.remove_button, self.form):
+        for widget in (self.edit_button, self.reset_button, self.remove_button, self.form):
             widget.setEnabled(corridor is not None)
         if corridor is None and self.edit_button.isChecked():
             self.edit_button.setChecked(False)
@@ -389,6 +401,12 @@ class CorridorTab(QWidget):
                     side, index, round(x, 4), round(y, 4), case=case_id
                 )
             )
+
+    def reset(self) -> None:
+        self._run(
+            lambda: self.session.reset_corridor(case=self.panel.case_id),
+            "The corridor laid out again as it was made",
+        )
 
     def reverse(self) -> None:
         self._run(

@@ -14,7 +14,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -35,7 +35,13 @@ from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import CASE_ROLES, ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
-from lagoonviz.core.data.setup import SIGMA_SOLVERS, CaseSetup, has_inputs, read_setup
+from lagoonviz.core.data.setup import (
+    CORRIDOR_GROUPS,
+    SIGMA_SOLVERS,
+    CaseSetup,
+    has_inputs,
+    read_setup,
+)
 from lagoonviz.core.kinds import kind_spec
 from lagoonviz.core.scene import MODE_KINDS, SETUP_KINDS, Scene, SceneItem
 from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
@@ -1811,7 +1817,21 @@ class DataManager:
         if setup is None:
             return None
         props = item.properties
-        shown = [m for m in setup.marks() if props.get(f"show_{m.group}", True)]
+        if item.kind == "corridor":  # the river corridor: its banks, points and grid
+            shown = []
+            for mark in setup.marks():
+                if mark.group == "corridor":
+                    if not props.get("show_points", True):
+                        mark = replace(mark, points=np.zeros((0, 3)))
+                    shown.append(mark)
+                elif mark.group == "corridor_grid" and props.get("show_grid", True):
+                    shown.append(mark)
+        else:
+            shown = [
+                m
+                for m in setup.marks()
+                if m.group not in CORRIDOR_GROUPS and props.get(f"show_{m.group}", True)
+            ]
         lines: dict[str, list[np.ndarray]] = {}
         points: dict[str, list[np.ndarray]] = {}
         faces: dict[str, list[np.ndarray]] = {}

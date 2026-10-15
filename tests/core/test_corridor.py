@@ -119,8 +119,10 @@ def test_a_case_gets_a_corridor_and_its_grid(river):
     session.set_corridor_options(points=16, curve="bspline", smoothing=50, slope=0.001)
     assert len(session.corridor().left) == 16 and session.corridor().curve == "bspline"
     # the set-up draws the corridor: its banks, its points, the grid it makes
-    marks = [m for m in session.data.case_setup(case_id).marks() if m.group == "corridor"]
-    assert len(marks) == 2 and len(marks[0].points) == 32
+    marks = session.data.case_setup(case_id).marks()
+    banks = [m for m in marks if m.group == "corridor"]
+    assert len(banks) == 1 and len(banks[0].points) == 32
+    assert [m for m in marks if m.group == "corridor_grid"]
     quality = session.make_corridor_grid()
     assert quality.folded == 0
     ni, nj = quality.cells
@@ -136,7 +138,7 @@ def test_a_case_gets_a_corridor_and_its_grid(river):
     groups = [m.group for m in setup.marks()]
     assert "curvgrid" in groups and session.data.grid(case_id) is None
     script = session.to_script()
-    assert "session.start_corridor([0.0, 200.0, 6.0, 54.0], points=12)" in script
+    assert "session.start_corridor(points=12)" in script
     assert "session.move_corridor_point('left', 5, 90.0, 58.0)" in script
     assert "session.make_corridor_grid()" in script
     session.undo()  # the grid, G 50 and the logical box: one step
@@ -211,8 +213,64 @@ def test_a_case_gets_a_corridor_along_its_thalweg(river):
     assert thalweg.level == 0.0  # F 60
     corridor = session.corridor()
     assert len(corridor.left) == 14 and corridor.left[0, 0] < 5
-    assert "session.auto_corridor(margin=5.0, level=0.0, points=14, sides=(1, 4))" in (
-        session.to_script()
-    )
+    assert "session.auto_corridor(margin=5.0, points=14)" in (session.to_script())
     session.move_corridor_point("left", 3, *corridor.left[3] + 2.0)  # then dragged
     assert session.make_corridor_grid().folded == 0
+
+
+def test_the_corridor_is_an_item_added_removed_and_reset(river):
+    session = Session()
+    case_id = session.open_case(river)
+    item = session.add_item("corridor")  # Add -> River corridor: laid out at once
+    assert session.scene.get(item).kind == "corridor" and session.corridor() is not None
+    assert session.add_item("corridor") == item  # one per case
+    # it draws the banks, their points and its grid; the Case set-up item does not
+    marks = session.data.setup_marks(item)
+    assert marks is not None and len(marks.points) and len(marks.lines) == 2
+    setup_item = next(i.id for i in session.scene if i.kind == "setup")
+    colours = [c for c, _ in session.data.setup_marks(setup_item).lines]
+    assert C.CURVES and "#ffd84a" not in colours
+    session.set_property(item, "show_grid", False)
+    session.set_property(item, "show_points", False)
+    marks = session.data.setup_marks(item)
+    assert len(marks.lines) == 1 and not len(marks.points)
+    # reset: as it was made, the dragged points dropped, the grid's settings kept
+    start = session.corridor().left.copy()
+    session.move_corridor_point("left", 4, 70.0, 59.0)
+    session.set_corridor_options(cells_across=10)
+    session.reset_corridor()
+    np.testing.assert_allclose(session.corridor().left, start)
+    assert session.corridor().cells_across == 10
+    assert session.to_script().splitlines()[-1] == "session.reset_corridor()"
+    # removed: the item and corridor.json, one undo step
+    session.remove_item(item)
+    assert not (river / "corridor.json").exists() and session.corridor() is None
+    assert not [i for i in session.scene if i.kind == "corridor"]
+    session.undo()
+    assert (river / "corridor.json").exists() and item in session.scene
+    # the corridor of a case opened again is its item
+    again = Session()
+    again.open_case(river)
+    assert [i for i in again.scene if i.kind == "corridor"]
+    # the River tab's Remove: the item goes with it
+    again.remove_corridor()
+    assert not [i for i in again.scene if i.kind == "corridor"]
+    again.undo()
+    assert [i for i in again.scene if i.kind == "corridor"]
+    assert case_id
+
+
+def test_a_corridor_drawn_over_an_area_resets_to_that_area(river):
+    session = Session()
+    session.open_case(river)
+    session.start_corridor((20, 180, 10, 50), points=8)
+    assert [i for i in session.scene if i.kind == "corridor"]
+    first = session.corridor().right.copy()
+    session.move_corridor_point("right", 2, 60.0, 0.0)
+    session.reset_corridor()
+    np.testing.assert_allclose(session.corridor().right, first)
+    assert session.corridor().extra["made"] == {
+        "how": "area",
+        "points": 8,
+        "area": [20.0, 180.0, 10.0, 50.0],
+    }

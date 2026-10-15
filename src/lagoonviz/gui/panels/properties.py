@@ -89,6 +89,14 @@ class PropertiesPanel(QWidget):
             fit.clicked.connect(self._fit_range)
             form.addRow("", fit)
             self.fit_button = fit
+        if item.kind == "corridor":
+            reset = QPushButton("Reset")
+            reset.setToolTip(
+                "Lay the corridor out again as it was made (along the domain, over the "
+                "area drawn, along the thalweg): the dragged points are dropped"
+            )
+            reset.clicked.connect(self._reset_corridor)
+            form.addRow("", reset)
         self.info = QLabel(self._data_info(item.id))
         self.info.setWordWrap(True)
         self.info.setEnabled(False)
@@ -242,6 +250,26 @@ class PropertiesPanel(QWidget):
                 "DIVEMesh's grid" if grid.source == "DIVEMesh" else "from control.txt (not run)"
             )
             return f"{source}\n{nx} × {ny} × {nz} = {nx * ny * nz:,} cells\n{sizes} m"
+        if item.kind == "corridor":
+            setup = data.case_setup(item_id)
+            corridor = setup.corridor if setup is not None else None
+            if corridor is None:
+                return "No corridor.json in the case folder: Set-up → River → Start"
+            from lagoonviz.core import corridor as corridors
+
+            made = (corridor.extra.get("made") or {}).get("how", "")
+            how = {
+                "thalweg": "along the thalweg",
+                "area": "over an area drawn",
+                "domain": "along the domain",
+            }.get(made, "")
+            lines = [f"{len(corridor.left)} points on each bank" + (f", laid {how}" if how else "")]
+            try:
+                lines.append(corridors.quality(*corridor.grid()).text())
+            except (ValueError, FloatingPointError) as error:
+                lines.append(f"No grid: {error}")
+            lines.append("Drag its points in Set-up → River (Drag points)")
+            return "\n".join(lines)
         if item.kind == "geodat":
             dataset = data.dataset(item_id)
             if dataset is None:
@@ -276,6 +304,15 @@ class PropertiesPanel(QWidget):
             )
         return f"{dataset.label} · {len(dataset)} frames · {dataset.folder.name}"
 
+    def _reset_corridor(self) -> None:
+        if not self.item_id:
+            return
+        owner = self.session.data.case_item(self.item_id)
+        try:
+            self.session.reset_corridor(case=owner.id if owner is not None else None)
+        except ValueError as error:
+            self.info.setText(str(error))
+
     def _rename(self, text: str) -> None:
         text = text.strip()
         if self.item_id and text and text != self.session.scene.get(self.item_id).name:
@@ -286,7 +323,7 @@ class PropertiesPanel(QWidget):
         if event in ("removed", "reset") and self.item_id not in self.session.scene:
             self.show_item("")
         elif event == "inputs" and self.item_id in self.session.scene:
-            if self.session.scene.get(self.item_id).kind in ("setup", "grid", "geodat"):
+            if self.session.scene.get(self.item_id).kind in ("setup", "grid", "geodat", "corridor"):
                 self.info.setText(self._data_info(self.item_id))  # the set-up's facts
         elif event == "changed" and item_id == self.item_id:
             self._refresh()

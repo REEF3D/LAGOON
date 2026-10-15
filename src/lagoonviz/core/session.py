@@ -94,11 +94,23 @@ class Session:
 
     # ------------------------------------------------------------- editing
     def add_item(self, kind: str, name: str | None = None, **properties: Any) -> str:
-        """Add a scene item and return its id."""
+        """Add a scene item and return its id (a "River corridor": the case's
+        corridor, laid out first if it has none, :meth:`add_corridor`)."""
+        if kind == "corridor" and not self._replaying_corridor(properties):
+            return self.add_corridor(case=properties.get("case") or None)
         command = AddItem(kind, name, properties)
         self.stack.execute(command)
         assert command.item_id is not None
         return command.item_id
+
+    def _replaying_corridor(self, properties: dict) -> bool:
+        """An item of a corridor there is already (added by itself, e.g. by a script
+        of an older session): just the item."""
+        try:
+            case_id = self._case_id(properties.get("case") or None)
+        except ValueError:
+            return True
+        return self.corridor(case_id) is not None and not self._corridor_items(case_id)
 
     def open_case(self, path: str | Path, name: str | None = None) -> str:
         """Open a REEF3D case and show its free surface and bed (its volume is there,
@@ -141,6 +153,8 @@ class Session:
                 children.append(AddItem("grid", None, {}))  # DIVEMesh's, or control.txt's
         elif has_inputs(case.path):  # results: the set-up is there, switched off
             children.append(AddItem("setup", None, {}, visible=False))
+        if (Path(case.path) / "corridor.json").is_file():  # its river corridor
+            children.append(AddItem("corridor", None, {}, visible=case.setup_only))
         if case.by_role("geodat") is not None:  # geo.dat's points: in the set-up
             children.append(AddItem("geodat", None, {}, visible=case.setup_only))
         for series in case.main_series():
@@ -427,7 +441,7 @@ class Session:
         it has none yet."""
         cases = [i for i in self.scene if i.kind == "case"]
         found = []
-        for kind in ("setup", "grid", "geodat"):
+        for kind in ("setup", "grid", "geodat", "corridor"):
             named = {str(i.properties.get("case", "")) for i in self.scene if i.kind == kind}
             if case_id in named or (len(cases) == 1 and "" in named):
                 continue
@@ -438,6 +452,8 @@ class Session:
                 continue
             setup = self.data.case_setup(case_id)
             if setup is None or (kind == "grid" and not setup.control.exists):
+                continue
+            if kind == "corridor" and setup.corridor is None:
                 continue
             found.append(AddItem(kind, None, {"case": case_id}))
         return found
@@ -626,7 +642,85 @@ class Session:
         if case:
             script += ("" if script.endswith("(") else ", ") + f"case={case!r}"
         script += ")"
-        self.stack.execute(self._case_file(case_id, corridors.FILE, text, script, label))
+        commands = [self._case_file(case_id, corridors.FILE, text, script, label)]
+        items = self._corridor_items(case_id)
+        if corridor is not None and not items:  # the corridor is an item of the scene
+            commands.append(AddItem("corridor", None, {"case": case_id}))
+        elif corridor is None:
+            commands += [RemoveItem(i) for i in items]
+        self.stack.execute(commands[0] if len(commands) == 1 else Batch(commands, script, label))
+
+    def _corridor_items(self, case_id: str) -> list[str]:
+        """The "River corridor" items of a case."""
+        found = []
+        for item in self.scene:
+            if item.kind != "corridor":
+                continue
+            owner = self.data.case_item(item.id)
+            if owner is not None and owner.id == case_id:
+                found.append(item.id)
+        return found
+
+    def add_corridor(self, case: str | None = None) -> str:
+        """A "River corridor" item: the case's corridor, laid out first if it has
+        none (along the thalweg with geo.dat, else straight along the domain).
+        Returns the item's id."""
+        case_id = self._case_id(case)
+        if self.corridor(case_id) is None:
+            setup = self.data.case_setup(case_id, create=True)
+            if setup is not None and (setup.path / "geo.dat").is_file():
+                self.auto_corridor(margin=5.0, case=case)
+            else:
+                self.start_corridor(case=case)
+        items = self._corridor_items(case_id)
+        if items:
+            return items[0]
+        return self.add_item("corridor", case=case_id)
+
+    def reset_corridor(self, case: str | None = None) -> None:
+        """Lay the corridor out again the way it was made (along the domain, over the
+        area drawn, or along the thalweg with its margin): the dragged points are
+        dropped, the grid's settings (cells, smoothing, curve, bed) kept."""
+        from dataclasses import replace
+
+        case_id = self._case_id(case)
+        current = self._corridor_of(case_id)
+        made = dict(current.extra.get("made") or {"how": "domain", "points": len(current.left)})
+        how = made.get("how", "domain")
+        if how == "thalweg":
+            fresh = self._thalweg_corridor(
+                case_id, **{k: v for k, v in made.items() if k != "how"}
+            )[0]
+        else:
+            area = made.get("area") if how == "area" else None
+            fresh = self._straight_corridor(case_id, area, int(made.get("points", 12)))
+        keep = ("curve", "cells_along", "cells_across", "smoothing", "bed", "z_start", "slope")
+        fresh = replace(fresh, **{k: getattr(current, k) for k in keep})
+        fresh.extra = dict(current.extra)
+        script = "session.reset_corridor("
+        self._put_corridor(case, fresh, script, "Reset river corridor")
+
+    def _straight_corridor(self, case_id: str, area, points: int):
+        from lagoonviz.core import corridor as corridors
+
+        setup = self.data.case_setup(case_id, create=True)
+        domain = setup.domain if setup is not None else None
+        how = "area" if area is not None else "domain"
+        if area is None:
+            if domain is None:
+                raise ValueError("no domain yet: give the area of the corridor")
+            xs, xe, ys, ye = domain[:4]
+            if xe - xs >= ye - ys:
+                area = (xs, xe, ys + 0.1 * (ye - ys), ye - 0.1 * (ye - ys))
+            else:
+                area = (xs + 0.1 * (xe - xs), xe - 0.1 * (xe - xs), ys, ye)
+        area = [round(float(v), 6) for v in area]
+        options = {"z_start": float(domain[4])} if domain is not None else {}
+        made = corridors.default(area, int(points), **options)
+        made.extra["made"] = {"how": how, "points": int(points)} | (
+            {"area": area} if how == "area" else {}
+        )
+        return made
 
     def _corridor_of(self, case_id: str):
         current = self.corridor(case_id)
@@ -638,23 +732,11 @@ class Session:
         """A straight river corridor over a plan area (x0, x1, y0, y1; default the
         domain without a tenth on each side across), flowing along its longer side,
         ``points`` points on each bank."""
-        from lagoonviz.core import corridor as corridors
-
         case_id = self._case_id(case)
-        setup = self.data.case_setup(case_id, create=True)
-        domain = setup.domain if setup is not None else None
-        if area is None:
-            if domain is None:
-                raise ValueError("no domain yet: give the area of the corridor")
-            xs, xe, ys, ye = domain[:4]
-            if xe - xs >= ye - ys:
-                area = (xs, xe, ys + 0.1 * (ye - ys), ye - 0.1 * (ye - ys))
-            else:
-                area = (xs + 0.1 * (xe - xs), xe - 0.1 * (xe - xs), ys, ye)
-        area = [round(float(v), 6) for v in area]
-        options = {"z_start": float(domain[4])} if domain is not None else {}
-        start = corridors.default(area, int(points), **options)
-        script = f"session.start_corridor({area!r}, points={int(points)}"
+        start = self._straight_corridor(case_id, area, int(points))
+        given = start.extra["made"].get("area")
+        script = "session.start_corridor(" + (f"{given!r}, " if given else "")
+        script += f"points={int(points)}"
         self._put_corridor(case, start, script, "Start river corridor")
 
     def auto_corridor(
@@ -672,15 +754,38 @@ class Session:
         domain's longer axis), its banks where the water below ``level`` (default: F
         60, else halfway up the banks) reaches, plus ``margin`` m (or ``width`` m
         wide), ``points`` points on each bank. Returns the thalweg found."""
+        case_id = self._case_id(case)
+        made, thalweg = self._thalweg_corridor(case_id, margin, level, points, width, sides)
+        words = [f"margin={float(margin)!r}"]
+        if level is not None:
+            words.append(f"level={float(level)!r}")
+        words.append(f"points={int(points)}")
+        if width is not None:
+            words.append(f"width={float(width)!r}")
+        if sides is not None:
+            words.append(f"sides={tuple(int(v) for v in sides)!r}")
+        script = "session.auto_corridor(" + ", ".join(words)
+        self._put_corridor(case, made, script, "Corridor along the thalweg")
+        return thalweg
+
+    def _thalweg_corridor(
+        self, case_id: str, margin=0.0, level=None, points=12, width=None, sides=None
+    ):
         from lagoonviz.core import corridor as corridors
 
-        case_id = self._case_id(case)
         setup = self.data.case_setup(case_id, create=True)
         if setup is None or not (setup.path / "geo.dat").is_file():
             raise ValueError("following the thalweg needs the bed: geo.dat (Map tab: Make geo.dat)")
         domain = setup.domain
         if domain is None:
             raise ValueError("no domain yet (B 10)")
+        recipe = {"how": "thalweg", "margin": float(margin), "points": int(points)}
+        if level is not None:
+            recipe["level"] = float(level)
+        if width is not None:
+            recipe["width"] = float(width)
+        if sides is not None:
+            recipe["sides"] = [int(v) for v in sides]
         if sides is None:
             inflow = [k for k, v in setup.sides.items() if v == 1 and k <= 4]
             outflow = [k for k, v in setup.sides.items() if v == 2 and k <= 4]
@@ -694,16 +799,8 @@ class Session:
             setup.geo_points(), domain, level, int(sides[0]), int(sides[1])
         )
         made = corridors.from_thalweg(thalweg, float(margin), int(points), width)
-        words = [f"margin={float(margin)!r}"]
-        if level is not None:
-            words.append(f"level={float(level)!r}")
-        words.append(f"points={int(points)}")
-        if width is not None:
-            words.append(f"width={float(width)!r}")
-        words.append(f"sides={tuple(int(v) for v in sides)!r}")
-        script = "session.auto_corridor(" + ", ".join(words)
-        self._put_corridor(case, made, script, "Corridor along the thalweg")
-        return thalweg
+        made.extra["made"] = recipe
+        return made, thalweg
 
     def move_corridor_point(
         self, side: str, index: int, x: float, y: float, case: str | None = None
@@ -1421,7 +1518,18 @@ class Session:
         )
 
     def remove_item(self, item_id: str) -> None:
-        self.scene.get(item_id)
+        item = self.scene.get(item_id)
+        if item.kind == "corridor":  # the corridor itself goes: its corridor.json too
+            owner = self.data.case_item(item_id)
+            if owner is not None and self.corridor(owner.id) is not None:
+                from lagoonviz.core import corridor as corridors
+
+                script = f"session.remove_item({item_id!r})"
+                commands = [RemoveItem(i) for i in self._corridor_items(owner.id)] + [
+                    self._case_file(owner.id, corridors.FILE, None, "", "corridor.json")
+                ]
+                self.stack.execute(Batch(commands, script, "Remove river corridor"))
+                return
         self.stack.execute(RemoveItem(item_id))
 
     def set_property(self, item_id: str, key: str, value: Any, *, merge: bool = False) -> None:

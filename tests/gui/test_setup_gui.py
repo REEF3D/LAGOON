@@ -565,3 +565,22 @@ def test_the_river_tab_follows_the_thalweg(window, flume):
     corridor = window.session.corridor()
     assert corridor is not None and len(corridor.left) == 10 and tab.edit_button.isChecked()
     assert abs(float(np.mean(corridor.left[:, 1] + corridor.right[:, 1])) / 2 - 1.0) < 0.2
+
+
+def test_the_corridor_is_an_item_with_a_reset(window, flume):
+    from PySide6.QtWidgets import QPushButton
+
+    window.open_case(flume)
+    item = window.add_item("corridor")  # Add → River corridor
+    assert window.session.scene.get(item).kind == "corridor"
+    tab = window.setup_panel.river_tab
+    assert tab.reset_button.isEnabled() and tab.form.isEnabled()
+    start = window.session.corridor().left.copy()
+    window.session.move_corridor_point("left", 2, 3.0, 1.95)
+    window.properties.show_item(item)
+    reset = next(b for b in window.properties.findChildren(QPushButton) if b.text() == "Reset")
+    reset.click()
+    assert (window.session.corridor().left == start).all()
+    assert "points on each bank" in window.properties.info.text()
+    window.session.remove_item(item)
+    assert window.session.corridor() is None and not tab.form.isEnabled()

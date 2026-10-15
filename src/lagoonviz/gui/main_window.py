@@ -626,6 +626,13 @@ class MainWindow(QMainWindow):
         kind = self.session.scene.get(item_id).kind
         if self.session.mode == "setup" and kind in ("case", "setup", "grid"):
             return
+        if self.session.mode == "setup" and kind == "corridor":  # edited in the River tab
+            panel = self.setup_panel
+            panel.tabs.setCurrentWidget(panel.river_tab)
+            if "setup" in self.docks:
+                self.docks["setup"].show()
+                self.docks["setup"].raise_()
+            return
         dock = self.docks["properties"]
         dock.show()
         dock.raise_()

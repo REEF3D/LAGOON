@@ -40,7 +40,7 @@ VIEW_EVENTS = ("camera_keys", "sun", "play_range", "highlight", "legend")
 #: DIVEMesh's grid); each mode shows its own items
 MODES = ("results", "setup")
 #: kinds of items that belong to the set-up: hidden in the results unless ticked
-SETUP_KINDS = ("setup", "grid")
+SETUP_KINDS = ("setup", "grid", "corridor")
 #: kinds of items with a check box of their own in each mode (on in the set-up, off
 #: over the results until ticked there): the set-up items and geo.dat's points; the
 #: background map is not one of them: it lies under the set-up and the results alike

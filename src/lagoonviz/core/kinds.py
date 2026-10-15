@@ -205,7 +205,6 @@ SETUP_GROUPS = {
     "regions": "Regions",
     "solids": "Solids",
     "bed": "Bed",
-    "corridor": "River corridor",
     "curvgrid": "Curvilinear grid",
 }
 #: faces of the domain the "DIVEMesh grid" item draws its lines on
@@ -227,7 +226,6 @@ _SETUP_TIPS = {
     "regions": "Refinement boxes, wind areas and other regions (A 276, A 372, F 72, S 74)",
     "solids": "Outlines of DIVEMesh's solids (S); the solids themselves are a structure item",
     "bed": "The bed's topo objects (T); geo.dat's points are an item of their own",
-    "corridor": "The river corridor: its banks, the points that shape them, its grid",
     "curvgrid": "The curvilinear grid of curvgrid.dat (G 50 2), on the bed",
 }
 
@@ -518,6 +516,18 @@ KINDS: dict[str, KindSpec] = {
             },
             "labels": PropertySpec(
                 True, "Labels", tip="Numbers of gauges and probes, kinds of sides"
+            ),
+        },
+    ),
+    "corridor": KindSpec(
+        "River corridor",
+        {
+            "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
+            "show_points": PropertySpec(
+                True, "Points", tip="The points that shape the banks (dragged in the 2D view)"
+            ),
+            "show_grid": PropertySpec(
+                True, "Grid", tip="The curvilinear grid the corridor makes (Make grid writes it)"
             ),
         },
     ),
