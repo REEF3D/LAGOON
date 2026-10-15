@@ -23,12 +23,12 @@ from collections.abc import Callable
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QIntValidator, QPainter, QPainterPath
 from PySide6.QtWidgets import (
-    QAbstractSpinBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QSlider,
     QSpinBox,
     QStyle,
@@ -321,15 +321,15 @@ class TimelinePanel(QWidget):
         # goes there); the time and the total around it are labels
         self.label = QLabel()
         self.label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.frame_box = QSpinBox()
-        self.frame_box.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.frame_box.setKeyboardTracking(False)  # goes there on Return or leaving
-        self.frame_box.setCorrectionMode(QAbstractSpinBox.CorrectToNearestValue)
+        # a plain text field for digits (a spin box without arrows, in the window's
+        # style, put its text outside the box on macOS: blank, and not typable)
+        self.frame_box = QLineEdit()
+        self.frame_box.setValidator(QIntValidator(0, 10**9, self.frame_box))
         self.frame_box.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.frame_box.setToolTip("Type a frame number and press Return to go there")
-        self.frame_box.valueChanged.connect(self._on_frame_typed)
-        # typed and gone there: the box follows the time again (playing, stepping)
-        self.frame_box.editingFinished.connect(self.frame_box.clearFocus)
+        self.frame_box.returnPressed.connect(self._on_frame_typed)
+        # typed and gone there (or left): the box follows the time again
+        self.frame_box.editingFinished.connect(self._frame_box_done)
         self.total_label = QLabel()
 
         self.fps = QSpinBox()
@@ -418,9 +418,6 @@ class TimelinePanel(QWidget):
         self.slider.setRange(self.first_frame, max(n - 1, 0) if n else STEPS)
         self.slider.setPageStep(max(1, self.steps.size // 20) if n else 50)
         self.slider.blockSignals(False)
-        self.frame_box.blockSignals(True)
-        self.frame_box.setRange(self.first_frame, max(n - 1, self.first_frame))
-        self.frame_box.blockSignals(False)
         self.frame_box.setVisible(bool(n))
         self.total_label.setVisible(bool(n))
         self._fit_label()
@@ -515,25 +512,32 @@ class TimelinePanel(QWidget):
         metrics = self.label.fontMetrics()
         self.label.setFixedWidth(metrics.horizontalAdvance(sample) + 8)
         self.total_label.setFixedWidth(metrics.horizontalAdvance(f"/ {last})") + 8)
-        # the box's own size for its largest number (its frame and margins: on macOS
-        # the digits plus a few pixels clipped the number away), never less than the
-        # digits with room around them
+        # the digits of the largest frame and one more, with the field's padding
         digits = self.frame_box.fontMetrics().horizontalAdvance(last + "8")
-        self.frame_box.setFixedWidth(max(self.frame_box.sizeHint().width(), digits + 28))
+        self.frame_box.setFixedWidth(digits + 24)
 
     def position_text(self) -> str:
         """Where the timeline is, as one line: "t = 1.00 s  (frame 2 / 2)"."""
         if not self.has_frames:
             return self.label.text()
-        frame = self.frame_box.value()
+        frame = self.frame_box.text()
         if self.unit == "s":
             return f"{self.label.text()} {frame} {self.total_label.text()}"
         return f"frame {frame} {self.total_label.text()}"
 
-    def _on_frame_typed(self, frame: int) -> None:
-        """A frame number typed (Return, or the box left): go there."""
-        if self.has_frames:
-            self.go_to_frame(frame)
+    def _on_frame_typed(self) -> None:
+        """A frame number typed and Return pressed: go there (past the ends: the
+        first or last frame)."""
+        text = self.frame_box.text().strip()
+        if self.has_frames and text.isdigit():
+            self.go_to_frame(int(text))
+        self._show_time(self.session.scene.time)
+
+    def _frame_box_done(self) -> None:
+        """Return pressed or the field left: the box shows the frame again (also
+        when what was typed was not a number) and follows the time."""
+        self.frame_box.clearFocus()
+        self._show_time(self.session.scene.time)
 
     # ------------------------------------------------------------- time
     def _index_of(self, time: float) -> int:
@@ -573,9 +577,7 @@ class TimelinePanel(QWidget):
             if not held:
                 self.slider.setValue(frame)
             if not self.frame_box.hasFocus():  # not while a number is being typed
-                self.frame_box.blockSignals(True)
-                self.frame_box.setValue(frame)
-                self.frame_box.blockSignals(False)
+                self.frame_box.setText(str(frame))
             seconds = self.unit == "s"
             self.label.setText(f"t = {time:.2f} s  (frame" if seconds else "frame")
             self.total_label.setText(f"/ {self.n_frames - 1}" + (")" if seconds else ""))

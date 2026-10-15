@@ -213,11 +213,12 @@ def test_open_case_fills_scene_and_timeline(window, reef3d_run):
     assert window.session.scene.time == 2
     assert timeline.position_text() == "frame 2 / 2"
     # the frame number typed: Return goes there
-    timeline.frame_box.lineEdit().setText("1")
-    timeline.frame_box.interpretText()
-    assert window.session.scene.time == 1 and timeline.frame_box.value() == 1
-    timeline.frame_box.setValue(99)  # past the end: the last frame
-    assert window.session.scene.time == 2
+    timeline.frame_box.setText("1")
+    timeline.frame_box.returnPressed.emit()
+    assert window.session.scene.time == 1 and timeline.frame_box.text() == "1"
+    timeline.frame_box.setText("99")  # past the end: the last frame
+    timeline.frame_box.returnPressed.emit()
+    assert window.session.scene.time == 2 and timeline.frame_box.text() == "2"
     timeline.slider.setValue(0)
     assert window.session.scene.time == 0
     assert "Open run" in window.act_undo.text()

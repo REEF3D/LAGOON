@@ -42,7 +42,7 @@ button '' tip='Camera keyframe: the 3D view at this time (Ctrl+K)'
 button '' [ ] tip='Follow the camera path through the keyframes' (disabled)
 slider in [0, 1000]
 label 't = 0.00 s'
-integer 0 in [0, 0] (hidden)
+text '' (hidden)
 label '' (hidden)
 integer 12 in [1, 240]
 label 'End'
