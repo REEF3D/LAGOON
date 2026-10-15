@@ -1404,7 +1404,9 @@ def _corridor_marks(setup: CaseSetup, water_z: float) -> list[Mark]:
     """The river corridor: its banks, the points that shape them and the grid it
     makes; the curvilinear grid of curvgrid.dat (G 50 2) on the bed."""
     marks = []
-    if setup.curvgrid is not None:
+    # one grid only: the corridor's (its item draws it) while there is a corridor,
+    # else curvgrid.dat's
+    if setup.curvgrid is not None and setup.corridor is None:
         x, y, z = setup.curvgrid
         marks.append(
             Mark(

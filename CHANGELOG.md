@@ -2,15 +2,22 @@
 
 ## Unreleased
 
-### Square river grids
+### Tidy river grids
 
-- The River tab's grid can have its **cross-sections square to the river**: straight
-  across the line halfway between the banks (found again from the cross-sections),
-  spaced evenly only where they would cross on the inside of a tight bend. A
-  corridor along the thalweg starts so; **Square the grid** (under Follow thalweg)
-  makes it so again after dragging, and *Cross-sections* chooses it or the equal
-  lengths along both banks of before. In a meander, the cross-sections were up to
-  50° off square; now under 1.5°.
+- The River tab's grid can have its **cross-sections across the river**: straight
+  across the line halfway between the banks where the banks allow, the cells along
+  each bank evened out (no cell more than 1.2 times its neighbour, none shorter
+  than 0.6 or longer than 1.6 times an even one), so it is neither skewed nor
+  squeezed. A corridor along the thalweg starts so; **Tidy the grid** (under Follow
+  thalweg) makes it so again after dragging, with a little smoothing;
+  *Cross-sections* chooses it or the equal lengths along both banks of before.
+- One grid at a time: while there is a corridor the set-up draws its grid only,
+  not curvgrid.dat's as well (which drew two grids after Make grid, and after a
+  session was opened again); the River tab says when curvgrid.dat is another grid.
+- **Follow thalweg** without F 60: the water at 0 where the bed's heights reach
+  below and above 0 (a coast, an estuary), and no bank farther than 2.5 times the
+  river's usual half width from the thalweg. On the Elbe at Hamburg the corridor
+  follows the river (about 500 m wide) instead of the marshes (12 km).
 - The bed from geo.dat is found in a second (only the points round the corridor;
   geo.dat on a regular grid read on it; very many points by their nearest): Make
   grid and Follow thalweg no longer hang on a large geo.dat.

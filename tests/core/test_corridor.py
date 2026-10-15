@@ -136,7 +136,9 @@ def test_a_case_gets_a_corridor_and_its_grid(river):
     # the domain is where the nodes are, not DIVEMesh's logical box
     assert setup.domain[3] > 50 and setup.domain[2] == pytest.approx(6.0)
     groups = [m.group for m in setup.marks()]
-    assert "curvgrid" in groups and session.data.grid(case_id) is None
+    # one grid: the corridor's while there is one (not curvgrid.dat's as well)
+    assert "corridor_grid" in groups and "curvgrid" not in groups
+    assert session.data.grid(case_id) is None
     script = session.to_script()
     assert "session.start_corridor(points=12)" in script
     assert "session.move_corridor_point('left', 5, 90.0, 58.0)" in script
@@ -311,6 +313,15 @@ def _off_square(corridor):
     return np.degrees(np.arcsin(np.clip(cosine, 0, 1)))
 
 
+def _stretch(corridor):
+    """The most a cell along a bank differs in length from its neighbour, and the
+    longest cell along a bank over the shortest."""
+    x, y = corridor.grid()
+    along = np.hypot(np.diff(x[[0, -1]], axis=1), np.diff(y[[0, -1]], axis=1))
+    ratio = along[:, 1:] / along[:, :-1]
+    return float(np.maximum(ratio, 1 / ratio).max()), float((along.max(1) / along.min(1)).max())
+
+
 def test_cross_sections_square_to_the_river():
     thalweg = C.find_thalweg(valley(), (0, 400, 0, 200, -2, 3), level=0.0)
     corridor = C.from_thalweg(thalweg, margin=20.0, count=14)
@@ -320,7 +331,9 @@ def test_cross_sections_square_to_the_river():
     even = replace(corridor, sections="even")
     assert np.median(_off_square(even)) > 15  # equal lengths: skewed in the bends
     square = _off_square(corridor)
-    assert np.median(square) < 1.0 and square.max() < 3.0
+    assert np.median(square) < 8.0 and square.max() < 15.0  # across the river, not skewed
+    neighbour, spread = _stretch(corridor)
+    assert neighbour < 1.25 and spread < 3.0  # and not squeezed or stretched along the banks
     x, y = corridor.grid()
     assert C.quality(x, y).folded == 0
     # a 90° bend: the cross-sections run to the centre of the bend
@@ -338,7 +351,23 @@ def test_cross_sections_square_to_the_river():
     # a point dragged far out: still no folded cells
     dragged = corridor.moved("left", 6, *(corridor.left[6] + [0.0, 30.0]))
     assert C.quality(*dragged.grid()).folded == 0
-    assert np.median(_off_square(dragged)) < 2.0
+    assert np.median(_off_square(dragged)) < 8.0 and _stretch(dragged)[0] < 1.25
     with pytest.raises(ValueError, match="sections"):
         replace(corridor, sections="radial")
     assert C.Corridor.from_dict({**corridor.to_dict(), "sections": "even"}).sections == "even"
+
+
+def test_the_default_water_level_and_the_widest_bank():
+    # heights to a sea level datum: the water at 0
+    z = np.array([[-5.0, 2.0], [10.0, 20.0]])
+    assert C.default_level(z, np.array([-5.0, -3.0])) == 0.0
+    # an inland river: halfway between its bed and the top of the banks
+    inland = np.array([[300.0, 302.0], [310.0, 320.0]])
+    assert 300.0 < C.default_level(inland, np.array([300.0])) < 320.0
+    # water spreading far over a flat marsh: the bank no farther than WIDEST half widths
+    line = np.column_stack([np.linspace(0, 1000, 101), np.zeros(101)])
+    left = np.full(101, 50.0)
+    left[40:60] = 2000.0
+    thalweg = C.Thalweg(line, np.zeros(101), left, np.full(101, 50.0), 0.0)
+    corridor = C.from_thalweg(thalweg, margin=0.0, count=12)
+    assert corridor.left[:, 1].max() <= C.WIDEST * 50.0 + 1e-6

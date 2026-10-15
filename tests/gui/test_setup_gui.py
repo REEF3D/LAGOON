@@ -628,7 +628,18 @@ def test_the_river_tab_squares_the_grid(window, flume):
     tab.start()
     assert window.session.corridor().sections == "even" and tab.square_button.isEnabled()
     window.session.set_corridor_options(smoothing=40)
+    assert tab.square_button.text() == "Tidy the grid"
     tab.square_button.click()
     corridor = window.session.corridor()
-    assert corridor.sections == "normal" and corridor.smoothing == 0
+    assert corridor.sections == "normal" and corridor.smoothing == 20
     assert tab.sections.currentData() == "normal"
+
+
+def test_one_grid_in_the_river_tab_and_a_note_when_curvgrid_is_another(window, flume):
+    window.open_case(flume)
+    tab = window.setup_panel.river_tab
+    tab.start()
+    tab.make_grid()
+    assert "curvgrid.dat is another grid" not in tab.quality.text()
+    window.session.move_corridor_point("left", 3, 3.0, 1.95)
+    assert "curvgrid.dat is another grid" in tab.quality.text()

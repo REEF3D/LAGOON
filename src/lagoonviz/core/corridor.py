@@ -125,11 +125,44 @@ def _sections(centre: np.ndarray, count: int, right_line: np.ndarray, left_line:
         missing = ~np.isfinite(at)
         at[missing] = even[missing]
         at[0], at[-1] = 0.0, along[-1]
-        at = _monotone(at, even)
+        at = _even_out(_monotone(at, even))
         ends.append(
             np.column_stack([np.interp(at, along, line[:, 0]), np.interp(at, along, line[:, 1])])
         )
     return ends[0], ends[1]
+
+
+#: the most a cell along a bank may differ in length from its neighbour
+STRETCH = 1.2
+#: the shortest and longest a cell along a bank may be, of the even length
+SPREAD = (0.6, 1.6)
+
+
+def _even_out(at: np.ndarray, stretch: float = STRETCH) -> np.ndarray:
+    """Positions along a bank (increasing) whose spacing changes smoothly: no step
+    shorter or longer than SPREAD of an even one, then the steps evened out
+    (diffused, their sum kept) until none is more than ``stretch`` times its
+    neighbour - square cross-sections where the banks allow, never cells squeezed
+    or stretched."""
+    steps = np.diff(at).astype(float)
+    if len(steps) < 2:
+        return at
+    total = float(steps.sum())
+    mean = total / len(steps)
+    for _ in range(50):  # none much shorter or longer than an even step
+        clipped = np.clip(steps, SPREAD[0] * mean, SPREAD[1] * mean)
+        clipped *= total / clipped.sum()
+        if np.allclose(clipped, steps):
+            break
+        steps = clipped
+    for _ in range(20000):
+        ratio = steps[1:] / steps[:-1]
+        if np.maximum(ratio, 1.0 / ratio).max() <= stretch:
+            break
+        padded = np.concatenate([steps[:1], steps, steps[-1:]])
+        steps = steps + 0.25 * (padded[:-2] - 2.0 * steps + padded[2:])
+        steps *= total / steps.sum()
+    return np.concatenate([[at[0]], at[0] + np.cumsum(steps)])
 
 
 def _crossing(line: np.ndarray, along: np.ndarray, point, direction) -> float:
@@ -512,6 +545,20 @@ def _smooth_line(line: np.ndarray, width: float) -> np.ndarray:
     return smooth[pad : pad + len(line)]
 
 
+#: the farthest a bank lies from the thalweg, in the river's usual half widths
+WIDEST = 2.5
+
+
+def default_level(z: np.ndarray, bed: np.ndarray) -> float:
+    """The water level when none is given (no F 60): 0 where the bed reaches below
+    and above 0 (heights to a sea level datum: a coast, an estuary), else halfway
+    between the thalweg's bed and the top of the banks."""
+    low, high = float(np.nanmin(z)), float(np.nanmax(z))
+    if low < 0.0 < high and float(np.median(bed)) < 0.0:
+        return 0.0
+    return float(np.median(bed) + 0.5 * (np.nanpercentile(z, 75) - np.median(bed)))
+
+
 def find_thalweg(
     points: np.ndarray,
     domain,
@@ -541,7 +588,7 @@ def find_thalweg(
     to_index = lambda p: np.array([(p[:, 1] - ys[0]) / step, (p[:, 0] - xs[0]) / step])  # noqa: E731
     bed = map_coordinates(z, to_index(line), order=1, mode="nearest")
     if level is None:
-        level = float(np.median(bed) + 0.5 * (np.percentile(z, 75) - np.median(bed)))
+        level = default_level(z, bed)
     tangent = np.gradient(line, axis=0)
     tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
     normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])  # to the left
@@ -583,8 +630,12 @@ def from_thalweg(
         left = right = np.full(n, 0.5 * float(width))
     else:
         size = max(3, n // 15) | 1
-        left = median_filter(thalweg.left, size=size, mode="nearest") + float(margin)
-        right = median_filter(thalweg.right, size=size, mode="nearest") + float(margin)
+        # where the water spreads far over flat land (a marsh, a harbour basin) the
+        # bank stays within WIDEST times the river's usual half width
+        widest = WIDEST * float(np.median(np.concatenate([thalweg.left, thalweg.right])))
+        left = median_filter(np.minimum(thalweg.left, widest), size=size, mode="nearest")
+        right = median_filter(np.minimum(thalweg.right, widest), size=size, mode="nearest")
+        left, right = left + float(margin), right + float(margin)
         left = _smooth(left, n / 30)
         right = _smooth(right, n / 30)
     tangent = np.gradient(line, axis=0)

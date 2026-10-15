@@ -20,6 +20,7 @@ Every change is an undo step; corridor.json and curvgrid.dat are written at once
 
 from __future__ import annotations
 
+import numpy as np
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -44,6 +45,8 @@ CURVE_LABELS = {
     "bspline": "Smooth, pulled by the points (B-spline)",
 }
 BED_LABELS = {"slope": "Sloping from the upstream end", "geo": "geo.dat's points"}
+#: the smoothing "Tidy the grid" gives (Winslow sweeps)
+TIDY_SMOOTHING = 20
 SECTION_LABELS = {
     "normal": "Square to the river",
     "even": "Equal lengths along both banks",
@@ -137,10 +140,11 @@ class CorridorTab(QWidget):
         auto_form.addRow("Water level", self.level)
         auto_form.addRow("Points per bank", self.auto_points)
         auto_form.addRow("", self.auto_button)
-        self.square_button = QPushButton("Square the grid")
+        self.square_button = QPushButton("Tidy the grid")
         self.square_button.setToolTip(
-            "Make the grid nice again: cross-sections square to the river (to the line "
-            "halfway between the banks), the smoothing off"
+            "Make the grid nice again: cross-sections across the river (square to the "
+            "line halfway between the banks where the banks allow), cells along the "
+            "banks evened out, a little smoothing"
         )
         self.square_button.clicked.connect(self.square)
 
@@ -326,7 +330,18 @@ class CorridorTab(QWidget):
             self.quality.setText(f"No grid: {error}")
             self.make_button.setEnabled(False)
             return
-        self.quality.setText(quality.text())
+        text = quality.text()
+        setup = self.session.data.case_setup(self.panel.case_id)
+        if setup is not None and setup.curvgrid is not None:
+            gx, gy, _ = setup.curvgrid
+            same = (
+                gx.shape == x.shape
+                and np.allclose(gx, x, atol=1e-3)
+                and np.allclose(gy, y, atol=1e-3)
+            )
+            if not same:
+                text += ". curvgrid.dat is another grid: Make grid writes this one"
+        self.quality.setText(text)
         self.quality.setStyleSheet("color: #e5484d;" if quality.folded else "")
         self.make_button.setEnabled(not quality.folded)
 
@@ -434,9 +449,9 @@ class CorridorTab(QWidget):
         """The grid's cross-sections square to the river again."""
         self._run(
             lambda: self.session.set_corridor_options(
-                case=self.panel.case_id, sections="normal", smoothing=0
+                case=self.panel.case_id, sections="normal", smoothing=TIDY_SMOOTHING
             ),
-            "The cross-sections square to the river",
+            "The grid tidied: cross-sections across the river, cells evened out",
         )
 
     def reset(self) -> None:

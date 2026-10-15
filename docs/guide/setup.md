@@ -196,7 +196,10 @@ and the curvilinear grid between them that REEF3D's SFLOW and NHFLOW read with
   the thalweg, the path along the deepest channel, from the deepest point of the
   inflow side (C 1x = 1) to the deepest of the outflow side (C 1x = 2; without
   them, from end to end of the domain's longer axis), smoothed. Its banks lie where
-  the water reaches across it (*Water level*: F 60 by default) plus the *Margin*,
+  the water reaches across it (*Water level*: F 60 by default; without F 60, 0 when
+the bed's heights reach below and above 0 - a coast, an estuary - else halfway up
+the banks) plus the *Margin*, never more than 2.5 times the river's usual half
+width from the thalweg (a marsh or a harbour basin does not widen it),
   smoothed along the river, with *Points per bank* points to drag afterwards. The
   bed of its grid comes from geo.dat.
 - **Drag points** (on after Start, Draw and Follow thalweg): press on a point of a bank in the 2D
@@ -217,9 +220,14 @@ cross-sections between the banks. *Cross-sections*: **square to the river** (fro
 points spaced equally along the line halfway between the banks, straight across it
 to both banks; where they would cross on the inside of a tight bend they are spaced
 evenly there), or **equal lengths** along both banks, paired (skewed in bends where
-one bank is longer). A corridor along the thalweg starts square; **Square the grid**
-(under *Follow thalweg*) makes the grid square again after points were dragged or
-the grid smoothed. *Smoothing* runs
+one bank is longer). Along the banks, square cross-sections are evened out so that no cell is much
+shorter or longer than its neighbour (at most 1.2 times) or than an even one (0.6
+to 1.6 times): across the river where the banks allow, never squeezed or
+stretched. A corridor along the thalweg starts so; **Tidy the grid** (under
+*Follow thalweg*) makes the grid nice again after points were dragged: these
+cross-sections and a little smoothing (20 sweeps). While there is a corridor, the
+set-up draws its grid only (not curvgrid.dat's as well); the River tab says when
+curvgrid.dat is another grid (*Make grid* writes this one). *Smoothing* runs
 that many sweeps of Winslow's elliptic grid equations over the inner nodes (the
 banks and the two ends stay): smoother, more even cells in bends. The set-up draws
 the grid as it changes, and the tab says how large its cells are, their smallest
