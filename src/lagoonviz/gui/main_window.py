@@ -91,6 +91,10 @@ class MainWindow(QMainWindow):
         locale = QLocale(QLocale.English, QLocale.UnitedKingdom)
         locale.setNumberOptions(QLocale.OmitGroupSeparator)
         QLocale.setDefault(locale)
+        # the wheel scrolls the panels, not the numbers and choices in them
+        from lagoonviz.gui import wheel_guard
+
+        wheel_guard.install()
         self.session = session or Session()
         self.bridge = SessionBridge(self.session, self)
         self.settings = settings if settings is not None else QSettings()

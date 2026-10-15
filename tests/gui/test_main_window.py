@@ -1129,3 +1129,71 @@ def test_a_performance_report(window, tmp_path, qtbot):
     text = (tmp_path / "report.txt").read_text()
     assert saved and "=== thread window" in text and "idle" in text
     assert window.profiler is None and not window.act_profile.isChecked()
+
+
+def test_the_wheel_scrolls_the_panel_not_its_fields(qtbot):
+    """Over a number box or a choice list in a scrolled panel the wheel scrolls the
+    panel (unless the field has the focus); outside one the field keeps it."""
+    from PySide6.QtCore import QPoint, QPointF
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import (
+        QApplication,
+        QComboBox,
+        QScrollArea,
+        QSlider,
+        QSpinBox,
+        QVBoxLayout,
+        QWidget,
+    )
+
+    from lagoonviz.gui import wheel_guard
+
+    wheel_guard.install()
+    area = QScrollArea()
+    inner = QWidget()
+    column = QVBoxLayout(inner)
+    spin, combo = QSpinBox(), QComboBox()
+    spin.setRange(0, 100)
+    spin.setValue(50)
+    combo.addItems(["a", "b", "c"])
+    combo.setCurrentIndex(1)
+    column.addWidget(spin)
+    column.addWidget(combo)
+    for _ in range(40):
+        column.addWidget(QSpinBox())
+    area.setWidget(inner)
+    area.setWidgetResizable(True)
+    area.resize(200, 150)
+    qtbot.addWidget(area)
+    area.show()
+    outside = QSlider()
+    outside.setRange(0, 100)
+    outside.setValue(50)
+    qtbot.addWidget(outside)
+    outside.show()
+
+    def wheel(widget):
+        centre = QPointF(widget.rect().center())
+        event = QWheelEvent(
+            centre,
+            QPointF(widget.mapToGlobal(QPoint(int(centre.x()), int(centre.y())))),
+            QPoint(0, 0),
+            QPoint(0, -120),
+            Qt.NoButton,
+            Qt.NoModifier,
+            Qt.NoScrollPhase,
+            False,
+        )
+        QApplication.sendEvent(widget, event)
+
+    assert wheel_guard.guarded(spin) and wheel_guard.guarded(combo)
+    assert not wheel_guard.guarded(outside) and not wheel_guard.guarded(area.verticalScrollBar())
+    wheel(spin)
+    wheel(combo)
+    assert spin.value() == 50 and combo.currentIndex() == 1
+    assert area.verticalScrollBar().value() > 0  # the panel scrolled instead
+    spin.setFocus()  # clicked into: the wheel is the field's
+    qtbot.waitUntil(spin.hasFocus, timeout=1000)
+    assert not wheel_guard.guarded(spin)
+    wheel(outside)  # not in a panel: as before
+    assert outside.value() != 50

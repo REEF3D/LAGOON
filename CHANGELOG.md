@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The wheel scrolls the panels
+
+- Over a number box, a choice list or a slider in the Properties and Set-up panels
+  (any scrolled panel) the mouse wheel or trackpad scrolls the panel; the field
+  takes the wheel only once clicked into. Scrolling down a panel no longer changes
+  a value or an option by accident. The time slider keeps the wheel.
+
 ### Items added for the data chosen
 
 - *Add → Iso-surface*, *Iso-volume*, *Free surface*, *Bed*, *Slice* and
