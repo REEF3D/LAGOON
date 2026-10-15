@@ -28,6 +28,11 @@ Observer = Callable[[str, str | None], None]
 PLAN_SIDES = ("top", "front", "back", "right", "left")
 
 
+#: the item_id of a "reset" sent by :meth:`Scene.data_changed`: the items are the
+#: same, their data was read again (views keep what they show until the new frames
+#: are there); a session loaded or cleared sends "reset" with None
+DATA_RESET = "data"
+
 #: events of view state, not of the items (panels that only show items skip them)
 VIEW_EVENTS = ("camera_keys", "sun", "play_range", "highlight", "legend")
 
@@ -220,8 +225,9 @@ class Scene:
 
     def data_changed(self) -> None:
         """Tell observers to show everything again: the data behind the items changed
-        (a reloaded case). Sent as "reset", like loading a session."""
-        self._notify("reset", None)
+        (a reloaded case). Sent as "reset", like loading a session, with item_id
+        DATA_RESET: the items are the ones of before."""
+        self._notify("reset", DATA_RESET)
 
     def set_camera_keys(self, keys: list[dict[str, Any]], path: bool | None = None) -> None:
         """The camera keyframes (and whether the views follow them); observers get

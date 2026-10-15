@@ -9,6 +9,9 @@
   as missing values (the surface drawn as nothing until the time moved). The
   shard is now read again once its new index is written (milliseconds); one left
   half written is reported as an error instead of drawn as nothing.
+- **Reload** (and following a run) keeps the results on screen until each item's
+  new frame has been read: the 3D view used to be cleared at once, and stayed empty
+  while a large run's frames were read again (for good if a read failed).
 
 ### Only the wet free surface
 

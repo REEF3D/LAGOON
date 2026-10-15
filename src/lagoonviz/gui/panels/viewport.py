@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 
 from lagoonviz.core.data.manager import BackgroundLoader, FrameKey
 from lagoonviz.core.legend import colour_bars, plain
-from lagoonviz.core.scene import VIEW_EVENTS
+from lagoonviz.core.scene import DATA_RESET, VIEW_EVENTS
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.panels.colorbar import ColorBarEntry, ColorBarStrip
 from lagoonviz.gui.perf import PERF
@@ -758,7 +758,13 @@ class Viewport3D(QWidget):
             return  # e.g. the play range: nothing to draw again
         if self.comparing:
             self._fill_cases()
-        if event == "reset":
+        if event == "reset" and item_id == DATA_RESET:
+            # the cases read again (Reload, following a run): what is shown stays
+            # until each item's new frame has been read (a large run takes a while;
+            # cleared, the view stayed empty all that time, and for good if a read
+            # failed)
+            self.refresh()
+        elif event == "reset":
             self.view.clear()
             self._wanted.clear()
             self._shown_keys.clear()

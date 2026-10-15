@@ -629,7 +629,7 @@ def test_reload_picks_up_new_outputs(tmp_path):
     s = Session()
     s.open_case(running)
     events = []
-    s.scene.subscribe(lambda event, item: events.append(event))
+    s.scene.subscribe(lambda event, item: events.append((event, item)))
     assert s.data.n_frames() == 3
     s.data.load("free_surface-1")
     before = s.data.signature("case-1")
@@ -640,7 +640,11 @@ def test_reload_picks_up_new_outputs(tmp_path):
     os.utime(folder, (os.path.getmtime(folder) + 5,) * 2)
     assert s.data.signature("case-1") != before
     assert s.reload() == [str(running.resolve())]
-    assert s.data.n_frames() == 5 and events[-1] == "reset"
+    # "reset" of the data: the views keep what they show until the new frames are
+    # read (a session loaded sends "reset" with no item: they start afresh)
+    from lagoonviz.core.scene import DATA_RESET
+
+    assert s.data.n_frames() == 5 and events[-1] == ("reset", DATA_RESET)
     assert len(s.data.cache) == 0  # frames read before are read again
     s.set_time(4)
     assert s.data.load("free_surface-1") is not None
