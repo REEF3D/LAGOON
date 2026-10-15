@@ -1350,6 +1350,9 @@ def _marks(setup: CaseSetup) -> list[Mark]:
 
 #: the groups of marks the "River corridor" item draws (not the "Case set-up" item)
 CORRIDOR_GROUPS = ("corridor", "corridor_grid")
+#: the most nodes of a corridor's grid that the set-up makes to draw it (a grid of
+#: 2320 x 200 cells: about 1.4 s, once; only every n-th line is drawn)
+CORRIDOR_NODES = 5_000_000
 #: the most grid lines drawn each way (every n-th line of a finer grid)
 GRID_LINES = 120
 
@@ -1441,7 +1444,7 @@ def _corridor_marks(setup: CaseSetup, water_z: float) -> list[Mark]:
         )
     )
     ni, nj = corridor.cells_along, corridor.cells_across
-    if (ni + 1) * (nj + 1) <= 400_000:
+    if (ni + 1) * (nj + 1) <= CORRIDOR_NODES:
         try:
             gx, gy = corridor.grid()
         except (ValueError, FloatingPointError):

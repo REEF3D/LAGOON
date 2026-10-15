@@ -11,6 +11,9 @@
   squeezed. A corridor along the thalweg starts so; **Tidy the grid** (under Follow
   thalweg) makes it so again after dragging, with a little smoothing;
   *Cross-sections* chooses it or the equal lengths along both banks of before.
+- A corridor's grid of more than 400,000 nodes was not drawn (so the grid vanished
+  after Make grid, the curvgrid.dat one no longer drawn beside it): it is now, up
+  to 5 million nodes (every n-th line).
 - One grid at a time: while there is a corridor the set-up draws its grid only,
   not curvgrid.dat's as well (which drew two grids after Make grid, and after a
   session was opened again); the River tab says when curvgrid.dat is another grid.
