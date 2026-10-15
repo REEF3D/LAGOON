@@ -101,7 +101,11 @@ COLORS = {
     "corridor": "#ffd84a",  # the banks and their points: yellow, as when dragged
     "curvgrid": "#7f9cc0",
     "refinement": "#e07b39",
+    "multiblock": "#ffd84a",  # the blocks' outlines, corners and points: yellow, as when dragged
+    "issues": "#ff3b30",
 }
+#: the colours of the cells' quality classes (multiblock.CLASSES; good cells are not marked)
+QUALITY_COLORS = {"fair": "#ffb020", "poor": "#ff5a36", "folded": "#a0001b"}
 
 SOLVERS = {2: "SFLOW", 3: "FNPF", 5: "NHFLOW", 6: "CFD", 7: "SEASTATE"}
 #: solvers whose grid REEF3D scales to σ (0 - 1) and stretches from the bed to the water
@@ -333,6 +337,10 @@ class CaseSetup:
     corridor: object | None = None
     #: the curvilinear grid REEF3D reads with G 50 2: (x, y, zb) of curvgrid.dat
     curvgrid: tuple | None = None
+    #: the multi-block grid (blocks.json; a lagoonviz.core.multiblock.Topology) or None
+    multiblock: object | None = None
+    #: the blocks REEF3D reads with G 50 1: [(x, y, zb), ...] of blocks.dat
+    blocksgrid: list | None = None
     #: counts the writes of corridor.json and curvgrid.dat (files_changed)
     files_revision: int = 0
     _bed: tuple | None = None
@@ -811,13 +819,21 @@ def read_setup(case_dir: str | Path) -> CaseSetup:
 
 def _read_curvilinear(setup: CaseSetup) -> None:
     """The river corridor (corridor.json) and, with G 50 2 in ctrl.txt, the
-    curvilinear grid (curvgrid.dat)."""
-    from lagoonviz.core import corridor
+    curvilinear grid (curvgrid.dat); the multi-block grid (blocks.json) and, with G 50
+    1, its blocks (blocks.dat): block 0 stands for the curvilinear grid (its sides are
+    DIVEMesh's C 11 - C 14)."""
+    from lagoonviz.core import corridor, multiblock
 
     setup.corridor = corridor.read(setup.path)
+    setup.multiblock = multiblock.read(setup.path)
     setup.curvgrid = None
+    setup.blocksgrid = None
     if setup.ctrl.int("G 50", 0) == 2:
         setup.curvgrid = corridor.read_grid(setup.path / corridor.GRID_FILE)
+    if setup.ctrl.int("G 50", 0) == 1:
+        setup.blocksgrid = multiblock.read_blocks(setup.path / multiblock.GRID_FILE)
+        if setup.blocksgrid:
+            setup.curvgrid = setup.blocksgrid[0]
 
 
 # ------------------------------------------------------------------ facts
@@ -852,7 +868,9 @@ def _domain(setup: CaseSetup) -> tuple | None:
             box[4] = min(box[4], water)
             box[5] = max(water, box[4] + 1e-6)
         if setup.curvgrid is not None:  # B 10 is the logical box: the nodes are where
-            x, y, _ = setup.curvgrid
+            grids = setup.blocksgrid or [setup.curvgrid]
+            x = np.concatenate([g[0].ravel() for g in grids])
+            y = np.concatenate([g[1].ravel() for g in grids])
             box[:4] = [float(x.min()), float(x.max()), float(y.min()), float(y.max())]
         return tuple(box)
     control = setup.control
@@ -1112,16 +1130,19 @@ def _marks(setup: CaseSetup) -> list[Mark]:
             boxes = [list(b[:4]) + [domain[4], domain[5]] for b in boxes]
     if setup.curvgrid is not None and domain is not None:
         boxes = []  # the curvilinear grid's outline instead of the logical box
-        marks.append(
-            Mark(
-                "domain",
-                "domain (curvilinear, curvgrid.dat)",
-                COLORS["domain"],
-                segments=_curvilinear_outline(setup.curvgrid, domain[4], domain[5]),
-                code="B 10",
-                file=CONTROL,
+        for grid in setup.blocksgrid or [setup.curvgrid]:
+            marks.append(
+                Mark(
+                    "domain",
+                    "domain (blocks.dat)"
+                    if setup.blocksgrid
+                    else "domain (curvilinear, curvgrid.dat)",
+                    COLORS["domain"],
+                    segments=_curvilinear_outline(grid, domain[4], domain[5]),
+                    code="B 10",
+                    file=CONTROL,
+                )
             )
-        )
     for index, box in enumerate(boxes):
         marks.append(
             Mark(
@@ -1350,6 +1371,10 @@ def _marks(setup: CaseSetup) -> list[Mark]:
 
 #: the groups of marks the "River corridor" item draws (not the "Case set-up" item)
 CORRIDOR_GROUPS = ("corridor", "corridor_grid")
+#: the groups of marks the "Multi-block grid" item draws
+MULTIBLOCK_GROUPS = ("multiblock", "multiblock_grid", "multiblock_quality", "multiblock_issues")
+#: groups of the set-up's marks that belong to an item of their own
+ITEM_GROUPS = CORRIDOR_GROUPS + MULTIBLOCK_GROUPS
 #: the most nodes of a corridor's grid that the set-up makes to draw it (a grid of
 #: 2320 x 200 cells: about 1.4 s, once; only every n-th line is drawn)
 CORRIDOR_NODES = 5_000_000
@@ -1407,18 +1432,21 @@ def _corridor_marks(setup: CaseSetup, water_z: float) -> list[Mark]:
     """The river corridor: its banks, the points that shape them and the grid it
     makes; the curvilinear grid of curvgrid.dat (G 50 2) on the bed."""
     marks = []
-    # one grid only: the corridor's (its item draws it) while there is a corridor,
-    # else curvgrid.dat's
-    if setup.curvgrid is not None and setup.corridor is None:
-        x, y, z = setup.curvgrid
-        marks.append(
-            Mark(
-                "curvgrid",
-                "curvilinear grid (curvgrid.dat)",
-                COLORS["curvgrid"],
-                segments=_grid_lines(x, y, z),
+    # one grid only: the corridor's or the blocks' (their items draw them) while
+    # there is a corridor or a blocks.json, else curvgrid.dat's or blocks.dat's
+    if setup.curvgrid is not None and setup.corridor is None and setup.multiblock is None:
+        for x, y, z in setup.blocksgrid or [setup.curvgrid]:
+            marks.append(
+                Mark(
+                    "curvgrid",
+                    "multi-block grid (blocks.dat)"
+                    if setup.blocksgrid
+                    else "curvilinear grid (curvgrid.dat)",
+                    COLORS["curvgrid"],
+                    segments=_grid_lines(x, y, z),
+                )
             )
-        )
+    marks.extend(_multiblock_marks(setup, water_z))
     corridor = setup.corridor
     if corridor is None:
         return marks
@@ -1456,6 +1484,118 @@ def _corridor_marks(setup: CaseSetup, water_z: float) -> list[Mark]:
                 COLORS["curvgrid"],
                 segments=_grid_lines(gx, gy, water_z),
                 file="corridor.json",
+            )
+        )
+    return marks
+
+
+def _multiblock_marks(setup: CaseSetup, water_z: float) -> list[Mark]:
+    """The multi-block grid (blocks.json): the outline of each block and its edges,
+    the corners and the points that shape the edges (handles), the names of the
+    blocks and the boundaries of their faces; its cells; the cells' quality (fair,
+    poor and folded cells as dots); the rules it breaks (red, at the place)."""
+    from lagoonviz.core import multiblock as mb
+
+    t = setup.multiblock
+    if t is None:
+        return []
+    marks = []
+    color = COLORS["multiblock"]
+    lines, labels = [], []
+    for edge in t.edges.values():
+        try:
+            lines.append(_polyline(edge.line(t.vertices), water_z))
+        except (KeyError, ValueError):
+            continue
+    handles = [np.asarray(p, float) for p in t.vertices.values()]
+    for edge in t.edges.values():
+        handles += [np.asarray(p, float) for p in edge.points]
+    grids = t.grids()
+    for b, block in enumerate(t.blocks):
+        g = grids[b]
+        if g is None:
+            continue
+        x, y = g
+        nj, ni = x.shape[0] - 1, x.shape[1] - 1
+        centre = (float(x[nj // 2, ni // 2]), float(y[nj // 2, ni // 2]), water_z)
+        labels.append((f"{b}: {block.name}", centre))
+        for face in mb.FACES:
+            kind = block.bc_type(face)
+            if kind == "wall":
+                continue
+            value = block.bc_value(face)
+            nodes = t.face_nodes(b, face)
+            middle = nodes[len(nodes) // 2]
+            text = (
+                (f"inflow {value:g} m3/s" if kind == "inflow" else f"water level {value:g} m")
+                if value is not None
+                else kind
+            )
+            labels.append((text, (float(middle[0]), float(middle[1]), water_z)))
+    points = np.column_stack([np.asarray(handles).reshape(-1, 2), np.full(len(handles), water_z)])
+    marks.append(
+        Mark(
+            "multiblock",
+            "multi-block grid (blocks.json)",
+            color,
+            segments=np.concatenate(lines) if lines else np.zeros((0, 2, 3)),
+            points=points,
+            labels=labels,
+            file="blocks.json",
+        )
+    )
+    cells = sum((g[0].size for g in grids if g is not None), 0)
+    if cells <= 600_000:
+        for g in grids:
+            if g is None:
+                continue
+            marks.append(
+                Mark(
+                    "multiblock_grid",
+                    "cells of the blocks",
+                    COLORS["curvgrid"],
+                    segments=_grid_lines(g[0], g[1], water_z),
+                    file="blocks.json",
+                )
+            )
+    for k, cls in enumerate(mb.CLASSES):
+        if cls == "good":
+            continue
+        dots = []
+        for g in grids:
+            if g is None:
+                continue
+            x, y = g
+            classes = mb.cell_classes(x, y)
+            jj, ii = np.nonzero(classes == k)
+            if len(jj):
+                cx = 0.25 * (x[jj, ii] + x[jj + 1, ii] + x[jj, ii + 1] + x[jj + 1, ii + 1])
+                cy = 0.25 * (y[jj, ii] + y[jj + 1, ii] + y[jj, ii + 1] + y[jj + 1, ii + 1])
+                dots.append(np.column_stack([cx, cy, np.full(len(cx), water_z)]))
+        if dots:
+            marks.append(
+                Mark(
+                    "multiblock_quality",
+                    f"{cls} cells",
+                    QUALITY_COLORS[cls],
+                    points=np.concatenate(dots),
+                    file="blocks.json",
+                )
+            )
+    issues = [i for i in mb.check(t) if i.where is not None]
+    if issues:
+        where = np.array([[*i.where, water_z] for i in issues], float)
+        marks.append(
+            Mark(
+                "multiblock_issues",
+                "rules broken (blocks.json)",
+                COLORS["issues"],
+                points=where,
+                labels=[
+                    (("! " if i.level == "error" else "? ") + i.text, tuple(p))
+                    for i, p in zip(issues, where, strict=True)
+                ],
+                file="blocks.json",
             )
         )
     return marks
