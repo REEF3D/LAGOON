@@ -515,8 +515,11 @@ class TimelinePanel(QWidget):
         metrics = self.label.fontMetrics()
         self.label.setFixedWidth(metrics.horizontalAdvance(sample) + 8)
         self.total_label.setFixedWidth(metrics.horizontalAdvance(f"/ {last})") + 8)
-        box = self.frame_box.fontMetrics().horizontalAdvance(last + "8")
-        self.frame_box.setFixedWidth(box + 12)
+        # the box's own size for its largest number (its frame and margins: on macOS
+        # the digits plus a few pixels clipped the number away), never less than the
+        # digits with room around them
+        digits = self.frame_box.fontMetrics().horizontalAdvance(last + "8")
+        self.frame_box.setFixedWidth(max(self.frame_box.sizeHint().width(), digits + 28))
 
     def position_text(self) -> str:
         """Where the timeline is, as one line: "t = 1.00 s  (frame 2 / 2)"."""
