@@ -455,6 +455,50 @@ def test_a_background_map_item(fjord, tmp_path):
     assert session.data.item_mode(item) == "both"
 
 
+def test_a_rotation_tried_turns_the_map_and_north(fjord, tmp_path):
+    """A rotation slider dragged: the map made before is shown turned to the
+    rotation tried (as the georeference would put it), north follows; nothing is
+    written until it is kept. The map made for the old rotation is shown turned to
+    the new one while the new one is made."""
+    session = Session()
+    case = session.open_case(fjord)
+    item = session.add_background_map("Kartverket topo", margin=0.2, pixels=256)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=30.0)
+    backgrounds = session.data.backgrounds
+    backgrounds.cache = TileCache(tmp_path / "tiles", FakeServer())
+    made = backgrounds.image(item)
+    north = backgrounds.north(case)
+    assert backgrounds.shown(item, made).transform is None
+    seen = []
+    session.scene.subscribe(lambda event, _id: seen.append(event))
+    # the georeference's rotation, about the model's origin
+    session.try_rotation(40.0)
+    assert "georef_tried" in seen and session.georef() == GEOREF  # nothing written
+    shown = backgrounds.shown(item, made)
+    positions = shown.mesh()[0]
+    corner = GEOREF.to_world(made.extent[0], made.extent[2])  # where it is on the Earth
+    tried = GEOREF.rotated(40.0)
+    assert positions[0, :2] == pytest.approx(tried.to_model(*corner), abs=1e-3)
+    turned = backgrounds.north(case)
+    angle = math.degrees(math.atan2(turned[1], turned[0]) - math.atan2(north[1], north[0]))
+    assert angle == pytest.approx(-10.0, abs=0.01)  # north turns back as the model turns
+    session.try_rotation(None)
+    assert backgrounds.shown(item, made).transform is None
+    # the model turned about the domain's centre: the centre stays on the map
+    session.try_rotation(50.0, about=(500.0, 250.0))
+    centre = GEOREF.to_world(500.0, 250.0)
+    assert backgrounds.shown_georef(case).to_world(500.0, 250.0) == pytest.approx(centre)
+    session.try_rotation(None)
+    # kept: the georeference written, the old map shown turned until the new is made
+    session.set_rotation(40.0)
+    assert session.georef().rotation_deg == 40.0 and session.georef().origin == GEOREF.origin
+    assert backgrounds.cached(item) is None and backgrounds.latest(item) is made
+    assert backgrounds.shown(item, made).transform is not None
+    assert session.to_script().splitlines()[-1] == "session.set_rotation(40.0)"
+    session.undo()
+    assert session.georef() == GEOREF
+
+
 def test_a_store_converted_keeps_the_case_georeference(tmp_path):
     from lagoon_format.geo import write
     from lagoon_format.store import Store

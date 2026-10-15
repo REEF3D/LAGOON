@@ -1042,6 +1042,36 @@ class Session:
         script += f", case={case!r})" if case else ")"
         self._set_georef(case_id, turned, script, "Turn the model")
 
+    def try_rotation(self, rotation_deg: float | None, about=None, case: str | None = None) -> None:
+        """Show a case on the map as if its model were turned to ``rotation_deg``
+        (degrees counter-clockwise from east), about a model point (default: its
+        origin, as the georeference's rotation turns it) - the maps turn and move,
+        north follows - without writing anything: what a rotation slider shows while
+        it is dragged. None: as it is. Not an undo step; :meth:`set_georef` or
+        :meth:`turn_model` then keeps it."""
+        case_id = self._case_id(case)
+        current = self.georef(case_id)
+        tried = None
+        if rotation_deg is not None and current is not None:
+            point = (0.0, 0.0) if about is None else (float(about[0]), float(about[1]))
+            tried = current.rotated(float(rotation_deg), point)
+        self.data.backgrounds.set_preview(case_id, tried)
+        self.scene.georef_tried(case_id)
+
+    def set_rotation(self, rotation_deg: float, case: str | None = None) -> None:
+        """Turn a case's georeference to ``rotation_deg`` about the model's origin
+        (its other values kept): the model turns on the map about its (0, 0)."""
+        case_id = self._case_id(case)
+        current = self.georef(case_id)
+        if current is None:
+            raise ValueError(f"{case_id}: set the georeference first (set_georef)")
+        turned = current.replace(rotation_deg=float(rotation_deg))
+        if turned == current:
+            return
+        script = f"session.set_rotation({float(rotation_deg)!r}"
+        script += f", case={case!r})" if case else ")"
+        self._set_georef(case_id, turned, script, "Turn the georeference")
+
     def _georef_file(self, case_id: str):
         from lagoon_format.geo import GeorefError
         from lagoon_format.geo import read as read_georef

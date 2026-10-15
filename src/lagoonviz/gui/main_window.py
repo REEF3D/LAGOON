@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
         self.setup_panel.map_tab.drawDomain.connect(self.viewport.start_domain_drawing)
         self.viewport.domainDrawn.connect(self.setup_panel.map_tab.domain_drawn)
         self.viewport.modelTurned.connect(self.setup_panel.map_tab.model_turned)
+        self.setup_panel.map_tab.northUp.connect(self.viewport.point_north)
         # the Porous and Solids tabs draw a structure's plan there too
         for tab in (self.setup_panel.porous_tab, self.setup_panel.solids_tab):
             tab.drawArea.connect(self.viewport.start_domain_drawing)

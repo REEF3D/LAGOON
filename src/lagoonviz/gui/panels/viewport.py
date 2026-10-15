@@ -780,6 +780,11 @@ class Viewport3D(QWidget):
         if event == "legend":  # the bars under the view on or off
             self._update_overlays()
             return
+        if event == "georef_tried":  # a rotation slider dragged: the maps and north follow
+            self._update_backgrounds()
+            self._apply_north()
+            self.redraw()
+            return
         if event in VIEW_EVENTS:
             return  # e.g. the play range: nothing to draw again
         if self.comparing:

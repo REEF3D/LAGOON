@@ -584,3 +584,32 @@ def test_the_corridor_is_an_item_with_a_reset(window, flume):
     assert "points on each bank" in window.properties.info.text()
     window.session.remove_item(item)
     assert window.session.corridor() is None and not tab.form.isEnabled()
+
+
+def test_the_rotation_sliders_show_the_turn_and_keep_it_when_let_go(window, flume):
+    window.open_case(flume)
+    session = window.session
+    tab = window.setup_panel.map_tab
+    assert not tab.rotation_slider.isEnabled()  # no georeference yet
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=30.0)
+    case = window.setup_panel.case_id
+    assert tab.rotation_slider.isEnabled() and tab.rotation_slider.value() == 300
+    # dragged: shown turned, nothing written
+    tab.rotation_slider.setSliderDown(True)
+    tab.rotation_slider.setValue(400)
+    assert session.georef().rotation_deg == 30.0
+    assert session.data.backgrounds.shown_georef(case).rotation_deg == 40.0
+    assert tab.rotation.value() == 40.0
+    # let go: written, the trial over
+    tab.rotation_slider.setSliderDown(False)
+    tab.rotation_slider.sliderReleased.emit()
+    assert session.georef().rotation_deg == 40.0
+    assert session.data.backgrounds.shown_georef(case) == session.georef()
+    # the domain's slider: about the domain's centre
+    centre = session.georef().to_world(5.0, 1.0)
+    tab.turn_slider.setValue(-200)  # moved by the keys: kept at once
+    assert session.georef().rotation_deg == -20.0
+    assert session.georef().to_world(5.0, 1.0) == pytest.approx(centre)
+    turned = []
+    window.viewport.statusMessage.connect(turned.append)
+    tab.north_button.click()  # the 3D view turns north up (no GPU here: said so)

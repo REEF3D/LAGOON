@@ -91,12 +91,20 @@ GeoTIFF and only the part of a large one that is needed).
   background map. When several places have the name, the list under the field
   offers the others, those near the case first.
 - **Georeference**: the CRS, the origin, the rotation, the vertical datum;
-  *Apply* writes `georef.json`, *Remove* takes it away.
+  *Apply* writes `georef.json`, *Remove* takes it away. The **rotation slider**
+  under the rotation turns the georeference about the model's origin as you drag
+  it: the map and north turn with it at once (the map made before, turned: nothing
+  is fetched or written while you drag), and it is written when you let go (the
+  arrow keys: 1° at a time, page up and down: 15°). **North up** turns the 3D view
+  so north points up the screen (as *North up* over the view, or N); from the top
+  the view keeps north up while you drag, so the map stays and the model turns.
 - **Domain**: *Draw on the map* turns the view to 2D from the top; drag the
   domain's rectangle there (B 10, snapped to the cell size B 1). **Shift + drag**
   turns the model on the map about the domain's centre: the domain turns, the map
   stays north up (B 10 keeps its numbers: the model's own axes turn). Esc stops.
-  Or type the extent (*Set B 10*) or the rotation (*Turn*).
+  Or type the extent (*Set B 10*) or the rotation (*Turn*), or drag the **slider**
+  under it: the model turns on the map about the domain's centre as you drag, and
+  is written when you let go.
 - **Background map**: *Show map* adds a *Background map* item for the case. The
   case keeps it (`LAGOON_map.json` in its folder, as last set: map, margin,
   placement, opacity, shown or not): opened again, its results in a new window or

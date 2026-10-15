@@ -121,6 +121,9 @@ class BackgroundMap:
     opacity: float
     visible: bool
     attribution: str = ""
+    #: the map made for another georeference, moved into this one's model frame:
+    #: (a, b, c, d, e, f) with x' = a x + b y + c, y' = d x + e y + f; None: as made
+    transform: tuple[float, ...] | None = None
 
     def mesh(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """(positions (n, 3), triangles (m, 3), texture coordinates (n, 2)): a plain
@@ -128,7 +131,7 @@ class BackgroundMap:
         x0, x1, y0, y1 = self.extent
         xs = [x0, x1]
         ys = [y0, y1]
-        if self.hole is not None:
+        if self.hole is not None and self.transform is None:
             hx0, hx1, hy0, hy1 = self.hole
             xs = [x0, max(hx0, x0), min(hx1, x1), x1]
             ys = [y0, max(hy0, y0), min(hy1, y1), y1]
@@ -136,11 +139,16 @@ class BackgroundMap:
         positions = np.column_stack([gx.ravel(), gy.ravel(), np.full(gx.size, self.z)])
         u = (gx.ravel() - x0) / max(x1 - x0, 1e-12)
         v = (gy.ravel() - y0) / max(y1 - y0, 1e-12)
+        if self.transform is not None:  # turned and moved (a rotation being tried)
+            a, b, c, d, e, f = self.transform
+            px, py = positions[:, 0].copy(), positions[:, 1].copy()
+            positions[:, 0] = a * px + b * py + c
+            positions[:, 1] = d * px + e * py + f
         nx = len(xs)
         triangles = []
         for j in range(len(ys) - 1):
             for i in range(nx - 1):
-                if self.hole is not None and i == 1 and j == 1:
+                if self.hole is not None and self.transform is None and i == 1 and j == 1:
                     continue  # the domain
                 a = j * nx + i
                 triangles += [(a, a + 1, a + nx + 1), (a, a + nx + 1, a + nx)]
@@ -166,6 +174,9 @@ class Backgrounds:
         self._making: set[str] = set()
         #: the 2D top view's area and pixels (set_view), or None
         self._view: tuple[tuple[float, float, float, float], int] | None = None
+        #: case folder -> a georeference being tried (a rotation slider dragged): the
+        #: maps and north are shown for it, nothing is made or written
+        self._preview: dict[str, Georef] = {}
         self.cache = None  # the tile cache, made when first needed
 
     # ------------------------------------------------------------- georeference
@@ -175,6 +186,29 @@ class Backgrounds:
         does not read)."""
         found, _ = self._georef(item_id)
         return found
+
+    # ------------------------------------------------------------- trying a rotation
+    def set_preview(self, item_id: str, georef: Georef | None) -> None:
+        """Show an item's case on the map as if it had ``georef`` (None: as it has):
+        its maps turned and moved to it, north by it. Nothing is made or written."""
+        folder = self.data.case_folder(item_id)
+        if folder is None:
+            return
+        key = str(folder.resolve())
+        if georef is None:
+            self._preview.pop(key, None)
+        else:
+            self._preview[key] = georef
+
+    def shown_georef(self, item_id: str) -> Georef | None:
+        """The georeference an item's case is shown with: the one being tried, else
+        its own."""
+        folder = self.data.case_folder(item_id)
+        if folder is not None:
+            tried = self._preview.get(str(folder.resolve()))
+            if tried is not None:
+                return tried
+        return self.georef(item_id)
 
     def north(self, item_id: str) -> tuple[float, float] | None:
         """True north as a unit (x, y) vector in the model coordinates of an item's
@@ -186,7 +220,7 @@ class Backgrounds:
 
         from lagoonviz.core.geo.crs import transformer
 
-        georef = self.georef(item_id)
+        georef = self.shown_georef(item_id)
         if georef is None:
             return None
         r = math.radians(georef.rotation_deg)
@@ -416,12 +450,38 @@ class Backgrounds:
         return made[1]
 
     def latest(self, item_id: str):
-        """The map made last for the item as it is now, even when it does not cover
-        the 2D view (shown while the one for the view is being made), else None."""
-        signature = self.signature(item_id)
+        """The map made last for the item, even when it does not cover the 2D view or
+        was made for the georeference before (shown, turned to the new one, while the
+        one for now is being made), else None."""
         with self._lock:
             made = self._made.get(item_id)
-        return made[1] if made is not None and made[0] == signature else None
+        return made[1] if made is not None else None
+
+    def _made_georef(self, item_id: str, made) -> Georef | None:
+        """The georeference a made map was made for."""
+        with self._lock:
+            found = self._made.get(item_id)
+        if found is None or found[1] is not made:
+            return None
+        try:
+            return Georef.from_json(found[0][0])
+        except (ValueError, TypeError, KeyError, IndexError):
+            return None
+
+    def _transform(self, item_id: str, made) -> tuple[float, ...] | None:
+        """How a made map moves into the model frame it is shown in (None: as made)."""
+        was = self._made_georef(item_id, made)
+        now = self.shown_georef(item_id)
+        if was is None or now is None or was.crs != now.crs:
+            return None
+        if (was.origin, was.rotation_deg) == (now.origin, now.rotation_deg):
+            return None
+        points = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+        world = np.column_stack(was.to_world(points[:, 0], points[:, 1]))
+        mx, my = now.to_model(world[:, 0], world[:, 1])
+        mx, my = np.asarray(mx, float), np.asarray(my, float)
+        c, f = mx[0], my[0]
+        return (mx[1] - c, mx[2] - c, c, my[1] - f, my[2] - f, f)
 
     # ------------------------------------------------------------- the 2D view
     def set_view(self, box: tuple[float, float, float, float] | None, pixels: int = 0) -> None:
@@ -472,6 +532,7 @@ class Backgrounds:
             float(props.get("opacity", 1.0)),
             item.visible,
             made.attribution,
+            self._transform(item_id, made),
         )
 
     def _water_level(self, item_id: str) -> float:

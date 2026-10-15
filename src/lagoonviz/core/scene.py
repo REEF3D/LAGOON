@@ -34,7 +34,7 @@ PLAN_SIDES = ("top", "front", "back", "right", "left")
 DATA_RESET = "data"
 
 #: events of view state, not of the items (panels that only show items skip them)
-VIEW_EVENTS = ("camera_keys", "sun", "play_range", "highlight", "legend")
+VIEW_EVENTS = ("camera_keys", "sun", "play_range", "highlight", "legend", "georef_tried")
 
 #: what the session works on: the results of a run, or its set-up (the input files,
 #: DIVEMesh's grid); each mode shows its own items
@@ -271,6 +271,11 @@ class Scene:
         """A case's input files (ctrl.txt, control.txt) were edited: observers get
         "inputs" (the set-up is drawn again)."""
         self._notify("inputs", case_id)
+
+    def georef_tried(self, case_id: str) -> None:
+        """A georeference is being tried for a case (a rotation slider dragged):
+        observers get "georef_tried" (a view event: the maps and north follow)."""
+        self._notify("georef_tried", case_id)
 
     def highlight_changed(self, case_id: str) -> None:
         """Another command of the input files is selected: observers get "highlight"

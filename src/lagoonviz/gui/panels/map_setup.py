@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -154,6 +155,22 @@ def _unit_icon(unit: str):
     return QIcon(pixmap)
 
 
+def _rotation_slider(tip: str) -> QSlider:
+    """A slider over -180° … 180° in tenths of a degree."""
+    slider = QSlider(Qt.Horizontal)
+    slider.setRange(-1800, 1800)
+    slider.setSingleStep(10)  # the arrow keys: 1°
+    slider.setPageStep(150)  # page up and down: 15°
+    slider.setToolTip(tip)
+    return slider
+
+
+def _wrapped(degrees: float) -> float:
+    """An angle in (-180°, 180°]."""
+    turned = (float(degrees) + 180.0) % 360.0 - 180.0
+    return 180.0 if turned == -180.0 else turned
+
+
 def _combo() -> QComboBox:
     """A combo box that narrows with the panel (long entries are elided)."""
     box = QComboBox()
@@ -225,6 +242,8 @@ class MapTab(QWidget):
 
     #: the user wants to draw the domain in the 2D view (the main window starts it)
     drawDomain = Signal(str)
+    #: turn the 3D view so north points up the screen
+    northUp = Signal()
     #: a message for the panel's status line: (text, error)
     message = Signal(str, bool)
     #: the user wants to start a case on the map (the main window asks where)
@@ -258,6 +277,19 @@ class MapTab(QWidget):
         self.rotation = _spin(-360.0, 360.0, 3, " °")
         self.rotation.setToolTip("Counter-clockwise from east to the model's x-axis")
         self.rotation.valueChanged.connect(self._describe_bearing)
+        self.rotation_slider = _rotation_slider(
+            "Drag to turn the georeference about the model's origin and see it on the map "
+            "as you go; it is written when let go"
+        )
+        self.rotation_slider.valueChanged.connect(
+            lambda v: self._slid(self.rotation_slider, v, about_origin=True)
+        )
+        self.rotation_slider.sliderReleased.connect(
+            lambda: self._slid(self.rotation_slider, self.rotation_slider.value(), True, True)
+        )
+        self.north_button = QPushButton("North up")
+        self.north_button.setToolTip("Turn the 3D view so north points up the screen (N)")
+        self.north_button.clicked.connect(lambda _checked=False: self.northUp.emit())
         self.bearing = QLabel()
         self.datum = QLineEdit()
         self.datum.setPlaceholderText("EPSG:5941 (NN2000), LAT, MSL …")
@@ -305,6 +337,10 @@ class MapTab(QWidget):
         origin.addWidget(self.y0, 1)
         form.addRow("Origin", origin)
         form.addRow("Rotation", self.rotation)
+        row = QHBoxLayout()
+        row.addWidget(self.rotation_slider, 1)
+        row.addWidget(self.north_button)
+        form.addRow("", row)
         form.addRow("", self.bearing)
         form.addRow("Vertical datum", self.datum)
         form.addRow("z = 0 at", self.z_offset)
@@ -331,6 +367,16 @@ class MapTab(QWidget):
             "domain stays where it is on the map)"
         )
         self.turn_button.clicked.connect(self.turn)
+        self.turn_slider = _rotation_slider(
+            "Drag to turn the model on the map about the domain's centre and see it as you "
+            "go; it is written when let go"
+        )
+        self.turn_slider.valueChanged.connect(
+            lambda v: self._slid(self.turn_slider, v, about_origin=False)
+        )
+        self.turn_slider.sliderReleased.connect(
+            lambda: self._slid(self.turn_slider, self.turn_slider.value(), False, True)
+        )
         domain = QGroupBox("Domain")
         form = QFormLayout(domain)
         form.addRow(self.draw_button)
@@ -352,6 +398,7 @@ class MapTab(QWidget):
         row.addWidget(self.turn_to, 1)
         row.addWidget(self.turn_button)
         form.addRow("Turn to", row)
+        form.addRow("", self.turn_slider)
 
         # ---- background map
         self.source = _combo()
@@ -639,6 +686,12 @@ class MapTab(QWidget):
         georef = self.session.data.georef(self.case_id) if has_case else None
         self.remove_button.setEnabled(georef is not None)
         self.turn_button.setEnabled(georef is not None)
+        for slider in (self.rotation_slider, self.turn_slider):
+            slider.setEnabled(georef is not None)
+            if georef is not None and not slider.isSliderDown():
+                slider.blockSignals(True)
+                slider.setValue(round(_wrapped(georef.rotation_deg) * 10))
+                slider.blockSignals(False)
         if not has_case:
             hint = (
                 "Start a case on the map with File → New case from map…, or open one "
@@ -849,6 +902,47 @@ class MapTab(QWidget):
             ),
             f"Turned the model by {angle:+.1f}°",
         )
+
+    def _slid(self, slider: QSlider, value: int, about_origin: bool, released=False) -> None:
+        """A rotation slider moved: while it is dragged the model is shown turned on
+        the map (the georeference's rotation about the model's origin, or the model
+        about the domain's centre); let go (or moved by the keys), it is written."""
+        if not self.case_id:
+            return
+        georef = self.session.data.georef(self.case_id)
+        degrees = value / 10.0
+        field = self.rotation if about_origin else self.turn_to
+        field.blockSignals(True)
+        field.setValue(degrees)
+        field.blockSignals(False)
+        if about_origin:
+            self._describe_bearing(degrees)
+        if georef is None:
+            return
+        about = None
+        if not about_origin:
+            domain = self.session.data.backgrounds.domain(self.case_id)
+            if domain is not None:
+                about = ((domain[0] + domain[1]) / 2, (domain[2] + domain[3]) / 2)
+        if slider.isSliderDown() and not released:
+            try:
+                self.session.try_rotation(degrees, about, case=self.case_id)
+            except ValueError as error:
+                self.message.emit(str(error), True)
+            return
+        if abs(_wrapped(georef.rotation_deg - degrees)) < 1e-9:
+            self.session.try_rotation(None, case=self.case_id)
+            return
+
+        def keep():
+            if about_origin:
+                self.session.set_rotation(degrees, case=self.case_id)
+            else:
+                self.session.turn_model(degrees, case=self.case_id)
+            self.session.try_rotation(None, case=self.case_id)
+
+        what = "the georeference" if about_origin else "the model"
+        self._run(keep, f"Turned {what} to {degrees:.1f}°")
 
     def turn(self) -> None:
         self._run(
