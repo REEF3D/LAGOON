@@ -485,3 +485,31 @@ def test_the_porous_tab_adds_draws_and_changes_structures(window, flume):
     # SFLOW has none
     window.session.set_input("ctrl.txt", "A 10", [2])
     assert not tab.add_button.isEnabled() and "no porous structures" in tab.note.text()
+
+
+def test_the_solids_tab_adds_divemesh_and_direct_forcing_solids(window, flume):
+    window.open_case(flume)
+    panel = window.setup_panel
+    tab = panel.solids_tab
+    assert panel.tabs.tabText(panel.tabs.indexOf(tab)) == "Solids"
+    # NHFLOW: its direct forcing first, then DIVEMesh's
+    assert tab.kind_box.currentData() == "A 581" and tab.kind_box.findData("S 33") > 0
+    assert "A 580" in tab.note.text() and not tab.material_box.isVisibleTo(tab)
+    tab.kind_box.setCurrentIndex(tab.kind_box.findData("S 33"))
+    tab.draw()
+    window.viewport.areaDrawn.emit("solid", (4.0, 5.0, 0.5, 1.5))
+    control = window.session.input_file("control.txt")
+    assert control.values("S 33") == [4.5, 1.0, 0.5]
+    assert "Run DIVEMesh" in panel.message.text()
+    assert len(tab._shape_fields) == 3 and tab.selected().kind.file == "control.txt"
+    # an area drawn for the Porous tab is not the Solids tab's
+    window.viewport.areaDrawn.emit("porous structure", (1.0, 2.0, 0.5, 1.5))
+    assert "B 210" not in window.session.input_file("ctrl.txt")
+    tab._shape_fields[2].setText("0.75")
+    tab._commit_shape()
+    assert window.session.input_file("control.txt").values("S 33") == [4.5, 1.0, 0.75]
+    tab.add("A 584")
+    assert window.session.input_file("ctrl.txt").values("A 584")[4] > 0
+    assert tab.tree.topLevelItemCount() == 2
+    tab.remove_selected()
+    assert "A 584" not in window.session.input_file("ctrl.txt")

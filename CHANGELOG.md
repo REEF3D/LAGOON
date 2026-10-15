@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### Porous structures in the set-up
+### Porous structures and solids in the set-up
 
 - The Set-up panel has a **Porous** tab: add, draw and change the porous structures
   (VRANS) of a case. REEF3D::CFD: boxes (B 270), vertical cylinders (B 274),
@@ -11,9 +11,13 @@
   B 218), one material for all of them (B 201, added with the first one). *Add*
   puts one in the middle of the domain from the bed to the still water, *Draw*
   drags its plan in the 2D top view; the selected one lights up in the 3D view.
-  In a script: `session.add_porous("B 270", [...])`.
-- The set-up draws wedges (B 217, B 218, B 281, B 282) as wedges and B 274 and B 291
-  too, and the ctrl.txt tab names the values of B 270 – B 291.
+  In a script: `session.add_structure("B 270", [...])`.
+- A **Solids** tab beside it does the same for solids: DIVEMesh's boxes, cylinders,
+  spheres and wedges (S 10, S 32, S 33, S 51, S 61, S 62 in control.txt, meshed by
+  Run DIVEMesh) for every module, and NHFLOW's direct forcing solids (A 581 –
+  A 588 in ctrl.txt). They reach from the bed to the domain's top.
+- The set-up draws wedges (B 217, B 218, B 281, B 282, A 587, A 588) as wedges,
+  and B 274 and B 291 too; the ctrl.txt tab names the values of B 270 – B 291.
 
 ### The frame number typed
 

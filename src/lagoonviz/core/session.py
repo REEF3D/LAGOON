@@ -518,56 +518,65 @@ class Session:
             script += f", occurrence={occurrence}"
         self._edit_input(file, case, lambda f: f.remove(code, occurrence), script, f"Remove {code}")
 
-    def add_porous(self, code: str, values=None, case: str | None = None) -> int:
-        """A porous structure (VRANS) in ctrl.txt, one undo step: ``code`` one of
-        :data:`lagoonviz.core.porous.KINDS` (B 270 box, B 274 cylinder, B 281/B 282
-        wedges, B 291 plate for CFD; B 210 - B 218 for NHFLOW), ``values`` its line
-        (default: in the middle of the domain, from the bed to the still water, of
-        rubble). NHFLOW's material B 201 is added too when the case has none.
-        Returns the structure's occurrence."""
-        from lagoonviz.core import porous
+    def add_structure(self, code: str, values=None, case: str | None = None) -> int:
+        """A porous structure or a solid, one undo step: ``code`` one of
+        :data:`lagoonviz.core.structures.KINDS` - porous (ctrl.txt): B 270 box, B 274
+        cylinder, B 281/B 282 wedges, B 291 plate for CFD, B 210 - B 218 for NHFLOW;
+        solids: DIVEMesh's S 10 box, S 32/S 33 cylinders, S 51 sphere, S 61/S 62
+        wedges (control.txt), NHFLOW's direct forcing A 581 - A 588 (ctrl.txt).
+        ``values``: its line (default: :meth:`structure_default`). NHFLOW's porous
+        material B 201 is added too when the case has none. Returns the structure's
+        occurrence."""
+        from lagoonviz.core import structures
 
-        kind = porous.BY_CODE.get(code)
+        kind = structures.BY_CODE.get(code)
         if kind is None:
-            raise ValueError(f"{code!r} is not a porous structure ({', '.join(porous.BY_CODE)})")
+            raise ValueError(f"{code!r} is not a structure ({', '.join(structures.BY_CODE)})")
         case_id = self._case_id(case)
         if values is None:
-            values = self.porous_default(code, case_id)
+            values = self.structure_default(code, case_id)
         values = [float(v) for v in values]
         if len(values) != kind.count:
             raise ValueError(f"{code} takes {kind.count} values, got {len(values)}")
 
         def change(f):
-            if kind.solver == "NHFLOW" and porous.NHFLOW_MATERIAL not in f:
-                f.add(porous.NHFLOW_MATERIAL, list(porous.DEFAULT_MATERIAL))
+            material = structures.NHFLOW_MATERIAL
+            if kind.material == material and material not in f:
+                f.add(material, list(structures.DEFAULT_MATERIAL))
             f.add(code, values)
 
         self._edit_input(
-            "ctrl.txt",
+            kind.file,
             case,
             change,
-            f"session.add_porous({code!r}, {values!r}",
-            f"Add {kind.name.lower()} ({code})",
+            f"session.add_structure({code!r}, {values!r}",
+            f"Add {kind.phrase()}",
         )
-        return len(self.input_file("ctrl.txt", case_id).entries(code)) - 1
+        return len(self.input_file(kind.file, case_id).entries(code)) - 1
 
-    def porous_default(self, code: str, case: str | None = None, area=None) -> list[float]:
-        """The line of a porous structure ``code`` over a plan area (x0, x1, y0, y1;
-        default the middle of the domain) from the bed (the domain's bottom) to the
-        still water level (F 60, else the domain's top), of rubble."""
-        from lagoonviz.core import porous
+    def structure_default(self, code: str, case: str | None = None, area=None) -> list[float]:
+        """The line of a structure ``code`` over a plan area (x0, x1, y0, y1; default
+        the middle of the domain), from the bed (the domain's bottom) up: a porous one
+        to the still water level (F 60), of rubble; a solid to the domain's top (for
+        NHFLOW's σ-grid, half the water depth above the still water)."""
+        from lagoonviz.core import structures
+        from lagoonviz.core.data.setup import SIGMA_SOLVERS
 
-        kind = porous.BY_CODE[code]
+        kind = structures.BY_CODE[code]
         setup = self.data.case_setup(self._case_id(case), create=True)
         domain = setup.domain if setup is not None else None
         if domain is None:
             domain = (0.0, 10.0, 0.0, 1.0, 0.0, 1.0)
         bottom, top = domain[4], domain[5]
-        if setup is not None and setup.water_level is not None and setup.water_level > bottom:
-            top = setup.water_level
+        water = setup.water_level if setup is not None else None
+        if water is not None and water > bottom:
+            if kind.group == "porous":
+                top = water
+            elif setup.solver in SIGMA_SOLVERS:
+                top = round(water + 0.5 * (water - bottom), 6)
         two_d = bool(setup is not None and setup.two_d)
-        area = area if area is not None else porous.default_area(domain, two_d)
-        return porous.from_area(kind, area, (bottom, top))
+        area = area if area is not None else structures.default_area(domain, two_d)
+        return structures.from_area(kind, area, (bottom, top))
 
     def set_input_text(self, file: str, text: str, case: str | None = None) -> None:
         """Replace the whole text of an input file (the text editor)."""

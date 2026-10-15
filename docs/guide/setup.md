@@ -166,8 +166,22 @@ z end at the crest). A plate is a band of the thickness given above that line.
 n is the porosity, d50 the mean stone diameter, α and β the linear and nonlinear
 resistance coefficients of the Forchheimer terms. SFLOW and FNPF have no porous
 structures. Each change is an undo step, saved with the input files; in a script:
-`session.add_porous("B 270", [30, 40, 0, 1, 0, 0.6, 0.4, 0.05, 500, 2])` (no values:
-the default place and material).
+`session.add_structure("B 270", [30, 40, 0, 1, 0, 0.6, 0.4, 0.05, 500, 2])` (no
+values: the default place and material).
+
+## Solids
+
+The *Solids* tab works the same way for solids:
+
+| Module | Solids | File |
+| --- | --- | --- |
+| every module (DIVEMesh) | box (S 10), vertical cylinder over the whole height (S 33), cylinder along y across the domain (S 32), sphere (S 51), wedge along x (S 61) or y (S 62) | `control.txt` |
+| NHFLOW (direct forcing) | box (A 581), cylinder along y (A 583), vertical cylinder (A 584), sphere (A 586), wedge along x (A 587) or y (A 588) | `ctrl.txt` |
+
+*Add* and *Draw* make a solid from the bed to the domain's top (for NHFLOW, whose
+domain ends at the still water, up to half the water depth above it). DIVEMesh's
+solids are meshed by *Run DIVEMesh*; NHFLOW takes them as A 580 says (0: they raise
+the bed, 1: immersed). In a script: `session.add_structure("S 33", [12.0, 2.5, 0.4])`.
 
 ## On the map
 

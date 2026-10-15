@@ -1,11 +1,13 @@
-"""Porous structures (VRANS) in the set-up: the ctrl.txt lines of CFD (B 270 - B 291,
-material on each line) and NHFLOW (B 210 - B 218, material B 201), added as one undo
-step, and drawn where REEF3D puts them."""
+"""Porous structures (VRANS) and solids in the set-up: the ctrl.txt lines of CFD
+(B 270 - B 291, material on each line) and NHFLOW (B 210 - B 218, material B 201),
+DIVEMesh's solids (S, control.txt) and NHFLOW's direct forcing (A 581 - A 588), added
+as one undo step, and drawn where REEF3D and DIVEMesh put them."""
 
 import numpy as np
 import pytest
 
-from lagoonviz.core import Session, porous
+from lagoonviz.core import Session
+from lagoonviz.core import structures as porous
 from lagoonviz.core.data.controlfile import ControlFile, catalog_for
 
 #: a 2D flume, 20 m long and 1 m high, for REEF3D::CFD
@@ -23,14 +25,14 @@ def flume(tmp_path):
 
 
 def test_the_kinds_each_module_reads():
-    assert [k.code for k in porous.kinds_for("CFD")] == [
+    assert [k.code for k in porous.kinds_for("porous", "CFD")] == [
         "B 270",
         "B 274",
         "B 281",
         "B 282",
         "B 291",
     ]
-    assert [k.code for k in porous.kinds_for("nhflow")] == [
+    assert [k.code for k in porous.kinds_for("porous", "nhflow")] == [
         "B 210",
         "B 212",
         "B 213",
@@ -38,14 +40,21 @@ def test_the_kinds_each_module_reads():
         "B 217",
         "B 218",
     ]
-    assert porous.kinds_for("SFLOW") == [] and porous.kinds_for("") == []
+    assert porous.kinds_for("porous", "SFLOW") == [] and porous.kinds_for("porous", "") == []
+    solids = [k.code for k in porous.kinds_for("solid", "CFD")]
+    assert solids == ["S 10", "S 33", "S 32", "S 51", "S 61", "S 62"]
+    nhflow = [k.code for k in porous.kinds_for("solid", "NHFLOW")]
+    assert nhflow[:6] == ["A 581", "A 583", "A 584", "A 586", "A 587", "A 588"]
+    assert nhflow[6:] == solids and porous.kinds_for("solid", "") == porous.kinds_for(
+        "solid", "FNPF"
+    )
     box = porous.BY_CODE["B 270"]
     assert box.count == 10 and box.material_on_line
     assert porous.BY_CODE["B 291"].count == 11 and porous.BY_CODE["B 210"].count == 6
     # every kind's line has as many values as REEF3D's reader takes
-    catalog = catalog_for("ctrl.txt")
+    catalogs = {f: catalog_for(f) for f in ("ctrl.txt", "control.txt")}
     for kind in porous.KINDS:
-        assert catalog.get(kind.code).count == kind.count, kind.code
+        assert catalogs[kind.file].get(kind.code).count == kind.count, kind.code
 
 
 def test_a_structure_from_an_area():
@@ -74,16 +83,17 @@ def test_a_structure_from_an_area():
 def test_adding_a_porous_structure_to_a_cfd_case(flume):
     session = Session()
     case_id = session.open_case(flume)
-    occurrence = session.add_porous("B 270")
+    occurrence = session.add_structure("B 270")
     assert occurrence == 0
     ctrl = session.input_file("ctrl.txt")
     # the middle fifth of the flume, all across it (2D), from the bed to the still water
     assert ctrl.all("B 270") == [[8.0, 12.0, 0.0, 0.05, 0.0, 0.6, 0.4, 0.05, 500.0, 2.0]]
-    drawn = session.porous_default("B 281", area=(14.0, 16.0, 0.0, 0.05))
-    assert session.add_porous("B 281", drawn) == 0
-    assert "session.add_porous('B 270', [8.0, 12.0" in session.to_script()
-    structures = porous.structures(session.input_file("ctrl.txt"), "CFD")
-    assert [s.label() for s in structures] == ["Box (B 270 #1)", "Wedge along x (B 281 #1)"]
+    drawn = session.structure_default("B 281", area=(14.0, 16.0, 0.0, 0.05))
+    assert session.add_structure("B 281", drawn) == 0
+    assert "session.add_structure('B 270', [8.0, 12.0" in session.to_script()
+    files = {"ctrl.txt": session.input_file("ctrl.txt")}
+    found = porous.structures(files, porous.kinds_for("porous", "CFD"))
+    assert [s.label() for s in found] == ["Box (B 270 #1)", "Wedge along x (B 281 #1)"]
     # drawn in the set-up where REEF3D puts them
     marks = {m.code: m for m in session.data.case_setup(case_id).marks()}
     assert (
@@ -95,9 +105,9 @@ def test_adding_a_porous_structure_to_a_cfd_case(flume):
     assert len(top) and np.allclose(top[:, 0], 16.0)  # high at its end, x = 16
     assert wedge[:, 2].min() == 0.0 and wedge[:, 0].min() == 14.0
     with pytest.raises(ValueError, match="takes 10 values"):
-        session.add_porous("B 270", [1.0, 2.0])
-    with pytest.raises(ValueError, match="not a porous structure"):
-        session.add_porous("P 51")
+        session.add_structure("B 270", [1.0, 2.0])
+    with pytest.raises(ValueError, match="not a structure"):
+        session.add_structure("P 51")
     session.undo()
     session.undo()
     assert session.input_file("ctrl.txt").text() == CTRL
@@ -110,12 +120,12 @@ def test_nhflow_gets_its_material_with_the_first_structure(flume):
     (flume / "ctrl.txt").write_text("A 10 5\nF 60 0.6\n")
     session = Session()
     session.open_case(flume)
-    session.add_porous("B 213", [10.0, 0.025, 0.0, 0.6, 0.3])
+    session.add_structure("B 213", [10.0, 0.025, 0.0, 0.6, 0.3])
     ctrl = session.input_file("ctrl.txt")
     assert ctrl.values("B 201") == list(porous.DEFAULT_MATERIAL)
     assert ctrl.values("B 213") == [10.0, 0.025, 0.0, 0.6, 0.3]
     session.set_input("ctrl.txt", "B 201", [0.45, 0.02, 500.0, 2.0])
-    session.add_porous("B 210")  # B 201 is there: kept as it is
+    session.add_structure("B 210")  # B 201 is there: kept as it is
     assert session.input_file("ctrl.txt").values("B 201") == [0.45, 0.02, 500.0, 2.0]
     assert len(session.input_file("ctrl.txt").entries("B 201")) == 1
     session.undo()
@@ -150,3 +160,36 @@ def test_the_catalog_describes_cfd_vrans():
     ctrl = ControlFile("ctrl.txt", "A 10 6\nB 270 0 1 0 1 0 1 0.4 0.05 500 2\n")
     assert not [p for p in catalog.check(ctrl, "CFD") if p.code == "B 270"]
     assert [p for p in catalog.check(ctrl, "NHFLOW") if p.code == "B 270"]  # not NHFLOW's
+
+
+def test_solids_from_an_area():
+    area, heights = (8.0, 10.0, 0.0, 1.0), (0.0, 1.0)
+    assert porous.from_area(porous.BY_CODE["S 10"], area, heights) == [8, 10, 0, 1, 0, 1]
+    assert porous.from_area(porous.BY_CODE["S 33"], area, heights) == [9.0, 0.5, 0.5]
+    assert porous.from_area(porous.BY_CODE["S 32"], area, heights) == [9.0, 0.5, 0.5]
+    pile = porous.BY_CODE["S 33"]
+    assert pile.describe([9, 0.5, 0.5]) == "at (9, 0.5), r 0.5 m, over the height"
+    assert porous.BY_CODE["S 10"].split([8, 10, 0, 1, 0, 1]) == ([8, 10, 0, 1, 0, 1], [])
+
+
+def test_adding_solids(flume):
+    session = Session()
+    case_id = session.open_case(flume)
+    # DIVEMesh's: in control.txt, from the bed to the domain's top
+    assert session.add_structure("S 10") == 0
+    control = session.input_file("control.txt")
+    assert control.all("S 10") == [[8.0, 12.0, 0.0, 0.05, 0.0, 1.0]]
+    assert session.inputs_modified() == ["control.txt"]
+    marks = [m for m in session.data.case_setup(case_id).marks() if m.code == "S 10"]
+    assert marks and marks[0].file == "control.txt"
+    session.undo()
+    assert "S 10" not in session.input_file("control.txt")
+    # NHFLOW's direct forcing: in ctrl.txt, up to half the depth above the still water
+    (flume / "ctrl.txt").write_text("A 10 5\nF 60 0.6\n")
+    other = Session()
+    other.open_case(flume)
+    other.add_structure("A 581")
+    assert other.input_file("ctrl.txt").values("A 581") == [8.0, 12.0, 0.0, 0.05, 0.0, 0.9]
+    assert "B 201" not in other.input_file("ctrl.txt")  # no porous material for a solid
+    wedge = other.structure_default("A 587", area=(1.0, 2.0, 0.0, 0.05))
+    assert wedge == [1.0, 2.0, 0.0, 0.05, 0.0, 0.9]
