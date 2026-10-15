@@ -44,6 +44,10 @@ CURVE_LABELS = {
     "bspline": "Smooth, pulled by the points (B-spline)",
 }
 BED_LABELS = {"slope": "Sloping from the upstream end", "geo": "geo.dat's points"}
+SECTION_LABELS = {
+    "normal": "Square to the river",
+    "even": "Equal lengths along both banks",
+}
 
 
 class CorridorTab(QWidget):
@@ -133,6 +137,12 @@ class CorridorTab(QWidget):
         auto_form.addRow("Water level", self.level)
         auto_form.addRow("Points per bank", self.auto_points)
         auto_form.addRow("", self.auto_button)
+        self.square_button = QPushButton("Square the grid")
+        self.square_button.setToolTip(
+            "Make the grid nice again: cross-sections square to the river (to the line "
+            "halfway between the banks), the smoothing off"
+        )
+        self.square_button.clicked.connect(self.square)
 
         # ---- the banks
         self.points = QSpinBox()
@@ -193,6 +203,14 @@ class CorridorTab(QWidget):
         grid_form = QFormLayout(grid)
         grid_form.addRow("Cells along", self.along)
         grid_form.addRow("Cells across", self.across)
+        self.sections = QComboBox()
+        for key, label in SECTION_LABELS.items():
+            self.sections.addItem(label, key)
+        self.sections.setToolTip(
+            "Square to the river: each cross-section straight across the line halfway "
+            "between the banks. Equal lengths: the banks cut into equal pieces, paired"
+        )
+        grid_form.addRow("Cross-sections", self.sections)
         grid_form.addRow("Smoothing", self.smoothing)
         grid_form.addRow("Bed", self.bed)
         grid_form.addRow("Bed at upstream end", self.z_start)
@@ -206,7 +224,7 @@ class CorridorTab(QWidget):
         for box in (self.z_start, self.slope):
             box.setKeyboardTracking(False)
             box.valueChanged.connect(lambda _v: self._commit())
-        for box in (self.curve, self.bed):
+        for box in (self.curve, self.bed, self.sections):
             box.activated.connect(lambda _i: self._commit())
         self._editors = (
             self.points,
@@ -215,6 +233,7 @@ class CorridorTab(QWidget):
             self.across,
             self.smoothing,
             self.bed,
+            self.sections,
             self.z_start,
             self.slope,
         )
@@ -234,6 +253,7 @@ class CorridorTab(QWidget):
         layout.addWidget(self.note)
         layout.addLayout(row)
         layout.addWidget(self.auto_box)
+        layout.addWidget(self.square_button)
         layout.addWidget(scroll, 1)
 
     # ------------------------------------------------------------- the case
@@ -257,7 +277,13 @@ class CorridorTab(QWidget):
         has_bed = setup is not None and (setup.path / "geo.dat").is_file()
         self.auto_box.setEnabled(has_bed)
         self.auto_box.setToolTip("" if has_bed else "Needs geo.dat (Map tab: Make geo.dat)")
-        for widget in (self.edit_button, self.reset_button, self.remove_button, self.form):
+        for widget in (
+            self.edit_button,
+            self.reset_button,
+            self.remove_button,
+            self.square_button,
+            self.form,
+        ):
             widget.setEnabled(corridor is not None)
         if corridor is None and self.edit_button.isChecked():
             self.edit_button.setChecked(False)
@@ -284,6 +310,7 @@ class CorridorTab(QWidget):
         self.along.setValue(corridor.cells_along)
         self.across.setValue(corridor.cells_across)
         self.smoothing.setValue(corridor.smoothing)
+        self.sections.setCurrentIndex(self.sections.findData(corridor.sections))
         self.bed.setCurrentIndex(self.bed.findData(corridor.bed))
         self.z_start.setValue(corridor.z_start)
         self.slope.setValue(corridor.slope)
@@ -323,6 +350,7 @@ class CorridorTab(QWidget):
             "cells_along": self.along.value(),
             "cells_across": self.across.value(),
             "smoothing": self.smoothing.value(),
+            "sections": self.sections.currentData(),
             "bed": self.bed.currentData(),
             "z_start": round(self.z_start.value(), 6),
             "slope": round(self.slope.value(), 8),
@@ -401,6 +429,15 @@ class CorridorTab(QWidget):
                     side, index, round(x, 4), round(y, 4), case=case_id
                 )
             )
+
+    def square(self) -> None:
+        """The grid's cross-sections square to the river again."""
+        self._run(
+            lambda: self.session.set_corridor_options(
+                case=self.panel.case_id, sections="normal", smoothing=0
+            ),
+            "The cross-sections square to the river",
+        )
 
     def reset(self) -> None:
         self._run(

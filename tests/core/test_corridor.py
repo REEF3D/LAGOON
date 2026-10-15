@@ -297,3 +297,48 @@ def test_the_bed_of_many_points_is_quick():
     z = C.interpolate_bed(scattered, gx, gy)
     assert time.perf_counter() - start < 5.0
     assert np.abs(z - np.sin(gx / 1000)).max() < 0.05
+
+
+def _off_square(corridor):
+    """How far the cross-sections are from square to the river (degrees, at the
+    middle of the river), each."""
+    x, y = corridor.grid()
+    j = x.shape[0] // 2
+    section = np.stack([x[-1] - x[0], y[-1] - y[0]], axis=1)
+    along = np.stack([np.gradient(x[j]), np.gradient(y[j])], axis=1)
+    cosine = np.abs((section * along).sum(1))
+    cosine /= np.linalg.norm(section, axis=1) * np.linalg.norm(along, axis=1)
+    return np.degrees(np.arcsin(np.clip(cosine, 0, 1)))
+
+
+def test_cross_sections_square_to_the_river():
+    thalweg = C.find_thalweg(valley(), (0, 400, 0, 200, -2, 3), level=0.0)
+    corridor = C.from_thalweg(thalweg, margin=20.0, count=14)
+    assert corridor.sections == "normal"  # along the thalweg: square at once
+    from dataclasses import replace
+
+    even = replace(corridor, sections="even")
+    assert np.median(_off_square(even)) > 15  # equal lengths: skewed in the bends
+    square = _off_square(corridor)
+    assert np.median(square) < 1.0 and square.max() < 3.0
+    x, y = corridor.grid()
+    assert C.quality(x, y).folded == 0
+    # a 90° bend: the cross-sections run to the centre of the bend
+    a = np.radians(np.linspace(90, 0, 12))
+    bend = C.Corridor(
+        np.column_stack([100 * np.cos(a), 100 * np.sin(a)]),
+        np.column_stack([40 * np.cos(a), 40 * np.sin(a)]),
+        cells_along=60,
+        cells_across=12,
+        sections="normal",
+    )
+    x, y = bend.grid()
+    radial = np.degrees(np.arctan2(y[0], x[0]) - np.arctan2(y[-1], x[-1]))
+    assert np.abs(radial).max() < 4.0
+    # a point dragged far out: still no folded cells
+    dragged = corridor.moved("left", 6, *(corridor.left[6] + [0.0, 30.0]))
+    assert C.quality(*dragged.grid()).folded == 0
+    assert np.median(_off_square(dragged)) < 2.0
+    with pytest.raises(ValueError, match="sections"):
+        replace(corridor, sections="radial")
+    assert C.Corridor.from_dict({**corridor.to_dict(), "sections": "even"}).sections == "even"

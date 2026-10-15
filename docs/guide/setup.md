@@ -212,8 +212,14 @@ and the curvilinear grid between them that REEF3D's SFLOW and NHFLOW read with
 - **Reverse flow** swaps upstream and downstream. The bank on the left looking
   downstream is the *left* bank; "upstream" is written at the corridor's start.
 
-The grid has *Cells along* x *Cells across* cells: each bank is cut into equal
-lengths and the nodes between them lie on straight lines across. *Smoothing* runs
+The grid has *Cells along* x *Cells across* cells, its nodes on straight
+cross-sections between the banks. *Cross-sections*: **square to the river** (from
+points spaced equally along the line halfway between the banks, straight across it
+to both banks; where they would cross on the inside of a tight bend they are spaced
+evenly there), or **equal lengths** along both banks, paired (skewed in bends where
+one bank is longer). A corridor along the thalweg starts square; **Square the grid**
+(under *Follow thalweg*) makes the grid square again after points were dragged or
+the grid smoothed. *Smoothing* runs
 that many sweeps of Winslow's elliptic grid equations over the inner nodes (the
 banks and the two ends stay): smoother, more even cells in bends. The set-up draws
 the grid as it changes, and the tab says how large its cells are, their smallest

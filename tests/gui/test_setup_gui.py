@@ -619,3 +619,16 @@ def test_the_rotation_sliders_show_the_turn_and_keep_it_when_let_go(window, flum
     turned = []
     window.viewport.statusMessage.connect(turned.append)
     tab.north_button.click()  # the 3D view turns north up (no GPU here: said so)
+
+
+def test_the_river_tab_squares_the_grid(window, flume):
+    window.open_case(flume)
+    tab = window.setup_panel.river_tab
+    assert not tab.square_button.isEnabled()
+    tab.start()
+    assert window.session.corridor().sections == "even" and tab.square_button.isEnabled()
+    window.session.set_corridor_options(smoothing=40)
+    tab.square_button.click()
+    corridor = window.session.corridor()
+    assert corridor.sections == "normal" and corridor.smoothing == 0
+    assert tab.sections.currentData() == "normal"

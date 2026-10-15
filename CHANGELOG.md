@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Square river grids
+
+- The River tab's grid can have its **cross-sections square to the river**: straight
+  across the line halfway between the banks (found again from the cross-sections),
+  spaced evenly only where they would cross on the inside of a tight bend. A
+  corridor along the thalweg starts so; **Square the grid** (under Follow thalweg)
+  makes it so again after dragging, and *Cross-sections* chooses it or the equal
+  lengths along both banks of before. In a meander, the cross-sections were up to
+  50° off square; now under 1.5°.
+- The bed from geo.dat is found in a second (only the points round the corridor;
+  geo.dat on a regular grid read on it; very many points by their nearest): Make
+  grid and Follow thalweg no longer hang on a large geo.dat.
+
 ### Turning the model on the map as you look
 
 - The Map tab has **sliders** for the georeference's rotation (about the middle of

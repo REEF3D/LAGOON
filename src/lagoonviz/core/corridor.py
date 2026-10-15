@@ -42,6 +42,9 @@ FILE = "corridor.json"
 GRID_FILE = "curvgrid.dat"
 CURVES = ("through", "bspline")
 BEDS = ("slope", "geo")
+#: how the banks are paired into cross-sections: equal lengths along both banks, or
+#: across the river (perpendicular to the line halfway between the banks)
+SECTIONS = ("even", "normal")
 #: points per bank: the fewest and the most
 MIN_POINTS, MAX_POINTS = 4, 60
 #: samples of the dense curve per segment between two points
@@ -105,6 +108,69 @@ def _straight(p: np.ndarray, samples: int) -> np.ndarray:
     return p[0] + t * (p[-1] - p[0])
 
 
+def _sections(centre: np.ndarray, count: int, right_line: np.ndarray, left_line: np.ndarray):
+    """The ends on the right and the left bank of ``count`` cross-sections square
+    to a line along the river, from points spaced equally along it."""
+    stations = resample(centre, count)
+    tangent = np.gradient(resample(centre, 4 * (count - 1) + 1), axis=0)[::4]
+    tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
+    normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])
+    ends = []
+    for line, sign in ((right_line, -1.0), (left_line, 1.0)):
+        along = lengths(line)
+        at = np.array(
+            [_crossing(line, along, p, sign * n) for p, n in zip(stations, normal, strict=True)]
+        )
+        even = np.linspace(0.0, along[-1], count)
+        missing = ~np.isfinite(at)
+        at[missing] = even[missing]
+        at[0], at[-1] = 0.0, along[-1]
+        at = _monotone(at, even)
+        ends.append(
+            np.column_stack([np.interp(at, along, line[:, 0]), np.interp(at, along, line[:, 1])])
+        )
+    return ends[0], ends[1]
+
+
+def _crossing(line: np.ndarray, along: np.ndarray, point, direction) -> float:
+    """Where a ray from ``point`` along ``direction`` first meets a polyline: the
+    distance along the polyline (NaN if it does not)."""
+    a, b = line[:-1], line[1:]
+    edge = b - a
+    d = np.asarray(direction, float)
+    offset = a - np.asarray(point, float)
+    denominator = edge[:, 0] * d[1] - edge[:, 1] * d[0]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = (offset[:, 1] * d[0] - offset[:, 0] * d[1]) / denominator  # along the edge
+        ray = (offset[:, 0] * edge[:, 1] - offset[:, 1] * edge[:, 0]) / -denominator
+    hit = (np.abs(denominator) > 1e-15) & (t >= 0) & (t <= 1) & (ray >= 0)
+    if not hit.any():
+        return float("nan")
+    k = np.flatnonzero(hit)[np.argmin(ray[hit])]
+    return float(along[k] + t[k] * (along[k + 1] - along[k]))
+
+
+def _monotone(at: np.ndarray, even: np.ndarray) -> np.ndarray:
+    """Positions along a bank made to increase: where they do not (cross-sections
+    crossing on the inside of a tight bend), spaced evenly between the nearest
+    positions round them that are in order - only there."""
+    at = at.astype(float).copy()
+    gap = 1e-6 * max(float(even[-1]), 1e-9)
+    for _ in range(len(at)):
+        bad = np.flatnonzero(np.diff(at) <= gap)
+        if not len(bad):
+            return at
+        low, high = int(bad[0]), int(bad[0]) + 1
+        while True:
+            low, high = max(low - 1, 0), min(high + 1, len(at) - 1)
+            if at[high] - at[low] > gap * (high - low) or (low == 0 and high == len(at) - 1):
+                break
+        if at[high] - at[low] <= gap * (high - low):
+            return even.copy()
+        at[low : high + 1] = np.linspace(at[low], at[high], high - low + 1)
+    return at if (np.diff(at) > gap).all() else even.copy()
+
+
 def lengths(line: np.ndarray) -> np.ndarray:
     """Distance along a polyline (m, 2) from its start, at each point."""
     steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
@@ -135,6 +201,7 @@ class Corridor:
     cells_along: int = 100
     cells_across: int = 20
     smoothing: int = 0
+    sections: str = "even"
     bed: str = "slope"
     z_start: float = 0.0
     slope: float = 0.0
@@ -145,6 +212,10 @@ class Corridor:
         self.right = np.asarray(self.right, float).reshape(-1, 2)
         if self.curve not in CURVES:
             raise ValueError(f"curve must be one of {', '.join(CURVES)}, got {self.curve!r}")
+        if self.sections not in SECTIONS:
+            raise ValueError(
+                f"sections must be one of {', '.join(SECTIONS)}, got {self.sections!r}"
+            )
         if self.bed not in BEDS:
             raise ValueError(f"bed must be one of {', '.join(BEDS)}, got {self.bed!r}")
         for name, bank in (("left", self.left), ("right", self.right)):
@@ -207,6 +278,7 @@ class Corridor:
             self.cells_along,
             self.cells_across,
             self.smoothing,
+            self.sections,
         )
         found = _GRIDS.get(key)
         if found is None:
@@ -218,8 +290,11 @@ class Corridor:
 
     def _make_grid(self) -> tuple[np.ndarray, np.ndarray]:
         ni, nj = self.cells_along, self.cells_across
-        right = resample(self.bank_line("right"), ni + 1)
-        left = resample(self.bank_line("left"), ni + 1)
+        if self.sections == "normal":
+            right, left = self._normal_sections()
+        else:
+            right = resample(self.bank_line("right"), ni + 1)
+            left = resample(self.bank_line("left"), ni + 1)
         s = np.linspace(0.0, 1.0, nj + 1)[:, None, None]
         nodes = (1.0 - s) * right[None] + s * left[None]  # (nj+1, ni+1, 2)
         x, y = nodes[..., 0].copy(), nodes[..., 1].copy()
@@ -228,6 +303,30 @@ class Corridor:
         if self.smoothing and ni > 1 and nj > 1:
             x, y = winslow(x, y, self.smoothing)
         return x, y
+
+    def _normal_sections(self) -> tuple[np.ndarray, np.ndarray]:
+        """The ends of ni + 1 cross-sections across the river: from points spaced
+        equally along the line halfway between the banks, straight across it to
+        both banks. That line is found again from the cross-sections twice (each
+        bank's point straight across from it, not the point as far along). Where
+        cross-sections would cross one another (the inside of a tight bend) they
+        are spaced evenly there; the two ends stay the corridor's."""
+        left_line, right_line = self.bank_line("left"), self.bank_line("right")
+        count = max(400, 4 * self.cells_along)
+        centre = 0.5 * (resample(left_line, count) + resample(right_line, count))
+        width = float(
+            np.median(
+                np.linalg.norm(resample(left_line, count) - resample(right_line, count), axis=1)
+            )
+        )
+        for _ in range(2):  # the line halfway across, from the cross-sections
+            step = lengths(centre)[-1] / max(len(centre) - 1, 1)
+            centre = _smooth_line(centre, 0.1 * width / max(step, 1e-12))
+            right, left = _sections(centre, count // 4, right_line, left_line)
+            centre = resample(0.5 * (right + left), count)
+        step = lengths(centre)[-1] / max(len(centre) - 1, 1)
+        centre = _smooth_line(centre, 0.1 * width / max(step, 1e-12))
+        return _sections(centre, self.cells_along + 1, right_line, left_line)
 
     def bed_heights(self, x: np.ndarray, y: np.ndarray, geo_points=None) -> np.ndarray:
         """zb at the nodes: geo.dat's points interpolated (``bed = "geo"``, when
@@ -247,6 +346,7 @@ class Corridor:
             "cells_along": self.cells_along,
             "cells_across": self.cells_across,
             "smoothing": self.smoothing,
+            "sections": self.sections,
             "bed": self.bed,
             "z_start": self.z_start,
             "slope": self.slope,
@@ -263,6 +363,7 @@ class Corridor:
             "cells_along",
             "cells_across",
             "smoothing",
+            "sections",
             "bed",
             "z_start",
             "slope",
@@ -494,6 +595,7 @@ def from_thalweg(
     mean_width = float(np.mean(left + right))
     options.setdefault("cells_across", 20)
     options.setdefault("bed", "geo")
+    options.setdefault("sections", "normal")
     length = float(lengths(line)[-1])
     options.setdefault(
         "cells_along", max(int(round(length / max(mean_width / options["cells_across"], 1e-9))), 4)
