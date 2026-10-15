@@ -5,8 +5,8 @@
 DIVEMesh's ``control.txt`` gives the domain (B 10), the grid (B 1, B 2), the kinds of
 the domain's sides (C 11 - C 16), the solids (S) and the bed (T, ``geo.dat``).
 REEF3D's ``ctrl.txt`` gives the still water level (F 60), the waves (B 90 - B 108),
-the gauges and probes (P), floating bodies and their moorings (X), porous and
-direct forcing structures (A 581 - A 589, B 210 - B 270).
+the gauges and probes (P), floating bodies and their moorings (X), and the
+direct forcing and porous structures (A 581 - A 589, B 210 - B 291).
 
 :func:`read_setup` reads both into a :class:`CaseSetup`; :meth:`CaseSetup.marks`
 turns them into :class:`Mark` s, lines, points and labels in groups (domain, sides,
@@ -216,6 +216,33 @@ def _cylinder(axis: int, centre2, start: float, end: float, r1: float, r2: float
             )
         )
     return np.concatenate([*rings, _segments(lines)])
+
+
+def _prism(axis: int, profile, across) -> np.ndarray:
+    """Edges of a prism: a profile of (a, z) points in the plane of a horizontal
+    axis (0: x, 1: y) and z, drawn at both ends of ``across`` (the other horizontal
+    axis) and joined there. Corners that fall together (a wedge's) are drawn once."""
+    corners = []
+    for a, z in profile:
+        if not corners or abs(a - corners[-1][0]) + abs(z - corners[-1][1]) > 1e-12:
+            corners.append((a, z))
+    if (
+        len(corners) > 1
+        and abs(corners[0][0] - corners[-1][0]) + abs(corners[0][1] - corners[-1][1]) <= 1e-12
+    ):
+        corners.pop()
+
+    def point(a, z, b):
+        return (a, b, z) if axis == 0 else (b, a, z)
+
+    lines = []
+    for b in across:
+        for i, (a, z) in enumerate(corners):
+            a2, z2 = corners[(i + 1) % len(corners)]
+            lines.append((point(a, z, b), point(a2, z2, b)))
+    for a, z in corners:
+        lines.append((point(a, z, across[0]), point(a, z, across[1])))
+    return _segments(lines)
 
 
 def _sphere(centre, radius: float) -> np.ndarray:
@@ -932,6 +959,9 @@ def _is_number(text: str) -> bool:
 #:   "zone" xs, xe, ys, ye, d: a line and its band of +- d
 #:   "ycyl" xc, zc, ys, ye, r;  "zcyl" xc, yc, zs, ze, r;  "zcyl_full" xc, yc, r
 #:   "cyl_tilted" xs, ys, zs, rs, xe, ye, ze, re;  "sphere" xc, yc, zc, r
+#:   "wedge_x", "wedge_y" xs, xe, ys, ye, zs, ze: the top from zs at the start to ze
+#:   at the end (along x or y), the base at the lower;  "plate_x": then d, a band
+#:   of thickness d above that line
 #:   "body_cyl_x/y/z" r, h, xc, yc, zc;  "corners6", "corners8": x, y, z of each
 #:   "net" D, L, x0, y0, z0: a cylinder hanging down from z0
 MARKS = {
@@ -1000,18 +1030,22 @@ MARKS = {
     "A 584": ("structures", "zcyl", "direct forcing cylinder", COLORS["structures"]),
     "A 585": ("structures", "cyl_tilted", "direct forcing cylinder", COLORS["structures"]),
     "A 586": ("structures", "sphere", "direct forcing sphere", COLORS["structures"]),
-    "A 587": ("structures", "box", "direct forcing wedge", COLORS["structures"]),
-    "A 588": ("structures", "box", "direct forcing wedge", COLORS["structures"]),
+    "A 587": ("structures", "wedge_x", "direct forcing wedge", COLORS["structures"]),
+    "A 588": ("structures", "wedge_y", "direct forcing wedge", COLORS["structures"]),
     "A 589": ("structures", "box", "direct forcing wedge", COLORS["structures"]),
     "B 210": ("structures", "box", "porous box (VRANS)", COLORS["structures"]),
     "B 212": ("structures", "ycyl", "porous cylinder (VRANS)", COLORS["structures"]),
     "B 213": ("structures", "zcyl", "porous cylinder (VRANS)", COLORS["structures"]),
     "B 215": ("structures", "sphere", "porous sphere (VRANS)", COLORS["structures"]),
-    "B 217": ("structures", "box", "porous wedge (VRANS)", COLORS["structures"]),
-    "B 218": ("structures", "box", "porous wedge (VRANS)", COLORS["structures"]),
+    "B 217": ("structures", "wedge_x", "porous wedge (VRANS)", COLORS["structures"]),
+    "B 218": ("structures", "wedge_y", "porous wedge (VRANS)", COLORS["structures"]),
     "B 219": ("structures", "box", "porous wedge (VRANS)", COLORS["structures"]),
     "B 240": ("structures", "box_after2", "Darcy porous box", COLORS["structures"]),
     "B 270": ("structures", "box", "porous box (VRANS)", COLORS["structures"]),
+    "B 274": ("structures", "zcyl", "porous cylinder (VRANS)", COLORS["structures"]),
+    "B 281": ("structures", "wedge_x", "porous wedge (VRANS)", COLORS["structures"]),
+    "B 282": ("structures", "wedge_y", "porous wedge (VRANS)", COLORS["structures"]),
+    "B 291": ("structures", "plate_x", "porous plate (VRANS)", COLORS["structures"]),
     # regions
     "A 276": ("regions", "rect", "mesh refinement box", COLORS["regions"]),
     "A 277": ("regions", "rect", "box without mesh refinement", COLORS["regions"]),
@@ -1353,6 +1387,18 @@ def _shaped(shape: str, v: list[float], span_x, span_y, span_z, water: float):
         return _tilted_cylinder(v[0:3], v[4:7], v[3], v[7]), none, (v[4], v[5], v[6])
     if shape == "sphere":
         return _sphere(v[:3], v[3]), none, (v[0], v[1], v[2] + v[3])
+    if shape in ("wedge_x", "wedge_y", "plate_x"):  # xs, xe, ys, ye, zs, ze (, d)
+        axis = 0 if shape != "wedge_y" else 1
+        a0, a1 = (v[0], v[1]) if axis == 0 else (v[2], v[3])
+        across = (v[2], v[3]) if axis == 0 else (v[0], v[1])
+        z0, z1 = v[4], v[5]
+        if shape == "plate_x":
+            profile = [(a0, z0), (a1, z1), (a1, z1 + v[6]), (a0, z0 + v[6])]
+        else:
+            low = min(z0, z1)
+            profile = [(a0, low), (a1, low), (a1, z1), (a0, z0)]
+        top = (v[1], v[3], max(z0, z1) + (v[6] if shape == "plate_x" else 0.0))
+        return _prism(axis, profile, across), none, top
     if shape.startswith("body_cyl_"):  # r, h, xc, yc, zc
         axis = "xyz".index(shape[-1])
         r, h, c = v[0], v[1], (v[2], v[3], v[4])

@@ -54,7 +54,7 @@ A case folder without output opens as its set-up:
   Morison cylinders (P 85);
 - floating **bodies** (X 110 – X 164), their centre of gravity (X 23) and
   moorings (X 311, X 312), nets (X 322);
-- direct forcing and porous **structures** (A 581 – A 589, B 210 – B 270), and
+- direct forcing and porous **structures** (A 581 – A 589, B 210 – B 291), and
   other regions (A 276, A 372, F 72, S 74);
 - DIVEMesh's **solids** (S), as a structure item, and the **bed**: its topo
   objects (T);
@@ -85,7 +85,7 @@ set-up* adds another one. Each group can be switched off in its properties:
 | Sections | discharge sections and flow files | P 167, P 168, P 230, P 240 |
 | Forces | force boxes and Morison cylinders | P 81, P 85 |
 | Floating bodies | bodies, centre of gravity, moorings, nets | X 23, X 110 – X 164, X 311 – X 322 |
-| Structures | direct forcing and porous structures | A 581 – A 589, B 210 – B 270 |
+| Structures | direct forcing and porous structures | A 581 – A 589, B 210 – B 291 |
 | Regions | refinement boxes, wind areas, prescribed water levels | A 276, A 277, A 372, F 72, S 74 |
 | Solids | outlines of DIVEMesh's solids (off: they are a structure item) | S |
 | Bed | DIVEMesh's topo objects | T |
@@ -139,6 +139,49 @@ view follows at once. The files themselves are written with *Save* (or *File →
 Save input files*); a tab with edits not saved yet has a `*`, and LAGOON asks
 before closing. Comments, blank lines and the order of the file are kept: only
 the lines that changed are rewritten.
+
+## Porous structures
+
+The panel's *Porous* tab holds the porous structures of a case (VRANS:
+breakwaters, rubble mounds, porous cylinders), as the `ctrl.txt` lines that make
+them:
+
+| Module | Structures | Material |
+| --- | --- | --- |
+| CFD | box (B 270), vertical cylinder (B 274), wedge along x (B 281) or y (B 282), plate along x (B 291) | on each line: n, d50, α, β |
+| NHFLOW | box (B 210), cylinder along y (B 212), vertical cylinder (B 213), sphere (B 215), wedge along x (B 217) or y (B 218) | one for all: B 201 n d50 α β |
+
+- **Add** puts the kind chosen in the middle of the domain (in a 2D case across
+  it), from the bed to the still water level (F 60), of rubble: n = 0.4, d50 =
+  0.05 m, α = 500, β = 2.0. For NHFLOW, B 201 comes with the first structure.
+- **Draw** drags its plan in the 2D top view of the 3D view (Esc stops): a box or
+  wedge over the area, the largest cylinder or sphere in it, snapped to the cells
+  (B 1). It reaches from the bed to the still water.
+- **Select** one to see its shape and material, ready to change; it lights up in
+  the 3D view. **Remove** takes it out.
+
+A wedge's top runs from its first height at its start to its second at its end,
+its base at the lower of the two (a slope rising along x: z start at the bed,
+z end at the crest). A plate is a band of the thickness given above that line.
+n is the porosity, d50 the mean stone diameter, α and β the linear and nonlinear
+resistance coefficients of the Forchheimer terms. SFLOW and FNPF have no porous
+structures. Each change is an undo step, saved with the input files; in a script:
+`session.add_structure("B 270", [30, 40, 0, 1, 0, 0.6, 0.4, 0.05, 500, 2])` (no
+values: the default place and material).
+
+## Solids
+
+The *Solids* tab works the same way for solids:
+
+| Module | Solids | File |
+| --- | --- | --- |
+| every module (DIVEMesh) | box (S 10), vertical cylinder over the whole height (S 33), cylinder along y across the domain (S 32), sphere (S 51), wedge along x (S 61) or y (S 62) | `control.txt` |
+| NHFLOW (direct forcing) | box (A 581), cylinder along y (A 583), vertical cylinder (A 584), sphere (A 586), wedge along x (A 587) or y (A 588) | `ctrl.txt` |
+
+*Add* and *Draw* make a solid from the bed to the domain's top (for NHFLOW, whose
+domain ends at the still water, up to half the water depth above it). DIVEMesh's
+solids are meshed by *Run DIVEMesh*; NHFLOW takes them as A 580 says (0: they raise
+the bed, 1: immersed). In a script: `session.add_structure("S 33", [12.0, 2.5, 0.4])`.
 
 ## On the map
 

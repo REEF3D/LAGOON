@@ -221,7 +221,7 @@ _SETUP_TIPS = {
     "sections": "Discharge sections and flow files (P 167, P 168, P 230, P 240)",
     "forces": "Force boxes (P 81) and Morison cylinders (P 85)",
     "bodies": "Floating bodies, centre of gravity, moorings (X 23, X 110 - X 164, X 311 - X 322)",
-    "structures": "Direct forcing (A 581 - A 589) and porous (B 210 - B 270) structures",
+    "structures": "Direct forcing (A 581 - A 589) and porous (B 210 - B 291) structures",
     "regions": "Refinement boxes, wind areas and other regions (A 276, A 372, F 72, S 74)",
     "solids": "Outlines of DIVEMesh's solids (S); the solids themselves are a structure item",
     "bed": "The bed's topo objects (T); geo.dat's points are an item of their own",

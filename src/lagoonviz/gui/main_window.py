@@ -132,6 +132,10 @@ class MainWindow(QMainWindow):
         self.setup_panel.map_tab.drawDomain.connect(self.viewport.start_domain_drawing)
         self.viewport.domainDrawn.connect(self.setup_panel.map_tab.domain_drawn)
         self.viewport.modelTurned.connect(self.setup_panel.map_tab.model_turned)
+        # the Porous and Solids tabs draw a structure's plan there too
+        for tab in (self.setup_panel.porous_tab, self.setup_panel.solids_tab):
+            tab.drawArea.connect(self.viewport.start_domain_drawing)
+            self.viewport.areaDrawn.connect(tab.area_drawn)
         self.setup_panel.map_tab.newCase.connect(self.new_case_from_map_dialog)
 
         self.docks: dict[str, QDockWidget] = {}

@@ -6795,54 +6795,264 @@
    "documented": false
   },
   "B 270": {
-   "title": "",
+   "title": "VRANS porous box",
    "repeat": true,
-   "params": [],
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "n",
+     "type": "double"
+    },
+    {
+     "name": "d_50",
+     "type": "double"
+    },
+    {
+     "name": "α",
+     "type": "double"
+    },
+    {
+     "name": "β",
+     "type": "double"
+    }
+   ],
    "values": 10,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
-   "documented": false
+   "text": "Porosity n, mean grain diameter d_50 in m and the linear and nonlinear resistance coefficients α and β follow the coordinates in m. Not in the user guide yet.",
+   "documented": false,
+   "modules": "C"
   },
   "B 274": {
-   "title": "",
+   "title": "VRANS porous vertical cylinder",
    "repeat": true,
-   "params": [],
+   "params": [
+    {
+     "name": "x_center",
+     "type": "double"
+    },
+    {
+     "name": "y_center",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "radius",
+     "type": "double"
+    },
+    {
+     "name": "n",
+     "type": "double"
+    },
+    {
+     "name": "d_50",
+     "type": "double"
+    },
+    {
+     "name": "α",
+     "type": "double"
+    },
+    {
+     "name": "β",
+     "type": "double"
+    }
+   ],
    "values": 9,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
-   "documented": false
+   "text": "Porosity n, mean grain diameter d_50 in m and the linear and nonlinear resistance coefficients α and β follow the coordinates in m. Not in the user guide yet.",
+   "documented": false,
+   "modules": "C"
   },
   "B 281": {
-   "title": "",
+   "title": "VRANS porous wedge in x-direction",
    "repeat": true,
-   "params": [],
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "n",
+     "type": "double"
+    },
+    {
+     "name": "d_50",
+     "type": "double"
+    },
+    {
+     "name": "α",
+     "type": "double"
+    },
+    {
+     "name": "β",
+     "type": "double"
+    }
+   ],
    "values": 10,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
-   "documented": false
+   "text": "The top runs from z_start at x_start to z_end at x_end, the base at the lower. Porosity n, mean grain diameter d_50 in m and the linear and nonlinear resistance coefficients α and β follow the coordinates in m. Not in the user guide yet.",
+   "documented": false,
+   "modules": "C"
   },
   "B 282": {
-   "title": "",
+   "title": "VRANS porous wedge in y-direction",
    "repeat": true,
-   "params": [],
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "n",
+     "type": "double"
+    },
+    {
+     "name": "d_50",
+     "type": "double"
+    },
+    {
+     "name": "α",
+     "type": "double"
+    },
+    {
+     "name": "β",
+     "type": "double"
+    }
+   ],
    "values": 10,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
-   "documented": false
+   "text": "The top runs from z_start at y_start to z_end at y_end, the base at the lower. Porosity n, mean grain diameter d_50 in m and the linear and nonlinear resistance coefficients α and β follow the coordinates in m. Not in the user guide yet.",
+   "documented": false,
+   "modules": "C"
   },
   "B 291": {
-   "title": "",
+   "title": "VRANS porous plate in x-direction",
    "repeat": true,
-   "params": [],
+   "params": [
+    {
+     "name": "x_start",
+     "type": "double"
+    },
+    {
+     "name": "x_end",
+     "type": "double"
+    },
+    {
+     "name": "y_start",
+     "type": "double"
+    },
+    {
+     "name": "y_end",
+     "type": "double"
+    },
+    {
+     "name": "z_start",
+     "type": "double"
+    },
+    {
+     "name": "z_end",
+     "type": "double"
+    },
+    {
+     "name": "d",
+     "type": "double"
+    },
+    {
+     "name": "n",
+     "type": "double"
+    },
+    {
+     "name": "d_50",
+     "type": "double"
+    },
+    {
+     "name": "α",
+     "type": "double"
+    },
+    {
+     "name": "β",
+     "type": "double"
+    }
+   ],
    "values": 11,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
-   "documented": false
+   "text": "A band of thickness d in m above the line from z_start at x_start to z_end at x_end. Porosity n, mean grain diameter d_50 in m and the linear and nonlinear resistance coefficients α and β follow the coordinates in m. Not in the user guide yet.",
+   "documented": false,
+   "modules": "C"
   },
   "B 295": {
    "title": "VRANS source treatment for turbulence model",
