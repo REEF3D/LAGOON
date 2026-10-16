@@ -346,6 +346,9 @@ class DataManager:
         #: the time is moving (playing, the timeline dragged): in the streaming memory
         #: mode, large surfaces are read coarser meanwhile (FrameKey.detail)
         self.moving = False
+        #: the settings of each open case's derived quantities (case key -> Settings)
+        self._derived: dict[str, object] = {}
+        scene.subscribe(self._derived_changed)
 
     # ------------------------------------------------------------- cases
     def reload(self, case_item_id: str | None = None) -> list[str]:
@@ -418,7 +421,82 @@ class DataManager:
                     raise
                 self._cases[key] = case
                 self._errors.pop(key, None)
+                self._attach_derived(key, case)
             return case
+
+    # ------------------------------------------------------------- derived quantities
+    def derived_settings(self, key: str):
+        """The settings of a case's derived quantities (Manning's n, its formulas),
+        from its case item."""
+        from lagoonviz.core.data import derived
+
+        for item in self.scene:
+            if item.kind != "case":
+                continue
+            raw = str(item.properties.get("path", ""))
+            if not raw or (self._resolved.get(raw) or str(Path(raw).expanduser().resolve())) != key:
+                continue
+            try:
+                formulas = derived.parse_formulas(str(item.properties.get("formulas", "")))
+            except ValueError:
+                formulas = []
+            return derived.Settings(float(item.properties.get("manning_n", 0.025)), formulas)
+        return derived.Settings()
+
+    def _attach_derived(self, key: str, case) -> None:
+        from lagoonviz.core.data import derived
+
+        settings = self.derived_settings(key)
+        self._derived[key] = settings
+        for dataset in case.datasets.values():
+            try:
+                derived.attach(dataset, settings)
+            except Exception:  # noqa: BLE001 (a dataset without derived quantities)
+                continue
+
+    def _derived_changed(self, event: str, item_id: str | None) -> None:
+        """A case's formulas or Manning's n changed: its datasets derive anew, and the
+        frames and colour ranges read with the old ones are forgotten."""
+        if event not in ("changed", "added") or not item_id or item_id not in self.scene:
+            return
+        item = self.scene.get(item_id)
+        if item.kind != "case":
+            return
+        raw = str(item.properties.get("path", ""))
+        key = self._resolved.get(raw) or (str(Path(raw).expanduser().resolve()) if raw else "")
+        case = self._cases.get(key)
+        if case is None or self.derived_settings(key) == self._derived.get(key):
+            return
+        self._attach_derived(key, case)
+        self.cache.drop_case(key)
+        with self._samples_lock:
+            self._samples.clear()
+        self._auto_ranges.clear()
+
+    def derived_problems(self, item_id: str) -> list[str]:
+        """Why some of a case's formulas give nothing (in the datasets they fit none):
+        a formula that does not read, or uses variables no output has."""
+        from lagoonviz.core.data import derived
+
+        case_item = self.case_item(item_id)
+        if case_item is None:
+            return []
+        try:
+            formulas = derived.parse_formulas(str(case_item.properties.get("formulas", "")))
+        except ValueError as error:
+            return [str(error)]
+        case = self.case(case_item.id)
+        if case is None:
+            return []
+        problems = []
+        for name, _ in formulas:
+            plans = [getattr(d, "_derived", None) for d in case.datasets.values()]
+            plans = [p for p in plans if p is not None]
+            if any(name in p.components for p in plans):
+                continue
+            why = next((p.problems[name] for p in plans if name in p.problems), None)
+            problems.append(why or f"{name}: no output has its variables")
+        return problems
 
     def error(self, item_id: str) -> str | None:
         """Why the case of an item could not be opened, if it could not."""

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Derived quantities
+
+- Colour by (contour lines, vectors, slices, iso-surfaces) quantities worked out
+  from the output: on free surfaces and AMR surfaces with a water depth
+  `water_depth`, `froude`, `unit_discharge` (h·u, a vector), `hazard` (h·|u|) and
+  `bed_shear` (Manning, the case's *Manning's n*); `vorticity` on surfaces;
+  `vorticity` (the curl) and `q_criterion` through volumes, worked out in their
+  cells before slicing, so iso-surfaces of Q show the vortices (VTU and LAGOON
+  stores).
+- The case's *Formulas*: your own, `name = expression; ...`, numpy expressions of
+  the variables (`velocity.x`, `eta`, the built-ins, earlier formulas). Undo, the
+  saved session and the script keep them; the case's information lists those that
+  fit no output.
+
 ### The sea anywhere, rivers and tide gauges
 
 - The Sea tab has a *Source*: MET Norway (NORA3, NorKyst, as before; Norwegian
