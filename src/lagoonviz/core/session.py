@@ -2139,8 +2139,8 @@ class Session:
     ) -> str:
         """A statistics map of a surface output over a time window (``source``: its key,
         default the free surface; ``end`` 0: to the last output): per point the max,
-        min, mean, time of the maximum and change of ``variables`` (default eta,
-        velocity, the water depth, hazard, Froude, bed shear; a bed's elevation), the
+        min, mean, time of the maximum and change of ``variables`` (default eta and
+        velocity; a bed's elevation), the water depth's maximum, the
         significant wave height Hs from eta, when the water first arrives, how long it
         stays and the maximum inundation. Worked out now (``compute``) and kept in the
         case's ``LAGOON_Statistics`` folder. Returns the item."""

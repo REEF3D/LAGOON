@@ -236,14 +236,6 @@ class PropertiesPanel(QWidget):
             parts = [f"{d.label}: {len(d)} frames" for d in case.datasets.values()]
             if case.series:
                 parts.append(f"{len(case.series)} gauge, 6DOF or force files")
-            made: set[str] = set()
-            for dataset in case.datasets.values():
-                plan = getattr(dataset, "_derived", None)
-                if plan is not None:
-                    made.update(plan.components)
-            if made:
-                parts.append("Derived: " + ", ".join(sorted(made)))
-            parts += [f"Formula {p}" for p in data.derived_problems(item_id)]
             return "\n".join(parts)
         if item.kind == "setup":
             setup = data.case_setup(item_id)

@@ -67,37 +67,6 @@ Surfaces, slices and objects share these properties:
 Bodies, structures and the other objects have a **Material** (steel, concrete,
 rock, ice, wood): its colour, and how the [cinematic looks](cinematic.md) draw it.
 
-### Derived quantities
-
-Next to what the run wrote, *Colour by*, *Contour lines of*, *Vectors of*, slices and
-iso-surfaces offer quantities worked out from it, as ParaView's calculator does:
-
-| quantity | where | what |
-|---|---|---|
-| `water_depth` | free surface, AMR surface with a water depth | h: NHFLOW's `WL`, SFLOW's `waterlevel`, FNPF's `depth` + `eta` |
-| `froude` | the same, with a velocity | \|u\| / √(g h), 0 on dry land |
-| `unit_discharge` | the same | h·u, a vector (arrows, `.x`, `.y`) [m²/s] |
-| `hazard` | the same | flood hazard h·\|u\|, depth times velocity [m²/s] |
-| `bed_shear` | the same | ρ g n² \|u\|² / h^(1/3) [Pa], n: the case's *Manning's n* |
-| `vorticity` | surfaces (also the bed) with a velocity | ∂v/∂x − ∂u/∂y [1/s] |
-| `vorticity` | volumes with a velocity | the curl of the velocity, a vector [1/s] |
-| `q_criterion` | volumes with a velocity | Q = (\|Ω\|² − \|S\|²)/2: vortices where Q > 0 (an iso-surface at a small positive Q) |
-
-\|u\| is the horizontal velocity. Gradients come from the cells (each cell's
-least-squares fit, averaged to its points); a volume's are worked out piece by
-piece before it is cut, so slices and iso-surfaces of Q are those of the volume.
-
-The case's **Formulas** (its properties) add your own: `name = expression`, several
-separated by `;`, e.g. `speed2 = velocity.x**2 + velocity.y**2; deep = where(WL > 1,
-1, 0)`. An expression uses the variables (`velocity`, `velocity.x`, `eta`, a
-built-in above, an earlier formula) with `sqrt`, `abs`, `mag` (a vector's length),
-`where`, `maximum`, `minimum`, `clip`, `log`, `exp`, `sin`, `cos`, `tan`, `arctan2`,
-`pi`, `g` (9.81) and `rho` (1000); a vector times a scalar is a vector. A formula
-appears in the outputs that have its variables; the case's information says which
-it fits none of and why. Changing a formula works the frames out anew; it is a
-property, so undo, the saved session and the script keep it. A probe or a time
-series at a point of a derived quantity reads every output for it (slower).
-
 ## Statistics over time
 
 *Add → Statistics* makes a map of a surface output over a time window (the free
@@ -109,7 +78,7 @@ lies at the mean height of the surface over the window. Per point:
 
 | field | what |
 |---|---|
-| `<v>_max`, `<v>_min`, `<v>_mean` | of each variable (a vector: its magnitude), e.g. `velocity_max`, `hazard_max` (flood hazard), `froude_max`, `bed_shear_max` |
+| `<v>_max`, `<v>_min`, `<v>_mean` | of each variable (a vector: its magnitude), e.g. `velocity_max`, `eta_max` |
 | `<v>_time_of_max` | when the maximum came [s] |
 | `<v>_change` | the last output minus the first: a bed's `elevation_change` is its erosion (< 0) and deposition (> 0) |
 | `Hs` | the significant wave height Hm0 = 4 σ(η) over the window: wave penetration, harbour agitation (FNPF, NHFLOW, SFLOW free surfaces) |
@@ -123,8 +92,8 @@ Wet means a water depth above *Wet from* (0.01 m; the depth NHFLOW's `WL`, SFLOW
 `waterlevel` or FNPF's `depth` + `eta`), else `wetdry`. Waves and velocities count
 only while wet. Each output stands for the time half-way to its neighbours. *From*
 and *To* set the window (leave out the start-up; *To* 0: the last output),
-*Variables* which variables (the derived quantities too); the defaults are eta,
-velocity, water depth, hazard, Froude and bed shear, a bed's elevation. Changed,
+*Variables* which variables; the defaults are eta, velocity and the water depth
+(`WL`, `waterlevel`, `depth`), a bed's elevation. Changed,
 the map is made again with *Compute*. The outputs must keep their points (not AMR
 surfaces, whose patches move). In a script: `session.add_statistics(source="nhflow_free_surface",
 start=60.0)`.

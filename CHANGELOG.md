@@ -20,27 +20,13 @@
 ### Statistics over time
 
 - *Add → Statistics*: a map of the free surface (or the bed) over a time window:
-  per point the max, min, mean, time of the maximum and change of each variable
-  (also the derived ones: hazard, Froude, bed shear), the significant wave height
+  per point the max, min, mean, time of the maximum and change of each variable,
+  the significant wave height
   Hs = 4 σ(η) (wave penetration, harbour agitation), when the water first arrives,
   how long it stays, the maximum inundation, the deepest water and highest level
   (run-up). Worked out in a worker thread, kept in the case's `LAGOON_Statistics`
   folder; *Compute* makes it again for a new window. In a script
   `session.add_statistics(...)`.
-
-### Derived quantities
-
-- Colour by (contour lines, vectors, slices, iso-surfaces) quantities worked out
-  from the output: on free surfaces and AMR surfaces with a water depth
-  `water_depth`, `froude`, `unit_discharge` (h·u, a vector), `hazard` (h·|u|) and
-  `bed_shear` (Manning, the case's *Manning's n*); `vorticity` on surfaces;
-  `vorticity` (the curl) and `q_criterion` through volumes, worked out in their
-  cells before slicing, so iso-surfaces of Q show the vortices (VTU and LAGOON
-  stores).
-- The case's *Formulas*: your own, `name = expression; ...`, numpy expressions of
-  the variables (`velocity.x`, `eta`, the built-ins, earlier formulas). Undo, the
-  saved session and the script keep them; the case's information lists those that
-  fit no output.
 
 ### The sea anywhere, rivers and tide gauges
 

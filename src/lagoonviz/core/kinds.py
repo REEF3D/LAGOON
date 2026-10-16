@@ -263,22 +263,6 @@ KINDS: dict[str, KindSpec] = {
                 tip="Use the case's vertical scale for every item (surface, bed, bodies, "
                 "slices, gauges); off: each surface and bed has its own",
             ),
-            "formulas": PropertySpec(
-                "",
-                "Formulas",
-                tip="Your own variables to colour by: 'name = expression', several separated "
-                "by ';', e.g. 'speed2 = velocity.x**2 + velocity.y**2; deep = where(WL > 1, "
-                "1, 0)'. Numpy expressions of the variables (velocity.x, eta, froude, ...) "
-                "with sqrt, abs, mag, where, maximum, minimum, log, exp, sin, cos, pi, g, rho",
-            ),
-            "manning_n": PropertySpec(
-                0.025,
-                "Manning's n",
-                minimum=0.0,
-                maximum=1.0,
-                tip="Manning's roughness [s/m^(1/3)] for the bed shear stress (bed_shear = "
-                "rho g n² |u|² / h^(1/3))",
-            ),
         },
     ),
     "free_surface": KindSpec(
@@ -683,9 +667,8 @@ KINDS: dict[str, KindSpec] = {
             "of_variables": PropertySpec(
                 "",
                 "Variables",
-                tip="The variables, separated by commas (empty: eta, velocity, the water "
-                "depth, hazard, Froude, bed shear; a bed's elevation): their max, min, mean, "
-                "time of the maximum and change",
+                tip="The variables, separated by commas (empty: eta and velocity; a bed's "
+                "elevation): their max, min, mean, time of the maximum and change",
             ),
             "wet_depth": PropertySpec(
                 0.01, "Wet from [m]", minimum=0.0, tip="A water depth above this is wet"

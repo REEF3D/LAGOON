@@ -38,7 +38,7 @@ FOLDER = "LAGOON_Statistics"
 WET_DEPTH = 0.01
 #: variables of a free surface or bed taken without being asked for (those it has)
 AUTO = {
-    "free_surface": ("eta", "velocity", "water_depth", "hazard", "froude", "bed_shear"),
+    "free_surface": ("eta", "velocity"),
     "bed": ("elevation", "velocity", "bedload", "suspended", "shields"),
     "seastate": ("Hs", "Tp", "Tm01"),
 }
@@ -66,7 +66,7 @@ class Recipe:
 
 
 def default_variables(dataset) -> list[str]:
-    """The variables :data:`AUTO` names that a dataset has (on file or derived)."""
+    """The variables :data:`AUTO` names that a dataset has."""
     wanted = AUTO.get(dataset.role, ())
     found = [v for v in wanted if v in dataset.components]
     if not found:  # an output of its own kind: its scalars and vectors
@@ -74,13 +74,25 @@ def default_variables(dataset) -> list[str]:
     return found
 
 
-def _wetness(dataset) -> str | None:
-    """How a dataset says where it is wet: "water_depth" (derived), "wetdry", None."""
-    if "water_depth" in dataset.components:
-        return "water_depth"
+#: the water depth of an output: NHFLOW's WL, SFLOW's waterlevel, FNPF's depth + eta
+DEPTHS = (("WL",), ("waterlevel",), ("depth", "eta"))
+
+
+def _wetness(dataset) -> tuple[str, ...] | None:
+    """How a dataset says where it is wet: the arrays of its water depth (DEPTHS),
+    ("wetdry",), or None."""
+    if dataset.role in ("free_surface", "seastate"):
+        for names in DEPTHS:
+            if all(dataset.components.get(n) == 1 for n in names):
+                return names
     if "wetdry" in dataset.components:
-        return "wetdry"
+        return ("wetdry",)
     return None
+
+
+def _water_depth(point_data, names: tuple[str, ...]) -> np.ndarray:
+    values = [np.asarray(point_data[n], np.float64) for n in names]
+    return values[0] if len(values) == 1 else values[0] + values[1]
 
 
 def compute(
@@ -102,7 +114,7 @@ def compute(
         raise ValueError(f"{dataset.label} has no {', '.join(unknown)}")
     wet_by = _wetness(dataset)
     eta = "eta" if "eta" in dataset.components and dataset.role == "free_surface" else None
-    arrays = sorted({*variables, *([wet_by] if wet_by else []), *([eta] if eta else [])})
+    arrays = sorted({*variables, *(wet_by or ()), *([eta] if eta else [])})
     # how long each output stands for: half-way to its neighbours
     t = times[chosen]
     edges = np.concatenate([[t[0]], 0.5 * (t[1:] + t[:-1]), [t[-1]]])
@@ -130,11 +142,11 @@ def compute(
             )
         z = mesh.points[:, 2].astype(np.float64)
         z_sum += z
-        if wet_by == "water_depth":
-            depth = np.asarray(mesh.point_data["water_depth"], np.float64)
+        if wet_by and wet_by != ("wetdry",):
+            depth = _water_depth(mesh.point_data, wet_by)
             wet = depth > recipe.wet_depth
             max_depth = np.maximum(max_depth, np.where(np.isfinite(depth), depth, -np.inf))
-        elif wet_by == "wetdry":
+        elif wet_by:
             wet = np.asarray(mesh.point_data["wetdry"], np.float64) > 0.5
         else:
             wet = np.ones(n, bool)
@@ -161,9 +173,8 @@ def compute(
                     "last": values.copy(),
                 }
             # waves and velocities only while wet (the depth itself always)
-            use = (wet if name not in ("water_depth", "elevation") else np.ones(n, bool)) & (
-                np.isfinite(values)
-            )
+            always = name in ("WL", "waterlevel", "depth", "elevation")  # depths: always
+            use = (np.ones(n, bool) if always else wet) & (np.isfinite(values))
             higher = use & (values > a["max"])
             a["tmax"] = np.where(higher, times[k], a["tmax"])
             a["max"] = np.where(higher, values, a["max"])
@@ -196,7 +207,7 @@ def compute(
         data["wet_duration"] = wet_time
         data["ever_wet"] = (wet_count > 0).astype(np.float64)
         data["max_level"] = np.where(np.isfinite(max_level), max_level, np.nan)
-        if wet_by == "water_depth":
+        if wet_by != ("wetdry",):
             data["max_depth"] = np.where(np.isfinite(max_depth), max_depth, np.nan)
     points = first.points.copy()
     points[:, 2] = (z_sum / len(chosen)).astype(points.dtype)
@@ -212,7 +223,7 @@ def compute(
         "end": float(t[-1]),
         "outputs": len(chosen),
         "variables": variables,
-        "wetness": wet_by or "",
+        "wetness": " + ".join(wet_by or ()),
     }
     return out, facts
 

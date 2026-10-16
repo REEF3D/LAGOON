@@ -16,7 +16,7 @@ class Flood:
 
     role = "free_surface"
     label = "a flood"
-    components = {"eta": 1, "velocity": 3, "water_depth": 1}
+    components = {"eta": 1, "velocity": 3, "WL": 1}
 
     def __init__(self) -> None:
         self.points = np.array([[x, 0.0, 0.0] for x in range(5)], np.float32)
@@ -31,7 +31,7 @@ class Flood:
         data = {
             "eta": wave.astype(np.float32),
             "velocity": np.stack([speed, 0 * x, 0 * x], 1).astype(np.float32),
-            "water_depth": depth.astype(np.float32),
+            "WL": depth.astype(np.float32),
         }
         return SurfaceMesh(points, np.array([[0, 1, 2], [2, 3, 4]], np.uint32), data)
 
@@ -40,7 +40,7 @@ def test_the_statistics_of_a_flood():
     times = np.arange(6) * 10.0  # outputs every 10 s
     mesh, facts = statistics.compute(Flood(), times, statistics.Recipe("flood"))
     d = mesh.point_data
-    assert facts["outputs"] == 6 and facts["wetness"] == "water_depth"
+    assert facts["outputs"] == 6 and facts["wetness"] == "WL"
     # point x is wet from output x on: arrival, how long, ever wet
     np.testing.assert_allclose(d["first_wet"], [0, 10, 20, 30, 40])
     # each output stands for the time half-way to its neighbours (5 s at the ends)
