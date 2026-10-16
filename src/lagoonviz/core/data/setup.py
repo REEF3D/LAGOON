@@ -129,7 +129,39 @@ def reads_geo_dat(folder: str | Path, control: ControlFile | None = None) -> boo
             control = ControlFile.read(path)
         except Exception:  # noqa: BLE001 (a control.txt that does not read: as before)
             return True
-    return control.int("G 10", 0) > 0
+    return control.int("G 10", 0) > 0 or made_for_case(folder, control)
+
+
+def made_for_case(folder: Path, control: ControlFile) -> bool:
+    """Whether LAGOON made the folder's geo.dat for this case: its LAGOON_geo.dat.json
+    fits geo.dat as it is, the case's georeference and its domain (B 10), the domain
+    much of the area geo.dat was made for. (Made, but G 10 1 not saved yet.)"""
+    from lagoonviz.core.geo import recipe as recipes
+
+    made = recipes.read(folder)
+    if not made:
+        return False
+    georef = None
+    try:
+        from lagoon_format.geo import FILE, Georef
+
+        if (folder / FILE).is_file():
+            georef = Georef.from_json((folder / FILE).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 (no georeference that reads)
+        georef = None
+    box = control.values("B 10")
+    domain = [float(v) for v in box[:4]] if box and len(box) >= 4 else None
+    if recipes.stale(made, georef, domain):
+        return False
+    area = made.get("domain")
+    if domain is None or not area or len(area) < 4:
+        return True
+    ix = max(0.0, min(domain[1], area[1]) - max(domain[0], area[0]))
+    iy = max(0.0, min(domain[3], area[3]) - max(domain[2], area[2]))
+    a = (domain[1] - domain[0]) * (domain[3] - domain[2])
+    b = (area[1] - area[0]) * (area[3] - area[2])
+    union = a + b - ix * iy
+    return union > 0 and ix * iy / union > 0.1
 
 
 def has_inputs(case_dir: str | Path) -> bool:

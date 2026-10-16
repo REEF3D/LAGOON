@@ -1185,3 +1185,33 @@ def test_geo_dat_with_the_most_points_asked_for(fjord, terrain):
     session.make_geo_dat(terrain, spacing=1.0, most_points=5_000)
     assert "most_points=5000" in session.to_script()
     assert session.geo_dat_recipe()["most_points"] == 5_000
+
+
+def test_a_geo_dat_made_here_opens_before_g10_is_saved(fjord, terrain):
+    """geo.dat made in LAGOON, the case opened again before its control.txt (G 10 1)
+    was saved: LAGOON_geo.dat.json says it was made for this case (its georeference,
+    its domain), so its points and the map are there; the same geo.dat in a folder of
+    a much smaller case is not this case's."""
+    from lagoonviz.core.data.setup import reads_geo_dat
+
+    session = Session()
+    session.open_case(fjord)
+    session.set_georef("EPSG:25833", origin=(270000.0, 7040000.0), rotation_deg=30.0)
+    session.set_domain(100.0, 900.0, -300.0, 400.0)
+    session.save_inputs()
+    session.make_geo_dat(terrain)
+    assert "G 10" not in (fjord / "control.txt").read_text()  # not saved
+    assert reads_geo_dat(fjord)
+    kinds = {i.kind for i in Session_open(fjord).scene}
+    assert "geodat" in kinds
+    # a flume of a few metres in the same folder: not its geo.dat
+    control = fjord / "control.txt"
+    control.write_text(control.read_text().replace("B 10 100.0 900.0 -300.0 400.0", "B 10 0 3 0 1"))
+    assert "B 10 0 3 0 1" in control.read_text()
+    assert not reads_geo_dat(fjord)
+    # geo.dat changed by another program: not LAGOON's any more
+    control.write_text(control.read_text().replace("B 10 0 3 0 1", "B 10 100.0 900.0 -300.0 400.0"))
+    assert reads_geo_dat(fjord)
+    with open(fjord / "geo.dat", "a") as handle:
+        handle.write("1 1 1\n")
+    assert not reads_geo_dat(fjord)
