@@ -465,6 +465,14 @@ KINDS: dict[str, KindSpec] = {
             **_colouring("none", "viridis"),
         },
     ),
+    "amr_blocks": KindSpec(
+        "AMR blocks",
+        {
+            **_data_source("AMR blocks"),
+            **_colouring("level", "viridis"),
+            "line_width": PropertySpec(1.5, "Line width [px]", minimum=0.5, maximum=20.0),
+        },
+    ),
     "mooring": KindSpec(
         "Mooring lines",
         {

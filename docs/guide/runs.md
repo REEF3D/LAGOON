@@ -27,9 +27,19 @@ files (`.pvtu`, `.pvtp`) say which pieces belong together.
 
 A **CFD** run has no free surface file: it opens with its free surface as an
 iso-surface of the volume, *Free surface*, where the level set `phi` is 0 (coloured
-by the velocity), the volume itself switched off, and its floating bodies. CFD's
-AMR blocks (`REEF3D_CFD_AMR`, 3D grids) are not read yet; the case opens without
-them.
+by the velocity), the volume itself switched off, and its floating bodies.
+
+With **adaptive mesh refinement**, CFD writes the refined blocks of every output in
+`REEF3D_CFD_AMR`: an index per output (`REEF3D-CFD-AMR-<output>.vtm`) and its blocks,
+3D grids of half, a quarter, ... of the volume's cell size. LAGOON joins them to the
+volume (its label says *with AMR*): the volume's cells under a block are left out,
+and so are a block's cells under a finer block. The free surface, slices,
+iso-surfaces and iso-volumes are then as fine as the refinement, e.g. around a
+floating body; *Colour by* `level` shows where (0: the volume's own cells). The
+item **AMR blocks** (in the scene, switched off) draws the outlines of the blocks,
+coloured by their level. Only the blocks an output's index lists are read: a file
+left over from an earlier run is not. Streamlines and time series at a point come
+from the volume's own cells.
 
 **SEASTATE**, REEF3D's spectral wave model, writes maps of the sea state
 (`REEF3D_SEASTATE_VTP`): they open as a *Sea state* item, coloured by the

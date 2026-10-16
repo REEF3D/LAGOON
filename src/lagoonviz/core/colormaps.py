@@ -161,6 +161,7 @@ PLAIN_COLORS = {
     "volume": "#9aa7b4",
     "slice": "#9aa7b4",
     "mooring": "#e0a030",
+    "amr_blocks": "#ffd84a",
     "body": "#8f9aa6",
     "structure": "#a7a39b",
     "dem": "#6f6a64",  # rock

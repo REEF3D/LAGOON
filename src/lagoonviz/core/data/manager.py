@@ -71,6 +71,7 @@ PLAN_LAYERS = {
     "geodat": 3.5,  # over the water, under the set-up's marks
     "seastate": 3.0,  # where the free surface would be
     "mooring": 2.0,
+    "amr_blocks": 2.0,
     "free_surface": 3.0,
     "amr": 3.0,
     "statistics": 3.2,  # over the water: a map of it

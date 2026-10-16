@@ -133,7 +133,9 @@ class _GridHeader:
     time: float | None
 
 
-def _grid_header(path: Path) -> _GridHeader:
+def _grid_header(path: Path, volume: bool = False) -> _GridHeader:
+    """The header of a grid file: a 2D grid (an AMR surface's), or with ``volume`` a
+    3D block (CFD's AMR, :mod:`lagoonviz.core.data.amr3d`)."""
     text, data_start = _read_xml_head(path)
     try:
         root = ET.fromstring(text)
@@ -150,13 +152,16 @@ def _grid_header(path: Path) -> _GridHeader:
     if len(extent) != 6:
         raise VTKFormatError(f"{path}: bad Extent")
     nx, ny, nz = extent[1] - extent[0], extent[3] - extent[2], extent[5] - extent[4]
-    if nz != 0:
+    if nz != 0 and not volume:
         raise VTKFormatError(f"{path}: a 3D grid; AMR surfaces are 2D")
+    if nz == 0 and volume:
+        raise VTKFormatError(f"{path}: a 2D grid, not a block of a volume")
+    layers = nz + 1 if volume else 1
     header = PieceHeader(
         path=path,
         kind="RectilinearGrid",
-        n_points=(nx + 1) * (ny + 1),
-        n_cells=nx * ny,
+        n_points=(nx + 1) * (ny + 1) * layers,
+        n_cells=nx * ny * max(nz, 1),
         points=None,
         header_dtype=np.dtype(VTK_TYPES[header_type]).newbyteorder(byte_order),
         byte_order=byte_order,

@@ -6,8 +6,12 @@
 
 - A CFD case folder opens with its free surface (the level set phi at 0, an
   iso-surface of the volume) and its floating bodies; before, it showed the volume
-  only. A run with AMR (`REEF3D_CFD_AMR`, 3D blocks) no longer fails to open: the
-  blocks are left out for now.
+  only.
+- CFD's adaptive mesh refinement (`REEF3D_CFD_AMR`): the refined blocks of every
+  output join the volume, the coarser cells under them left out, so the free
+  surface, slices, iso-surfaces and iso-volumes are as fine as the refinement;
+  colour by `level` to see it. *AMR blocks* draws the blocks' outlines by level.
+  Before, these 3D blocks stopped the case from opening.
 
 ### The river drawn first
 

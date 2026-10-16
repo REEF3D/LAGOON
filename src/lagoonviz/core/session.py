@@ -151,6 +151,9 @@ class Session:
                     props["colormap"] = seastate.DEFAULT_COLORMAP
                 if kind == "seastate" and "wave_direction" in dataset.components:
                     props["vectors_of"] = "wave_direction"
+            if kind == "amr_blocks":  # there, switched off: a tick shows them
+                children.append(AddItem(kind, None, props, visible=False))
+                continue
             if kind == "volume" and "phi" in dataset.components:
                 # CFD: its free surface, the level set phi at 0; the volume switched off
                 children.append(AddItem(kind, None, props, visible=False))
