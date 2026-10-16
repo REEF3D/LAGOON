@@ -43,7 +43,14 @@ SERIES_FOLDERS = {
 WAVE_THEORY_FOLDER = "REEF3D_Log-Wave"
 #: the sea at the case from MET Norway, written for the set-up (lagoonviz.core.sea)
 SEA_FOLDER = "LAGOON_Sea"
-SEA_NAMES = {"nora3": "NORA3 waves", "norkyst": "NorKyst sea", "boundaries": "Boundaries"}
+SEA_NAMES = {
+    "nora3": "NORA3 waves",
+    "norkyst": "NorKyst sea",
+    "boundaries": "Boundaries",
+    "era5": "ERA5 waves",
+    "openmeteo": "Open-Meteo sea",
+    "glofas": "GloFAS river",
+}
 #: what REEF3D calls its print-outs (the User Guide's names, P 50 - P 140), by file
 #: name (lower case); {n}: the number in the name
 REEF3D_NAMES = (
@@ -118,6 +125,9 @@ class SeriesFile:
         if self.group == "sea conditions":  # NORA3-2020010504: NORA3 waves 2020-01-05 04:00
             what, _, when = stem.partition("-")
             label = SEA_NAMES.get(what.lower(), what)
+            if what.lower().startswith("gauge_"):  # Gauge_NOAA_8518750: NOAA gauge 8518750
+                _, source, code = (what.split("_", 2) + ["", ""])[:3]
+                label = f"{source} gauge {code}".strip()
             if len(when) == 10 and when.isdigit():
                 return f"{label} {when[:4]}-{when[4:6]}-{when[6:8]} {when[8:]}:00"
             return f"{label} {when}".strip()

@@ -346,46 +346,97 @@ bathymetry survey ([Maps and the place of a case](maps.md)).
 
 ## The sea at the case
 
-The panel's *Sea* tab reads the sea at a georeferenced case from MET Norway's
-hindcasts on thredds.met.no: **NORA3** (waves and wind, 3 km, hourly, from 1959,
-a month or two behind) and **NorKyst** (water level and current, 800 m, hourly,
-from 2017-02-20: v2 to 2023, v3 from 2024). It reads at the middle of the wave
-generation side (C 1x = 6), else at the domain's centre; the tab says where.
+The panel's *Sea* tab reads the sea at a georeferenced case, for its waves and its
+boundaries, and the water measured nearby, to compare a run with. *Source* chooses
+where the sea comes from (*Automatic*: MET Norway in its waters, Open-Meteo
+elsewhere):
 
-- *Find storms*: the largest wave events at the case in the years chosen (NORA3's
-  Hs, at least three days apart), with Tp, where they come from and the wind.
-  Choosing one sets the time window (a day before its peak to 12 hours after) and
-  the hour of the spectrum (its peak). Reading a year takes some seconds.
-- *Show the conditions*: NORA3's Hs, Tp, direction and wind and NorKyst's water
-  level and depth-averaged current over the window, as time series items (*NORA3
-  waves …*, *NorKyst sea …*). They are tables in the case's `LAGOON_Sea` folder,
+- **MET Norway** (thredds.met.no; Norwegian waters): **NORA3** (waves and wind, 3 km,
+  hourly, from 1959, a month or two behind, with 2D spectra) and **NorKyst** (water
+  level and current, 800 m, hourly, from 2017-02-20: v2 to 2023, v3 from 2024).
+- **Open-Meteo** (open-meteo.com; anywhere): **ERA5** waves and wind (ECMWF's
+  reanalysis, 0.5°, hourly, from 1940, a few days behind; no 2D spectra) and
+  **Météo-France's** sea level with the tide and the surge and its surface currents
+  (SMOC, 8 km, hourly, from 2022). Free for non-commercial use; for commercial use
+  give the key of an Open-Meteo plan in *API key* (kept in LAGOON's settings).
+
+It reads at the middle of the wave generation side (C 1x = 6), else at the domain's
+centre; the tab says where and from which source.
+
+- *Find storms*: the largest wave events at the case in the years chosen (Hs, at
+  least three days apart), with Tp, where they come from and the wind. Choosing one
+  sets the time window (a day before its peak to 12 hours after) and the hour of the
+  spectrum (its peak). Reading a year takes some seconds.
+- *Show the conditions*: Hs, Tp, direction and wind and the water level and current
+  over the window, as time series items (*NORA3 waves …*, *NorKyst sea …*, or *ERA5
+  waves …*, *Open-Meteo sea …*). They are tables in the case's `LAGOON_Sea` folder,
   time 0 at the window's start (UTC, written in the header); `beta` is where the
   waves go in the model (from its x-axis, as B 105), `u`, `v` the current in the
-  model's frame, `level` the still water level (F 60) plus NorKyst's zeta.
-- *Write spectrum-file-2d.dat*: NORA3's 2D wave spectrum (30 frequencies, 24
-  directions) at the hour chosen as REEF3D's `spectrum-file-2d.dat` in the case
-  folder: the directions within ±90° of the mean, turned into the model's frame
-  (its rotation and the grid's north), the energy per rad/s and rad. With *Set
-  ctrl.txt to them*, the wave generation follows it: B 85 11, B 92 31, B 93 Hs Tp,
-  B 105 the mean direction (its origin kept), B 130 1.
-- *Write boundary hydrographs*: NorKyst's water level and discharge along the
-  sides of the domain over the window: per side `hydrograph_FSF_<n>.dat` (time,
-  water level) and `hydrograph_Q_<n>.dat` (time, discharge into the domain), n = 1
-  x min, 2 y max, 3 y min, 4 x max; the sides more than half in NorKyst's water,
-  or those chosen. The discharge is the depth-averaged current across the side
-  times the water depth (NorKyst's, plus zeta), the level the still water level
-  plus the mean zeta along it. A *Boundaries* time series shows them all. With *Set
-  ctrl.txt to them*: B 440 n n (the side as a patch), B 421 n 1, B 422 n 1. The
-  User Guide gives patchBC for SFLOW and CFD.
+  model's frame, `level` the still water level (F 60) plus zeta. NorKyst's current
+  is depth-averaged, Open-Meteo's at the surface.
+- *Write spectrum-file-2d.dat* (MET Norway): NORA3's 2D wave spectrum (30
+  frequencies, 24 directions) at the hour chosen as REEF3D's `spectrum-file-2d.dat`
+  in the case folder: the directions within ±90° of the mean, turned into the
+  model's frame (its rotation and the grid's north), the energy per rad/s and rad.
+  With *Set ctrl.txt to them*, the wave generation follows it: B 85 11, B 92 31, B
+  93 Hs Tp, B 105 the mean direction (its origin kept), B 130 1.
+- *Set the waves (JONSWAP)* (Open-Meteo): ERA5's Hs, Tp and mean direction at the
+  hour; with *Set ctrl.txt to them* a JONSWAP spectrum: B 85 2, B 92 31, B 93 Hs Tp,
+  B 105 the direction (B 88, the peak enhancement, and the spreading B 130 stay as
+  they are). Where Open-Meteo serves no peak period, ERA5's mean period stands for
+  Tp (the table says so).
+- *Write boundary hydrographs*: the water level and discharge along the sides of
+  the domain over the window: per side `hydrograph_FSF_<n>.dat` (time, water level)
+  and `hydrograph_Q_<n>.dat` (time, discharge into the domain), n = 1 x min, 2 y
+  max, 3 y min, 4 x max; the sides more than half in the water, or those chosen. The
+  discharge is the current across the side times the water depth, the level the
+  still water level plus the mean zeta along it. NorKyst gives its own depth;
+  with Open-Meteo the depth comes from the case's bed (geo.dat, else the bottom of
+  the domain, B 10), and its sea level and current, asked about every 4 km along
+  the sides (its resolution), are interpolated between. A *Boundaries* time series
+  shows them all. With *Set ctrl.txt to them*: B 440 n n (the side as a patch), B
+  421 n 1, B 422 n 1. The User Guide gives patchBC for SFLOW and CFD.
+
+### A river
+
+*River (GloFAS)*: the daily discharge of the river at the case from **GloFAS** (the
+Copernicus flood service, 5 km, from 1984; through Open-Meteo, anywhere), hourly
+between the days over the window, time 0 at its start. It is read at the upstream
+end of the case's river corridor (the end nearer an inflow side), else at the middle
+of the inflow side (C 1x = 1), else at the domain's centre; the tab says where, and
+the message which GloFAS cell answered and how far it is. As `hydrograph.dat` for
+ioFlow (B 60 2), or as `hydrograph_Q_<n>.dat` for a side as a patch (B 440, B 421).
+A *GloFAS river* time series shows it. GloFAS is a model on a 5 km river network:
+small rivers may not be in it, and a point near a confluence may take the
+neighbour.
+
+### Tide gauges
+
+*Find gauges* lists the tide gauges nearest to the case (300 km at most) of
+**Kartverket** (Norway: observations and the tide predicted, relative to mean sea
+level, every 10 minutes), **NOAA CO-OPS** (USA: observations every 6 minutes and
+predictions, relative to MSL) and the **IOC** Sea Level Station Monitoring Facility
+(the world: raw observations of many agencies, without a datum: given about their
+mean over the window, not quality-controlled). *Show the measured water level*: the
+observed, the predicted and the surge (observed minus predicted) over the window,
+and `level` the still water level plus the observed, as a time series (*NOAA gauge
+8518750 …*) to compare the run's gauges with. *Use it as the water level at the
+sides*: the observed level (gaps filled linearly) as `hydrograph_FSF_<n>.dat` at the
+sides chosen above (B 440, B 422).
 
 ctrl.txt changes are one undo step each and are saved with the input files; the
 script repeats them as `set_input_text`. In a script: `session.find_storms(2015,
-2024)`, `session.sea_conditions("2020-01-05T00:00Z", "2020-01-06T00:00Z")`,
-`session.write_spectrum("2020-01-05T04:00Z")`,
-`session.write_boundaries(start, end, sides=[1, 4])`.
+2024, source="Open-Meteo")`, `session.sea_conditions("2020-01-05T00:00Z",
+"2020-01-06T00:00Z")`, `session.write_spectrum("2020-01-05T04:00Z")`,
+`session.write_waves("2023-03-10T06:00Z")`, `session.write_boundaries(start, end,
+sides=[1, 4])`, `session.river_discharge(start, end, target="B 60")`,
+`session.find_gauges()`, `session.gauge_levels("NOAA:8518750", start, end)`,
+`session.gauge_boundaries("Kartverket:TRD", start, end, [4])`.
 
-The data are MET Norway's under NLOD 2.0 / CC BY 4.0: name MET Norway (NORA3,
-NorKyst) when you publish results made with them.
+Name the data when you publish results made with them: MET Norway (NORA3,
+NorKyst; NLOD 2.0 / CC BY 4.0); Open-Meteo.com (CC BY 4.0) with Copernicus/ECMWF
+(ERA5, GloFAS) and Météo-France / Copernicus Marine (sea level, currents);
+Kartverket (NLOD 2.0), NOAA CO-OPS, the IOC Sea Level Station Monitoring Facility.
 
 ## Running DIVEMesh
 

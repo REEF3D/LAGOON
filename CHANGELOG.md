@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### The sea anywhere, rivers and tide gauges
+
+- The Sea tab has a *Source*: MET Norway (NORA3, NorKyst, as before; Norwegian
+  waters) or **Open-Meteo** (anywhere): ERA5 waves and wind from 1940 for the storms,
+  the conditions and a JONSWAP wave generation (B 85 2, B 93, B 105), and
+  Météo-France's sea level with the tide and its currents from 2022 for the
+  conditions and the boundary hydrographs (the depth from the case's bed).
+  *Automatic* takes MET Norway in its waters. An Open-Meteo API key for commercial
+  use.
+- *River (GloFAS)*: a river's daily discharge (Copernicus GloFAS through Open-Meteo,
+  from 1984) at the corridor's upstream end or the inflow side, hourly over the
+  window, as `hydrograph.dat` (ioFlow, B 60 2) or a side's `hydrograph_Q_<n>.dat`.
+- *Tide gauges*: the nearest gauges of Kartverket, NOAA CO-OPS and the IOC network;
+  their observed and predicted water level and the surge over the window as a time
+  series to compare a run with, or the observed level as the water level at sides
+  of the domain (`hydrograph_FSF_<n>.dat`, B 422).
+- In a script: `find_storms(..., source=...)`, `write_waves`, `river_discharge`,
+  `find_gauges`, `gauge_levels`, `gauge_boundaries`.
+
 ### A new SFLOW run, not the one before
 
 - A LAGOON store REEF3D started on top of an earlier run's (SFLOW before REEF3D's

@@ -349,6 +349,56 @@ def test_the_sea_tab(window, tmp_path, monkeypatch, qtbot):
     assert np.isclose(ctrl.values("B 93")[0], 4.0, atol=0.01)
 
 
+def test_the_sea_tab_anywhere(window, tmp_path, monkeypatch, qtbot):
+    """Away from Norway: Open-Meteo's storms and waves (JONSWAP), a river's
+    hydrograph, tide gauges (stand-ins for the services)."""
+    import json
+
+    from openmeteo_fake import FakeGauges, FakeOpenMeteo
+
+    from lagoonviz.core.geo import gauges as gg
+    from lagoonviz.core.geo import openmeteo as om
+    from lagoonviz.core.geo.crs import transformer
+
+    monkeypatch.setattr(om, "FETCH", FakeOpenMeteo())
+    monkeypatch.setattr(gg, "FETCH", FakeGauges(40.45, -73.85))
+    case = tmp_path / "bay"
+    case.mkdir()
+    (case / "control.txt").write_text("B 1 50\nB 10 0 2000 0 1000 -20 10\nC 11 6\nC 14 7\n")
+    (case / "ctrl.txt").write_text("A 10 5\nF 60 0.0\n")
+    x, y = transformer("EPSG:4326", "EPSG:32618")(-73.85, 40.45)
+    georef = {"version": 1, "crs": "EPSG:32618", "origin": [float(x), float(y)]}
+    (case / "georef.json").write_text(json.dumps(georef))
+    window.open_case(case)
+    tab = window.setup_panel.sea_tab
+    tab.refresh()
+    assert "Open-Meteo" in tab.where.text() and tab.storm_box.title() == "Storms (ERA5)"
+    assert tab.spectrum_button.text() == "Set the waves (JONSWAP)"
+    tab.first_year.setValue(2023)
+    tab.last_year.setValue(2023)
+    tab.count.setValue(2)
+    tab.storm_button.click()
+    qtbot.waitUntil(lambda: tab._runner is None and tab.table.rowCount() == 2, timeout=20000)
+    assert tab.table.item(0, 0).text() == "2023-03-10 06:00"
+    tab.table.selectRow(0)
+    tab.spectrum_button.click()
+    qtbot.waitUntil(lambda: tab._runner is None, timeout=20000)
+    assert window.session.input_file("ctrl.txt").values("B 85") == [2.0]
+    tab.river_button.click()
+    qtbot.waitUntil(lambda: tab._runner is None, timeout=20000)
+    assert (case / "hydrograph.dat").is_file()
+    tab.gauge_button.click()
+    qtbot.waitUntil(lambda: tab._runner is None and tab.gauge_list.count() > 0, timeout=20000)
+    assert "Kartverket" in tab.gauge_list.itemText(0)
+    tab.gauge_list.setCurrentIndex(1)  # NOAA
+    tab.levels_button.click()
+    qtbot.waitUntil(lambda: tab._runner is None, timeout=20000)
+    assert any(i.name.startswith("NOAA gauge") for i in window.session.scene)
+    # back to MET Norway by hand: the spectrum file again
+    tab.source.setCurrentIndex(tab.source.findData("MET Norway"))
+    assert tab.spectrum_button.text() == "Write spectrum-file-2d.dat"
+
+
 def test_a_turned_model_makes_geo_dat_again_before_divemesh(
     window, flume, tmp_path, qtbot, monkeypatch
 ):

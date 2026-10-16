@@ -1645,7 +1645,7 @@ class Session:
         job.run(progress)
         return job.finish()
 
-    # ------------------------------------------------------------- the sea (MET Norway)
+    # ------------------------------------------------------------- the sea
     def find_storms(
         self,
         first_year: int | None = None,
@@ -1653,11 +1653,13 @@ class Session:
         count: int = 10,
         case: str | None = None,
         progress=None,
+        source: str | None = None,
     ) -> list:
-        """The largest wave events at a case (NORA3, MET Norway; default the last ten
-        years): :class:`~lagoonviz.core.geo.metocean.Storm` s, the highest first. Read
-        at the middle of the wave generation side (else the domain's centre); the
-        case needs a georeference. Not an undo step."""
+        """The largest wave events at a case (default the last ten years):
+        :class:`~lagoonviz.core.geo.metocean.Storm` s, the highest first. ``source``:
+        "MET Norway" (NORA3) or "Open-Meteo" (ERA5); default MET Norway in its waters,
+        Open-Meteo elsewhere. Read at the middle of the wave generation side (else the
+        domain's centre); the case needs a georeference. Not an undo step."""
         from lagoonviz.core import sea
 
         first, last = sea.default_years()
@@ -1668,20 +1670,108 @@ class Session:
             last_year or last,
             count,
             progress,
+            source=source,
         )
         return found
 
-    def sea_conditions(self, start, end, case: str | None = None, progress=None) -> list[str]:
+    def sea_conditions(
+        self, start, end, case: str | None = None, progress=None, source: str | None = None
+    ) -> list[str]:
         """The sea at a case from ``start`` to ``end`` (UTC: ISO text, a datetime or
-        seconds since 1970): NORA3's waves and wind and NorKyst's water level and
-        current, as tables in the case's ``LAGOON_Sea`` folder, shown as time series
-        items (time 0 at ``start``). Returns the new items."""
+        seconds since 1970): the waves and wind and the water level and current (NORA3
+        and NorKyst, or ERA5 and Météo-France's sea level with the tide from
+        Open-Meteo; ``source`` as for :meth:`find_storms`), as tables in the case's
+        ``LAGOON_Sea`` folder, shown as time series items (time 0 at ``start``).
+        Returns the new items."""
         from lagoonviz.core import sea
 
         case_id = self._case_id(case)
-        written = sea.conditions(self, case_id, start, end, progress)
+        written = sea.conditions(self, case_id, start, end, progress, source=source)
         self.sea_notes = written.notes
         return self._show_sea_tables(case_id, written.files)
+
+    def write_waves(self, when, case: str | None = None, apply: bool = True) -> dict:
+        """The waves at a case at the hour ``when`` (UTC) from ERA5 (Open-Meteo): Hs, Tp
+        and the mean direction for a JONSWAP spectrum; with ``apply`` the wave
+        generation of ctrl.txt follows them (B 85 2, B 92 31, B 93, B 105; one undo
+        step). For NORA3's 2D spectrum: :meth:`write_spectrum`."""
+        from lagoonviz.core import sea
+
+        return sea.waves_at(self, self._case_id(case), when, apply)
+
+    def river_discharge(
+        self,
+        start,
+        end,
+        target: str | int = "B 60",
+        case: str | None = None,
+        apply: bool = True,
+        at: tuple[float, float] | None = None,
+    ):
+        """GloFAS's discharge of the river at a case (Open-Meteo) from ``start`` to
+        ``end`` (UTC), hourly, time 0 at ``start``: ``hydrograph.dat`` for ioFlow
+        (``target`` "B 60", B 60 2) or ``hydrograph_Q_<n>.dat`` for side n as a patch
+        (B 440, B 421); a table shown as a time series. Read at the river corridor's
+        upstream end, else the inflow side's middle, else the domain's centre; ``at``
+        = (x, y) to choose. With ``apply`` ctrl.txt follows (one undo step)."""
+        from lagoonviz.core import sea
+
+        case_id = self._case_id(case)
+        found = sea.river(self, case_id, start, end, target, apply, at)
+        self._show_sea_tables(case_id, [f for f in found.files if f.parent.name == sea.FOLDER])
+        return found
+
+    def find_gauges(
+        self,
+        case: str | None = None,
+        sources=("Kartverket", "NOAA", "IOC"),
+        count: int = 8,
+        radius_km: float = 300.0,
+    ) -> list:
+        """The tide gauges nearest to a case (Kartverket, NOAA CO-OPS, IOC):
+        :class:`~lagoonviz.core.geo.gauges.Station` s, the nearest first."""
+        from lagoonviz.core import sea
+
+        found, _ = sea.find_gauges(self, self._case_id(case), sources, count, radius_km)
+        return found
+
+    def gauge_levels(
+        self, station, start, end, case: str | None = None, progress=None
+    ) -> list[str]:
+        """The water levels measured at a gauge (:meth:`find_gauges`; or its source and
+        code as "NOAA:8518750") from ``start`` to ``end`` (UTC), with the tide
+        predicted where its source has it, as a table in ``LAGOON_Sea`` shown as a time
+        series (time 0 at ``start``): to compare a run with. Returns the new items."""
+        from lagoonviz.core import sea
+
+        case_id = self._case_id(case)
+        station = self._station(station, case_id)
+        _, table = sea.gauge_levels(self, case_id, station, start, end, progress)
+        return self._show_sea_tables(case_id, [table])
+
+    def gauge_boundaries(
+        self, station, start, end, sides, case: str | None = None, apply: bool = True
+    ) -> list:
+        """A gauge's observed water level as the water level at sides of a case's
+        domain (``hydrograph_FSF_<n>.dat``; with ``apply`` B 440, B 422: one undo step).
+        Returns the files written."""
+        from lagoonviz.core import sea
+
+        case_id = self._case_id(case)
+        station = self._station(station, case_id)
+        return sea.gauge_boundaries(self, case_id, station, start, end, list(sides), apply)
+
+    def _station(self, station, case_id: str):
+        """A gauge given as a Station, or as "SOURCE:CODE" (found near the case)."""
+        from lagoonviz.core.geo.gauges import Station
+
+        if isinstance(station, Station):
+            return station
+        source, _, code = str(station).partition(":")
+        for found in self.find_gauges(case_id, sources=(source,), count=10**6, radius_km=1e9):
+            if found.code == code:
+                return found
+        raise ValueError(f"no gauge {station!r}")
 
     def _show_sea_tables(self, case_id: str, files: list[Path]) -> list[str]:
         self.data.reload(case_id)
@@ -1728,17 +1818,19 @@ class Session:
         case: str | None = None,
         apply: bool = True,
         progress=None,
+        source: str | None = None,
     ) -> list:
-        """NorKyst's water level and discharge along the sides of a case's domain from
-        ``start`` to ``end`` (UTC): REEF3D's ``hydrograph_FSF_<n>.dat`` and
-        ``hydrograph_Q_<n>.dat`` per side in the water (n: 1 x min, 2 y max, 3 y min,
-        4 x max; ``sides`` to choose), a table of them shown as a time series; with
-        ``apply`` ctrl.txt gets the patches (B 440, B 421, B 422; one undo step).
-        Returns the sides written."""
+        """The water level and discharge along the sides of a case's domain from
+        ``start`` to ``end`` (UTC; NorKyst, or Open-Meteo's sea level and current with
+        the depth from the case's bed; ``source`` as for :meth:`find_storms`): REEF3D's
+        ``hydrograph_FSF_<n>.dat`` and ``hydrograph_Q_<n>.dat`` per side in the water
+        (n: 1 x min, 2 y max, 3 y min, 4 x max; ``sides`` to choose), a table of them
+        shown as a time series; with ``apply`` ctrl.txt gets the patches (B 440, B 421,
+        B 422; one undo step). Returns the sides written."""
         from lagoonviz.core import sea
 
         case_id = self._case_id(case)
-        chosen = sea.boundaries(self, case_id, start, end, sides, apply, progress)
+        chosen = sea.boundaries(self, case_id, start, end, sides, apply, progress, source=source)
         folder = self.data.case_folder(case_id)
         if chosen and folder is not None:
             from lagoonviz.core.geo.metocean import _utc
