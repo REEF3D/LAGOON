@@ -644,6 +644,9 @@ class CutPlan:
     line_a: np.ndarray | None = None  # (2q,) the grid lines' points, as a, b, t
     line_b: np.ndarray | None = None
     line_t: np.ndarray | None = None
+    #: an iso-surface's grid lines (where it crosses the cells' faces): pairs of its
+    #: own points (see :func:`with_grid_lines`)
+    outline_pairs: np.ndarray | None = None
 
     @property
     def n_points(self) -> int:
@@ -666,6 +669,8 @@ class CutPlan:
         if self.line_a is not None:  # a slice: its grid lines (none in a piece it misses)
             count = self.line_a.size
             outlines = (self.n_points + np.arange(count, dtype=np.uint32)).reshape(-1, 2)
+        elif self.outline_pairs is not None:  # an iso-surface: its grid lines
+            outlines = self.outline_pairs.astype(np.uint32)
         return SurfaceMesh(cut.astype(np.float32), self.triangles, data, outlines=outlines)
 
 
@@ -827,7 +832,38 @@ def orient_by_field(plan: CutPlan, points: np.ndarray, field: np.ndarray) -> Cut
     )
     flip = (normal * up[triangles].sum(axis=1)).sum(axis=1) < 0
     triangles[flip] = triangles[flip][:, [0, 2, 1]]
-    return CutPlan(plan.a, plan.b, plan.t, np.ascontiguousarray(triangles, dtype=np.uint32))
+    return replace(plan, triangles=np.ascontiguousarray(triangles, dtype=np.uint32))
+
+
+def with_grid_lines(
+    plan: CutPlan,
+    distance: np.ndarray,
+    connectivity: np.ndarray,
+    offsets: np.ndarray,
+    types: np.ndarray,
+) -> CutPlan:
+    """An iso-surface's plan (merged: one point per cut edge) with its grid lines:
+    where the surface crosses the faces of the cells (:func:`plan_cell_edges`), as
+    pairs of the surface's own points, so they lie on it and shade with it."""
+    none = np.zeros((0, 2), np.uint32)
+    if not plan.a.size:
+        return replace(plan, outline_pairs=none)
+    a, b, _ = plan_cell_edges(distance, connectivity, offsets, types)
+    if not a.size:
+        return replace(plan, outline_pairs=none)
+    span = int(max(plan.a.max(), plan.b.max(), a.max(), b.max())) + 1
+    own = np.minimum(plan.a, plan.b) * span + np.maximum(plan.a, plan.b)
+    order = np.argsort(own)
+    wanted = np.minimum(a, b) * span + np.maximum(a, b)
+    at = np.searchsorted(own[order], wanted)
+    at = np.minimum(at, own.size - 1)
+    found = own[order][at] == wanted
+    index = order[at]
+    pairs = index.reshape(-1, 2)
+    keep = found.reshape(-1, 2).all(axis=1) & (pairs[:, 0] != pairs[:, 1])
+    pairs = np.sort(pairs[keep], axis=1)
+    pairs = np.unique(pairs, axis=0) if len(pairs) else pairs
+    return replace(plan, outline_pairs=pairs.astype(np.uint32))
 
 
 def iso_lines(mesh: SurfaceMesh, field: np.ndarray, level: float) -> SurfaceMesh:

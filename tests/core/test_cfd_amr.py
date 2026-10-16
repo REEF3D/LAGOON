@@ -139,3 +139,26 @@ def test_outputs_without_blocks_and_the_block_outlines(tmp_path):
     assert outlines.segments.shape == (2 * 12, 2)
     assert sorted(set(outlines.point_data["level"])) == [1.0, 2.0]
     assert case.datasets["cfd_amr_blocks"].steps == [0, 1]
+
+
+def test_the_free_surface_shows_its_grid_lines(tmp_path):
+    root = cfd_amr_case(tmp_path)
+    s = Session()
+    s.open_case(root)
+    free = next(i for i in s.scene if i.kind == "iso_surface")
+    assert free.properties["grid_lines"] == "off"
+    s.set_property(free.id, "grid_lines", "dark")
+    mesh = s.data.load(free.id)
+    pairs = mesh.outlines.astype(np.int64)
+    assert len(pairs) and pairs.max() < mesh.n_points  # on the surface's own points
+    ends = mesh.points[pairs]
+    # every line lies in a face of a cell: one coordinate the same at both ends
+    same = np.isclose(ends[:, 0], ends[:, 1], atol=1e-5)
+    assert same.any(axis=1).all()
+    # finer inside the blocks: the level 2 block's x faces every 0.25 m
+    xs = np.unique(np.round(ends[:, :, 0][same[:, 0]][:, 0], 4))
+    inner = xs[(xs > 2.5) & (xs < 3.5)]
+    assert {2.75, 3.0, 3.25} <= set(inner.tolist())
+    shown = s.data.display(free.id, mesh)
+    lines = s.data.patch_outlines(free.id, mesh, shown)
+    assert lines is not None and lines.segments.shape == (len(pairs), 2, 3)

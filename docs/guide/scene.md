@@ -26,7 +26,7 @@ script the session writes ([Scripting](../scripting.md)).
 | Statistics | a map of an output over a time window: max, min, mean, time of the maximum, Hs, arrival and duration of the water, maximum inundation ([Statistics over time](#statistics-over-time)) |
 | Volume | the outside of the volume output |
 | Slice | the volume cut by an x, y or z plane |
-| Iso-surface | where a variable of the volume has a given value; on the free surface or the bed, the line where it has it |
+| Iso-surface | where a variable of the volume has a given value (*Grid lines*: where it crosses the cells); on the free surface or the bed, the line where it has it |
 | Sea state | SEASTATE's map of the sea state: Hs, periods, direction, with arrows where the waves go ([Opening runs](runs.md)) |
 | Iso-volume | the part of the volume where a variable lies in a range (the water of a CFD run: phi from 0 up); on the free surface or the bed, the part of the surface in the range |
 | Streamlines | lines along a vector field, through the volume, in a plane or on the free surface |

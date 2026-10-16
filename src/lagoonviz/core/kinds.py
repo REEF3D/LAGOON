@@ -389,6 +389,7 @@ KINDS: dict[str, KindSpec] = {
             ),
             "iso_value": PropertySpec(0.0, "Value", tip="Where the surface lies"),
             **_colouring("none", "ocean"),
+            **_grid_lines("the surface crosses (with AMR: of every level)"),
         },
     ),
     "iso_volume": KindSpec(

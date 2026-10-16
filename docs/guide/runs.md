@@ -35,8 +35,9 @@ With **adaptive mesh refinement**, CFD writes the refined blocks of every output
 volume (its label says *with AMR*): the volume's cells under a block are left out,
 and so are a block's cells under a finer block. The free surface, slices,
 iso-surfaces and iso-volumes are then as fine as the refinement, e.g. around a
-floating body; *Colour by* `level` shows where (0: the volume's own cells). The
-item **AMR blocks** (in the scene, switched off) draws the outlines of the blocks,
+floating body; *Colour by* `level` shows where (0: the volume's own cells), and the
+free surface's *Grid lines* (dark or white) draw where it crosses the cells' faces,
+of every level. The item **AMR blocks** (in the scene, switched off) draws the outlines of the blocks,
 coloured by their level. Only the blocks an output's index lists are read: a file
 left over from an earlier run is not. Streamlines and time series at a point come
 from the volume's own cells.

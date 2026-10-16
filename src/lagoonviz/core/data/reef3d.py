@@ -37,6 +37,7 @@ from lagoonviz.core.data.mesh import (
     triangulate,
     tubes,
     variable_names,
+    with_grid_lines,
 )
 from lagoonviz.core.data.profiles import ProfileSet, find_profiles
 from lagoonviz.core.data.series import SeriesFile, find_series
@@ -515,8 +516,10 @@ class Dataset:
             field = scalar_values(piece.point_data, variable)
             if field is None:
                 raise ValueError("an iso-surface needs a variable")
-            plan = plan_level(field.astype(np.float64) - value, connectivity, offsets, types, True)
+            distance = field.astype(np.float64) - value
+            plan = plan_level(distance, connectivity, offsets, types, True)
             plan = orient_by_field(plan, piece.points, field)
+            plan = with_grid_lines(plan, distance, connectivity, offsets, types)
             parts.append(plan.apply(piece.points, piece.point_data))
         return _joined(parts)
 

@@ -11,6 +11,8 @@
   output join the volume, the coarser cells under them left out, so the free
   surface, slices, iso-surfaces and iso-volumes are as fine as the refinement;
   colour by `level` to see it. *AMR blocks* draws the blocks' outlines by level.
+- Iso-surfaces, also CFD's free surface, have *Grid lines*: where the surface
+  crosses the faces of the cells (with AMR, of every level).
   Before, these 3D blocks stopped the case from opening.
 
 ### The river drawn first
