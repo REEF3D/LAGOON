@@ -25,6 +25,12 @@ particles, and the text files of wave gauges (`WSF`), free surface lines (`WSFLI
 6DOF motions and forces. Each MPI rank's piece is read and joined; the parallel
 files (`.pvtu`, `.pvtp`) say which pieces belong together.
 
+A **CFD** run has no free surface file: it opens with its free surface as an
+iso-surface of the volume, *Free surface*, where the level set `phi` is 0 (coloured
+by the velocity), the volume itself switched off, and its floating bodies. CFD's
+AMR blocks (`REEF3D_CFD_AMR`, 3D grids) are not read yet; the case opens without
+them.
+
 **SEASTATE**, REEF3D's spectral wave model, writes maps of the sea state
 (`REEF3D_SEASTATE_VTP`): they open as a *Sea state* item, coloured by the
 significant wave height `Hs` on the rainbow map (as SEASTATE's own maps), with

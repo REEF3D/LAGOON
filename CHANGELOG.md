@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### CFD cases
+
+- A CFD case folder opens with its free surface (the level set phi at 0, an
+  iso-surface of the volume) and its floating bodies; before, it showed the volume
+  only. A run with AMR (`REEF3D_CFD_AMR`, 3D blocks) no longer fails to open: the
+  blocks are left out for now.
+
 ### The river drawn first
 
 - River tab: **Draw the river** on the map as a line, point by point from upstream,

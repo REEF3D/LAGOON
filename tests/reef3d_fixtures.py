@@ -199,6 +199,8 @@ def _volume_piece(i0: int, i1: int, frame: int, nz: int = 3, cartesian: bool = F
         "velocity": velocity.astype(np.float32),
         "pressure": (1000 * 9.81 * (DEPTH - points[:, 2])).astype(np.float32),
     }
+    if cartesian:  # CFD: the level set, the distance below the free surface
+        data["phi"] = (DEPTH + e.ravel() - points[:, 2]).astype(np.float32)
     offsets = np.arange(1, len(cells) + 1) * 8
     types = np.full(len(cells), 12, np.uint8)
     return points, data, cells.ravel(), offsets, types

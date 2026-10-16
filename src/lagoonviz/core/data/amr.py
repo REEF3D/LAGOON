@@ -20,6 +20,7 @@ its grid's ``level``, so the surface can be coloured by refinement level.
 
 from __future__ import annotations
 
+import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -37,6 +38,8 @@ from lagoonviz.core.data.vtkxml import (
     _read_xml_head,
     read_array,
 )
+
+log = logging.getLogger(__name__)
 
 #: ``REEF3D_NHFLOW_AMR``
 AMR_FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_AMR$")
@@ -502,6 +505,10 @@ def amr_datasets(folder: Path) -> list[Dataset]:
     if not frames:
         return []
     frames.sort(key=lambda frame: frame.step)
-    dataset = AmrDataset(f"{solver.lower()}_amr", solver, frames, folder)
+    try:
+        dataset = AmrDataset(f"{solver.lower()}_amr", solver, frames, folder)
+    except VTKFormatError as error:  # e.g. CFD's 3D blocks: not a surface
+        log.warning("%s: not read as an AMR surface: %s", folder, error)
+        return []
     _times_from_files(dataset)
     return [dataset]

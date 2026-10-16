@@ -799,10 +799,18 @@ class Case:
                     if matches:
                         found[role] = matches[0]
                 return found
-            chosen = {"volume": max(volumes, key=lambda d: d.written_span()[1])}
-            solid = self._solids_of(chosen["volume"])
+            lead = max(volumes, key=lambda d: d.written_span()[1])
+            chosen = {"volume": lead}
+            solid = self._solids_of(lead)
             if solid is not None:
                 chosen = {"solid": solid, **chosen}
+            # objects of the same run (CFD's floating bodies, structures)
+            for role in ("body", "mooring", "structure", "dem", "ice", "rods", "particles"):
+                options = [
+                    d for d in self.datasets.values() if d.role == role and d.same_run_as(lead)
+                ]
+                if options:
+                    chosen[role] = max(options, key=len)
             return chosen
         free = [d for d in surfaces if d.role == "free_surface"]
         lead = preferred(free or surfaces)

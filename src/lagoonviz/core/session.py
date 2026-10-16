@@ -124,7 +124,8 @@ class Session:
 
     def open_case(self, path: str | Path, name: str | None = None) -> str:
         """Open a REEF3D case and show its free surface and bed (its volume is there,
-        switched off). Returns the case id.
+        switched off; a CFD run's free surface is the level set phi at 0, an
+        iso-surface of its volume), and its bodies. Returns the case id.
 
         ``path`` is a case folder, one of its ``REEF3D_*`` output folders, or a file.
         A case folder without output yet shows its set-up from the input files
@@ -150,6 +151,16 @@ class Session:
                     props["colormap"] = seastate.DEFAULT_COLORMAP
                 if kind == "seastate" and "wave_direction" in dataset.components:
                     props["vectors_of"] = "wave_direction"
+            if kind == "volume" and "phi" in dataset.components:
+                # CFD: its free surface, the level set phi at 0; the volume switched off
+                children.append(AddItem(kind, None, props, visible=False))
+                free = {"iso_by": "phi", "iso_value": 0.0}
+                if "dataset" in props:
+                    free["dataset"] = props["dataset"]
+                if "velocity" in dataset.components:
+                    free["variable"] = "velocity"
+                children.append(AddItem("iso_surface", "Free surface", free))
+                continue
             children.append(AddItem(kind, None, props))
         volume = case.main_volume()
         if volume is not None:  # in the scene, switched off: a tick shows it
