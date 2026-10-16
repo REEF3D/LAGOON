@@ -553,7 +553,7 @@ floes (`fnpf_ice`). It writes every output at once, the inner chunk being filled
 again with each output, so a store can be read during a run; `P 18 1` leaves out
 their VTP files.
 
-## 11. Adaptive mesh refinement surfaces
+## 11. Adaptive mesh refinement surfaces and blocks
 
 REEF3D's AMR solvers (FNPF, NHFLOW and SFLOW with `A 270`) compute the free
 surface on a level-0 grid and on refined patches, each finer by a factor of 2 per
@@ -586,6 +586,22 @@ another:
 | `grids/cell_end`      | (ng,)     | int64   | end of each grid's cells in the cell fields |
 | `x`, `y`              | (nn,)     | float64 | node coordinates of each grid, rising (`nx + 1`, `ny + 1` per grid) [m] |
 | `cell_data/<array>`   | (nc[, c]) | as written | cell values of each grid, `nx · ny` per grid, x fastest |
+
+**Blocks of a volume** (`"dims": 3` in the set's attributes): REEF3D::CFD's adaptive
+mesh refinement refines its volume in 3D blocks; level 0 is the volume itself
+(section 4), the set holds the refined blocks (level 1 and up). Such a set has, in
+addition,
+
+| array                 | shape     | dtype   | content |
+|-----------------------|-----------|---------|---------|
+| `grids/size`          | (ng, 3)   | int32   | `[nx, ny, nz]`, cells in x, y and z (in place of the 2D sizes) |
+| `grids/z_end`         | (ng,)     | int64   | end of each grid's node coordinates in `z` |
+| `z`                   | (nn,)     | float64 | node coordinates in z of each grid, rising (`nz + 1` per grid) [m] |
+
+and `nx · ny · nz` cell values per grid, x fastest, then y, then z. REEF3D writes
+the set `cfd_amr` with `P 18`: `phi`, `pressure`, the velocity at the cell centres
+as `u`, `v`, `w`, the grid's `level` and `covered` (1 where a finer block lies over
+the cell) as int32, and the heat (`T`) or concentration (`C`) if computed.
 
 A grid's cells are the rectangles between its nodes; cell `(i, j)` lies between
 `x[i]`, `x[i+1]` and `y[j]`, `y[j+1]`. An output lists level 0 first, then the

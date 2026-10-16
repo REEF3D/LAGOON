@@ -800,8 +800,17 @@ def store_datasets(path: str | Path) -> list[Dataset]:
     ]
     datasets += [StoreBodyDataset(store, bodies) for bodies in store.bodies.values() if len(bodies)]
     datasets += [StoreParticleDataset(store, p) for p in store.particles.values() if len(p)]
-    datasets += [StoreAmrDataset(store, a) for a in store.amr.values() if len(a)]
+    datasets += [StoreAmrDataset(store, a) for a in store.amr.values() if len(a) and a.dims != 3]
     return datasets
+
+
+def store_blocks(path: str | Path) -> list[tuple[str, object]]:
+    """The refined blocks of a store's volume (CFD's AMR sets of 3D grids): (solver,
+    :class:`~lagoonviz.core.data.amr3d.StoreBlocks`)."""
+    from lagoonviz.core.data.amr3d import StoreBlocks
+
+    store = Store(path)
+    return [(store.solver, StoreBlocks(a)) for a in store.amr.values() if len(a) and a.dims == 3]
 
 
 def find_stores(case_dir: Path) -> list[Path]:

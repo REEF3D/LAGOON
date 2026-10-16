@@ -162,3 +162,35 @@ def test_the_free_surface_shows_its_grid_lines(tmp_path):
     shown = s.data.display(free.id, mesh)
     lines = s.data.patch_outlines(free.id, mesh, shown)
     assert lines is not None and lines.segments.shape == (len(pairs), 2, 3)
+
+
+def test_the_blocks_in_a_lagoon_store(tmp_path):
+    """lagoon-convert puts the blocks into the store (an AMR set of 3D grids, as
+    REEF3D does with P 18); the case opens from the store alone just the same."""
+    from lagoon_format.store import Store
+
+    from lagoonviz.core.convert import convert
+
+    root = cfd_amr_case(tmp_path)
+    s = Session()
+    from_files = s.data.case(s.open_case(root)).datasets["cfd_volume"]
+    expected = from_files.read_iso(1, "phi", 0.0, ["level"])
+    convert(root)
+    store = Store(root / "REEF3D_CFD.lagoon")
+    blocks = store.amr["cfd_amr"]
+    assert blocks.dims == 3 and len(blocks) == 3
+    assert blocks.fields["velocity"][0] == 3 and len(blocks.grids(0)) == 2
+    # the store alone: no VTU, no AMR folder
+    shutil.rmtree(root / "REEF3D_CFD_VTU")
+    shutil.rmtree(root / "REEF3D_CFD_AMR")
+    s = Session()
+    case = s.data.case(s.open_case(root))
+    volume = case.datasets["cfd_volume"]
+    assert type(volume).__name__ == "RefinedVolume"
+    assert type(volume.blocks).__name__ == "StoreBlocks"
+    got = volume.read_iso(1, "phi", 0.0, ["level"])
+    assert set(np.unique(got.point_data["level"])) == {0.0, 1.0, 2.0}
+    inner = got.points[got.point_data["level"] == 2]
+    assert len(inner) == (expected.point_data["level"] == 2).sum()
+    outlines = s.data.load(next(i.id for i in s.scene if i.kind == "amr_blocks"))
+    assert outlines.segments.shape == (24, 2)

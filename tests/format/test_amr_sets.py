@@ -157,3 +157,57 @@ def test_paraview_reader_amr(tmp_path):
         widths = np.outer(np.diff(grid.y), np.diff(grid.x)).ravel()
         area += widths[ghosts == 0].sum()
     assert area == pytest.approx(8.0 * 3.0)  # the leaf cells cover the domain once
+
+
+def _blocks(t: int) -> list[AmrGrid]:
+    """CFD's refined blocks of a volume: 3D grids, a level 1 block and a level 2 one."""
+    rng = np.random.default_rng(100 + t)
+
+    def block(level, rank, x0, x1, y0, y1, z0, z1, d):
+        x, y, z = (np.arange(a, b + 0.5 * d, d) for a, b in ((x0, x1), (y0, y1), (z0, z1)))
+        shape = (len(z) - 1, len(y) - 1, len(x) - 1)
+        fields = {
+            "phi": rng.normal(size=shape).astype(np.float32),
+            "velocity": rng.normal(size=(*shape, 3)).astype(np.float32),
+            "covered": (rng.uniform(size=shape) > 0.5).astype(np.int32),
+        }
+        return AmrGrid(level, x, y, fields, rank, z=z)
+
+    shift = 0.25 * t
+    return [
+        block(1, 0, 1.0 + shift, 3.0 + shift, 0.0, 1.0, 0.5, 1.5, 0.25),
+        block(2, 1, 1.5 + shift, 2.5 + shift, 0.25, 0.75, 0.75, 1.25, 0.125),
+    ]
+
+
+def test_an_amr_set_of_3d_blocks(tmp_path):
+    path = tmp_path / "REEF3D_CFD.lagoon"
+    writer = StoreWriter.create(path, "CFD")
+    fields = {"phi": (1, "float32"), "velocity": (3, "float32"), "covered": (1, "int32")}
+    amr = writer.amr_writer("cfd_amr", {"fields": fields, "dims": 3, "source": "REEF3D_CFD_AMR"})
+    for t in range(4):
+        amr.append(0.1 * t, t, _blocks(t))
+    writer.close()
+    stored = Store(path).amr["cfd_amr"]
+    assert stored.dims == 3 and stored.info["dims"] == 3 and len(stored) == 4
+    for t in range(4):
+        got, expected = stored.grids(t), _blocks(t)
+        _same(got, expected)
+        for a, b in zip(got, expected, strict=True):
+            assert a.nz == b.nz and np.array_equal(a.z, b.z)
+            assert a.fields["velocity"].shape == (b.nz, b.ny, b.nx, 3)
+        assert stored.table(t)["size"].shape == (2, 3)
+    # appending later goes on where it stopped (z too)
+    writer = StoreWriter(path)
+    amr = writer.amr_writer("cfd_amr")
+    amr.append(0.4, 4, _blocks(4))
+    writer.close()
+    stored = Store(path).amr["cfd_amr"]
+    _same(stored.grids(4), _blocks(4))
+    assert np.array_equal(stored.grids(4)[1].z, _blocks(4)[1].z)
+    # a 2D grid has no place in it, a block without z neither
+    writer = StoreWriter(path)
+    amr = writer.amr_writer("cfd_amr")
+    flat = AmrGrid(1, np.arange(3.0), np.arange(2.0), {n: np.zeros(2) for n in fields})
+    with pytest.raises(ValueError, match="cells"):
+        amr.append(0.5, 5, [flat])

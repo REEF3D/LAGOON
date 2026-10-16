@@ -47,7 +47,9 @@ from lagoonviz.core.scene import MODE_KINDS, SETUP_KINDS, Scene, SceneItem
 from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
 
 #: item kinds that show a dataset, and the dataset role they use by default
-DATA_KINDS = {kind: role for role, kind in ROLES.items() if role not in ("solid", "topo")} | {
+DATA_KINDS = {
+    kind: role for role, kind in ROLES.items() if role not in ("solid", "topo", "forcing")
+} | {
     "slice": "volume",
     "iso_surface": "volume",
     "iso_volume": "volume",

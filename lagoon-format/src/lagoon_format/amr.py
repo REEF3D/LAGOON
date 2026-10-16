@@ -4,10 +4,12 @@
 
 REEF3D's AMR solvers (FNPF, NHFLOW, SFLOW with ``A 270``) write their free surface
 as a set of 2D rectilinear grids per output: level 0 (one grid per MPI rank) and
-the refined patches, which come and go as the solution is regridded. An *AMR set*
-``amr/<key>`` keeps the grids of all outputs one after another: a table of the
-grids (refinement level, MPI rank, size, where its coordinates and cells end), the
-node coordinates in ``x`` and ``y``, and the cell fields.
+the refined patches, which come and go as the solution is regridded. CFD writes
+the refined blocks of its volume as 3D grids (``dims`` 3; its level 0 is the
+volume). An *AMR set* ``amr/<key>`` keeps the grids of all outputs one after
+another: a table of the grids (refinement level, MPI rank, size, where its
+coordinates and cells end), the node coordinates in ``x``, ``y`` (and ``z``), and
+the cell fields.
 
     writer = AmrWriter.create(parent, "nhflow_amr", {"eta": (1, "float32")})
     writer.append(0.5, 1, [AmrGrid(0, x, y, {"eta": eta}), AmrGrid(1, xp, yp, {...})])
@@ -44,19 +46,37 @@ GRID_TABLE = {
     "y_end": ("int64", 1),
     "cell_end": ("int64", 1),
 }
+#: the per-grid table of a set of 3D grids (``dims`` 3)
+GRID_TABLE_3D = {**GRID_TABLE, "size": ("int32", 3), "z_end": ("int64", 1)}
+
+
+def grid_table(dims: int) -> dict[str, tuple[str, int]]:
+    """The per-grid table of a set of 2D or 3D grids."""
+    return GRID_TABLE_3D if int(dims) == 3 else GRID_TABLE
 
 
 @dataclass
 class AmrGrid:
     """One grid of an output: ``x`` (nx + 1) and ``y`` (ny + 1) node coordinates, cell
     fields of shape (ny, nx[, components]) with x fastest, its refinement level and the
-    MPI rank that wrote it (-1: not known)."""
+    MPI rank that wrote it (-1: not known). A 3D grid (a block of CFD's volume) has
+    ``z`` (nz + 1) node coordinates too, its fields of shape (nz, ny, nx[, c])."""
 
     level: int
     x: np.ndarray
     y: np.ndarray
     fields: dict[str, np.ndarray] = field(default_factory=dict)
     rank: int = -1
+    z: np.ndarray | None = None
+
+    @property
+    def nz(self) -> int:
+        """Cells in z; 0 for a 2D grid."""
+        return 0 if self.z is None else int(np.asarray(self.z).size) - 1
+
+    @property
+    def cells(self) -> int:
+        return self.nx * self.ny * max(self.nz, 1)
 
     @property
     def nx(self) -> int:
@@ -137,6 +157,11 @@ class AmrSet:
         """The cell fields: name -> (components, data type)."""
         return _fields(self.info.get("fields", {}))
 
+    @property
+    def dims(self) -> int:
+        """2: grids of a surface; 3: blocks of a volume."""
+        return int(self.info.get("dims", 2))
+
     def __len__(self) -> int:
         return self.group.array("time").shape[0]  # time is extended last
 
@@ -186,8 +211,9 @@ class AmrSet:
         """The grids of output t: ``level``, ``rank``, ``size`` (nx, ny cells), and
         the start and end of each grid's ``x``, ``y`` and cells."""
         g0, g1 = self._grid_span(t)
-        rows = {name: self._rows(f"grids/{name}", g0, g1) for name in GRID_TABLE}
-        for name in ("x", "y", "cell"):
+        rows = {name: self._rows(f"grids/{name}", g0, g1) for name in grid_table(self.dims)}
+        axes = ("x", "y", "z") if self.dims == 3 else ("x", "y")
+        for name in (*axes, "cell"):
             before = self._rows(f"grids/{name}_end", g0 - 1, g0) if g0 > 0 else np.zeros(1)
             ends = rows[f"{name}_end"].astype(np.int64)
             rows[f"{name}_start"] = np.concatenate([before.astype(np.int64), ends[:-1]])
@@ -210,16 +236,23 @@ class AmrSet:
         c0, c1 = int(rows["cell_start"][0]), int(rows["cell_end"][-1])
         values = {name: self._rows(f"cell_data/{arrays[name]}", c0, c1) for name in names}
         x0, y0 = int(rows["x_start"][0]), int(rows["y_start"][0])
+        volume = self.dims == 3
+        if volume:
+            z = self._rows("z", int(rows["z_start"][0]), int(rows["z_end"][-1]))
+            z0 = int(rows["z_start"][0])
         grids = []
         for g in range(len(rows["level"])):
-            nx, ny = (int(v) for v in rows["size"][g])
+            size = [int(v) for v in rows["size"][g]]
+            nx, ny = size[0], size[1]
             xs = slice(int(rows["x_start"][g]) - x0, int(rows["x_end"][g]) - x0)
             ys = slice(int(rows["y_start"][g]) - y0, int(rows["y_end"][g]) - y0)
             cs = slice(int(rows["cell_start"][g]) - c0, int(rows["cell_end"][g]) - c0)
+            shape = (size[2], ny, nx) if volume else (ny, nx)
             grid_fields = {}
             for name in names:
                 part = values[name][cs]
-                grid_fields[name] = part.reshape((ny, nx, *part.shape[1:]))
+                grid_fields[name] = part.reshape((*shape, *part.shape[1:]))
+            zs = slice(int(rows["z_start"][g]) - z0, int(rows["z_end"][g]) - z0) if volume else None
             grids.append(
                 AmrGrid(
                     level=int(rows["level"][g]),
@@ -227,6 +260,7 @@ class AmrSet:
                     y=np.asarray(y[ys], np.float64),
                     fields=grid_fields,
                     rank=int(rows["rank"][g]),
+                    z=np.asarray(z[zs], np.float64) if volume else None,
                 )
             )
         return grids
@@ -241,20 +275,28 @@ class AmrWriter:
         self.info = group.attrs.get("lagoon", {})
         self.stored = AmrSet(group, self.info)
         self.fields = self.stored.fields
+        self.dims = self.stored.dims
+        self._table = grid_table(self.dims)
         self._field_arrays = _arrays(self.info.get("fields", {}))
         n = len(self.stored)
         self._grid_end = int(self.stored._per_output("grid_end")[-1]) if n else 0
         ends = {}
-        for name in ("x_end", "y_end", "cell_end"):
+        for name in ("x_end", "y_end", "z_end", "cell_end"):
+            if name not in self._table:
+                ends[name] = 0
+                continue
             array = self.group.array(f"grids/{name}")
             ends[name] = int(array[self._grid_end - 1 : self._grid_end][0]) if self._grid_end else 0
         self._x_end, self._y_end, self._cell_end = ends["x_end"], ends["y_end"], ends["cell_end"]
+        self._z_end = ends["z_end"]
         self._clear()
 
     def _clear(self) -> None:
         self._per: dict[str, list] = {k: [] for k in ("time", "step", "grid_end")}
-        self._grid_rows: dict[str, list] = {k: [] for k in GRID_TABLE}
+        self._grid_rows: dict[str, list] = {k: [] for k in self._table}
         self._rows: dict[str, list[np.ndarray]] = {"x": [], "y": []}
+        if self.dims == 3:
+            self._rows["z"] = []
         self._rows.update({f"cell_data/{a}": [] for a in self._field_arrays.values()})
         self._buffered = 0
 
@@ -266,11 +308,15 @@ class AmrWriter:
         fields: dict[str, tuple[int, Any]],
         source: str = "",
         attributes: dict[str, Any] | None = None,
+        dims: int = 2,
     ) -> AmrWriter:
-        """A new AMR set. ``fields``: name -> (components, data type) of the cell fields."""
+        """A new AMR set. ``fields``: name -> (components, data type) of the cell fields;
+        ``dims`` 3: the blocks of a volume (3D grids)."""
         info: dict[str, Any] = {"kind": "amr", "fields": _fields_json(fields)}
         if source:
             info["source"] = source
+        if int(dims) == 3:
+            info["dims"] = 3
         info.update(attributes or {})
         arrays = _arrays(info["fields"])
         group = Group.create(parent.path / key, {"lagoon": info})
@@ -278,10 +324,10 @@ class AmrWriter:
         _per_output(group.path / "step", "int64")
         _per_output(group.path / "grid_end", "int64")
         table = Group.create(group.path / "grids")
-        for name, (dtype, components) in GRID_TABLE.items():
+        for name, (dtype, components) in grid_table(dims).items():
             _growing(table.path / name, dtype, components, "grid")
-        _growing(group.path / "x", "float64", 1, "node", "m")
-        _growing(group.path / "y", "float64", 1, "node", "m")
+        for axis in ("x", "y", "z") if int(dims) == 3 else ("x", "y"):
+            _growing(group.path / axis, "float64", 1, "node", "m")
         Group.create(group.path / "cell_data")
         for name, (components, dtype) in fields.items():
             _growing(group.path / "cell_data" / arrays[name], dtype, components, "cell")
@@ -289,32 +335,41 @@ class AmrWriter:
 
     def append(self, time: float, step: int, grids: list[AmrGrid]) -> None:
         """One output: all its grids, level 0 first as REEF3D lists them."""
+        volume = self.dims == 3
         for grid in grids:
-            nx, ny = grid.nx, grid.ny
-            if nx < 1 or ny < 1:
-                raise ValueError(f"output {step}: a grid of {nx} x {ny} cells")
+            nx, ny, nz = grid.nx, grid.ny, grid.nz
+            if nx < 1 or ny < 1 or (volume and nz < 1):
+                raise ValueError(f"output {step}: a grid of {nx} x {ny} x {nz} cells")
+            if not volume and nz:
+                raise ValueError(f"output {step}: a 3D grid in a set of 2D grids")
+            n = grid.cells
             for name, (components, dtype) in self.fields.items():
                 if name not in grid.fields:
                     raise ValueError(f"output {step}: a grid without {name!r}")
                 values = np.asarray(grid.fields[name], dtype)
-                if values.size != nx * ny * components:
+                if values.size != n * components:
+                    size = f"{nx} x {ny}" + (f" x {nz}" if volume else "")
                     raise ValueError(
-                        f"output {step}: {name!r} has {values.size} values for {nx} x {ny} cells"
+                        f"output {step}: {name!r} has {values.size} values for {size} cells"
                     )
-                shape = (nx * ny, components) if components > 1 else (nx * ny,)
+                shape = (n, components) if components > 1 else (n,)
                 self._rows[f"cell_data/{self._field_arrays[name]}"].append(values.reshape(shape))
             self._rows["x"].append(np.asarray(grid.x, np.float64).ravel())
             self._rows["y"].append(np.asarray(grid.y, np.float64).ravel())
             self._x_end += nx + 1
             self._y_end += ny + 1
-            self._cell_end += nx * ny
+            self._cell_end += n
             self._grid_rows["level"].append(int(grid.level))
             self._grid_rows["rank"].append(int(grid.rank))
-            self._grid_rows["size"].append((nx, ny))
+            self._grid_rows["size"].append((nx, ny, nz) if volume else (nx, ny))
             self._grid_rows["x_end"].append(self._x_end)
             self._grid_rows["y_end"].append(self._y_end)
+            if volume:
+                self._rows["z"].append(np.asarray(grid.z, np.float64).ravel())
+                self._z_end += nz + 1
+                self._grid_rows["z_end"].append(self._z_end)
             self._grid_rows["cell_end"].append(self._cell_end)
-            self._buffered += nx * ny
+            self._buffered += n
         self._grid_end += len(grids)
         self._per["grid_end"].append(self._grid_end)
         self._per["time"].append(float(time))
@@ -330,7 +385,7 @@ class AmrWriter:
         for name, parts in self._rows.items():
             if parts:
                 _append(self.group.array(name), np.concatenate(parts))
-        for name, (dtype, components) in GRID_TABLE.items():
+        for name, (dtype, components) in self._table.items():
             rows = self._grid_rows[name]
             if rows:
                 values = np.asarray(rows, dtype)

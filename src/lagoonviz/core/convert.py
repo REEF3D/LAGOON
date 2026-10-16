@@ -280,6 +280,11 @@ def convert(
     began = _time.perf_counter()
     case = open_case(case_path, stores=False)
     datasets = chosen_datasets(case, tuple(r for r in roles if r in ROLES))
+    blocks = None  # CFD's refined blocks: the volume as written, the blocks of their own
+    volume = datasets.get("volume")
+    if volume is not None and hasattr(volume, "blocks") and hasattr(volume, "base"):
+        datasets["volume"] = volume.base
+        blocks = volume if "amr" in roles else None
     lead = next(iter(datasets.values()), None)
     bodies = None
     if "bodies" in roles:
@@ -358,6 +363,10 @@ def convert(
         if refined is not None:
             n, size = _convert_amr(case, refined, writer, pool, progress, limit)
             added["amr"] = n
+            vtk_bytes += size
+        if blocks is not None:
+            n, size = _convert_blocks(case, blocks, writer, progress, limit)
+            added["amr"] = added.get("amr", 0) + n
             vtk_bytes += size
     if series:
         added["series"] = _convert_series(series, writer)
@@ -803,6 +812,64 @@ def _convert_amr(case, dataset, writer, pool, progress, limit) -> tuple[int, int
         size += frame.path.stat().st_size + sum(
             p.stat().st_size for p in dataset.grid_files(k) if p.exists()
         )
+        if progress is not None:
+            progress("amr", count, len(todo))
+    set_writer.flush()
+    return len(todo), size
+
+
+def _convert_blocks(case, volume, writer, progress, limit) -> tuple[int, int]:
+    """CFD's refined blocks of its volume (SPEC 11, ``dims`` 3): the blocks of every
+    output, as REEF3D writes them into the store with P 18."""
+    from lagoon_format.amr import AmrGrid
+
+    blocks = volume.blocks
+    key = f"{volume.solver.lower()}_amr"
+    times = dict(zip(volume.steps, _frame_times(case, volume), strict=False))
+    steps = [s for s in blocks.steps if s in times]
+    stored = Store(writer.path).amr.get(key)
+    if stored is not None:
+        if stored.dims != 3:
+            raise ConvertError(f"amr: the store's {key} is not the blocks of a volume")
+        set_writer = writer.amr_writer(key)
+        done = {int(s) for s in stored.steps}
+    else:
+        first = next((blocks.block(k) for s in steps for k in blocks.keys(s)), None)
+        if first is None:
+            return 0, 0
+        fields = {
+            name: (int(v.shape[3]) if v.ndim == 4 else 1,
+                   "int32" if name in ("level", "covered") else "float32")
+            for name, v in first.cells.items()
+        }  # fmt: skip
+        set_writer = writer.amr_writer(
+            key,
+            {
+                "fields": fields,
+                "dims": 3,
+                "source": f"REEF3D_{volume.solver}_AMR",
+                "attributes": {"dataset": key, "role": "amr", "refinement": 2},
+            },
+        )
+        done = set()
+    todo = [s for s in steps if s not in done]
+    if limit is not None:
+        todo = todo[:limit]
+    size = 0
+    for count, step in enumerate(todo, start=1):
+        grids = []
+        for k in blocks.keys(step):
+            block = blocks.block(k)
+            cells = {
+                n: np.asarray(v, np.int32 if n in ("level", "covered") else np.float32)
+                for n, v in block.cells.items()
+            }
+            grids.append(AmrGrid(block.level, block.x, block.y, cells, -1, z=block.z))
+            size += k.stat().st_size if k.exists() else 0
+        try:
+            set_writer.append(times[step], step, grids)
+        except ValueError as error:
+            raise ConvertError(f"amr: {error}") from error
         if progress is not None:
             progress("amr", count, len(todo))
     set_writer.flush()

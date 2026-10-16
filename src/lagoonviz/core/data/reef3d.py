@@ -70,12 +70,13 @@ ROLES = {
     "amr": "amr",
     "amr_blocks": "amr_blocks",  # CFD's refined blocks: their outlines
     "solid": "structure",  # DIVEMesh's solids (a monopile, the blocks under a beach)
+    "forcing": "structure",  # NHFLOW's direct forcing solids (A 581 - A 589)
     "topo": "bathymetry",  # DIVEMesh's bed (its topo objects, geo.dat), before a run
     "geodat": "geodat",  # the points of geo.dat, as DIVEMesh reads them
     "seastate": "seastate",  # SEASTATE's maps of the sea state (Hs, Tp, dir, ...)
 }
 #: roles of the case, not of a run: DIVEMesh's solids and bed, geo.dat's points
-CASE_ROLES = ("solid", "topo", "geodat")
+CASE_ROLES = ("solid", "topo", "geodat", "forcing")
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
 _SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp", ".vtk")
@@ -140,6 +141,7 @@ ROLE_LABELS = {
     "amr": "AMR surface",
     "amr_blocks": "AMR blocks",
     "solid": "solids",
+    "forcing": "direct forcing solids",
     "topo": "bed",
     "geodat": "geo.dat points",
     "seastate": "sea state",
@@ -799,7 +801,7 @@ class Case:
             volumes = [d for d in self.datasets.values() if d.role == "volume"]
             if not volumes:  # not run yet: DIVEMesh's bed and solids, if any
                 found = {}
-                for role in ("topo", "solid"):
+                for role in ("topo", "solid", "forcing"):
                     matches = [d for d in self.datasets.values() if d.role == role]
                     if matches:
                         found[role] = matches[0]
@@ -809,6 +811,9 @@ class Case:
             solid = self._solids_of(lead)
             if solid is not None:
                 chosen = {"solid": solid, **chosen}
+            forcing = self.by_role("forcing")
+            if forcing is not None:
+                chosen = {"forcing": forcing, **chosen}
             # objects of the same run (CFD's floating bodies, structures, AMR blocks)
             objects = ("body", "mooring", "structure", "dem", "ice", "rods", "particles")
             for role in (*objects, "amr_blocks"):
@@ -843,10 +848,14 @@ class Case:
         solid = self._solids_of(lead)
         if solid is not None:
             chosen["solid"] = solid
+        forcing = self.by_role("forcing")
+        if forcing is not None:
+            chosen["forcing"] = forcing
         # beds are drawn first, so a transparent free surface shows them
         order = (
             "bed",
             "solid",
+            "forcing",
             "structure",
             "body",
             "dem",
@@ -960,6 +969,47 @@ class SolidDataset(Dataset):
             triangles=np.ascontiguousarray(triangles, dtype=np.uint32),
             point_data={},
         ).with_normals()
+
+    def written_span(self) -> tuple[float, float]:
+        try:
+            written = self.source.stat().st_mtime
+        except OSError:
+            written = 0.0
+        return written, written
+
+
+class ForcingDataset(Dataset):
+    """NHFLOW's direct forcing solids (:mod:`lagoonviz.core.data.forcing`): one frame,
+    shown at any time, read from REEF3D_NHFLOW_FORCING_VTP or built from ctrl.txt."""
+
+    def __init__(self, source: Path, case_dir: Path) -> None:
+        self.source = source
+        self._mesh: SurfaceMesh | None = None
+        frames = [Frame(0, source, [source])]
+        super().__init__("nhflow_forcing", "NHFLOW", "forcing", frames, case_dir)
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        return "PolyData", {}
+
+    @property
+    def label(self) -> str:
+        return "NHFLOW direct forcing solids"
+
+    def read(self, index: int = 0, variables: list[str] | None = None) -> SurfaceMesh:
+        if self._mesh is None:
+            from lagoonviz.core.data.forcing import forcing_from_ctrl
+
+            if self.source.suffix == ".vtp":
+                mesh = self._read_plain(self.frames[0], [], False)
+                points, triangles = mesh.points, mesh.triangles
+            else:
+                points, triangles, _ = forcing_from_ctrl(self.source)
+            self._mesh = SurfaceMesh(
+                points=np.ascontiguousarray(points, dtype=np.float32),
+                triangles=np.ascontiguousarray(triangles, dtype=np.uint32),
+                point_data={},
+            ).with_normals()
+        return self._mesh
 
     def written_span(self) -> tuple[float, float]:
         try:
@@ -1095,11 +1145,15 @@ def solid_datasets(case_dir: Path) -> list[Dataset]:
     another case's DIVEMesh run left in the folder."""
     from lagoonviz.core.data.divemesh import find_solids, left_over
     from lagoonviz.core.data.divemesh_grid import TOPO
+    from lagoonviz.core.data.forcing import find_forcing
 
     found: list[Dataset] = []
     source = find_solids(case_dir)
     if source is not None:
         found.append(SolidDataset(source, case_dir))
+    forcing = find_forcing(case_dir)
+    if forcing is not None:
+        found.append(ForcingDataset(forcing, case_dir))
     topo = case_dir / TOPO
     if topo.is_file() and not left_over(topo, case_dir):
         found.append(TopoDataset(topo, case_dir))
@@ -1368,29 +1422,28 @@ def _datasets_by_run(key, solver, role, frames, folder, owners) -> list[Dataset]
     return datasets
 
 
-def _with_refinement(datasets: list[Dataset], folder: Path) -> list[Dataset]:
-    """The volume of a CFD run with the refined blocks in its AMR folder (the
-    volume of the same solver written last stands in for itself), and the blocks'
-    outlines as a dataset of their own."""
-    from lagoonviz.core.data.amr3d import AmrBlocks, RefinedVolume, amr_outputs
+def _with_refinement(datasets: list[Dataset], solver: str, blocks, folder: Path) -> list[Dataset]:
+    """The volume of a CFD run with its refined blocks (from its AMR folder or its
+    store: the volume of the same solver written last stands in for itself), and the
+    blocks' outlines as a dataset of their own."""
+    from lagoonviz.core.data.amr3d import AmrBlocks, RefinedVolume
 
-    solver = AMR_FOLDER_SOLVER.match(folder.name).group("solver")
-    outputs = amr_outputs(folder)
-    if not outputs:
+    if not blocks.steps:
         return datasets
     volumes = [d for d in datasets if d.role == "volume" and d.solver == solver]
     out = list(datasets)
+    base = None
     if volumes:
         base = max(volumes, key=lambda d: d.written_span()[1])
-        out[out.index(base)] = RefinedVolume(base, outputs)
+        out[out.index(base)] = RefinedVolume(base, blocks)
     try:
-        blocks = AmrBlocks(f"{solver.lower()}_amr_blocks", solver, outputs, folder)
-    except ValueError:  # no index lists a block file
+        outlines = AmrBlocks(f"{solver.lower()}_amr_blocks", solver, blocks, folder)
+    except ValueError:  # no output has a block
         return out
-    if volumes:
-        blocks.run_id, blocks.run_started = base.run_id, base.run_started
-        blocks.times = _times_by_step(base, blocks)
-    out.append(blocks)
+    if base is not None:
+        outlines.run_id, outlines.run_started = base.run_id, base.run_started
+        outlines.times = _times_by_step(base, outlines)
+    out.append(outlines)
     return out
 
 
@@ -1402,10 +1455,6 @@ def _times_by_step(base: Dataset, other: Dataset) -> np.ndarray | None:
     by_step = dict(zip(base.steps, base.times, strict=False))
     times = [by_step.get(step) for step in other.steps]
     return None if any(t is None for t in times) else np.asarray(times, np.float64)
-
-
-#: an AMR folder and its solver
-AMR_FOLDER_SOLVER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_AMR$")
 
 
 def _times_from_files(dataset: Dataset) -> None:
@@ -1574,8 +1623,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     ``stores=False`` leaves LAGOON stores in the case folder out (the converter reads
     the VTK output)."""
     from lagoonviz.core.data.amr import AMR_FOLDER, amr_datasets
-    from lagoonviz.core.data.amr3d import is_volume_amr
-    from lagoonviz.core.data.lagoon import find_stores, store_datasets, stored_series
+    from lagoonviz.core.data.amr3d import FolderBlocks, amr_outputs, is_volume_amr
+    from lagoonviz.core.data.lagoon import find_stores, store_blocks, store_datasets, stored_series
 
     path = Path(path).expanduser()
     if path.is_dir() and path.name == RUN_FOLDER:
@@ -1593,7 +1642,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
         )
     datasets: list[Dataset] = []
     stored: list[Dataset] = []
-    refined: list[Path] = []  # CFD's AMR folders: the blocks of its volume
+    refined: list[tuple] = []  # CFD's refined blocks of its volume: (solver, blocks, folder)
     store_paths: list[Path] = []
     alone = ""  # a store opened on its own: its solver
     if path.is_dir() and path in find_stores(path.parent):  # a LAGOON store
@@ -1623,13 +1672,16 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     else:
         case_dir = path
         for folder in sorted(path.iterdir()):
+            if folder.name == "REEF3D_NHFLOW_FORCING_VTP":
+                continue  # the case's direct forcing solids (solid_datasets)
             if folder.is_dir() and (
                 _FOLDER.match(folder.name) or _OBJECT_FOLDER.match(folder.name)
             ):
                 datasets += _dataset_from_folder(folder)
             elif folder.is_dir() and AMR_FOLDER.match(folder.name):
                 if is_volume_amr(folder):  # CFD: the refined blocks of its volume
-                    refined.append(folder)
+                    solver = AMR_FOLDER.match(folder.name).group("solver")
+                    refined.append((solver, FolderBlocks(amr_outputs(folder)), folder))
                 else:
                     datasets += amr_datasets(folder)
         store_paths = find_stores(path) if stores else []
@@ -1640,8 +1692,12 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
             datasets = _dataset_from_folder(path)
     stored = _current_in_stores(stored, store_paths, case_dir)
     datasets = _prefer_stores(datasets, stored)
-    for folder in refined:
-        datasets = _with_refinement(datasets, folder)
+    # the refined blocks: a store's first (its run's), else an AMR folder's
+    in_stores = [(solver, blocks, st) for st in store_paths for solver, blocks in store_blocks(st)]
+    taken = {solver for solver, _b, _f in in_stores}
+    refined = in_stores + [r for r in refined if r[0] not in taken]
+    for solver, blocks, folder in refined:
+        datasets = _with_refinement(datasets, solver, blocks, folder)
     if path == case_dir or store_paths:  # the case itself: its solids too
         datasets += solid_datasets(case_dir)
     series = find_series(case_dir)

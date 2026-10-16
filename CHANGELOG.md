@@ -13,6 +13,16 @@
   colour by `level` to see it. *AMR blocks* draws the blocks' outlines by level.
 - Iso-surfaces, also CFD's free surface, have *Grid lines*: where the surface
   crosses the faces of the cells (with AMR, of every level).
+- The refined blocks also from the LAGOON store (REEF3D writes them there with
+  `P 18`, an AMR set of 3D grids, SPEC 11), and `lagoon-convert` puts the
+  `REEF3D_CFD_AMR` files into it.
+
+### NHFLOW
+
+- NHFLOW's direct forcing solids (A 581 - A 589: boxes, cylinders, jacket members,
+  spheres, wedges) are shown as a structure of the case: before a run built from
+  ctrl.txt, after it from the file NHFLOW writes (`REEF3D_NHFLOW_FORCING_VTP`, with
+  its STL and grid solids), unless ctrl.txt was changed since.
   Before, these 3D blocks stopped the case from opening.
 
 ### The river drawn first

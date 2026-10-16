@@ -8,7 +8,9 @@ refined blocks of every output in ``REEF3D_CFD_AMR``: an index per output
 (``.vtr``) with cell data: ``phi``, ``pressure``, ``velocity``, the block's ``level``
 (1: half the volume's cell size, 2: a quarter, ...) and ``covered`` (1 where a finer
 block lies over the cell). Only the index says which blocks belong to an output: a
-block file left over from an earlier run is not read.
+block file left over from an earlier run is not read. With ``P 18`` the blocks go
+into the LAGOON store too, as an AMR set of 3D grids (``amr/cfd_amr``, ``dims`` 3):
+:class:`FolderBlocks` and :class:`StoreBlocks` hand them out alike.
 
 :class:`RefinedVolume` is the volume with its blocks: the volume's cells under a
 block are left out, each block's cells not covered by a finer one are added, their
@@ -216,18 +218,125 @@ def amr_outputs(folder: Path) -> dict[int, Path]:
     return dict(sorted(found.items()))
 
 
+# ======================================================================== sources
+class FolderBlocks:
+    """The blocks of a ``REEF3D_CFD_AMR`` folder: each output's index and files."""
+
+    def __init__(self, outputs: dict[int, Path]):
+        self.outputs = outputs
+        self._keys: dict[int, list[Path]] = {}
+        self._boxes: dict[Path, tuple] = {}
+        self._cache: dict[Path, Block] = {}
+        self._lock = threading.Lock()
+
+    @property
+    def steps(self) -> list[int]:
+        return list(self.outputs)
+
+    def keys(self, step: int) -> list[Path]:
+        """The block files of an output (from its index; none without one)."""
+        keys = self._keys.get(step)
+        if keys is None:
+            vtm = self.outputs.get(step)
+            try:
+                keys = [p for p in index_files(vtm) if p.is_file()] if vtm is not None else []
+            except VTKFormatError:
+                keys = []
+            self._keys[step] = keys
+        return keys
+
+    def box(self, key: Path) -> tuple:
+        box = self._boxes.get(key)
+        if box is None:
+            box = self._boxes[key] = block_box(key)
+        return box
+
+    def block(self, key: Path) -> Block:
+        """A block with all its arrays (small: read once, kept a while)."""
+        with self._lock:
+            cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        block = read_block(key, None)
+        with self._lock:
+            if len(self._cache) > 64:
+                self._cache.clear()
+            self._cache[key] = block
+        return block
+
+    def level(self, key: Path) -> int:
+        return self.block(key).level
+
+    def stamp(self, step: int) -> Path:
+        """A file whose modification time says when the output was written."""
+        return self.outputs[step]
+
+
+class StoreBlocks:
+    """The blocks of a LAGOON store's AMR set of 3D grids (``dims`` 3)."""
+
+    def __init__(self, amr):
+        self.amr = amr
+        self._steps = [int(s) for s in amr.steps]
+        self._index = {step: t for t, step in enumerate(self._steps)}
+        self._grids: dict[int, list] = {}
+        self._lock = threading.Lock()
+
+    @property
+    def steps(self) -> list[int]:
+        return list(self._steps)
+
+    def _of(self, t: int) -> list[Block]:
+        with self._lock:
+            found = self._grids.get(t)
+        if found is not None:
+            return found
+        found = []
+        for g, grid in enumerate(self.amr.grids(t)):
+            cells = dict(grid.fields)
+            if "velocity" not in cells and all(c in cells for c in ("u", "v", "w")):
+                cells["velocity"] = np.stack([cells.pop(c) for c in ("u", "v", "w")], axis=-1)
+            if "level" not in cells:
+                cells["level"] = np.full((grid.nz, grid.ny, grid.nx), grid.level, np.float32)
+            key = self.amr.group.path / f"t{t}" / f"g{g}.block"
+            found.append(Block(key, grid.x, grid.y, grid.z, cells))
+        with self._lock:
+            if len(self._grids) > 4:
+                self._grids.clear()
+            self._grids[t] = found
+        return found
+
+    def keys(self, step: int) -> list[Path]:
+        t = self._index.get(step)
+        return [] if t is None else [b.path for b in self._of(t)]
+
+    def _find(self, key: Path) -> Block:
+        t = int(key.parent.name[1:])
+        return self._of(t)[int(key.stem[1:])]
+
+    def box(self, key: Path) -> tuple:
+        return self._find(key).box
+
+    def block(self, key: Path) -> Block:
+        return self._find(key)
+
+    def level(self, key: Path) -> int:
+        return self._find(key).level
+
+    def stamp(self, step: int) -> Path:
+        return self.amr.group.path / "time" / "zarr.json"
+
+
 # ======================================================================== datasets
 class RefinedVolume(Dataset):
     """A volume with the refined blocks of each output (module doc). It stands in
     for the volume (the same key): its pieces are the volume's, then the blocks."""
 
-    def __init__(self, base: Dataset, outputs: dict[int, Path]):
+    def __init__(self, base: Dataset, blocks):
         self.base = base
-        self.outputs = outputs
-        self._amr_files: dict[int, list[Path]] = {}
-        self._boxes: dict[Path, tuple] = {}
+        self.blocks = blocks
         self._frame_of: dict[Path, int] = {}
-        self._block_cache: dict[Path, Block] = {}
+        self._block_keys: set[Path] = set()
         self._plans: dict[tuple, VolumePlan] = {}
         self._own_cells: dict[tuple, tuple] = {}
         self._amr_lock = threading.Lock()
@@ -235,8 +344,9 @@ class RefinedVolume(Dataset):
         for index, frame in enumerate(base.frames):
             for path in frame.pieces:
                 self._frame_of[path] = index
-            files = self._files_of(index, frame.step)
-            frames.append(Frame(frame.step, frame.path, [*frame.pieces, *files]))
+            keys = blocks.keys(frame.step)
+            self._block_keys.update(keys)
+            frames.append(Frame(frame.step, frame.path, [*frame.pieces, *keys]))
         super().__init__(base.key, base.solver, base.role, frames, base.folder)
         self.run_id = base.run_id
         self.run_started = base.run_started
@@ -255,46 +365,15 @@ class RefinedVolume(Dataset):
     def written_span(self) -> tuple[float, float]:
         return self.base.written_span()
 
-    def _files_of(self, index: int, step: int) -> list[Path]:
-        """The block files of an output (from its index; none without one)."""
-        files = self._amr_files.get(index)
-        if files is None:
-            vtm = self.outputs.get(step)
-            try:
-                files = [p for p in index_files(vtm) if p.is_file()] if vtm is not None else []
-            except VTKFormatError:
-                files = []
-            self._amr_files[index] = files
-        return files
-
     def amr_blocks(self, index: int) -> list[Path]:
-        """The block files of a frame."""
-        return self._files_of(index, self.frames[index].step)
-
-    def _box(self, path: Path) -> tuple:
-        box = self._boxes.get(path)
-        if box is None:
-            box = self._boxes[path] = block_box(path)
-        return box
-
-    def _block(self, path: Path) -> Block:
-        """A block with all its arrays (small: read once, kept a while)."""
-        with self._amr_lock:
-            cached = self._block_cache.get(path)
-        if cached is not None:
-            return cached
-        block = read_block(path, None)
-        with self._amr_lock:
-            if len(self._block_cache) > 64:
-                self._block_cache.clear()
-            self._block_cache[path] = block
-        return block
+        """The blocks of a frame."""
+        return self.blocks.keys(self.frames[index].step)
 
     # ------------------------------------------------------------- pieces
     def _piece(self, path: Path, point_arrays: list[str] | None = None, with_cells: bool = True):
         names = list(self.components) if point_arrays is None else list(point_arrays)
-        if path.suffix == ".vtr":
-            return block_piece(self._block(path), names, with_cells)
+        if path in self._block_keys:
+            return block_piece(self.blocks.block(path), names, with_cells)
         level = "level" in names
         own = [n for n in names if n != "level"]
         piece = self.base._piece(path, point_arrays=own, with_cells=with_cells)
@@ -304,7 +383,7 @@ class RefinedVolume(Dataset):
             index = self._frame_of.get(path)
             files = self.amr_blocks(index) if index is not None else []
             if files:
-                piece = _without_covered(piece, [self._box(f) for f in files])
+                piece = _without_covered(piece, [self.blocks.box(f) for f in files])
         return piece
 
     def _piece_cells(self, number: int, path: Path, piece) -> tuple:
@@ -363,7 +442,7 @@ class RefinedVolume(Dataset):
 
     def sample_values(self, index: int, variable: str):
         if variable.partition(".")[0] == "level":
-            levels = [float(read_block(p, ["level"]).level) for p in self.amr_blocks(index)]
+            levels = [float(self.blocks.level(p)) for p in self.amr_blocks(index)]
             return np.array([0.0, *levels])
         return self.base.sample_values(index, variable)
 
@@ -413,16 +492,13 @@ def _without_covered(piece: Piece, boxes: list[tuple]) -> Piece:
 class AmrBlocks(Dataset):
     """The outlines of the refined blocks of each output, coloured by level."""
 
-    def __init__(self, key: str, solver: str, outputs: dict[int, Path], folder: Path):
-        self.outputs = outputs
+    def __init__(self, key: str, solver: str, blocks, folder: Path):
+        self.blocks = blocks
         frames = []
-        for step, vtm in outputs.items():
-            try:
-                files = [p for p in index_files(vtm) if p.is_file()]
-            except VTKFormatError:
-                continue
-            if files:
-                frames.append(Frame(step, vtm, files))
+        for step in blocks.steps:
+            keys = blocks.keys(step)
+            if keys:
+                frames.append(Frame(step, blocks.stamp(step), keys))
         super().__init__(key, solver, "amr_blocks", frames, folder)
 
     def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
@@ -441,15 +517,14 @@ class AmrBlocks(Dataset):
             [[0, 1], [1, 3], [3, 2], [2, 0], [4, 5], [5, 7], [7, 6], [6, 4],
              [0, 4], [1, 5], [2, 6], [3, 7]]
         )  # fmt: skip
-        for number, path in enumerate(self.frames[index].pieces):
-            x0, x1, y0, y1, z0, z1 = block_box(path)
+        for number, key in enumerate(self.frames[index].pieces):
+            x0, x1, y0, y1, z0, z1 = self.blocks.box(key)
             corners = np.array(
                 [[x, y, z] for z in (z0, z1) for y in (y0, y1) for x in (x0, x1)], np.float32
             )
-            level = read_block(path, ["level"]).level
             segments.append(edges + 8 * number)
             points.append(corners)
-            levels.append(np.full(8, float(level), np.float32))
+            levels.append(np.full(8, float(self.blocks.level(key)), np.float32))
         if not points:
             empty = np.zeros((0, 3), np.float32)
             return SurfaceMesh(empty, np.zeros((0, 3), np.uint32), {"level": np.zeros(0)})

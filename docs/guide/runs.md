@@ -42,6 +42,14 @@ coloured by their level. Only the blocks an output's index lists are read: a fil
 left over from an earlier run is not. Streamlines and time series at a point come
 from the volume's own cells.
 
+With `P 18` REEF3D writes the blocks into the LAGOON store as well (`P 18 1`:
+instead of the files); LAGOON reads them from there the same way.
+
+**NHFLOW's direct forcing solids** (A 581 - A 589 in ctrl.txt) are a *Structures*
+item of the case: NHFLOW's file of them (`REEF3D_NHFLOW_FORCING_VTP`, with an STL
+and DIVEMesh's solids), or, before a run or when ctrl.txt was changed since, the
+boxes, cylinders, jacket members, spheres and wedges built from ctrl.txt.
+
 **SEASTATE**, REEF3D's spectral wave model, writes maps of the sea state
 (`REEF3D_SEASTATE_VTP`): they open as a *Sea state* item, coloured by the
 significant wave height `Hs` on the rainbow map (as SEASTATE's own maps), with
