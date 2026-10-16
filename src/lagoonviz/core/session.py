@@ -857,20 +857,93 @@ class Session:
         made.extra["made"] = recipe
         return made, thalweg
 
-    def trace_corridor(self, line, width: float, points: int = 12, case: str | None = None) -> None:
-        """A corridor along a line drawn on the map ((x, y) points, upstream first),
-        ``width`` m wide, ``points`` points on each bank: drawn before there is a bed,
-        to set the domain around it (:meth:`corridor_domain`), make geo.dat there and
-        fit it to the river afterwards (:meth:`fit_corridor`)."""
-        made = self._traced_corridor(self._case_id(case), line, width, points)
-        recipe = made.extra["made"]
-        script = (
-            f"session.trace_corridor({recipe['line']!r}, {recipe['width']!r}, "
-            f"points={recipe['points']}"
-        )
-        self._put_corridor(case, made, script, "Draw the river")
+    # ------------------------------------------------------------- a river drawn first
+    def river_line(self, case: str | None = None) -> list[tuple[float, float]] | None:
+        """The river drawn on the map (river.json): its points, upstream first; else
+        the line the case's corridor was made along; None if neither."""
+        case_id = self._case_id(case)
+        setup = self.data.case_setup(case_id, create=True)
+        line = setup.river_line if setup is not None else None
+        if line is not None:
+            return [(float(x), float(y)) for x, y in line]
+        current = self.corridor(case_id)
+        made = dict(current.extra.get("made") or {}) if current is not None else {}
+        if made.get("how") == "fitted":
+            made = dict(made.get("from") or {})
+        if made.get("how") != "line":
+            return None
+        return [(float(x), float(y)) for x, y in made["line"]]
 
-    def _traced_corridor(self, case_id: str, line, width, points):
+    def draw_river(self, line, case: str | None = None) -> None:
+        """The river drawn on the map: a line ((x, y) points, upstream first; None
+        removes it), kept in river.json, one undo step. Then :meth:`corridor_domain`
+        sets the domain around it (for geo.dat) and :meth:`create_river` makes the
+        corridor and its grid along it."""
+        import numpy as np
+
+        from lagoonviz.core import corridor as corridors
+
+        case_id = self._case_id(case)
+        text = None
+        if line is not None:
+            points = np.asarray(line, float).reshape(-1, 2)
+            keep = np.concatenate([[True], np.hypot(*np.diff(points, axis=0).T) > 1e-9])
+            points = points[keep]
+            if len(points) < 2:
+                raise ValueError("a river needs two points at least")
+            text = corridors.river_text(points)
+            line = [[round(float(x), 4), round(float(y), 4)] for x, y in points]
+        script = f"session.draw_river({line!r}"
+        if case:
+            script += f", case={case!r}"
+        script += ")"
+        label = "Draw the river" if line is not None else "Remove the river drawn"
+        self.stack.execute(self._case_file(case_id, corridors.RIVER_FILE, text, script, label))
+
+    def create_river(
+        self,
+        width: float,
+        points: int = 12,
+        margin: float = 0.0,
+        level: float | None = None,
+        smoothing: int = 20,
+        case: str | None = None,
+    ):
+        """The river corridor and its grid along the river drawn (:meth:`draw_river`):
+        ``width`` m wide, ``points`` points on each bank; with geo.dat fitted to the
+        river in the bed (its thalweg from the upstream end to the downstream end,
+        its banks where the water below ``level`` reaches plus ``margin`` m, at most
+        half as far again as ``width``). ``smoothing``: Winslow sweeps of the grid.
+        One undo step. Returns the thalweg found (None without geo.dat)."""
+        from lagoonviz.core import corridor as corridors
+
+        case_id = self._case_id(case)
+        line = self.river_line(case_id)
+        if line is None:
+            raise ValueError("draw the river on the map first (Draw the river)")
+        made = self._traced_corridor(case_id, line, width, points, smoothing=int(smoothing))
+        setup = self.data.case_setup(case_id, create=True)
+        thalweg = None
+        if setup is not None and (setup.path / "geo.dat").is_file():
+            used = setup.water_level if level is None else level
+            drawn = made.extra["made"]
+            made, thalweg = corridors.fit_to_bed(made, setup.geo_points(), used, float(margin))
+            recipe = {"how": "fitted", "margin": float(margin), "points": int(points)}
+            if level is not None:
+                recipe["level"] = float(level)
+            recipe["from"] = drawn
+            made.extra["made"] = recipe
+        words = [f"{float(width)!r}", f"points={int(points)}"]
+        if float(margin):
+            words.append(f"margin={float(margin)!r}")
+        if level is not None:
+            words.append(f"level={float(level)!r}")
+        if int(smoothing) != 20:
+            words.append(f"smoothing={int(smoothing)}")
+        self._put_corridor(case, made, "session.create_river(" + ", ".join(words), "Create river")
+        return thalweg
+
+    def _traced_corridor(self, case_id: str, line, width, points, **options):
         import numpy as np
 
         from lagoonviz.core import corridor as corridors
@@ -880,7 +953,8 @@ class Session:
         line = [[round(float(x), 4), round(float(y), 4)] for x, y in np.asarray(line, float)]
         setup = self.data.case_setup(case_id, create=True)
         domain = setup.domain if setup is not None else None
-        options = {"z_start": float(domain[4])} if domain is not None else {}
+        if domain is not None:
+            options.setdefault("z_start", float(domain[4]))
         made = corridors.from_line(line, float(width), int(points), **options)
         made.extra["made"] = {
             "how": "line",
@@ -890,27 +964,45 @@ class Session:
         }
         return made
 
-    def corridor_domain(self, margin: float | None = None, case: str | None = None):
-        """The domain (B 10's x and y) around the corridor, ``margin`` m beyond it on
-        every side (default: half the river's width), its edges on DIVEMesh's cells
-        (B 1): where geo.dat is made for the river. Returns (x0, x1, y0, y1)."""
+    def corridor_domain(
+        self, margin: float | None = None, width: float | None = None, case: str | None = None
+    ):
+        """The domain (B 10's x and y) around the river drawn (``width`` m wide;
+        default: the corridor's width) or else around the corridor, ``margin`` m
+        beyond it on every side (default: half the river's width), its edges on
+        DIVEMesh's cells (B 1): where geo.dat is made for the river. Returns (x0, x1,
+        y0, y1)."""
         import numpy as np
 
         case_id = self._case_id(case)
-        current = self._corridor_of(case_id)
         setup = self.data.case_setup(case_id, create=True)
         if setup is not None and setup.ctrl.int("G 50", 0) in (1, 2):
             raise ValueError(
                 "B 10 holds the logical box of the case's curvilinear grid (G 50 in "
                 "ctrl.txt): set the domain on the map before making the grid"
             )
-        banks = np.vstack([current.bank_line("left"), current.bank_line("right")])
+        current = self.corridor(case_id)
+        drawn = setup.river_line if setup is not None else None
+        if width is None and current is not None:
+            width = float(np.mean(np.hypot(*(current.left - current.right).T)))
+        if drawn is not None:
+            if width is None:
+                width = 0.1 * float(np.hypot(*np.diff(drawn, axis=0).T).sum())
+            from lagoonviz.core import corridor as corridors
+
+            dense = corridors.resample(drawn, max(20 * len(drawn), 100))
+            low = dense.min(axis=0) - 0.5 * float(width)
+            high = dense.max(axis=0) + 0.5 * float(width)
+        elif current is not None:
+            banks = np.vstack([current.bank_line("left"), current.bank_line("right")])
+            low, high = banks.min(axis=0), banks.max(axis=0)
+        else:
+            raise ValueError("draw the river on the map first (Draw the river)")
         if margin is None:
-            across = np.hypot(*(current.left - current.right).T)
-            margin = 0.5 * float(np.mean(across))
+            margin = 0.5 * float(width)
         step = float(self.input_file("control.txt", case_id).value("B 1") or 0.0)
-        low = banks.min(axis=0) - float(margin)
-        high = banks.max(axis=0) + float(margin)
+        low = low - float(margin)
+        high = high + float(margin)
         if step > 0:
             low = np.floor(low / step) * step
             high = np.ceil(high / step) * step

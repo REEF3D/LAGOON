@@ -131,7 +131,7 @@ class ViewportPlaceholder(QWidget):
     def start_domain_drawing(self, case_id: str = "", purpose: str = "domain") -> None:
         self.statusMessage.emit(f"Drawing the {purpose} needs the 3D view (no GPU here)")
 
-    def start_line_drawing(self, case_id: str = "", purpose: str = "river") -> None:
+    def start_line_drawing(self, case_id: str = "", purpose: str = "river", points=None) -> None:
         self.statusMessage.emit(f"Drawing the {purpose} needs the 3D view (no GPU here)")
         self.lineDrawn.emit(purpose, None)
 
@@ -1131,14 +1131,20 @@ class Viewport3D(QWidget):
         self.redraw()
 
     # ------------------------------------------------------------- tracing a line
-    #: how near (pixels) a click must be to the last point to end the line there
+    #: how near (pixels) a click must be to a point or a segment to be on it
     TRACE_PICK = 8.0
+    #: what the status bar says while tracing
+    TRACE_HELP = (
+        "click to add · click on a segment to put a point in · drag a point to move it · "
+        "right click (or Alt + click) removes it · click the last point again or Enter "
+        "to end · Backspace · Esc"
+    )
 
-    def start_line_drawing(self, case_id: str = "", purpose: str = "river") -> None:
+    def start_line_drawing(self, case_id: str = "", purpose: str = "river", points=None) -> None:
         """Clicks in the 2D top view trace a line point by point (upstream first for a
-        river): a click on the last point again (a double click) or Enter ends it
-        (lineDrawn), Backspace takes the last point back, Esc stops; dragging pans
-        the view as always."""
+        river; ``points``: a line drawn before, taken up again): see
+        :mod:`lagoonviz.core.line_trace`. Ended, it is sent (lineDrawn); Esc stops;
+        dragging away from the points pans the view as always."""
         from lagoonviz.core.line_trace import LineTrace
 
         if not (self.two_d and self.two_d_side == "top"):
@@ -1146,12 +1152,21 @@ class Viewport3D(QWidget):
         self.stop_domain_drawing()
         self.stop_corridor_editing()
         self.stop_line_drawing(quiet=True)
-        self._tracing = {"case": case_id, "purpose": purpose, "trace": LineTrace(), "press": None}
+        self._tracing = {
+            "case": case_id,
+            "purpose": purpose,
+            "trace": LineTrace(points),
+            "press": None,
+            "grab": None,
+        }
         self.canvas.setCursor(Qt.CrossCursor)
-        self.statusMessage.emit(
-            f"Click the {purpose} point by point in the 2D view (upstream first) · click "
-            "the last point again or Enter to end · Backspace takes a point back · Esc stops"
-        )
+        if points:
+            self._trace_sketch()
+        else:
+            self.statusMessage.emit(
+                f"Click the {purpose} point by point in the 2D view, upstream first · "
+                + self.TRACE_HELP
+            )
 
     def stop_line_drawing(self, quiet: bool = False) -> None:
         """Stop tracing (no line); ``lineDrawn(purpose, None)`` unless ``quiet``."""
@@ -1159,6 +1174,7 @@ class Viewport3D(QWidget):
         if tracing is None:
             return
         self._tracing = None
+        self._trace_pan(True)
         self.canvas.unsetCursor()
         self.view.set_sketch(None)
         self.redraw()
@@ -1171,10 +1187,17 @@ class Viewport3D(QWidget):
             return
         points = list(tracing["trace"].points)
         self._tracing = None
+        self._trace_pan(True)
         self.canvas.unsetCursor()
         self.view.set_sketch(None)
         self.redraw()
         self.lineDrawn.emit(tracing["purpose"], points)
+
+    def _trace_pan(self, on: bool) -> None:
+        try:
+            self.controller.enabled = on
+        except AttributeError:
+            pass
 
     def _trace_sketch(self, pointer=None) -> None:
         trace = self._tracing["trace"]
@@ -1184,8 +1207,7 @@ class Viewport3D(QWidget):
         if count:
             self.statusMessage.emit(
                 f"{self._tracing['purpose'].capitalize()}: {count} point"
-                f"{'s' if count != 1 else ''}, {trace.length(pointer):.1f} m · click the "
-                "last point again or Enter to end · Backspace · Esc"
+                f"{'s' if count != 1 else ''}, {trace.length(pointer):.1f} m · " + self.TRACE_HELP
             )
         self.redraw()
 
@@ -1209,23 +1231,75 @@ class Viewport3D(QWidget):
         return False
 
     def _trace_pointer(self, kind: str, event) -> None:
-        """A click (press and release without dragging) adds a point; a drag pans."""
+        """Press on a point: drag it (a click on the last one ends the line); right
+        click (or Alt + click) on a point: removed; a click elsewhere adds a point
+        (or puts one into a segment); a drag elsewhere pans."""
         tracing = self._tracing
+        trace = tracing["trace"]
         x, y = getattr(event, "x", 0.0), getattr(event, "y", 0.0)
-        if kind == "pointer_down":
-            tracing["press"] = (x, y) if getattr(event, "button", 1) == 1 else None
-            return
-        press, tracing["press"] = tracing["press"], None
-        if kind != "pointer_up" or press is None or abs(x - press[0]) + abs(y - press[1]) > 4:
-            return
         point = self._plan_point(event)
-        if point is None:
-            return
         reach = self._reach(event, self.TRACE_PICK) or 0.0
-        if tracing["trace"].click(point, reach):
+        if kind == "pointer_down":
+            button = getattr(event, "button", 1)
+            modifiers = getattr(event, "modifiers", ()) or ()
+            on = trace.point_at(point, reach) if point is not None else None
+            tracing["press"] = tracing["grab"] = None
+            # a right click, Alt + click, or Ctrl + click on a Mac (Qt's Meta there)
+            removing = button == 2 or (button == 1 and ({"Alt", "Meta"} & set(modifiers)))
+            if on is not None and removing:
+                trace.remove(on)
+                self._trace_pan(False)  # this press does not pan
+                tracing["grab"] = {"index": None, "moved": False}
+                self._trace_sketch()
+                return
+            if button != 1:
+                return
+            if on is not None:
+                tracing["grab"] = {"index": on, "moved": False}
+                self._trace_pan(False)  # the drag moves the point, not the view
+                self.canvas.setCursor(Qt.ClosedHandCursor)
+                return
+            tracing["press"] = (x, y)
+            return
+        if kind != "pointer_up":
+            return
+        grab, tracing["grab"] = tracing["grab"], None
+        press, tracing["press"] = tracing["press"], None
+        if grab is not None:
+            self._trace_pan(True)
+            self.canvas.setCursor(Qt.CrossCursor)
+            if grab["index"] is None or grab["moved"]:
+                self._trace_sketch()
+                return
+            # pressed and let go on a point without moving it: a click on it
+            if point is not None and trace.click(point, reach):
+                self._finish_line()
+            return
+        if press is None or abs(x - press[0]) + abs(y - press[1]) > 4 or point is None:
+            return  # a drag: the view panned
+        if trace.click(point, reach):
             self._finish_line()
             return
         self._trace_sketch(point)
+
+    def _trace_move(self, event) -> None:
+        tracing = self._tracing
+        trace = tracing["trace"]
+        point = self._plan_point(event)
+        grab = tracing["grab"]
+        if grab is not None:
+            if grab["index"] is not None and point is not None:
+                trace.move(grab["index"], point)
+                grab["moved"] = True
+                self._trace_sketch()
+            return
+        if tracing["press"] is not None or point is None:
+            return  # panning
+        reach = self._reach(event, self.TRACE_PICK) or 0.0
+        over = trace.point_at(point, reach) is not None
+        self.canvas.setCursor(Qt.OpenHandCursor if over else Qt.CrossCursor)
+        if trace.points:
+            self._trace_sketch(None if over else point)
 
     # ------------------------------------------------------------- the river corridor
     #: how near (pixels) a press must be to a point of a bank to drag it
@@ -1705,8 +1779,7 @@ class Viewport3D(QWidget):
 
     def _on_move(self, event) -> None:
         if self._tracing is not None:
-            if self._tracing["trace"].points and self._tracing["press"] is None:
-                self._trace_sketch(self._plan_point(event))
+            self._trace_move(event)
             return
         if self._drawing is not None and self._drawing.get("start") is not None:
             self._draw_domain("pointer_move", event)

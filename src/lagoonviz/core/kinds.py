@@ -206,6 +206,7 @@ SETUP_GROUPS = {
     "solids": "Solids",
     "bed": "Bed",
     "curvgrid": "Curvilinear grid",
+    "river": "River drawn",
 }
 #: faces of the domain the "DIVEMesh grid" item draws its lines on
 GRID_FACES = ("bottom and back", "bottom", "back", "outside")
@@ -227,6 +228,7 @@ _SETUP_TIPS = {
     "solids": "Outlines of DIVEMesh's solids (S); the solids themselves are a structure item",
     "bed": "The bed's topo objects (T); geo.dat's points are an item of their own",
     "curvgrid": "The curvilinear grid of curvgrid.dat (G 50 2) or blocks.dat (G 50 1), on the bed",
+    "river": "The river drawn on the map (river.json), before its corridor is made",
 }
 
 

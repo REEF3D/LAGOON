@@ -99,6 +99,7 @@ COLORS = {
     "solids": "#a0a8b4",
     "bed": "#b08d57",
     "corridor": "#ffd84a",  # the banks and their points: yellow, as when dragged
+    "river": "#ffd84a",  # the river drawn on the map: yellow, as when drawn
     "curvgrid": "#7f9cc0",
     "refinement": "#e07b39",
     "multiblock": "#ffd84a",  # the blocks' outlines, corners and points: yellow, as when dragged
@@ -386,6 +387,8 @@ class CaseSetup:
     domain_from: str = ""
     #: the river corridor (corridor.json; a lagoonviz.core.corridor.Corridor) or None
     corridor: object | None = None
+    #: the river drawn on the map (river.json): its line (n, 2), upstream first, or None
+    river_line: object | None = None
     #: the curvilinear grid REEF3D reads with G 50 2: (x, y, zb) of curvgrid.dat
     curvgrid: tuple | None = None
     #: the multi-block grid (blocks.json; a lagoonviz.core.multiblock.Topology) or None
@@ -876,6 +879,7 @@ def _read_curvilinear(setup: CaseSetup) -> None:
     from lagoonviz.core import corridor, multiblock
 
     setup.corridor = corridor.read(setup.path)
+    setup.river_line = corridor.read_river(setup.path)
     setup.multiblock = multiblock.read(setup.path)
     setup.curvgrid = None
     setup.blocksgrid = None
@@ -1498,6 +1502,20 @@ def _corridor_marks(setup: CaseSetup, water_z: float) -> list[Mark]:
                 )
             )
     marks.extend(_multiblock_marks(setup, water_z))
+    line = setup.river_line
+    if line is not None:  # the river drawn on the map, before its corridor
+        start = line[0]
+        marks.append(
+            Mark(
+                "river",
+                "river drawn (river.json)",
+                COLORS["river"],
+                segments=_polyline(line, water_z),
+                points=np.column_stack([line, np.full(len(line), water_z)]),
+                labels=[("upstream", (float(start[0]), float(start[1]), water_z))],
+                file="river.json",
+            )
+        )
     corridor = setup.corridor
     if corridor is None:
         return marks

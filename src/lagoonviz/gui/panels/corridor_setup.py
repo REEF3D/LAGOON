@@ -6,11 +6,13 @@ curvgrid.dat; ``core.corridor``).
 
 - *Start* lays a straight corridor along the domain, *Draw* one over an area dragged
   in the 2D view (it flows along the area's longer side).
-- Before there is a bed: *Draw the river* on the map, clicking point by point from
-  upstream (a corridor *Width* wide along it), then *Domain and geo.dat* sets the
-  domain around it and makes geo.dat there (with the Map tab's source), and *Fit to
-  the bed* makes the corridor follow the river in it: its thalweg, its banks at the
-  water's edge plus the margin.
+- Before there is a bed: *Draw the river* on the map as a line, clicking point by
+  point from upstream (*Continue drawing* takes the line up again: more points,
+  points moved, put in or removed); *Domain and geo.dat* sets the domain around it
+  and makes geo.dat there (with the Map tab's source); *Create river* makes the
+  corridor *River width* wide along it and its grid, with geo.dat fitted to the
+  river in the bed (its thalweg, its banks at the water's edge plus the margin).
+  *Fit to the bed* fits a corridor made otherwise (or dragged) the same way.
 - *Drag points*: press on a point of a bank in the 2D top view and drag it; the bank
   follows as a spline through the points or a smoother B-spline (*Curve*). Elsewhere
   the view pans as always; Esc stops.
@@ -65,8 +67,9 @@ class CorridorTab(QWidget):
 
     #: draw an area in the 2D top view: (case id, purpose)
     drawArea = Signal(str, str)
-    #: trace a line in the 2D top view (case id, purpose), or stop
-    drawLine = Signal(str, str)
+    #: trace a line in the 2D top view (case id, purpose, the points of a line to
+    #: take up again or None), or stop
+    drawLine = Signal(str, str, object)
     stopLine = Signal()
     #: drag the corridor's points in the 2D view (case id), or stop
     editPoints = Signal(str)
@@ -116,35 +119,57 @@ class CorridorTab(QWidget):
             row.addWidget(button)
         row.addStretch(1)
 
-        # ---- the river drawn on the map first, the bed made for it afterwards
+        # ---- the river drawn on the map first (a line), its bed and corridor after
+        self.trace_button = QPushButton("Draw the river")
+        self.trace_button.setCheckable(True)
+        self.trace_button.setToolTip(
+            "Click the river on the map in the 2D top view as a line, point by point from "
+            "upstream; click the last point again or press Enter to end (Esc stops)"
+        )
+        self.trace_button.toggled.connect(self._trace_toggled)
+        self.continue_button = QPushButton("Continue drawing")
+        self.continue_button.setCheckable(True)
+        self.continue_button.setToolTip(
+            "Take up the river drawn: click to add points at its downstream end, click on "
+            "a segment to put a point in, drag points, right click (or Alt + click) "
+            "removes one, Backspace the last; Enter ends it"
+        )
+        self.continue_button.toggled.connect(self._continue_toggled)
         self.width = QDoubleSpinBox()
         self.width.setRange(0.1, 1e5)
         self.width.setDecimals(1)
         self.width.setValue(50.0)
         self.width.setSuffix(" m")
-        self.width.setToolTip("How wide the corridor drawn along the line is")
-        self.trace_button = QPushButton("Draw the river")
-        self.trace_button.setCheckable(True)
-        self.trace_button.setToolTip(
-            "Click the river on the map in the 2D top view, point by point from upstream; "
-            "click the last point again or press Enter to end (Esc stops)"
+        self.width.setToolTip(
+            "How wide the corridor along the river is (with geo.dat its banks follow the "
+            "water's edge, at most half as far again)"
         )
-        self.trace_button.toggled.connect(self._trace_toggled)
         self.bed_button = QPushButton("Domain and geo.dat")
         self.bed_button.setToolTip(
-            "Set the domain (B 10) around the corridor, half its width beyond the "
-            "banks, and make geo.dat there with the Map tab's source"
+            "Set the domain (B 10) around the river, a river width beyond its line, and "
+            "make geo.dat there with the Map tab's source"
         )
         self.bed_button.clicked.connect(self.domain_and_bed)
+        self.create_button = QPushButton("Create river")
+        self.create_button.setToolTip(
+            "The corridor and its grid along the river drawn, River width wide; with "
+            "geo.dat fitted to the river in the bed (the Margin and Water level below)"
+        )
+        self.create_button.clicked.connect(self.create_river)
         self.trace_box = QGroupBox("Draw the river on the map")
         trace_form = QFormLayout(self.trace_box)
-        trace_form.addRow("Width", self.width)
-        trace_row = QHBoxLayout()
-        trace_row.setContentsMargins(0, 0, 0, 0)
-        trace_row.addWidget(self.trace_button)
-        trace_row.addWidget(self.bed_button)
-        trace_row.addStretch(1)
-        trace_form.addRow(trace_row)
+        for left, right in (
+            (self.trace_button, self.continue_button),
+            (self.bed_button, self.create_button),
+        ):
+            pair = QHBoxLayout()
+            pair.setContentsMargins(0, 0, 0, 0)
+            pair.addWidget(left)
+            pair.addWidget(right)
+            pair.addStretch(1)
+            if left is self.bed_button:
+                trace_form.addRow("River width", self.width)
+            trace_form.addRow(pair)
 
         # ---- a corridor along the thalweg of the bed (geo.dat)
         self.margin = QDoubleSpinBox()
@@ -332,7 +357,12 @@ class CorridorTab(QWidget):
             button.setEnabled(has_case)
         if not has_case and self.trace_button.isChecked():
             self.trace_button.setChecked(False)
-        self.bed_button.setEnabled(corridor is not None)
+        drawn = self.session.river_line(self.panel.case_id) if has_case else None
+        self.continue_button.setEnabled(drawn is not None)
+        if drawn is None and self.continue_button.isChecked():
+            self.continue_button.setChecked(False)
+        self.bed_button.setEnabled(drawn is not None or corridor is not None)
+        self.create_button.setEnabled(drawn is not None)
         setup = self.session.data.case_setup(self.panel.case_id) if has_case else None
         has_bed = setup is not None and (setup.path / "geo.dat").is_file()
         self.auto_box.setEnabled(has_bed)
@@ -463,51 +493,60 @@ class CorridorTab(QWidget):
 
     def _trace_toggled(self, on: bool) -> None:
         if on and self.panel.case_id:
+            self._quiet(self.continue_button, False)
             self.edit_button.setChecked(False)
-            self.drawLine.emit(self.panel.case_id, LINE)
+            self.drawLine.emit(self.panel.case_id, LINE, None)
         elif not on:
             self.stopLine.emit()
 
+    def _continue_toggled(self, on: bool) -> None:
+        drawn = self.session.river_line(self.panel.case_id) if self.panel.case_id else None
+        if on and drawn is not None:
+            self._quiet(self.trace_button, False)
+            self.edit_button.setChecked(False)
+            self.drawLine.emit(self.panel.case_id, LINE, drawn)
+        elif on:
+            self._quiet(self.continue_button, False)
+        else:
+            self.stopLine.emit()
+
+    @staticmethod
+    def _quiet(button, on: bool) -> None:
+        button.blockSignals(True)
+        button.setChecked(on)
+        button.blockSignals(False)
+
     def line_drawn(self, purpose: str, points) -> None:
-        """A line traced in the 2D view (None: stopped without one): a corridor along
-        it, as wide as asked."""
+        """A line traced in the 2D view (None: stopped without one): the river drawn
+        (river.json), a line only; Create river makes its corridor."""
         if purpose != LINE:
             return
-        self.trace_button.blockSignals(True)
-        self.trace_button.setChecked(False)
-        self.trace_button.blockSignals(False)
+        self._quiet(self.trace_button, False)
+        self._quiet(self.continue_button, False)
         if points is None or not self.panel.case_id:
             return
-        count = self.points.value() if self.corridor() is not None else 12
         setup = self.session.data.case_setup(self.panel.case_id)
         has_bed = setup is not None and (setup.path / "geo.dat").is_file()
-        then = (
-            "Fit to the bed makes it follow the river"
-            if has_bed
-            else "Domain and geo.dat makes the bed for it"
-        )
-        if self._run(
-            lambda: self.session.trace_corridor(
-                [(round(x, 3), round(y, 3)) for x, y in points],
-                self.width.value(),
-                count,
-                case=self.panel.case_id,
+        then = "" if has_bed else "Domain and geo.dat makes the bed under it, "
+        self._run(
+            lambda: self.session.draw_river(
+                [(round(x, 3), round(y, 3)) for x, y in points], case=self.panel.case_id
             ),
-            f"A corridor along the river drawn: {then}, or drag its points",
-        ):
-            self.edit_button.setChecked(True)
+            f"The river drawn ({len(points)} points): {then}Create river makes its corridor "
+            "and grid; Continue drawing changes it",
+        )
 
     def domain_and_bed(self) -> None:
-        """The domain around the corridor, then geo.dat for it (the Map tab's source,
-        in a worker thread)."""
+        """The domain around the river, then geo.dat for it (the Map tab's source, in a
+        worker thread)."""
         case = self.panel.case_id
-        if not case or self.corridor() is None:
+        if not case:
             return
         found = None
 
         def domain():
             nonlocal found
-            found = self.session.corridor_domain(case=case)
+            found = self.session.corridor_domain(width=self.width.value(), case=case)
 
         if not self._run(domain) or found is None:
             return
@@ -523,11 +562,44 @@ class CorridorTab(QWidget):
         def made() -> None:
             self.refresh()
             self.message.emit(
-                "geo.dat made for the river: Fit to the bed makes the corridor follow it",
-                False,
+                "geo.dat made for the river: Create river makes its corridor and grid", False
             )
 
         map_tab.make_geo_dat(then=made)
+
+    def create_river(self) -> None:
+        """The corridor and its grid along the river drawn (fitted to the bed with
+        geo.dat)."""
+        level = None if self.level.value() <= self.level.minimum() else self.level.value()
+        found = []
+
+        def create():
+            found.append(
+                self.session.create_river(
+                    self.width.value(),
+                    points=self.auto_points.value(),
+                    margin=self.margin.value(),
+                    level=level,
+                    case=self.panel.case_id,
+                )
+            )
+
+        if not self._run(create):
+            return
+        corridor = self.corridor()
+        cells = f"{corridor.cells_along} x {corridor.cells_across} cells" if corridor else "grid"
+        thalweg = found[0] if found else None
+        if thalweg is not None:
+            text = (
+                f"The river created ({cells}), following the river in the bed (water at "
+                f"{thalweg.level:.2f} m, banks {self.margin.value():g} m beyond its edge)"
+            )
+        else:
+            text = (
+                f"The river created ({cells}), {self.width.value():g} m wide along the line "
+                "(no geo.dat: Domain and geo.dat, then Create river again fits it to the bed)"
+            )
+        self.message.emit(text + ": drag its points, Make grid writes curvgrid.dat", False)
 
     def fit(self) -> None:
         """The corridor made to follow the river in the bed."""
@@ -572,8 +644,10 @@ class CorridorTab(QWidget):
             self.edit_button.setChecked(True)
 
     def _edit_toggled(self, on: bool) -> None:
-        if on and self.trace_button.isChecked():
-            self.trace_button.setChecked(False)
+        if on and (self.trace_button.isChecked() or self.continue_button.isChecked()):
+            self._quiet(self.trace_button, False)
+            self._quiet(self.continue_button, False)
+            self.stopLine.emit()
         if on and self.panel.case_id:
             self.editPoints.emit(self.panel.case_id)
         else:

@@ -424,45 +424,60 @@ def test_a_river_drawn_on_the_map_and_fitted_to_its_bed():
     assert thalweg.line[0, 0] < 10 and thalweg.line[-1, 0] > 385
 
 
-def test_a_river_drawn_first_then_its_domain_bed_and_fit(river):
-    """Draw the river on the map, set the domain around it, make geo.dat there, fit
-    the corridor to the bed; reset fits the drawn river again."""
+def test_a_river_drawn_first_then_its_domain_bed_and_corridor(river):
+    """Draw the river on the map (a line), set the domain around it, make geo.dat
+    there, create the river: the corridor and its grid, fitted to the bed."""
     (river / "control.txt").write_text(
         "C 11 1\nC 14 2\nB 1 2.0\nB 10 50.0 150.0 50.0 150.0 -2.0 3.0\nM 10 1\n"
     )
     (river / "ctrl.txt").write_text("A 10 2\nF 60 0.0\n")
     session = Session()
     session.open_case(river)
-    session.trace_corridor(DRAWN, 60.0, points=10)
-    corridor = session.corridor()
-    assert len(corridor.left) == 10 and corridor.z_start == -2.0
-    assert corridor.extra["made"]["how"] == "line"
-    assert [i for i in session.scene if i.kind == "corridor"]
-    with pytest.raises(ValueError, match="geo.dat"):
-        session.fit_corridor()
-    # the domain around it, on DIVEMesh's 2 m cells, 30 m beyond the banks
-    x0, x1, y0, y1 = session.corridor_domain()
-    banks = np.vstack([corridor.bank_line("left"), corridor.bank_line("right")])
-    assert x0 <= banks[:, 0].min() - 30 and x1 >= banks[:, 0].max() + 30
-    assert y0 <= banks[:, 1].min() - 30 and y1 >= banks[:, 1].max() + 30
+    with pytest.raises(ValueError, match="draw the river"):
+        session.create_river(60.0)
+    session.draw_river(DRAWN)
+    assert session.corridor() is None  # a line only
+    assert session.river_line() == [tuple(map(float, p)) for p in DRAWN]
+    assert (river / "river.json").is_file()
+    setup = session.data.case_setup(session._case_id(None))
+    marks = [m for m in setup.marks() if m.group == "river"]
+    assert len(marks) == 1 and len(marks[0].points) == len(DRAWN)  # drawn in yellow
+    setup_item = session.add_item("setup")
+    assert session.scene.get(setup_item).properties.get("show_river", True)
+    assert "#ffd84a" in [c for c, _ in session.data.setup_marks(setup_item).lines]
+    # the domain around it, on DIVEMesh's 2 m cells, the river 60 m wide and 30 m more
+    x0, x1, y0, y1 = session.corridor_domain(width=60.0)
+    assert x0 <= -60 and x1 >= 460 and y0 <= 52 - 60 and y1 >= 148 + 60
     assert x0 % 2 == 0 and y1 % 2 == 0
     assert session.input_file("control.txt").values("B 10") == [x0, x1, y0, y1, -2.0, 3.0]
-    # the bed (as Make geo.dat would download it), then the fit
+    # without a bed: a corridor along the line, as wide as asked
+    assert session.create_river(60.0, points=10) is None
+    straight = session.corridor()
+    assert len(straight.left) == 10 and straight.extra["made"]["how"] == "line"
+    assert straight.smoothing == 20 and [i for i in session.scene if i.kind == "corridor"]
+    session.undo()
+    assert session.corridor() is None and session.river_line() is not None
+    # the bed (as Make geo.dat would download it), then the river created on it
     np.savetxt(river / "geo.dat", valley(), fmt="%.4f")
     session.data.case_setup(session._case_id(None)).geo_changed()
-    thalweg = session.fit_corridor(margin=2.0)
-    assert thalweg.level == 0.0  # F 60
+    thalweg = session.create_river(60.0, points=10, margin=2.0)
+    assert thalweg is not None and thalweg.level == 0.0  # F 60
     fitted = session.corridor()
     centre = fitted.centreline(100)
     inside = (centre[:, 0] > 15) & (centre[:, 0] < 385)
-    assert (
-        np.abs(centre[inside, 1] - channel(centre[inside, 0])).max() < 6.0
-    )  # in the 20 m channel, 10 points a bank
+    assert np.abs(centre[inside, 1] - channel(centre[inside, 0])).max() < 6.0
     assert fitted.extra["made"]["how"] == "fitted"
     assert fitted.extra["made"]["from"]["how"] == "line"
+    x, y, _z, quality = session.corridor_grid()
+    assert quality.folded == 0
     script = session.to_script()
-    assert "session.trace_corridor(" in script and "session.fit_corridor(margin=2.0)" in script
-    # dragged, then reset: fitted again from the river drawn
+    assert "session.draw_river([[0.0, 92.0]" in script
+    assert "session.create_river(60.0, points=10, margin=2.0)" in script
+    # drawn again (continued): the line changes, the corridor waits for Create river
+    session.draw_river([*DRAWN[:-1], (420, 80)])
+    assert session.river_line()[-1] == (420.0, 80.0)
+    assert session.corridor().extra["made"]["how"] == "fitted"
+    # dragged, then reset: fitted again from the line it was made along
     session.move_corridor_point("left", 3, *fitted.left[3] + 5.0)
     session.reset_corridor()
     np.testing.assert_allclose(session.corridor().left, fitted.left, atol=1e-6)
@@ -470,7 +485,7 @@ def test_a_river_drawn_first_then_its_domain_bed_and_fit(river):
     # with the grid made, B 10 is its logical box: the domain is not set from the river
     with pytest.raises(ValueError, match="logical box"):
         session.corridor_domain()
-    # undo goes back step by step: the grid, the reset, the drag, the fit
-    for _ in range(4):
-        session.undo()
-    assert session.corridor().extra["made"]["how"] == "line"
+    # the line removed: the corridor's own line is the river's
+    session.draw_river(None)
+    assert not (river / "river.json").exists()
+    assert session.river_line()[-1] == (400.0, 90.0)

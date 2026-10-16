@@ -26,7 +26,8 @@ river (``bed = "slope"``).
 i fastest (REEF3D's lexer_geometry.cpp). DIVEMesh's grid must be the logical box of
 the curvilinear one: ni x nj cells (B 10 and B 1 of control.txt).
 
-The corridor is kept in ``corridor.json`` in the case folder.
+The corridor is kept in ``corridor.json`` in the case folder; a river drawn on the
+map as a line (before the corridor is made along it) in ``river.json``.
 """
 
 from __future__ import annotations
@@ -39,6 +40,8 @@ from pathlib import Path
 import numpy as np
 
 FILE = "corridor.json"
+#: the river drawn on the map: its line, upstream first
+RIVER_FILE = "river.json"
 GRID_FILE = "curvgrid.dat"
 CURVES = ("through", "bspline")
 BEDS = ("slope", "geo")
@@ -418,6 +421,25 @@ def read(folder: str | Path) -> Corridor | None:
         return Corridor.from_dict(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, ValueError, TypeError, KeyError):
         return None
+
+
+def read_river(folder: str | Path) -> np.ndarray | None:
+    """The river drawn on the map of a case folder: its line (n, 2), upstream first
+    (None: no river.json, or not readable)."""
+    path = Path(folder) / RIVER_FILE
+    if not path.is_file():
+        return None
+    try:
+        line = np.asarray(json.loads(path.read_text(encoding="utf-8"))["line"], float)
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+    return line.reshape(-1, 2) if line.size >= 4 and line.size % 2 == 0 else None
+
+
+def river_text(line) -> str:
+    """river.json of a line."""
+    points = [[round(float(x), 4), round(float(y), 4)] for x, y in np.asarray(line, float)]
+    return json.dumps({"line": points}, indent=1) + "\n"
 
 
 def default(area, count: int = 12, along_x: bool | None = None, **options) -> Corridor:
