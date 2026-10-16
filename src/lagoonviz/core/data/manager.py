@@ -52,6 +52,7 @@ DATA_KINDS = {kind: role for role, kind in ROLES.items() if role not in ("solid"
     "iso_surface": "volume",
     "iso_volume": "volume",
     "streamlines": "volume",
+    "statistics": "statistics",
 }
 #: 2D: heights of the flat layers (the free surface over objects over the bed)
 PLAN_LAYERS = {
@@ -72,6 +73,7 @@ PLAN_LAYERS = {
     "mooring": 2.0,
     "free_surface": 3.0,
     "amr": 3.0,
+    "statistics": 3.2,  # over the water: a map of it
 }
 #: kinds drawn as points, one screen-space dot each
 POINT_KINDS = ("particles", "geodat")
@@ -424,6 +426,69 @@ class DataManager:
                 self._attach_derived(key, case)
             return case
 
+    # ------------------------------------------------------------- statistics
+    def statistics_recipe(self, properties: dict, case=None):
+        """The recipe of a statistics item (:class:`~lagoonviz.core.statistics.Recipe`):
+        its source output (default the free surface, else the bed), window, variables
+        and wet depth; None when the case has no surface to make it of."""
+        from lagoonviz.core.statistics import Recipe
+
+        source = str(properties.get("source", "") or "")
+        if not source and case is not None:
+            found = case.by_role("free_surface") or case.by_role("bed")
+            source = found.key if found is not None else ""
+        if not source:
+            return None
+        names = [v.strip() for v in str(properties.get("of_variables", "")).split(",") if v.strip()]
+        return Recipe(
+            source,
+            float(properties.get("start", 0.0) or 0.0),
+            float(properties.get("end", 0.0) or 0.0),
+            names,
+            float(properties.get("wet_depth", 0.01)),
+        )
+
+    def statistics_file(self, item_id: str) -> Path | None:
+        """Where a statistics item's map is (or will be) kept."""
+        from lagoonviz.core.statistics import FOLDER
+
+        item = self.scene.get(item_id)
+        recipe = self.statistics_recipe(item.properties, self.case(item_id))
+        folder = self.case_folder(item_id)
+        if recipe is None or folder is None:
+            return None
+        return folder / FOLDER / recipe.name()
+
+    def _statistics_dataset(self, case_item, case, properties: dict):
+        from lagoonviz.core.statistics import FOLDER, StatisticsDataset
+
+        recipe = self.statistics_recipe(properties, case)
+        if recipe is None:
+            return None
+        path = Path(case.path)
+        path = path.parent if path.is_file() else path
+        path = path / FOLDER / recipe.name()
+        key = "statistics_" + path.stem
+        found = case.datasets.get(key)
+        if found is not None:
+            return found
+        if not path.is_file():
+            return None
+        try:
+            found = StatisticsDataset(key, path)
+        except (OSError, ValueError, KeyError):
+            return None
+        case.datasets[key] = found
+        return found
+
+    def dataset_times(self, dataset) -> np.ndarray:
+        """The simulation time of every frame of a dataset (its own, else the output
+        number times the output interval, else the output number)."""
+        if dataset.times is not None:
+            return np.asarray(dataset.times, np.float64)
+        dt = self.print_interval() or 1.0
+        return np.array([frame.step * dt for frame in dataset.frames], np.float64)
+
     # ------------------------------------------------------------- derived quantities
     def derived_settings(self, key: str):
         """The settings of a case's derived quantities (Manning's n, its formulas),
@@ -548,6 +613,8 @@ class DataManager:
             case = self.open(case_item.properties["path"])
         except (OSError, ValueError):
             return None
+        if kind == "statistics":
+            return self._statistics_dataset(case_item, case, properties)
         key = properties.get("dataset", "")
         if key and key in case.datasets:
             return case.datasets[key]
@@ -578,6 +645,10 @@ class DataManager:
         if case is None:
             return []
         kind = self.scene.get(item_id).kind if item_id in self.scene else ""
+        if kind == "statistics":
+            from lagoonviz.core.statistics import SOURCE_ROLES
+
+            return [k for k, d in case.datasets.items() if d.role in SOURCE_ROLES]
         if kind in ("slice", "streamlines", "volume", "iso_surface", "iso_volume"):
             return [k for k, d in case.datasets.items() if shows(kind, d)]
         return list(case.datasets)
@@ -745,6 +816,8 @@ class DataManager:
         dataset = self.dataset(item_id)
         if dataset is None:
             return None
+        if dataset.role == "statistics":
+            return 0  # a map over a window: the same at any time
         time = self.scene.time if time is None else time
         if dataset.times is not None and self.logged_times() is not None:
             index = dataset.index_at_time(time)
@@ -774,7 +847,7 @@ class DataManager:
             ):
                 continue
             dataset = self.dataset(item_id)
-            if dataset is not None and dataset.role != "bed":
+            if dataset is not None and dataset.role not in ("bed", "statistics"):
                 firsts.append(dataset.frames[0].step)
         return min(firsts) if firsts else 0
 
@@ -1334,6 +1407,16 @@ class DataManager:
             from lagoonviz.core.data.seastate import wet_triangles
 
             triangles = wet_triangles(triangles, mesh.point_data["wet"])
+        elif (
+            item.kind == "statistics"
+            and props.get("hide_dry", True)
+            and ("ever_wet" in mesh.point_data)
+        ):
+            from lagoonviz.core.data.seastate import wet_triangles
+
+            triangles = self._kept(
+                item_id, mesh, wet_triangles(triangles, mesh.point_data["ever_wet"])
+            )
         elif item.kind == "bathymetry" and props.get("hide_wet", False):
             level = self.still_water_level(item_id, mesh)
             triangles = self._kept(item_id, mesh, _dry_triangles(mesh, level))
@@ -2066,7 +2149,12 @@ def shows(kind: str, dataset) -> bool:
         return volume
     if kind in ("iso_surface", "iso_volume"):
         return volume or getattr(dataset, "surface_like", False) or dataset.role == "amr"
-    roles = {"free_surface": ("free_surface",), "bathymetry": ("bed", "topo"), "amr": ("amr",)}
+    roles = {
+        "free_surface": ("free_surface",),
+        "bathymetry": ("bed", "topo"),
+        "amr": ("amr",),
+        "statistics": ("free_surface", "bed", "seastate"),
+    }
     return dataset.role in roles.get(kind, ())
 
 

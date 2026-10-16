@@ -67,7 +67,15 @@ LAYOUT_VERSION = 4
 VOLUME_TOOLS = ("slice", "iso_surface", "iso_volume", "streamlines", "volume")
 #: items added for an output chosen from a menu (Add menu, the toolbar button's
 #: arrow): which free surface or bed, and what an iso-surface or iso-volume is of
-CHOOSE_DATA = ("free_surface", "bathymetry", "iso_surface", "iso_volume", "slice", "streamlines")
+CHOOSE_DATA = (
+    "free_surface",
+    "bathymetry",
+    "iso_surface",
+    "iso_volume",
+    "slice",
+    "streamlines",
+    "statistics",
+)
 #: the window setting of the memory use mode (lagoonviz.core.memory)
 MEMORY_KEY = "performance/memory"
 TOOLBAR_KINDS = (
@@ -760,6 +768,8 @@ class MainWindow(QMainWindow):
         case = self._target_case() if kind in VOLUME_TOOLS else {}
         if kind in ("iso_surface", "iso_volume", "slice", "streamlines"):
             case = {**case, **self._target_dataset(kind)}
+        if kind == "statistics":
+            return self._add_statistics(**case)
         if kind == "slice":
             return self.session.add_slice("y", **case)
         if kind == "iso_surface":
@@ -804,7 +814,31 @@ class MainWindow(QMainWindow):
                 lambda _=False, k=kind, d=key, c=case_id: self._add_of(k, d, c if several else None)
             )
 
+    def _add_statistics(self, source: str = "", case: str | None = None) -> str | None:
+        """A statistics item, its map worked out in a worker thread (every output of
+        the run is read) with a progress dialog; taken back when it fails."""
+        from lagoonviz.gui.jobs import run_job
+
+        props = {"case": case} if case else {}
+        item = self.session.add_statistics(source=source, compute=False, **props)
+        try:
+            job = self.session.statistics_job(item)
+        except ValueError as error:
+            self.session.undo()
+            self.statusBar().showMessage(str(error), 8000)
+            return None
+
+        def failed(message: str) -> None:
+            if item in self.session.scene:
+                self.session.undo()
+            self.statusBar().showMessage(f"Statistics: {message}", 10000)
+
+        run_job(self, "Statistics", job.run, lambda _r: job.finish(), failed)
+        return item
+
     def _add_of(self, kind: str, dataset: str, case: str | None) -> str | None:
+        if kind == "statistics":
+            return self._add_statistics(dataset, case)
         try:
             return self.session.add_of(kind, dataset, case=case)
         except ValueError as error:

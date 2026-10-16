@@ -1875,6 +1875,9 @@ class Session:
             raise ValueError(f"no output {dataset!r} in the case")
         if not shows(kind, found):
             raise ValueError(f"{found.label}: not something a {KINDS[kind].label} shows")
+        if kind == "statistics":
+            properties["source"] = properties.pop("dataset")
+            return self.add_statistics(**properties)
         if kind == "iso_surface":
             return self.add_iso_surface(**properties)
         if kind == "iso_volume":
@@ -1897,6 +1900,83 @@ class Session:
             return self.data.open(case_item.properties["path"]).datasets
         except (KeyError, OSError, ValueError):
             return {}
+
+    def add_statistics(
+        self,
+        source: str = "",
+        start: float = 0.0,
+        end: float = 0.0,
+        variables=None,
+        wet_depth: float = 0.01,
+        case: str | None = None,
+        progress=None,
+        compute: bool = True,
+        **properties: Any,
+    ) -> str:
+        """A statistics map of a surface output over a time window (``source``: its key,
+        default the free surface; ``end`` 0: to the last output): per point the max,
+        min, mean, time of the maximum and change of ``variables`` (default eta,
+        velocity, the water depth, hazard, Froude, bed shear; a bed's elevation), the
+        significant wave height Hs from eta, when the water first arrives, how long it
+        stays and the maximum inundation. Worked out now (``compute``) and kept in the
+        case's ``LAGOON_Statistics`` folder. Returns the item."""
+        if isinstance(variables, (list, tuple)):
+            variables = ", ".join(variables)
+        props: dict[str, Any] = {
+            "source": source,
+            "start": float(start),
+            "end": float(end),
+            "of_variables": variables or "",
+            "wet_depth": float(wet_depth),
+            **properties,
+        }
+        if case:
+            props["case"] = case
+        elif sum(i.kind == "case" for i in self.scene) > 1:
+            props["case"] = next(i.id for i in self.scene if i.kind == "case")
+        item = self.add_item("statistics", **props)
+        if compute:
+            try:
+                self.compute_statistics(item, progress)
+            except Exception:
+                self.stack.undo()  # nothing to show: no item either
+                raise
+        return item
+
+    def compute_statistics(self, item_id: str, progress=None, again: bool = False) -> Path:
+        """Work a statistics item's map out (reading every output of its window) and
+        keep it in the case's ``LAGOON_Statistics`` folder; a map kept for the same
+        recipe is used as it is unless ``again``. Not an undo step. Returns the file."""
+        job = self.statistics_job(item_id, again)
+        job.run(progress)
+        return job.finish()
+
+    def statistics_job(self, item_id: str, again: bool = False):
+        """:meth:`compute_statistics` in two parts, for a GUI: ``job.run(progress)``
+        reads the outputs and writes the map (it may run in a worker thread);
+        ``job.finish()`` then, in the session's thread, shows it."""
+        item = self.scene.get(item_id)
+        if item.kind != "statistics":
+            raise ValueError(f"{item.name} is no statistics item")
+        case = self.data.case(item_id)
+        if case is None:
+            raise ValueError("the case is not open")
+        recipe = self.data.statistics_recipe(item.properties, case)
+        if recipe is None:
+            raise ValueError("the case has no free surface or bed to make statistics of")
+        source = case.datasets.get(recipe.source)
+        if source is None:
+            raise ValueError(f"no output {recipe.source!r} in the case")
+        return _StatisticsJob(
+            self, item_id, self.data.statistics_file(item_id), source, recipe, again
+        )
+
+    def _statistics_ready(self, item_id: str) -> None:
+        item = self.scene.get(item_id)
+        dataset = self.data.dataset(item_id)
+        if dataset is not None and item.properties.get("variable") not in dataset.variables():
+            item.properties["variable"] = dataset.default_variable()  # (not an undo step)
+        self.scene.data_changed()
 
     def add_slice(self, normal: str = "y", position: float | None = None, **properties: Any) -> str:
         """Add a slice through the volume; without a position it cuts the middle.
@@ -2567,3 +2647,27 @@ def sun_vector(look: str | None = None) -> tuple[float, float, float]:
     x, y, z = LOOK_SUNS.get(look or "", DEFAULT_SUN)
     n = math.sqrt(x * x + y * y + z * z)
     return x / n, y / n, z / n
+
+
+class _StatisticsJob:
+    """A statistics map to work out (:meth:`Session.statistics_job`)."""
+
+    def __init__(self, session, item_id, path, source, recipe, again) -> None:
+        self.session, self.item_id, self.path = session, item_id, path
+        self.source, self.recipe, self.again = source, recipe, again
+        self.times = session.data.dataset_times(source)
+
+    def run(self, progress=None) -> None:
+        from lagoonviz.core import statistics
+
+        if self.path.is_file() and not self.again:
+            return
+        mesh, facts = statistics.compute(self.source, self.times, self.recipe, progress)
+        statistics.save(self.path, mesh, facts, self.recipe)
+
+    def finish(self) -> Path:
+        case = self.session.data.case(self.item_id)
+        if case is not None:
+            case.datasets.pop("statistics_" + self.path.stem, None)  # read the new one
+        self.session._statistics_ready(self.item_id)
+        return self.path

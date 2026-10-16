@@ -631,6 +631,22 @@ def test_add_menus_choose_the_data(window, tmp_path):
     assert len(list(window.session.scene)) == before + 1
 
 
+def test_a_statistics_map_from_the_add_menu(window, tmp_path, qtbot):
+    """Add → Statistics works the map out in a worker thread, then shows it; its
+    Compute button does it again."""
+    from reef3d_fixtures import make_run
+
+    root = make_run(tmp_path / "run", frames=4, print_interval=0.5, volume=False)
+    window.open_case(root)
+    window.add_actions["statistics"].trigger()
+    session = window.session
+    item = next(i.id for i in session.scene if i.kind == "statistics")
+    qtbot.waitUntil(lambda: session.data.dataset(item) is not None, timeout=20000)
+    assert session.scene.get(item).properties["variable"] == "Hs"
+    window.scene_tree.select(item)
+    assert "outputs" in window.properties.info.text()
+
+
 def test_viewport_look_is_remembered(window):
     window.look_actions["ocean"].trigger()
     assert window.settings.value("view/look") == "ocean"

@@ -663,6 +663,39 @@ KINDS: dict[str, KindSpec] = {
             ),
         },
     ),
+    "statistics": KindSpec(
+        "Statistics",
+        {
+            "case": PropertySpec("", "Case", provider="cases", tip="Case item (empty: first case)"),
+            "source": PropertySpec(
+                "",
+                "Of",
+                provider="datasets",
+                tip="The surface output the statistics are of (free surface, bed; empty: the "
+                "free surface)",
+            ),
+            "start": PropertySpec(0.0, "From [s]", minimum=0.0, tip="Start of the window"),
+            "end": PropertySpec(
+                0.0, "To [s]", minimum=0.0, tip="End of the window; 0: the last output"
+            ),
+            "of_variables": PropertySpec(
+                "",
+                "Variables",
+                tip="The variables, separated by commas (empty: eta, velocity, the water "
+                "depth, hazard, Froude, bed shear; a bed's elevation): their max, min, mean, "
+                "time of the maximum and change",
+            ),
+            "wet_depth": PropertySpec(
+                0.01, "Wet from [m]", minimum=0.0, tip="A water depth above this is wet"
+            ),
+            **_colouring("Hs", "rainbow"),
+            **_contours(),
+            **_vectors(),
+            "hide_dry": PropertySpec(
+                True, "Hide never wet", tip="Leave out where the water never came (ever_wet 0)"
+            ),
+        },
+    ),
     "particles": KindSpec(
         "Particles",
         {

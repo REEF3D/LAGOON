@@ -89,6 +89,14 @@ class PropertiesPanel(QWidget):
             fit.clicked.connect(self._fit_range)
             form.addRow("", fit)
             self.fit_button = fit
+        if item.kind == "statistics":
+            compute = QPushButton("Compute")
+            compute.setToolTip(
+                "Read the outputs of the window and work the map out (again: a map kept "
+                "for the same settings is replaced)"
+            )
+            compute.clicked.connect(self._compute_statistics)
+            form.addRow("", compute)
         if item.kind == "corridor":
             reset = QPushButton("Reset")
             reset.setToolTip(
@@ -258,6 +266,20 @@ class PropertiesPanel(QWidget):
                 "DIVEMesh's grid" if grid.source == "DIVEMesh" else "from control.txt (not run)"
             )
             return f"{source}\n{nx} × {ny} × {nz} = {nx * ny * nz:,} cells\n{sizes} m"
+        if item.kind == "statistics":
+            dataset = data.dataset(item_id)
+            if dataset is None:
+                return (
+                    "Not worked out for these settings yet: Compute (it reads every output "
+                    "of the window)"
+                )
+            f = dataset.facts
+            return (
+                f"{dataset.label}: {f.get('outputs', 0)} outputs of {f.get('label', '')}\n"
+                f"Variables: {', '.join(f.get('variables', []))}"
+                + (f"; wet from {f['wetness']}" if f.get("wetness") else "")
+                + f"\nFields: {', '.join(dataset.components)}"
+            )
         if item.kind == "corridor":
             setup = data.case_setup(item_id)
             corridor = setup.corridor if setup is not None else None
@@ -333,6 +355,27 @@ class PropertiesPanel(QWidget):
                 else ""
             )
         return f"{dataset.label} · {len(dataset)} frames · {dataset.folder.name}"
+
+    def _compute_statistics(self) -> None:
+        from lagoonviz.gui.jobs import run_job
+
+        item_id = self.item_id
+        try:
+            job = self.session.statistics_job(item_id, again=True)
+        except ValueError as error:
+            self.info.setText(str(error))
+            return
+
+        def finish(_result) -> None:
+            job.finish()
+            if self.item_id == item_id:
+                self.info.setText(self._data_info(item_id))
+
+        def failed(message: str) -> None:
+            if self.item_id == item_id:
+                self.info.setText(message)
+
+        run_job(self, "Statistics", job.run, finish, failed)
 
     def _reset_corridor(self) -> None:
         if not self.item_id:

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Statistics over time
+
+- *Add → Statistics*: a map of the free surface (or the bed) over a time window:
+  per point the max, min, mean, time of the maximum and change of each variable
+  (also the derived ones: hazard, Froude, bed shear), the significant wave height
+  Hs = 4 σ(η) (wave penetration, harbour agitation), when the water first arrives,
+  how long it stays, the maximum inundation, the deepest water and highest level
+  (run-up). Worked out in a worker thread, kept in the case's `LAGOON_Statistics`
+  folder; *Compute* makes it again for a new window. In a script
+  `session.add_statistics(...)`.
+
 ### Derived quantities
 
 - Colour by (contour lines, vectors, slices, iso-surfaces) quantities worked out

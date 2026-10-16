@@ -23,6 +23,7 @@ script the session writes ([Scripting](../scripting.md)).
 | Free surface | the water surface, coloured by a variable or plain |
 | AMR surface | the surface of an adaptive-mesh run, finer patches over coarser ones, with the patch outlines; *AMR patches* off shows the base grid (level 0) alone, *Grid lines* draws the cells of every level |
 | Bed | the bathymetry (sand coloured by default) |
+| Statistics | a map of an output over a time window: max, min, mean, time of the maximum, Hs, arrival and duration of the water, maximum inundation ([Statistics over time](#statistics-over-time)) |
 | Volume | the outside of the volume output |
 | Slice | the volume cut by an x, y or z plane |
 | Iso-surface | where a variable of the volume has a given value; on the free surface or the bed, the line where it has it |
@@ -96,6 +97,37 @@ appears in the outputs that have its variables; the case's information says whic
 it fits none of and why. Changing a formula works the frames out anew; it is a
 property, so undo, the saved session and the script keep it. A probe or a time
 series at a point of a derived quantity reads every output for it (slower).
+
+## Statistics over time
+
+*Add → Statistics* makes a map of a surface output over a time window (the free
+surface, else the bed; the arrow of the button, or the Add menu's list, chooses
+another): it reads every output of the window once (a progress dialog, which can
+cancel) and keeps the map in the case's `LAGOON_Statistics` folder, so it opens
+again at once, in this session or the next. The map is the same at any time; it
+lies at the mean height of the surface over the window. Per point:
+
+| field | what |
+|---|---|
+| `<v>_max`, `<v>_min`, `<v>_mean` | of each variable (a vector: its magnitude), e.g. `velocity_max`, `hazard_max` (flood hazard), `froude_max`, `bed_shear_max` |
+| `<v>_time_of_max` | when the maximum came [s] |
+| `<v>_change` | the last output minus the first: a bed's `elevation_change` is its erosion (< 0) and deposition (> 0) |
+| `Hs` | the significant wave height Hm0 = 4 σ(η) over the window: wave penetration, harbour agitation (FNPF, NHFLOW, SFLOW free surfaces) |
+| `eta_range`, `setup` | the highest crest to the lowest trough, the mean water level |
+| `first_wet` | when the water first arrived [s] (empty where it never did) |
+| `wet_duration` | how long it stayed [s] |
+| `ever_wet` | 1 where the water ever came: the maximum inundation (*Hide never wet* leaves the rest out) |
+| `max_depth`, `max_level` | the deepest water, the highest water level: run-up |
+
+Wet means a water depth above *Wet from* (0.01 m; the depth NHFLOW's `WL`, SFLOW's
+`waterlevel` or FNPF's `depth` + `eta`), else `wetdry`. Waves and velocities count
+only while wet. Each output stands for the time half-way to its neighbours. *From*
+and *To* set the window (leave out the start-up; *To* 0: the last output),
+*Variables* which variables (the derived quantities too); the defaults are eta,
+velocity, water depth, hazard, Froude and bed shear, a bed's elevation. Changed,
+the map is made again with *Compute*. The outputs must keep their points (not AMR
+surfaces, whose patches move). In a script: `session.add_statistics(source="nhflow_free_surface",
+start=60.0)`.
 
 ## Vertical scale
 

@@ -132,6 +132,15 @@ def _iso_surface(p: QPainter) -> None:
     p.restore()
 
 
+def _statistics(p: QPainter) -> None:
+    """A map with a peak curve over it: a time maximum."""
+    p.drawRect(QRectF(8, 22, 32, 20))
+    path = QPainterPath(QPointF(8, 18))
+    for x, y in ((16, 12), (24, 15), (32, 6), (40, 10)):
+        path.lineTo(x, y)
+    p.drawPath(path)
+
+
 def _iso_volume(p: QPainter) -> None:
     """The box with a filled body of water in its lower part, a wavy top."""
     _volume(p)
@@ -300,6 +309,7 @@ DRAWINGS: dict[str, Draw] = {
     "slice": _slice,
     "iso_surface": _iso_surface,
     "iso_volume": _iso_volume,
+    "statistics": _statistics,
     "series": _series,
     "play": _play,
     "pause": _pause,
