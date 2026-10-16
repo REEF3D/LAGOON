@@ -488,15 +488,21 @@ def _side_cells(shape, side: int):
     return [(ny - 1, c) for c in range(nx)]
 
 
-def thalweg_path(z: np.ndarray, start: tuple[int, int], end: tuple[int, int]) -> np.ndarray:
+def thalweg_path(
+    z: np.ndarray, start: tuple[int, int], end: tuple[int, int], open_=None
+) -> np.ndarray:
     """The least-cost path (rows, columns) between two raster cells, the cost of a
-    step rising steeply with the bed's height: it keeps to the deepest channel."""
+    step rising steeply with the bed's height: it keeps to the deepest channel.
+    ``open_``: the cells it may cross (a mask; default all)."""
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import dijkstra
 
     ny, nx = z.shape
-    low, high = float(np.nanmin(z)), float(np.nanmax(z))
+    inside = z if open_ is None else z[open_]
+    low, high = float(np.nanmin(inside)), float(np.nanmax(inside))
     weight = 1.0 + 1000.0 * ((z - low) / max(high - low, 1e-12)) ** 2
+    if open_ is not None:
+        weight = np.where(open_, weight, 1e9)
     index = np.arange(ny * nx).reshape(ny, nx)
     rows, cols, costs = [], [], []
     for dr, dc in ((0, 1), (1, 0), (1, 1), (1, -1)):
@@ -589,11 +595,25 @@ def find_thalweg(
     bed = map_coordinates(z, to_index(line), order=1, mode="nearest")
     if level is None:
         level = default_level(z, bed)
+    reach = 0.5 * max(domain[1] - domain[0], domain[3] - domain[2])
+    left, right = _wetted(line, xs, ys, z, level, reach)
+    return Thalweg(line, bed, left, right, float(level))
+
+
+def _wetted(line, xs, ys, z, level, reach):
+    """How far the water below ``level`` reaches to the left and right of a line on
+    the raster (xs, ys, z): (left, right) half-widths, at most ``reach``."""
+    from scipy.ndimage import map_coordinates
+
+    step = float(xs[1] - xs[0]) if len(xs) > 1 else 1.0
+
+    def to_index(p):
+        return np.array([(p[:, 1] - ys[0]) / step, (p[:, 0] - xs[0]) / step])
+
     tangent = np.gradient(line, axis=0)
     tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
     normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])  # to the left
-    reach = 0.5 * max(domain[1] - domain[0], domain[3] - domain[2])
-    distances = np.arange(0.0, reach, 0.5 * step)
+    distances = np.arange(0.0, max(reach, step), 0.5 * step)
     widths = []
     for sign in (1.0, -1.0):
         found = np.full(len(line), np.nan)
@@ -613,7 +633,102 @@ def find_thalweg(
                 break
         found[np.isnan(found)] = distances[-1]
         widths.append(found)
-    return Thalweg(line, bed, widths[0], widths[1], float(level))
+    return widths[0], widths[1]
+
+
+def from_line(line, width: float, count: int = 12, **options) -> Corridor:
+    """A corridor along a line drawn on the map (upstream first), ``width`` m wide,
+    ``count`` points on each bank: the banks parallel to it, the line smoothed a
+    little so its corners do not fold the grid."""
+    line = np.asarray(line, float)
+    if len(line) < 2:
+        raise ValueError("a river needs two points at least")
+    keep = np.concatenate([[True], np.hypot(*np.diff(line, axis=0).T) > 1e-9])
+    line = line[keep]
+    if len(line) < 2:
+        raise ValueError("the points of the river lie on one another")
+    dense = resample(line, max(8 * len(line), 64))
+    dense = _smooth_line(dense, 0.25 * len(dense) / max(len(line) - 1, 1))
+    dense[0], dense[-1] = line[0], line[-1]
+    n = len(dense)
+    half = np.full(n, 0.5 * float(width))
+    flat = Thalweg(dense, np.zeros(n), half, half, 0.0)
+    options.setdefault("bed", "slope")
+    return from_thalweg(flat, 0.0, count, width=float(width), **options)
+
+
+def fit_to_bed(
+    corridor: Corridor,
+    points: np.ndarray,
+    level: float | None = None,
+    margin: float = 0.0,
+    count: int | None = None,
+    cells: int = RASTER,
+    **options,
+) -> tuple[Corridor, Thalweg]:
+    """A corridor drawn by eye made to follow the river: the thalweg of the bed
+    (geo.dat's points) within the corridor, from the deepest point of its upstream
+    end to the deepest of its downstream end; its banks where the water below
+    ``level`` reaches (default: halfway up the banks) plus ``margin``, at most half
+    as far again as the corridor drawn. The banks' curve, the grid's cells and
+    smoothing are kept. Returns (the corridor, the thalweg found)."""
+    from scipy.ndimage import map_coordinates
+    from scipy.spatial import cKDTree
+
+    centre = corridor.centreline(400)
+    left = resample(corridor.bank_line("left"), 400)
+    right = resample(corridor.bank_line("right"), 400)
+    half = 0.5 * float(np.max(np.hypot(*(left - right).T)))
+    pad = 0.75 * half
+    box = (
+        float(centre[:, 0].min() - half - pad),
+        float(centre[:, 0].max() + half + pad),
+        float(centre[:, 1].min() - half - pad),
+        float(centre[:, 1].max() + half + pad),
+    )
+    xs, ys, z = bed_raster(points, box, cells)
+    step = float(xs[1] - xs[0]) if len(xs) > 1 else 1.0
+    gx, gy = np.meshgrid(xs, ys)
+    cells_xy = np.column_stack([gx.ravel(), gy.ravel()])
+    near, _ = cKDTree(centre).query(cells_xy)
+    band = (near <= half + 0.5 * step).reshape(z.shape) & np.isfinite(z)
+    if band.sum() < 4:
+        raise ValueError("the corridor is too narrow for the bed's raster")
+    if not np.isfinite(z[band]).all() or np.nanmax(z[band]) - np.nanmin(z[band]) <= 0:
+        raise ValueError("the bed is flat under the corridor: nothing to follow")
+
+    def deepest_at(a, b):
+        """The deepest cell of the band on the cross-section from a to b."""
+        ab = b - a
+        t = np.clip(((cells_xy - a) @ ab) / max(float(ab @ ab), 1e-12), 0.0, 1.0)
+        d = np.hypot(*(cells_xy - (a + t[:, None] * ab)).T).reshape(z.shape)
+        on = band & (d <= 0.75 * step)
+        if not on.any():
+            on = band & (d <= 2.0 * step)
+        if not on.any():
+            raise ValueError("an end of the corridor lies outside the bed")
+        rc = np.unravel_index(np.argmin(np.where(on, z, np.inf)), z.shape)
+        return int(rc[0]), int(rc[1])
+
+    start = deepest_at(right[0], left[0])
+    end = deepest_at(right[-1], left[-1])
+    path = thalweg_path(np.where(band, z, 0.0), start, end, band)
+    line = np.column_stack([xs[path[:, 1]], ys[path[:, 0]]])
+    line = resample(_smooth_line(line, 3.0), max(len(line), 8))
+    line = resample(_smooth_line(line, 0.02 * len(line)), max(len(line) // 2, 8))
+    index = np.array([(line[:, 1] - ys[0]) / step, (line[:, 0] - xs[0]) / step])
+    bed = map_coordinates(z, index, order=1, mode="nearest")
+    if level is None:
+        level = default_level(z[band], bed)
+    widest = 1.5 * half
+    wet_left, wet_right = _wetted(line, xs, ys, z, level, widest)
+    thalweg = Thalweg(
+        line, bed, np.minimum(wet_left, widest), np.minimum(wet_right, widest), float(level)
+    )
+    keep = {k: getattr(corridor, k) for k in ("curve", "cells_along", "cells_across", "smoothing")}
+    keep.update(options)
+    made = from_thalweg(thalweg, float(margin), int(count or len(corridor.left)), **keep)
+    return made, thalweg
 
 
 def from_thalweg(

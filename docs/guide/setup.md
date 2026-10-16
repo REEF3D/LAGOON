@@ -202,7 +202,21 @@ the banks) plus the *Margin*, never more than 2.5 times the river's usual half
 width from the thalweg (a marsh or a harbour basin does not widen it),
   smoothed along the river, with *Points per bank* points to drag afterwards. The
   bed of its grid comes from geo.dat.
-- **Drag points** (on after Start, Draw and Follow thalweg): press on a point of a bank in the 2D
+- **Draw the river** (before there is a bed: a new case started on the map): click
+  the river in the 2D top view over the map, point by point from upstream; click the
+  last point again (a double click) or press Enter to end, Backspace takes the last
+  point back, Esc stops, and dragging pans the view as always. The corridor runs
+  along the line, *Width* wide. **Domain and geo.dat** then sets the domain (B 10's
+  x and y) around the corridor, half its width beyond the banks and on DIVEMesh's
+  cells, and makes geo.dat there with the Map tab's source (downloaded, or the file
+  chosen there).
+- **Fit to the bed** (with geo.dat) makes the corridor as it is - drawn on the map,
+  over an area or dragged - follow the river in the bed: the thalweg within the
+  corridor, from the deepest point of its upstream end to the deepest of its
+  downstream end, the banks where the water reaches (*Water level*) plus the
+  *Margin*, at most half as far again as the corridor was wide. Its points per bank,
+  curve and grid's cells stay; the bed of its grid comes from geo.dat.
+- **Drag points** (on after Start, Draw, Draw the river, Fit to the bed and Follow thalweg): press on a point of a bank in the 2D
   top view and drag it; the bank follows at once, drawn over everything while you
   drag. Pressing anywhere else pans the view as always; Esc stops. Each point moved
   is an undo step.
@@ -251,14 +265,19 @@ draws the banks and their points in yellow and the grid it makes; *Points* and
 River tab forward. **Remove** (in the scene, or in the River tab) takes the
 corridor away with its `corridor.json`; **Reset** (in its properties, or in the
 River tab) lays it out again the way it was made - along the domain, over the area
-drawn, or along the thalweg with its margin - dropping the dragged points and
-keeping the grid's settings. Each is one undo step.
+drawn, along the river drawn on the map, along the thalweg with its margin, or
+fitted to the bed from any of these - dropping the dragged points and keeping the
+grid's settings. Each is one undo step.
 
 The corridor is kept in `corridor.json` in the case folder. In a script:
 
 ```python
 session.start_corridor([0, 200, 0, 20], points=12)   # or along the thalweg:
 session.auto_corridor(margin=5.0, points=12)
+# or drawn on the map first, the domain and the bed made for it, then fitted:
+session.trace_corridor([(0, 92), (125, 106), (250, 96), (400, 90)], 60.0, points=12)
+session.corridor_domain()    # B 10 around it; then make_geo_dat("best")
+session.fit_corridor(margin=2.0)
 session.move_corridor_point("left", 5, 90.0, 28.0)
 session.set_corridor_options(points=16, curve="bspline", cells_along=100,
                              cells_across=10, smoothing=100, slope=0.001)

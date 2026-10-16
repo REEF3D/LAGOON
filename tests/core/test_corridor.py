@@ -384,3 +384,93 @@ def test_a_fine_grid_is_drawn_too(river):
     marks = session.data.case_setup(case_id).marks()
     grid = [m for m in marks if m.group == "corridor_grid"]
     assert grid and 0 < len(grid[0].segments) < 2 * 121 * 2400
+
+
+#: a river drawn by eye over the map of valley(): near its channel, not on it
+DRAWN = [(0, 92), (62, 148), (125, 106), (187, 52), (250, 96), (312, 146), (375, 108), (400, 90)]
+
+
+def channel(x):
+    return 100 + 40 * np.sin(2 * np.pi * np.asarray(x) / 250)
+
+
+def widths(corridor):
+    """How far each point of the left bank lies from the right bank."""
+    right = corridor.bank_line("right")
+    left = C.resample(corridor.bank_line("left"), 100)[5:-5]
+    return np.linalg.norm(left[:, None] - right[None], axis=2).min(axis=1)
+
+
+def test_a_river_drawn_on_the_map_and_fitted_to_its_bed():
+    drawn = C.from_line(DRAWN, 60.0, 12)
+    assert len(drawn.left) == 12 and drawn.bed == "slope"
+    assert np.median(widths(drawn)) == pytest.approx(60, rel=0.05)
+    np.testing.assert_allclose(drawn.centreline(50)[0], DRAWN[0], atol=1.0)
+    with pytest.raises(ValueError, match="two points"):
+        C.from_line([(1, 1)], 10.0)
+    # fitted: along the channel, the banks at its edge plus the margin
+    fitted, thalweg = C.fit_to_bed(drawn, valley(), level=0.0, margin=2.0)
+    inside = (thalweg.line[:, 0] > 5) & (thalweg.line[:, 0] < 395)
+    assert np.abs(thalweg.line[inside, 1] - channel(thalweg.line[inside, 0])).max() < 3.5
+    centre = fitted.centreline(200)
+    inside = (centre[:, 0] > 15) & (centre[:, 0] < 385)
+    assert np.abs(centre[inside, 1] - channel(centre[inside, 0])).max() < 4.0
+    assert 18 < np.median(widths(fitted)) < 30  # the channel is 20 m wide, 2 m more each side
+    assert len(fitted.left) == 12 and fitted.bed == "geo"
+    assert fitted.cells_across == drawn.cells_across
+    x, y = fitted.grid()
+    assert C.quality(x, y).folded == 0
+    # the ends stay where the corridor was drawn
+    assert thalweg.line[0, 0] < 10 and thalweg.line[-1, 0] > 385
+
+
+def test_a_river_drawn_first_then_its_domain_bed_and_fit(river):
+    """Draw the river on the map, set the domain around it, make geo.dat there, fit
+    the corridor to the bed; reset fits the drawn river again."""
+    (river / "control.txt").write_text(
+        "C 11 1\nC 14 2\nB 1 2.0\nB 10 50.0 150.0 50.0 150.0 -2.0 3.0\nM 10 1\n"
+    )
+    (river / "ctrl.txt").write_text("A 10 2\nF 60 0.0\n")
+    session = Session()
+    session.open_case(river)
+    session.trace_corridor(DRAWN, 60.0, points=10)
+    corridor = session.corridor()
+    assert len(corridor.left) == 10 and corridor.z_start == -2.0
+    assert corridor.extra["made"]["how"] == "line"
+    assert [i for i in session.scene if i.kind == "corridor"]
+    with pytest.raises(ValueError, match="geo.dat"):
+        session.fit_corridor()
+    # the domain around it, on DIVEMesh's 2 m cells, 30 m beyond the banks
+    x0, x1, y0, y1 = session.corridor_domain()
+    banks = np.vstack([corridor.bank_line("left"), corridor.bank_line("right")])
+    assert x0 <= banks[:, 0].min() - 30 and x1 >= banks[:, 0].max() + 30
+    assert y0 <= banks[:, 1].min() - 30 and y1 >= banks[:, 1].max() + 30
+    assert x0 % 2 == 0 and y1 % 2 == 0
+    assert session.input_file("control.txt").values("B 10") == [x0, x1, y0, y1, -2.0, 3.0]
+    # the bed (as Make geo.dat would download it), then the fit
+    np.savetxt(river / "geo.dat", valley(), fmt="%.4f")
+    session.data.case_setup(session._case_id(None)).geo_changed()
+    thalweg = session.fit_corridor(margin=2.0)
+    assert thalweg.level == 0.0  # F 60
+    fitted = session.corridor()
+    centre = fitted.centreline(100)
+    inside = (centre[:, 0] > 15) & (centre[:, 0] < 385)
+    assert (
+        np.abs(centre[inside, 1] - channel(centre[inside, 0])).max() < 6.0
+    )  # in the 20 m channel, 10 points a bank
+    assert fitted.extra["made"]["how"] == "fitted"
+    assert fitted.extra["made"]["from"]["how"] == "line"
+    script = session.to_script()
+    assert "session.trace_corridor(" in script and "session.fit_corridor(margin=2.0)" in script
+    # dragged, then reset: fitted again from the river drawn
+    session.move_corridor_point("left", 3, *fitted.left[3] + 5.0)
+    session.reset_corridor()
+    np.testing.assert_allclose(session.corridor().left, fitted.left, atol=1e-6)
+    assert session.make_corridor_grid().folded == 0
+    # with the grid made, B 10 is its logical box: the domain is not set from the river
+    with pytest.raises(ValueError, match="logical box"):
+        session.corridor_domain()
+    # undo goes back step by step: the grid, the reset, the drag, the fit
+    for _ in range(4):
+        session.undo()
+    assert session.corridor().extra["made"]["how"] == "line"

@@ -103,6 +103,9 @@ class ViewportPlaceholder(QWidget):
     domainDrawn = Signal(object)
     #: another area drawn there: (purpose, (x0, x1, y0, y1)); never sent here
     areaDrawn = Signal(str, object)
+    #: a line traced there: (purpose, [(x, y), ...]), or (purpose, None) when the
+    #: tracing stopped without a line; never sent here
+    lineDrawn = Signal(str, object)
     #: the model turned on the map (degrees, about the model point); never sent here
     modelTurned = Signal(float, object)
 
@@ -127,6 +130,13 @@ class ViewportPlaceholder(QWidget):
 
     def start_domain_drawing(self, case_id: str = "", purpose: str = "domain") -> None:
         self.statusMessage.emit(f"Drawing the {purpose} needs the 3D view (no GPU here)")
+
+    def start_line_drawing(self, case_id: str = "", purpose: str = "river") -> None:
+        self.statusMessage.emit(f"Drawing the {purpose} needs the 3D view (no GPU here)")
+        self.lineDrawn.emit(purpose, None)
+
+    def stop_line_drawing(self) -> None:
+        pass
 
     def start_corridor_editing(self, case_id: str = "") -> None:
         self.statusMessage.emit("Dragging the corridor's points needs the 3D view (no GPU here)")
@@ -293,6 +303,9 @@ class Viewport3D(QWidget):
     #: another area drawn there (start_domain_drawing with a purpose other than
     #: "domain", e.g. "porous structure"): (purpose, (x0, x1, y0, y1))
     areaDrawn = Signal(str, object)
+    #: a line traced there point by point (start_line_drawing): (purpose, [(x, y),
+    #: ...]), or (purpose, None) when the tracing stopped without a line
+    lineDrawn = Signal(str, object)
     #: the model turned on the map with Shift + drag: degrees (counter-clockwise),
     #: about the model point (x, y)
     modelTurned = Signal(float, object)
@@ -361,6 +374,9 @@ class Viewport3D(QWidget):
         #: editing a river corridor (start_corridor_editing): the case, the point being
         #: dragged, or None
         self._corridor_edit: dict | None = None
+        #: tracing a line point by point (start_line_drawing): the case, the purpose,
+        #: the LineTrace, the press of a click, or None
+        self._tracing: dict | None = None
         #: editing the blocks (start_blocks_editing): the case, the mode ("drag", "cut",
         #: "extend") and what is being dragged
         self._blocks_edit: dict | None = None
@@ -1005,6 +1021,7 @@ class Viewport3D(QWidget):
         self.two_d, self.two_d_side = on, side
         if not (on and side == "top"):
             self.stop_domain_drawing()  # the domain is drawn in the 2D top view only
+            self.stop_line_drawing()
             self.stop_corridor_editing()
             self.stop_blocks_editing()
         self.two_d_button.blockSignals(True)
@@ -1043,6 +1060,8 @@ class Viewport3D(QWidget):
             purpose = self._drawing.get("purpose", "domain")
             self.stop_domain_drawing()
             self.statusMessage.emit(f"Stopped drawing the {purpose}")
+            return
+        if self._tracing is not None and self._trace_key(key):
             return
         if key == "Escape" and self._corridor_edit is not None:
             self.stop_corridor_editing()
@@ -1084,6 +1103,7 @@ class Viewport3D(QWidget):
         for it (areaDrawn), Shift does nothing more."""
         if not (self.two_d and self.two_d_side == "top"):
             self.set_2d(True, "top")
+        self.stop_line_drawing()
         self._drawing = {"start": None, "case": case_id, "purpose": purpose}
         try:
             self.controller.enabled = False  # the drag draws, it does not pan
@@ -1110,6 +1130,103 @@ class Viewport3D(QWidget):
         self.view.set_outline(None)
         self.redraw()
 
+    # ------------------------------------------------------------- tracing a line
+    #: how near (pixels) a click must be to the last point to end the line there
+    TRACE_PICK = 8.0
+
+    def start_line_drawing(self, case_id: str = "", purpose: str = "river") -> None:
+        """Clicks in the 2D top view trace a line point by point (upstream first for a
+        river): a click on the last point again (a double click) or Enter ends it
+        (lineDrawn), Backspace takes the last point back, Esc stops; dragging pans
+        the view as always."""
+        from lagoonviz.core.line_trace import LineTrace
+
+        if not (self.two_d and self.two_d_side == "top"):
+            self.set_2d(True, "top")
+        self.stop_domain_drawing()
+        self.stop_corridor_editing()
+        self.stop_line_drawing(quiet=True)
+        self._tracing = {"case": case_id, "purpose": purpose, "trace": LineTrace(), "press": None}
+        self.canvas.setCursor(Qt.CrossCursor)
+        self.statusMessage.emit(
+            f"Click the {purpose} point by point in the 2D view (upstream first) · click "
+            "the last point again or Enter to end · Backspace takes a point back · Esc stops"
+        )
+
+    def stop_line_drawing(self, quiet: bool = False) -> None:
+        """Stop tracing (no line); ``lineDrawn(purpose, None)`` unless ``quiet``."""
+        tracing = self._tracing
+        if tracing is None:
+            return
+        self._tracing = None
+        self.canvas.unsetCursor()
+        self.view.set_sketch(None)
+        self.redraw()
+        if not quiet:
+            self.lineDrawn.emit(tracing["purpose"], None)
+
+    def _finish_line(self) -> None:
+        tracing = self._tracing
+        if tracing is None or not tracing["trace"].done:
+            return
+        points = list(tracing["trace"].points)
+        self._tracing = None
+        self.canvas.unsetCursor()
+        self.view.set_sketch(None)
+        self.redraw()
+        self.lineDrawn.emit(tracing["purpose"], points)
+
+    def _trace_sketch(self, pointer=None) -> None:
+        trace = self._tracing["trace"]
+        segments, dots = trace.sketch(pointer, self.SKETCH_Z)
+        self.view.set_sketch(segments, dots, color=HIGHLIGHT_SKETCH, point_size=8.0)
+        count = len(trace.points)
+        if count:
+            self.statusMessage.emit(
+                f"{self._tracing['purpose'].capitalize()}: {count} point"
+                f"{'s' if count != 1 else ''}, {trace.length(pointer):.1f} m · click the "
+                "last point again or Enter to end · Backspace · Esc"
+            )
+        self.redraw()
+
+    def _trace_key(self, key: str) -> bool:
+        """Esc, Enter and Backspace while tracing; True if the key was the trace's."""
+        if key == "Escape":
+            purpose = self._tracing["purpose"]
+            self.stop_line_drawing()
+            self.statusMessage.emit(f"Stopped drawing the {purpose}")
+            return True
+        if key in ("Enter", "Return"):
+            if self._tracing["trace"].done:
+                self._finish_line()
+            else:
+                self.statusMessage.emit("Click two points at least, then Enter")
+            return True
+        if key in ("Backspace", "Delete"):
+            self._tracing["trace"].back()
+            self._trace_sketch()
+            return True
+        return False
+
+    def _trace_pointer(self, kind: str, event) -> None:
+        """A click (press and release without dragging) adds a point; a drag pans."""
+        tracing = self._tracing
+        x, y = getattr(event, "x", 0.0), getattr(event, "y", 0.0)
+        if kind == "pointer_down":
+            tracing["press"] = (x, y) if getattr(event, "button", 1) == 1 else None
+            return
+        press, tracing["press"] = tracing["press"], None
+        if kind != "pointer_up" or press is None or abs(x - press[0]) + abs(y - press[1]) > 4:
+            return
+        point = self._plan_point(event)
+        if point is None:
+            return
+        reach = self._reach(event, self.TRACE_PICK) or 0.0
+        if tracing["trace"].click(point, reach):
+            self._finish_line()
+            return
+        self._trace_sketch(point)
+
     # ------------------------------------------------------------- the river corridor
     #: how near (pixels) a press must be to a point of a bank to drag it
     CORRIDOR_PICK = 12.0
@@ -1121,6 +1238,7 @@ class Viewport3D(QWidget):
         a point takes it, elsewhere the view pans as always); Esc stops."""
         if not (self.two_d and self.two_d_side == "top"):
             self.set_2d(True, "top")
+        self.stop_line_drawing()
         self._corridor_edit = {"case": case_id, "drag": None}
         self.statusMessage.emit(
             "Drag the points of the banks in the 2D view · elsewhere the view pans · Esc stops"
@@ -1586,6 +1704,10 @@ class Viewport3D(QWidget):
         return _edges_near(box, point, reach)
 
     def _on_move(self, event) -> None:
+        if self._tracing is not None:
+            if self._tracing["trace"].points and self._tracing["press"] is None:
+                self._trace_sketch(self._plan_point(event))
+            return
         if self._drawing is not None and self._drawing.get("start") is not None:
             self._draw_domain("pointer_move", event)
         elif self._drawing is not None and self._drawing.get("purpose") == "domain":
@@ -1603,6 +1725,9 @@ class Viewport3D(QWidget):
         kind = getattr(event, "type", "")
         if self._drawing is not None:
             self._draw_domain(kind, event)
+            return
+        if self._tracing is not None:
+            self._trace_pointer(kind, event)
             return
         if self._corridor_edit is not None and self._edit_corridor(kind, event):
             return

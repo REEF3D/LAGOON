@@ -660,6 +660,47 @@ def test_the_river_tab_follows_the_thalweg(window, flume):
     assert abs(float(np.mean(corridor.left[:, 1] + corridor.right[:, 1])) / 2 - 1.0) < 0.2
 
 
+def test_the_river_tab_draws_the_river_first_then_its_bed_and_fits_it(window, flume):
+    import numpy as np
+
+    window.open_case(flume)
+    tab = window.setup_panel.river_tab
+    assert tab.trace_button.isEnabled() and not tab.bed_button.isEnabled()
+    assert not tab.fit_button.isEnabled()  # no corridor, no bed
+    tab.trace_button.setChecked(True)  # no GPU here: the view says so and stops
+    assert not tab.trace_button.isChecked()
+    # the view traced the river: a corridor along it, as wide as asked
+    tab.width.setValue(1.6)
+    window.viewport.lineDrawn.emit("river", [(0.5, 1.3), (5.0, 0.7), (9.5, 1.2)])
+    corridor = window.session.corridor()
+    assert corridor is not None and corridor.extra["made"]["how"] == "line"
+    assert tab.bed_button.isEnabled() and not tab.fit_button.isEnabled()
+    window.viewport.lineDrawn.emit("river", None)  # stopped without a line: nothing
+    assert window.session.corridor().extra["made"]["how"] == "line"
+
+    # Domain and geo.dat: the domain around the river, then the Map tab's geo.dat
+    def make_geo_dat(then=None):
+        x, y = np.linspace(-2, 12, 57), np.linspace(-2, 4, 25)
+        gx, gy = np.meshgrid(x, y)
+        z = 0.2 + 0.5 * (gy - 1.0) ** 2  # a channel along y = 1
+        np.savetxt(flume / "geo.dat", np.column_stack([gx.ravel(), gy.ravel(), z.ravel()]))
+        window.session.data.case_setup(window.setup_panel.case_id).geo_changed()
+        then()
+        return True
+
+    window.setup_panel.map_tab.make_geo_dat = make_geo_dat
+    tab.domain_and_bed()
+    x0, x1, y0, y1 = window.session.input_file("control.txt").values("B 10")[:4]
+    assert x0 < 0.5 and x1 > 9.5 and y0 < 0 and y1 > 2  # beyond the banks
+    assert tab.fit_button.isEnabled()
+    tab.margin.setValue(0.1)
+    tab.fit()
+    fitted = window.session.corridor()
+    assert fitted.extra["made"]["how"] == "fitted" and tab.edit_button.isChecked()
+    centre = fitted.centreline(50)[5:-5]
+    assert np.abs(centre[:, 1] - 1.0).max() < 0.25
+
+
 def test_the_corridor_is_an_item_with_a_reset(window, flume):
     from PySide6.QtWidgets import QPushButton
 

@@ -159,6 +159,9 @@ class MainWindow(QMainWindow):
         river = self.setup_panel.river_tab
         river.drawArea.connect(self.viewport.start_domain_drawing)
         self.viewport.areaDrawn.connect(river.area_drawn)
+        river.drawLine.connect(self.viewport.start_line_drawing)
+        river.stopLine.connect(lambda: self.viewport.stop_line_drawing())
+        self.viewport.lineDrawn.connect(river.line_drawn)
         river.editPoints.connect(self.viewport.start_corridor_editing)
         river.stopEditing.connect(self.viewport.stop_corridor_editing)
         self.viewport.corridorPointMoved.connect(river.point_moved)

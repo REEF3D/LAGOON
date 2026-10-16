@@ -533,7 +533,7 @@ class MapTab(QWidget):
             "Interpolate the file onto a grid over the domain and write geo.dat in model "
             "coordinates (and G 10 1); then Run DIVEMesh"
         )
-        self.geo_button.clicked.connect(self.make_geo_dat)
+        self.geo_button.clicked.connect(lambda: self.make_geo_dat())
         bathymetry = QGroupBox("Bathymetry")
         form = QFormLayout(bathymetry)
         form.addRow("From", self.bathy_source)
@@ -1145,16 +1145,18 @@ class MapTab(QWidget):
         self.resolution_note.setText(text)
         self.resolution_note.setVisible(bool(text))
 
-    def make_geo_dat(self) -> None:
+    def make_geo_dat(self, then=None) -> bool:
         """Ask where geo.dat is stored (a draft case moves to that folder), then make
         it, downloaded for the domain or from the file chosen, in a worker thread with
-        a progress bar (Cancel keeps the geo.dat there was)."""
+        a progress bar (Cancel keeps the geo.dat there was); ``then()`` once it is
+        made. False if it was not started."""
         key = self.bathy_source.currentData()
         if key == "file" and self._bathymetry is None:
-            return
+            self.message.emit("Choose the bathymetry file in the Map tab first", True)
+            return False
         chosen = self._where_geo_dat()
         if chosen is None:
-            return
+            return False
         spacing = self._spacing()
         try:
             if key == "file":
@@ -1183,8 +1185,9 @@ class MapTab(QWidget):
                 )
         except (ValueError, OSError, CrsError) as error:
             self.message.emit(str(error), True)
-            return
-        self._start_geo_job(job, chosen)
+            return False
+        self._start_geo_job(job, chosen, then)
+        return True
 
     def _start_geo_job(self, job, chosen: Path, then=None) -> None:
         """Run a geo.dat job in a worker thread, with a progress bar; ``then()`` once

@@ -711,6 +711,10 @@ class Session:
             fresh = self._thalweg_corridor(
                 case_id, **{k: v for k, v in made.items() if k != "how"}
             )[0]
+        elif how == "line":
+            fresh = self._traced_corridor(case_id, made["line"], made["width"], made["points"])
+        elif how == "fitted":
+            fresh = self._refitted_corridor(case_id, current, made)
         else:
             area = made.get("area") if how == "area" else None
             fresh = self._straight_corridor(case_id, area, int(made.get("points", 12)))
@@ -719,6 +723,37 @@ class Session:
         fresh.extra = dict(current.extra)
         script = "session.reset_corridor("
         self._put_corridor(case, fresh, script, "Reset river corridor")
+
+    def _refitted_corridor(self, case_id: str, current, made: dict):
+        """A fitted corridor made again: the corridor it was fitted from (drawn, over
+        an area, along the domain) laid out again and fitted to the bed."""
+        from dataclasses import replace
+
+        from lagoonviz.core import corridor as corridors
+
+        source = dict(made.get("from") or {})
+        how = source.get("how", "domain")
+        if how == "line":
+            start = self._traced_corridor(
+                case_id, source["line"], source["width"], source["points"]
+            )
+        elif how == "thalweg":
+            start = self._thalweg_corridor(
+                case_id, **{k: v for k, v in source.items() if k != "how"}
+            )[0]
+        else:
+            area = source.get("area") if how == "area" else None
+            start = self._straight_corridor(case_id, area, int(source.get("points", 12)))
+        keep = ("curve", "cells_along", "cells_across", "smoothing")
+        start = replace(start, **{k: getattr(current, k) for k in keep})
+        setup = self.data.case_setup(case_id, create=True)
+        if setup is None or not (setup.path / "geo.dat").is_file():
+            raise ValueError("fitting the river needs the bed: geo.dat (Map tab: Make geo.dat)")
+        level = made.get("level", setup.water_level)
+        fresh, _ = corridors.fit_to_bed(
+            start, setup.geo_points(), level, float(made.get("margin", 0.0))
+        )
+        return fresh
 
     def _straight_corridor(self, case_id: str, area, points: int):
         from lagoonviz.core import corridor as corridors
@@ -821,6 +856,103 @@ class Session:
         made = corridors.from_thalweg(thalweg, float(margin), int(points), width)
         made.extra["made"] = recipe
         return made, thalweg
+
+    def trace_corridor(self, line, width: float, points: int = 12, case: str | None = None) -> None:
+        """A corridor along a line drawn on the map ((x, y) points, upstream first),
+        ``width`` m wide, ``points`` points on each bank: drawn before there is a bed,
+        to set the domain around it (:meth:`corridor_domain`), make geo.dat there and
+        fit it to the river afterwards (:meth:`fit_corridor`)."""
+        made = self._traced_corridor(self._case_id(case), line, width, points)
+        recipe = made.extra["made"]
+        script = (
+            f"session.trace_corridor({recipe['line']!r}, {recipe['width']!r}, "
+            f"points={recipe['points']}"
+        )
+        self._put_corridor(case, made, script, "Draw the river")
+
+    def _traced_corridor(self, case_id: str, line, width, points):
+        import numpy as np
+
+        from lagoonviz.core import corridor as corridors
+
+        if not float(width) > 0:
+            raise ValueError(f"the river's width must be above 0, got {width}")
+        line = [[round(float(x), 4), round(float(y), 4)] for x, y in np.asarray(line, float)]
+        setup = self.data.case_setup(case_id, create=True)
+        domain = setup.domain if setup is not None else None
+        options = {"z_start": float(domain[4])} if domain is not None else {}
+        made = corridors.from_line(line, float(width), int(points), **options)
+        made.extra["made"] = {
+            "how": "line",
+            "line": line,
+            "width": float(width),
+            "points": int(points),
+        }
+        return made
+
+    def corridor_domain(self, margin: float | None = None, case: str | None = None):
+        """The domain (B 10's x and y) around the corridor, ``margin`` m beyond it on
+        every side (default: half the river's width), its edges on DIVEMesh's cells
+        (B 1): where geo.dat is made for the river. Returns (x0, x1, y0, y1)."""
+        import numpy as np
+
+        case_id = self._case_id(case)
+        current = self._corridor_of(case_id)
+        setup = self.data.case_setup(case_id, create=True)
+        if setup is not None and setup.ctrl.int("G 50", 0) in (1, 2):
+            raise ValueError(
+                "B 10 holds the logical box of the case's curvilinear grid (G 50 in "
+                "ctrl.txt): set the domain on the map before making the grid"
+            )
+        banks = np.vstack([current.bank_line("left"), current.bank_line("right")])
+        if margin is None:
+            across = np.hypot(*(current.left - current.right).T)
+            margin = 0.5 * float(np.mean(across))
+        step = float(self.input_file("control.txt", case_id).value("B 1") or 0.0)
+        low = banks.min(axis=0) - float(margin)
+        high = banks.max(axis=0) + float(margin)
+        if step > 0:
+            low = np.floor(low / step) * step
+            high = np.ceil(high / step) * step
+        x0, y0 = (float(v) for v in low)
+        x1, y1 = (float(v) for v in high)
+        self.set_domain(x0, x1, y0, y1, case=case)
+        return x0, x1, y0, y1
+
+    def fit_corridor(
+        self,
+        margin: float = 0.0,
+        level: float | None = None,
+        case: str | None = None,
+    ):
+        """The corridor (drawn by eye, or dragged) made to follow the river in the
+        bed (geo.dat): along its thalweg from the upstream end of the corridor to the
+        downstream end, its banks where the water below ``level`` (default: F 60,
+        else halfway up the banks) reaches, plus ``margin`` m; its points, curve and
+        grid kept. Returns the thalweg found."""
+        from lagoonviz.core import corridor as corridors
+
+        case_id = self._case_id(case)
+        current = self._corridor_of(case_id)
+        setup = self.data.case_setup(case_id, create=True)
+        if setup is None or not (setup.path / "geo.dat").is_file():
+            raise ValueError("fitting the river needs the bed: geo.dat (Map tab: Make geo.dat)")
+        used = setup.water_level if level is None else level
+        made, thalweg = corridors.fit_to_bed(current, setup.geo_points(), used, float(margin))
+        before = dict(current.extra.get("made") or {})
+        recipe = {"how": "fitted", "margin": float(margin), "points": len(made.left)}
+        if level is not None:
+            recipe["level"] = float(level)
+        recipe["from"] = before.get("from", before) if before.get("how") == "fitted" else before
+        made.extra = dict(current.extra)
+        made.extra["made"] = recipe
+        words = [f"margin={float(margin)!r}"]
+        if level is not None:
+            words.append(f"level={float(level)!r}")
+        self._put_corridor(
+            case, made, "session.fit_corridor(" + ", ".join(words), "Fit the river to the bed"
+        )
+        return thalweg
 
     def move_corridor_point(
         self, side: str, index: int, x: float, y: float, case: str | None = None

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### The river drawn first
+
+- River tab: **Draw the river** on the map, point by point from upstream (a corridor
+  *Width* wide along it), before there is a bed; **Domain and geo.dat** sets the
+  domain around it and makes geo.dat there; **Fit to the bed** then makes the
+  corridor follow the river: its thalweg from the corridor's upstream end to its
+  downstream end, its banks at the water's edge plus the margin, its points and grid
+  kept. *Reset* fits the river drawn again. In a script `session.trace_corridor`,
+  `session.corridor_domain`, `session.fit_corridor`.
+- A geo.dat made in LAGOON opens with its case before G 10 is saved: LAGOON knows it
+  as the case's own (the record it keeps of how it was made: the same file, the
+  same place on the map, the domain).
+
 ### Statistics over time
 
 - *Add → Statistics*: a map of the free surface (or the bed) over a time window:
