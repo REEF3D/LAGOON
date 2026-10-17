@@ -44,7 +44,7 @@ from lagoonviz.core.data.setup import (
 )
 from lagoonviz.core.kinds import kind_spec
 from lagoonviz.core.scene import MODE_KINDS, SETUP_KINDS, Scene, SceneItem
-from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
+from lagoonviz.core.vectors import arrow_segments, spread_points
 
 #: item kinds that show a dataset, and the dataset role they use by default
 DATA_KINDS = {
@@ -990,8 +990,7 @@ class DataManager:
         used = np.unique(shown_triangles)  # not on hidden dry land
         count = int(props.get("vector_count", 400))
         # spaced for the area shown (the water, not the whole domain's box)
-        spacing = grid_spacing(mesh.points, count, shown_triangles)
-        picked = pick_points(mesh.points, used, count, spacing)
+        picked, spacing = spread_points(mesh.points, used, shown_triangles, count)
         if not picked.size:
             return None
         _, high = self._range_of(item_id, name, mesh)  # the speed of the longest arrows

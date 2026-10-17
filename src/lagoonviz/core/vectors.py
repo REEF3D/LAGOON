@@ -58,6 +58,20 @@ def grid_spacing(points: np.ndarray, count: int, triangles: np.ndarray | None = 
     return float(np.sqrt(area / max(count, 1)))
 
 
+def spread_points(
+    points: np.ndarray, candidates: np.ndarray, triangles: np.ndarray, count: int
+) -> tuple[np.ndarray, float]:
+    """About ``count`` of the ``candidates`` spread evenly over the area of
+    ``triangles``, and their spacing. On narrow water the grid cells the banks cut
+    each add an arrow; with many more than asked the spacing is widened once."""
+    spacing = grid_spacing(points, count, triangles)
+    picked = pick_points(points, candidates, count, spacing)
+    if count > 0 and picked.size > 1.25 * count:
+        spacing *= float(np.sqrt(picked.size / count))
+        picked = pick_points(points, candidates, count, spacing)
+    return picked, spacing
+
+
 def arrow_segments(base: np.ndarray, vectors: np.ndarray, length: float) -> np.ndarray:
     """Line segments ``(3k, 2, 3)`` of arrows: a shaft and two head strokes each.
 
