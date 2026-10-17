@@ -11,6 +11,7 @@ dependency, the GUI only forwards its callbacks to the main thread.
 from __future__ import annotations
 
 import threading
+import weakref
 from collections import OrderedDict
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -333,6 +334,9 @@ class DataManager:
         self._errors: dict[str, str] = {}
         self._resolved: dict[str, str] = {}
         self._auto_ranges: dict[tuple, tuple[float, float]] = {}
+        #: item -> (the frame's mesh (weak), variable, mode, its range): the automatic
+        #: colour range of the frame shown, found once per frame
+        self._frame_ranges: dict[str, tuple] = {}
         #: (dataset key, variable) -> a variable's values sampled over the run, made
         #: in a loader thread when the first frame is read (see _sampled_values)
         self._samples: dict[tuple, list[np.ndarray]] = {}
@@ -919,19 +923,29 @@ class DataManager:
 
     # ------------------------------------------------------------- display
     def value_range(self, item_id: str, mesh: SurfaceMesh) -> tuple[float, float]:
-        """Colour range: fixed from the item, or automatic.
-
-        The automatic range is found once and then kept, so colours stay comparable
-        while playing. For surfaces it comes from a spread of frames over the run (the
-        first frame alone is often calm water); otherwise from the frame shown.
-        :meth:`Session.fit_range` fits it to the current frame instead.
-        """
+        """Colour range: fixed from the item, or automatic: fitted to the frame shown
+        (as *Fit range to this frame*, every frame), its "range_from" and
+        "range_percent" applied."""
         item = self.scene.get(item_id)
         props = item.properties
         if not props.get("auto_range", True):
             return float(props.get("vmin", 0.0)), float(props.get("vmax", 1.0))
-        low, high = self._range_of(item_id, str(props.get("variable", "none")), mesh)
+        low, high = self._frame_range(item_id, str(props.get("variable", "none")), mesh)
         return scaled_range(low, high, props)
+
+    def _frame_range(self, item_id: str, variable: str, mesh: SurfaceMesh) -> tuple[float, float]:
+        """The automatic range of a variable in one frame (found once per frame)."""
+        mode = self._range_mode(item_id)
+        kept = self._frame_ranges.get(item_id)
+        if kept is not None and kept[0]() is mesh and kept[1:3] == (variable, mode):
+            return kept[3]
+        found = auto_range(mesh.scalar(variable), mode)
+        try:
+            ref = weakref.ref(mesh)
+        except TypeError:  # pragma: no cover (meshes take weak references)
+            return found
+        self._frame_ranges[item_id] = (ref, variable, mode, found)
+        return found
 
     def _range_mode(self, item_id: str) -> str:
         """How an item's automatic range is found (RANGE_FROM)."""
@@ -1160,34 +1174,36 @@ class DataManager:
             self._samples[key] = found
         return found
 
-    def automatic_range(self, item_id: str) -> tuple[float, float] | None:
-        """The automatic colour range of an item as shown (found on first display, or
-        now from its current frame). None without data."""
+    def automatic_range(self, item_id: str, read: bool = True) -> tuple[float, float] | None:
+        """The automatic colour range of an item: that of its current frame (the one
+        shown, or read now; ``read=False``: None while it is not read yet). None
+        without data."""
         item = self.scene.get(item_id)
         variable = str(item.properties.get("variable", "none"))
         if variable == "none":
             return None
-        dataset = self.dataset(item_id)
-        key = (item_id, dataset.key if dataset else "", variable, self._range_mode(item_id))
-        if key not in self._auto_ranges:
-            mesh = self.load(item_id)
-            if mesh is None:
-                return None
-            auto = item.properties.get("auto_range", True)
-            item.properties["auto_range"] = True  # the automatic range, whatever is set
-            try:
-                found = self.value_range(item_id, mesh)
-            except KeyError:
-                return None
-            finally:
-                item.properties["auto_range"] = auto
-            kept = self._auto_ranges.get(key)  # (values all alike: not kept)
-            return found if kept is None else scaled_range(*kept, item.properties)
-        return scaled_range(*self._auto_ranges[key], item.properties)
+        mode = self._range_mode(item_id)
+        kept = self._frame_ranges.get(item_id)
+        key = self.frame_key(item_id)
+        current = self.cache.get(key) if key is not None else None
+        if current is not None and kept is not None and kept[1:3] == (variable, mode):
+            if kept[0]() is current:
+                return scaled_range(*kept[3], item.properties)
+        if current is None and not read:
+            return None
+        mesh = current if current is not None else self.load(item_id)
+        if mesh is None:
+            return None
+        try:
+            found = self._frame_range(item_id, variable, mesh)
+        except KeyError:
+            return None
+        return scaled_range(*found, item.properties)
 
     def forget_range(self, item_id: str) -> None:
         for key in [k for k in self._auto_ranges if k[0] == item_id]:
             del self._auto_ranges[key]
+        self._frame_ranges.pop(item_id, None)
 
     def still_water_level(self, item_id: str, mesh: SurfaceMesh) -> float:
         """Reference height for vertical exaggeration: the still water level.

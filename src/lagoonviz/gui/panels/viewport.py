@@ -97,6 +97,8 @@ class ViewportPlaceholder(QWidget):
     """Shown when no GPU canvas is available (tests, remote sessions without GPU)."""
 
     statusMessage = Signal(str)
+    #: a frame of an item was drawn (its automatic colour range is that frame's)
+    frameShown = Signal(str)
     #: the probe (orange dot) placed or moved: a Probe, or None when removed
     probeChanged = Signal(object)
     #: the domain drawn in the 2D top view (x0, x1, y0, y1); never sent here
@@ -290,6 +292,8 @@ class Viewport3D(QWidget):
     """pygfx canvas plus a small view toolbar and the colour bars."""
 
     statusMessage = Signal(str)
+    #: a frame of an item was drawn (its automatic colour range is that frame's)
+    frameShown = Signal(str)
     #: the probe (orange dot) placed or moved: a Probe, or None when removed
     probeChanged = Signal(object)
     #: (key, mesh, error) from a loader thread, delivered on the GUI thread
@@ -800,6 +804,7 @@ class Viewport3D(QWidget):
                 self.view.update_trails(item_id, data.particle_trails(item_id, mesh))
                 self.view.update_outlines(item_id, data.patch_outlines(item_id, mesh, shown))
                 self.view.update_grid_lines(item_id, data.amr_grid_lines(item_id, mesh, shown))
+            self.frameShown.emit(item_id)
         except Exception:  # noqa: BLE001 (a bad frame must not take the window down)
             log.error("showing %s failed:\n%s", item_id, traceback.format_exc())
             self.statusMessage.emit(f"Could not show {item.name}; see the log")

@@ -132,7 +132,12 @@ def _colouring(variable: str, colormap: str) -> dict[str, PropertySpec]:
     return {
         "variable": PropertySpec(variable, "Colour by", provider="variables"),
         "colormap": PropertySpec(colormap, "Colour map", choices=COLORMAPS),
-        "auto_range": PropertySpec(True, "Automatic range"),
+        "auto_range": PropertySpec(
+            True,
+            "Automatic range",
+            tip="Fit the colour range to every frame shown (off: Range min and max hold, "
+            "the same colours at every time)",
+        ),
         "range_from": PropertySpec(
             "1st - 99th percentile",
             "Range from",

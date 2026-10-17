@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
         )
         self.viewport.statusMessage.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.viewport.probeChanged.connect(lambda probe: self.plots.set_probe(probe))
+        self.viewport.frameShown.connect(lambda item_id: self.properties.frame_shown(item_id))
         # the 3D views sit in a splitter: one normally, two when comparing cases
         self.viewports = QSplitter(Qt.Horizontal)
         self.viewports.setObjectName("viewports")
@@ -927,6 +928,7 @@ class MainWindow(QMainWindow):
                 lambda text: self.statusBar().showMessage(text, 8000)
             )
             self.viewport2.probeChanged.connect(lambda probe: self.plots.set_probe(probe))
+            self.viewport2.frameShown.connect(lambda item_id: self.properties.frame_shown(item_id))
             self.viewports.addWidget(self.viewport2)
             self.viewport.partner = self.viewport2
             self.viewport2.partner = self.viewport

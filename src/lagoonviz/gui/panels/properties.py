@@ -402,6 +402,8 @@ class PropertiesPanel(QWidget):
                 self.info.setText(self._data_info(self.item_id))  # the set-up's facts
         elif event == "changed" and item_id == self.item_id:
             self._refresh()
+        elif event == "time" and self.item_id in self.session.scene:
+            self._show_range(read=False)  # the frame's range, if it is read already
         elif (
             event == "changed"
             and self.item_id in self.session.scene
@@ -472,7 +474,13 @@ class PropertiesPanel(QWidget):
         editor.slider.setToolTip(text)
         editor.spin.setToolTip(text)
 
-    def _show_range(self) -> None:
+    def frame_shown(self, item_id: str) -> None:
+        """A frame of an item was drawn: with an automatic range, the min and max boxes
+        show the range of that frame."""
+        if item_id == self.item_id and item_id in self.session.scene:
+            self._show_range(read=False)
+
+    def _show_range(self, read: bool = True) -> None:
         """With an automatic range, the min and max boxes show it; typing in them fixes
         the range. Coloured by nothing (a plain colour), the colour map and range are
         greyed out."""
@@ -524,7 +532,7 @@ class PropertiesPanel(QWidget):
             _show_bounds(low_box, high_box)
             return
         try:
-            shown = self.session.data.automatic_range(self.item_id)
+            shown = self.session.data.automatic_range(self.item_id, read=read)
         except Exception:  # noqa: BLE001 (no data yet: the boxes stay as they are)
             shown = None
         if shown is None:

@@ -248,18 +248,22 @@ def test_display_exaggeration_and_range(reef3d_run):
     mesh = s.data.load("free_surface-1")
     shown = s.data.display("free_surface-1", mesh)
     assert shown.variable == "eta" and shown.colormap == "reef3d"
-    eta = mesh.scalar("eta")  # the range: lowest to highest over the run, as ParaView
-    assert shown.vmin <= np.nanmin(eta) and shown.vmax >= np.nanmax(eta)
+    eta = mesh.scalar("eta")  # the automatic range: fitted to the frame shown
+    assert (shown.vmin, shown.vmax) == pytest.approx(auto_range(eta, "1st - 99th percentile"))
     assert s.data.still_water_level("free_surface-1", mesh) == pytest.approx(DEPTH, abs=1e-5)
     s.set_property("case-1", "exaggeration", 10.0)  # synced: applies to every item
     big = s.data.display("free_surface-1", mesh)
     np.testing.assert_allclose(
         big.positions[:, 2] - DEPTH, 10 * (mesh.points[:, 2] - DEPTH), atol=1e-4
     )
-    # the automatic range is kept while playing
+    # the automatic range follows the frames while playing
     s.set_time(2)
-    later = s.data.display("free_surface-1", s.data.load("free_surface-1"))
-    assert (later.vmin, later.vmax) == (shown.vmin, shown.vmax)
+    later_mesh = s.data.load("free_surface-1")
+    later = s.data.display("free_surface-1", later_mesh)
+    fitted = auto_range(later_mesh.scalar("eta"), "1st - 99th percentile")
+    assert (later.vmin, later.vmax) == pytest.approx(fitted)
+    assert (later.vmin, later.vmax) != pytest.approx((shown.vmin, shown.vmax))
+    assert s.data.automatic_range("free_surface-1") == pytest.approx(fitted)
     low, high = s.fit_range("free_surface-1")
     props = s.scene.get("free_surface-1").properties
     assert props["auto_range"] is False and props["vmax"] == pytest.approx(high, abs=1e-5)

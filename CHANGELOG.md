@@ -19,6 +19,10 @@
 
 ### NHFLOW
 
+- *Automatic range* fits the colour range to every frame shown (as *Fit range to
+  this frame*, each frame); before, it was found once over a sample of the run and
+  kept. *Range min* and *Range max* show the frame's range. Switched off, the range
+  holds for the same colours at every time.
 - The colour range of a free surface's k, epsilon/omega and eddy viscosity works:
   *Range min* and *Range max* showed and took only three decimals (1e-6 was
   0.000), and *Fit range to this frame* (Cmd/Ctrl + F) rounded to six decimals, so

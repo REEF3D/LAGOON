@@ -902,6 +902,20 @@ def test_properties_show_the_automatic_range(window, reef3d_run):
     ] == pytest.approx(shown[1], rel=1e-5)
 
 
+def test_the_automatic_range_follows_the_frame(window, reef3d_run):
+    """Bug: the automatic range was found once and kept; it is fitted to every frame."""
+    window.open_case(reef3d_run)
+    window.scene_tree.select("free_surface-1")
+    low, high = window.properties.editors["vmin"], window.properties.editors["vmax"]
+    first = window.session.data.automatic_range("free_surface-1")
+    window.session.set_time(2)
+    window.session.data.load("free_surface-1")  # read, as the view does
+    window.properties.frame_shown("free_surface-1")  # and drawn
+    later = window.session.data.automatic_range("free_surface-1")
+    assert later != pytest.approx(first)
+    assert (low.value(), high.value()) == pytest.approx(later, rel=1e-5)
+
+
 def test_typing_a_range_bound_fixes_the_range(window, reef3d_run):
     """Bug: range min and max could not be changed while the range was automatic."""
     window.open_case(reef3d_run)
