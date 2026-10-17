@@ -41,7 +41,7 @@ def test_arrows_spaced_for_the_area_covered():
     assert 250 <= len(picked) <= 700  # cells the banks cut get one too
     assert grid_spacing(points, 400) == pytest.approx(50.0)  # no triangles: the box
     spread, wider = spread_points(points, used, triangles, 400)
-    assert 300 <= len(spread) <= 500 and wider >= spacing  # about as many as asked
+    assert 320 <= len(spread) <= 500 and wider >= spacing  # about as many as asked
 
 
 def test_arrows_have_a_shaft_and_a_head():

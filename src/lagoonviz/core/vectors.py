@@ -63,11 +63,19 @@ def spread_points(
 ) -> tuple[np.ndarray, float]:
     """About ``count`` of the ``candidates`` spread evenly over the area of
     ``triangles``, and their spacing. On narrow water the grid cells the banks cut
-    each add an arrow; with many more than asked the spacing is widened once."""
+    each add an arrow: with many more than asked the spacing is widened, and set
+    again a few times until the number is within a quarter of the one asked."""
     spacing = grid_spacing(points, count, triangles)
     picked = pick_points(points, candidates, count, spacing)
-    if count > 0 and picked.size > 1.25 * count:
-        spacing *= float(np.sqrt(picked.size / count))
+    widened = False
+    for _ in range(4):
+        n = picked.size
+        if count <= 0 or not n or (0.8 * count <= n <= 1.25 * count):
+            break
+        if n < 0.8 * count and not widened:
+            break  # fewer points than asked for: they all have one
+        widened = True
+        spacing *= float(np.sqrt(n / count))
         picked = pick_points(points, candidates, count, spacing)
     return picked, spacing
 
