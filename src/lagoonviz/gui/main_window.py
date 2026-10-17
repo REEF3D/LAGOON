@@ -395,6 +395,20 @@ class MainWindow(QMainWindow):
         self.act_play = self._action(
             "&Play / pause", lambda: self.timeline.play_button.toggle(), "Space"
         )
+        # one output back or forth: Cmd + arrow on a Mac, Ctrl + arrow elsewhere (Qt's
+        # Ctrl is the Command key there); text fields keep the keys for moving by word
+        self.act_previous_frame = self._action(
+            "Pre&vious frame", lambda: self.timeline.step(-1), "Ctrl+Left"
+        )
+        self.act_next_frame = self._action(
+            "Ne&xt frame", lambda: self.timeline.step(1), "Ctrl+Right"
+        )
+        self.act_fit_range = self._action(
+            "&Fit range to this frame",
+            self.fit_range,
+            "Ctrl+F",
+            tip="Fix the colour range of the selected item to the values of the current frame",
+        )
         self.act_add_key = self._action(
             "Add camera &keyframe",
             self.add_camera_key,
@@ -545,6 +559,9 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.act_compare)
         view_menu.addAction(self.act_full_screen)
         view_menu.addAction(self.act_play)
+        view_menu.addAction(self.act_previous_frame)
+        view_menu.addAction(self.act_next_frame)
+        view_menu.addAction(self.act_fit_range)
         camera_menu = view_menu.addMenu("&Camera path")
         camera_menu.addAction(self.act_add_key)
         camera_menu.addAction(self.act_remove_key)
@@ -686,6 +703,9 @@ class MainWindow(QMainWindow):
             self.timeline.play_button.setChecked(False)
         self.timeline.setEnabled(not setup)
         self.act_play.setEnabled(not setup)
+        self.act_previous_frame.setEnabled(not setup)
+        self.act_next_frame.setEnabled(not setup)
+        self.act_fit_range.setEnabled(not setup)
         self.act_run_divemesh.setVisible(setup)
         switched = getattr(self, "_shown_mode", "results") != self.session.mode
         if setup and not self.full_screen:
@@ -935,6 +955,24 @@ class MainWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------- camera path
+    def fit_range(self) -> None:
+        """The colour range of the selected item fitted to the current frame (Cmd/Ctrl+F)."""
+        item_id = self.properties.item_id
+        if not item_id or "auto_range" not in self.session.scene.get(item_id).properties:
+            self.statusBar().showMessage(
+                "Select an item coloured by a variable to fit its range", 5000
+            )
+            return
+        try:
+            self.session.fit_range(item_id)
+        except (ValueError, KeyError) as error:
+            self.statusBar().showMessage(str(error), 8000)
+            return
+        props = self.session.scene.get(item_id).properties
+        self.statusBar().showMessage(
+            f"Colour range {props['vmin']:.4g} … {props['vmax']:.4g} (this frame)", 5000
+        )
+
     def add_camera_key(self) -> int:
         """A camera keyframe: the 3D view as it is now, at the current time.
         Returns the number of keys (0 without a 3D view)."""

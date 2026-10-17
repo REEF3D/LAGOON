@@ -7,6 +7,7 @@ import math
 from typing import Any
 
 from PySide6.QtCore import QLocale, Qt, Signal
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -85,7 +86,10 @@ class PropertiesPanel(QWidget):
             if key == "vmax" and "auto_range" in spec.properties:
                 # directly under the range it sets
                 fit = QPushButton("Fit range to this frame")
-                fit.setToolTip("Fix the colour range to the values of the current frame")
+                fit.setToolTip(
+                    "Fix the colour range to the values of the current frame "
+                    f"({QKeySequence('Ctrl+F').toString(QKeySequence.NativeText)})"
+                )
                 fit.clicked.connect(self._fit_range)
                 form.addRow("", fit)
                 self.fit_button = fit

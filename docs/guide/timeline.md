@@ -7,6 +7,10 @@ The **Timeline** panel steps through the outputs of the open cases:
 - the buttons go to the start of the play range, the previous and the next
   output, and the end of the play range, and play or pause (++space++ in the 3D
   view);
+- ++cmd+left++ and ++cmd+right++ on a Mac (++ctrl+left++ and ++ctrl+right++ on
+  Windows and Linux) go one output back or forth, wherever the keyboard is
+  (*View → Previous frame*, *Next frame*); ++cmd+f++ (++ctrl+f++) fits the colour
+  range of the selected item to the frame shown (*View → Fit range to this frame*);
 - the slider jumps to where it is clicked and follows the mouse while held;
 - the number box sets the playback speed in frames per second (up to 240).
 

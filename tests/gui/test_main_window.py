@@ -1221,3 +1221,33 @@ def test_the_wheel_scrolls_the_panel_not_its_fields(qtbot):
     assert not wheel_guard.guarded(spin)
     wheel(outside)  # not in a panel: as before
     assert outside.value() != 50
+
+
+def test_frame_and_fit_range_shortcuts(window, reef3d_run):
+    """Cmd/Ctrl + left/right: one output back or forth; Cmd/Ctrl + F: the selected
+    item's colour range fitted to the frame shown."""
+    from PySide6.QtGui import QKeySequence
+
+    window.open_case(reef3d_run)
+    assert window.act_previous_frame.shortcut() == QKeySequence("Ctrl+Left")
+    assert window.act_next_frame.shortcut() == QKeySequence("Ctrl+Right")
+    assert window.act_fit_range.shortcut() == QKeySequence("Ctrl+F")
+    timeline = window.timeline
+    timeline.go_to_frame(1)
+    window.act_next_frame.trigger()
+    assert timeline.frame_of(window.session.scene.time) == 2
+    window.act_previous_frame.trigger()
+    window.act_previous_frame.trigger()
+    assert timeline.frame_of(window.session.scene.time) == 0
+    window.act_previous_frame.trigger()  # not before the first
+    assert timeline.frame_of(window.session.scene.time) == 0
+    # nothing coloured selected: said so, nothing changed
+    window.properties.show_item("")
+    window.act_fit_range.trigger()
+    assert "Select an item" in window.statusBar().currentMessage()
+    window.scene_tree.select("free_surface-1")
+    window.properties.editors["variable"].setCurrentText("eta")
+    window.act_fit_range.trigger()
+    props = window.session.scene.get("free_surface-1").properties
+    assert props["auto_range"] is False and props["vmin"] < props["vmax"]
+    assert "Colour range" in window.statusBar().currentMessage()
