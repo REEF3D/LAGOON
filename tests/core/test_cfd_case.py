@@ -3,6 +3,7 @@ the volume), its floating bodies are shown, and CFD's 3D AMR blocks do not keep 
 case from opening."""
 
 import shutil
+from pathlib import Path
 
 import numpy as np
 from reef3d_fixtures import DEPTH, make_run
@@ -95,3 +96,29 @@ def test_the_solver_of_ctrl_txt_is_shown_next_to_older_runs(tmp_path):
     s = Session()
     s.open_case(root)
     assert any(i.kind == "free_surface" for i in s.scene)
+
+
+def test_the_store_of_the_run_going_on_beats_the_files_of_the_run_before():
+    """Bug: REEF3D's store of a CFD run (P 18 1) names the output its bodies stand for
+    (cfd_body); the 6DOF files of the run before had more outputs, so the store's
+    bodies were left out and the run showed no floating body."""
+    from types import SimpleNamespace
+
+    from lagoonviz.core.data.reef3d import _prefer_stores
+
+    def dataset(key, run, steps, recorded=None):
+        return SimpleNamespace(
+            key=key, role="body", solver="CFD", run_id=run, earlier_run=False,
+            last_step=steps, recorded=recorded, folder=Path("store/bodies"),
+        )  # fmt: skip
+
+    files = dataset("cfd_body", "run-before", 13)
+    store = dataset("cfd_body", "run-now", 4, recorded="cfd_body")
+    kept = _prefer_stores([files], [store])
+    assert store in kept and files in kept  # both runs, the store's is the run going on
+    # the files of the same run, further on than the store: the files
+    same_run = dataset("cfd_body", "run-now", 6)
+    assert _prefer_stores([same_run], [store]) == [same_run]
+    # converted from these files and complete: the store replaces them
+    older = dataset("cfd_body", "run-now", 3)
+    assert _prefer_stores([older], [store]) == [store]

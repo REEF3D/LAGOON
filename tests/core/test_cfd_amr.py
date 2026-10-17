@@ -194,3 +194,9 @@ def test_the_blocks_in_a_lagoon_store(tmp_path):
     assert len(inner) == (expected.point_data["level"] == 2).sum()
     outlines = s.data.load(next(i.id for i in s.scene if i.kind == "amr_blocks"))
     assert outlines.segments.shape == (24, 2)
+    # the blocks' own times from the store (REEF3D writes the volume after them: its
+    # times lag one output, and the timeline must not fall back to P 30 x output)
+    own = case.datasets["cfd_amr_blocks"]
+    np.testing.assert_allclose(own.times, blocks.times)
+    stored = zip(blocks.steps.tolist(), blocks.times.tolist(), strict=True)
+    assert volume.blocks.times == dict(stored)

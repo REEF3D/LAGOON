@@ -1457,6 +1457,10 @@ def _with_refinement(datasets: list[Dataset], solver: str, blocks, folder: Path)
     if base is not None:
         outlines.run_id, outlines.run_started = base.run_id, base.run_started
         outlines.times = _times_by_step(base, outlines)
+    own = getattr(blocks, "times", None)  # a store's blocks: their own times
+    if own and all(step in own for step in outlines.steps):
+        # (the volume is written after the blocks: its times lag one output behind)
+        outlines.times = np.asarray([own[step] for step in outlines.steps], np.float64)
     out.append(outlines)
     return out
 
@@ -1572,17 +1576,17 @@ def _prefer_stores(datasets: list[Dataset], stored: list[Dataset]) -> list[Datas
     kept = list(datasets)
     for store in stored:
         recorded = getattr(store, "recorded", None)
+        # not the output of another run: REEF3D's store of the run going on next to
+        # the files of the run before keeps both
+        ours = [
+            d
+            for d in datasets
+            if not d.earlier_run and (not d.run_id or not store.run_id or d.run_id == store.run_id)
+        ]
         if recorded:  # the store says which output it was converted from
-            same = [d for d in datasets if d.key == recorded]
+            same = [d for d in ours if d.key == recorded]
         else:
-            same = [
-                d
-                for d in datasets
-                if d.role == store.role
-                and d.solver == store.solver
-                and not d.earlier_run
-                and (not d.run_id or not store.run_id or d.run_id == store.run_id)
-            ]
+            same = [d for d in ours if d.role == store.role and d.solver == store.solver]
         if any(d.last_step > store.last_step for d in same):
             where = getattr(getattr(store, "store", None), "path", store.folder.parent)
             log.info("%s: the VTK output is newer than %s", store.key, Path(where).name)

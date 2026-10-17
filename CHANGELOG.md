@@ -8,6 +8,11 @@
   run (with its AMR blocks from the LAGOON store) next to older NHFLOW or FNPF
   output showed their free surface, bed and volume instead, since CFD writes no
   free surface. The other runs stay selectable as datasets.
+- The floating bodies of a CFD run's store (P 18 1) are shown: the 6DOF files of the
+  run before, with more outputs, took their place, and the run showed no body.
+- The timeline of a CFD run with AMR from the store follows the stored times: the
+  blocks are written before the volume, so for one output they had no time and
+  the timeline fell back to P 30 x output (0.1 s where the run was at 0.2 s).
 - A CFD case folder opens with its free surface (the level set phi at 0, an
   iso-surface of the volume) and its floating bodies; before, it showed the volume
   only.

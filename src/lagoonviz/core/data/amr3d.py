@@ -278,6 +278,12 @@ class StoreBlocks:
     def __init__(self, amr):
         self.amr = amr
         self._steps = [int(s) for s in amr.steps]
+        try:
+            times = [float(t) for t in amr.times]
+        except (KeyError, ValueError, TypeError):
+            times = []
+        #: output number -> simulation time, as stored
+        self.times = dict(zip(self._steps, times, strict=False)) if times else {}
         self._index = {step: t for t, step in enumerate(self._steps)}
         self._grids: dict[int, list] = {}
         self._lock = threading.Lock()
