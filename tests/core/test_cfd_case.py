@@ -67,3 +67,31 @@ def test_cfd_amr_blocks_do_not_keep_the_case_from_opening(tmp_path):
     assert "cfd_volume" in case.datasets and not [d for d in case.datasets.values()
                                                   if d.role == "amr"]  # fmt: skip
     assert [i for i in s.scene if i.kind == "iso_surface"]
+
+
+def test_the_solver_of_ctrl_txt_is_shown_next_to_older_runs(tmp_path):
+    """Bug: a CFD run going on in a folder with an older NHFLOW (or FNPF) run showed
+    the NHFLOW free surface, bed and volume: CFD writes no free surface, and any
+    free surface won. ctrl.txt's solver (A 10) is shown when it wrote anything."""
+    root = cfd_case(tmp_path)
+    make_run(root, solver="NHFLOW", frames=3)  # the older run beside it
+    ctrl = root / "ctrl.txt"
+    ctrl.write_text("A 10 6\n" + ctrl.read_text())
+    s = Session()
+    s.open_case(root)
+    assert s.data.case("case-1").ctrl_solver == "CFD"
+    shown = {i.kind: s.data.dataset(i.id) for i in s.scene if s.data.dataset(i.id) is not None}
+    assert "free_surface" not in shown and "bathymetry" not in shown
+    assert shown["iso_surface"].solver == "CFD" and shown["volume"].solver == "CFD"
+    assert "nhflow_volume" in s.data.choices("volume-1", "datasets")  # still there
+    # ctrl.txt set up for NHFLOW: the NHFLOW run
+    ctrl.write_text(ctrl.read_text().replace("A 10 6", "A 10 5"))
+    s = Session()
+    s.open_case(root)
+    kinds = {i.kind: s.data.dataset(i.id) for i in s.scene if s.data.dataset(i.id) is not None}
+    assert kinds["free_surface"].solver == "NHFLOW"
+    # a solver that wrote nothing yet: as before, every run is looked at
+    ctrl.write_text(ctrl.read_text().replace("A 10 5", "A 10 3"))
+    s = Session()
+    s.open_case(root)
+    assert any(i.kind == "free_surface" for i in s.scene)

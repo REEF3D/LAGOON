@@ -700,6 +700,8 @@ class Case:
     setup_only: bool = False
     #: the domain of each run (lower, upper corner; from the run log), by run
     domains: dict[str, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
+    #: the solver ctrl.txt sets up (A 10), "" if it names none
+    ctrl_solver: str = ""
 
     @property
     def solver(self) -> str:
@@ -760,6 +762,20 @@ class Case:
             picked.append(item)
         return picked[:limit]
 
+    def _pool(self) -> list[Dataset]:
+        """The datasets the case opens with: those of the solver ctrl.txt sets up
+        (A 10), when that solver wrote any (a folder holding an older NHFLOW or FNPF
+        run next to the CFD run going on shows the CFD run); and the case's own
+        (DIVEMesh's solids and bed, geo.dat, forcing solids). All datasets when
+        ctrl.txt names none or its solver wrote nothing yet."""
+        every = list(self.datasets.values())
+        if not self.ctrl_solver:
+            return every
+        own = [d for d in every if d.solver == self.ctrl_solver and d.role not in CASE_ROLES]
+        if not own:
+            return every
+        return [d for d in every if d.solver == self.ctrl_solver or d.role in CASE_ROLES]
+
     def main_volume(self) -> Dataset | None:
         """The volume of the run :meth:`main_datasets` shows (None: it shows the
         volume itself, or the run wrote none)."""
@@ -768,9 +784,7 @@ class Case:
             return None
         lead = main.get("free_surface") or main.get("amr") or main.get("bed")
         volumes = [
-            d
-            for d in self.datasets.values()
-            if d.role == "volume" and (lead is None or d.same_run_as(lead))
+            d for d in self._pool() if d.role == "volume" and (lead is None or d.same_run_as(lead))
         ]
         return max(volumes, key=len) if volumes else None
 
@@ -778,7 +792,7 @@ class Case:
         """What to show when the case is opened (see :meth:`_main_datasets`), and
         SEASTATE's sea state map of the latest run, if it wrote one."""
         chosen = self._main_datasets()
-        maps = [d for d in self.datasets.values() if d.role == "seastate"]
+        maps = [d for d in self._pool() if d.role == "seastate"]
         if maps:
             chosen["seastate"] = preferred(maps)
         return chosen
@@ -790,19 +804,21 @@ class Case:
         writes again), e.g. an FNPF run next to an older NHFLOW run, or a bed from an
         earlier run. The free surface (or bed) written last picks the run; outputs
         written during that run join it; a bed of the same solver joins in any case.
-        Without surfaces, the volume is shown. An AMR surface of the run is shown in
+        Without surfaces, the volume is shown. Only the solver ctrl.txt sets up is
+        looked at, if it wrote anything (:meth:`_pool`). An AMR surface of the run is shown in
         place of its free surface (its level 0 is that surface).
         """
-        surfaces = [d for d in self.datasets.values() if d.role in ("free_surface", "bed")]
-        refined = [d for d in self.datasets.values() if d.role == "amr"]
+        pool = self._pool()
+        surfaces = [d for d in pool if d.role in ("free_surface", "bed")]
+        refined = [d for d in pool if d.role == "amr"]
         if not surfaces and refined:
             return {"amr": preferred(refined)}
         if not surfaces:
-            volumes = [d for d in self.datasets.values() if d.role == "volume"]
+            volumes = [d for d in pool if d.role == "volume"]
             if not volumes:  # not run yet: DIVEMesh's bed and solids, if any
                 found = {}
                 for role in ("topo", "solid", "forcing"):
-                    matches = [d for d in self.datasets.values() if d.role == role]
+                    matches = [d for d in pool if d.role == role]
                     if matches:
                         found[role] = matches[0]
                 return found
@@ -817,9 +833,7 @@ class Case:
             # objects of the same run (CFD's floating bodies, structures, AMR blocks)
             objects = ("body", "mooring", "structure", "dem", "ice", "rods", "particles")
             for role in (*objects, "amr_blocks"):
-                options = [
-                    d for d in self.datasets.values() if d.role == role and d.same_run_as(lead)
-                ]
+                options = [d for d in pool if d.role == role and d.same_run_as(lead)]
                 if options:
                     chosen[role] = max(options, key=len)
             return chosen
@@ -838,7 +852,7 @@ class Case:
                 chosen[role] = max(options, key=len)
         # objects of the same run: bodies, mooring lines, structures
         for role in ("body", "mooring", "structure", "dem", "ice", "rods", "particles"):
-            options = [d for d in self.datasets.values() if d.role == role and d.same_run_as(lead)]
+            options = [d for d in pool if d.role == role and d.same_run_as(lead)]
             if options:
                 chosen[role] = max(options, key=len)
         options = [d for d in refined if d.same_run_as(lead)]
@@ -1514,6 +1528,25 @@ def split_runs(frames: list[Frame], tolerance: float = 1.0) -> list[list[Frame]]
     return [runs[i] for i in order]
 
 
+#: ctrl.txt's A 10: the solver it sets up
+CTRL_SOLVERS = {2: "SFLOW", 3: "FNPF", 5: "NHFLOW", 6: "CFD"}
+
+
+def read_ctrl_solver(case_dir: Path) -> str:
+    """The solver ``ctrl.txt`` sets up (``A 10``), "" without one."""
+    ctrl = Path(case_dir) / "ctrl.txt"
+    if not ctrl.is_file():
+        return ""
+    try:
+        for line in ctrl.read_text(errors="replace").splitlines():
+            fields = line.split("//")[0].split()
+            if len(fields) >= 3 and fields[:2] == ["A", "10"]:
+                return CTRL_SOLVERS.get(int(float(fields[2])), "")
+    except (OSError, ValueError):
+        return ""
+    return ""
+
+
 def read_print_interval(case_dir: Path) -> float | None:
     """Time between outputs from ``ctrl.txt`` (``P 30 dt``), if the run used it."""
     ctrl = case_dir / "ctrl.txt"
@@ -1731,6 +1764,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     case = Case(
         case_dir,
         print_interval=read_print_interval(case_dir),
+        ctrl_solver=read_ctrl_solver(case_dir),
         series=series,
         profiles=profiles,
         setup_only=setup_only,

@@ -4,6 +4,10 @@
 
 ### CFD cases
 
+- A case folder opens with the run of the solver ctrl.txt sets up (A 10): a CFD
+  run (with its AMR blocks from the LAGOON store) next to older NHFLOW or FNPF
+  output showed their free surface, bed and volume instead, since CFD writes no
+  free surface. The other runs stay selectable as datasets.
 - A CFD case folder opens with its free surface (the level set phi at 0, an
   iso-surface of the volume) and its floating bodies; before, it showed the volume
   only.
