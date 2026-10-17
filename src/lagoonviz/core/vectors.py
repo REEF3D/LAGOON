@@ -40,16 +40,18 @@ def pick_points(
 
 def grid_spacing(points: np.ndarray, count: int, triangles: np.ndarray | None = None) -> float:
     """The spacing of about ``count`` arrows over a surface: from the area of its
-    ``triangles`` (indices into ``points``), or without them (or none with an area)
-    from the bounding box of ``points``."""
+    ``triangles`` (indices into ``points``) seen across its two widest directions, or
+    without them (or none with an area) from the bounding box of ``points``."""
     points = np.asarray(points, dtype=np.float64)
     if triangles is not None and len(triangles):
         corners = points[np.asarray(triangles, dtype=np.int64)]
-        area = 0.5 * float(
-            np.linalg.norm(
-                np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]), axis=1
-            ).sum()
-        )
+        # the area seen across the grid :func:`pick_points` lays (the surface's two
+        # widest directions): a free surface's plan area, not that of its slopes
+        extent = np.ptp(corners.reshape(-1, 3), axis=0)
+        a, b = np.argsort(extent)[::-1][:2]
+        u = corners[:, 1] - corners[:, 0]
+        w = corners[:, 2] - corners[:, 0]
+        area = 0.5 * float(np.abs(u[:, a] * w[:, b] - u[:, b] * w[:, a]).sum())
         if area > 0:
             return float(np.sqrt(area / max(count, 1)))
         points = corners.reshape(-1, 3)
