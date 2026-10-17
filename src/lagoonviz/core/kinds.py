@@ -318,6 +318,7 @@ KINDS: dict[str, KindSpec] = {
             **_colouring("none", "sand"),
             **_grid_lines("of the bed"),
             **_contours(),
+            **_vectors(),
             **_exaggeration("Scales the bed height about the still water level"),
             "hide_wet": PropertySpec(
                 False,

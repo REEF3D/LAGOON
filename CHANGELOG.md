@@ -27,6 +27,8 @@
 - *Vectors of* chooses the arrows' colour too: `velocity (white)`, `velocity
   (black)` or `velocity (grey)` (they stay so on another look). Sessions saved with
   plain `velocity` keep the look's contour colour.
+- The bed has the same *Vectors of* options: NHFLOW's and SFLOW's velocity at the
+  bed as arrows, in white, black or grey.
 - Vector arrows are spread over the area a surface covers, not over its bounding
   box: on a river winding through a wide domain the arrows asked for land on the
   water, close enough to show how the flow turns (before, a few long ones, mostly

@@ -94,6 +94,27 @@ def test_velocity_arrows_on_the_free_surface(reef3d_run):
         assert arrows.color == colour and arrows.segments.shape == flat.segments.shape
 
 
+def test_velocity_arrows_on_the_bed(reef3d_run):
+    """The bed has the free surface's vector options (NHFLOW and SFLOW write the
+    velocity at the bed)."""
+    s = Session()
+    s.open_case(reef3d_run)
+    bed = "bathymetry-1"
+    props = s.scene.get(bed).properties
+    assert props["vectors_of"] == "none" and props["vector_count"] == 400
+    s.set_property(bed, "vectors_of", "velocity (grey)")
+    s.set_property(bed, "vector_count", 12)
+    mesh = s.data.load(bed)
+    flow = np.zeros((mesh.n_points, 3), np.float32)
+    flow[:, 0], flow[:, 1] = 0.5, 0.2
+    mesh.point_data["velocity"] = flow  # the fixture's bed has none
+    arrows = s.data.vector_arrows(bed, mesh, s.data.display(bed, mesh))
+    assert arrows is not None and arrows.color == "#808080"
+    shaft = arrows.segments[: len(arrows.segments) // 3]
+    direction = shaft[:, 1] - shaft[:, 0]
+    np.testing.assert_allclose(direction[:, 1] / direction[:, 0], 0.4, rtol=1e-4)
+
+
 def test_vectors_of_names_the_colour():
     assert split_vectors("velocity (white)") == ("velocity", "#ffffff")
     assert split_vectors("velocity (grey)") == ("velocity", "#808080")
