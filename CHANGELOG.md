@@ -17,6 +17,9 @@
   started with (REEF3D_Case/ctrl-<run>.txt, named in the run log): ctrl.txt
   changed while the run goes on (P 30 0.05 at the start, 0.025 later) made
   LAGOON's times half of REEF3D's.
+- The grid lines of CFD's free surface (and any iso-surface) are drawn on both of
+  its sides: an iso-surface faces the rising field, phi rises into the water, so
+  the lines were lifted under the surface and hidden from above.
 - A CFD case folder opens with its free surface (the level set phi at 0, an
   iso-surface of the volume) and its floating bodies; before, it showed the volume
   only.

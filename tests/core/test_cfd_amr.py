@@ -161,7 +161,12 @@ def test_the_free_surface_shows_its_grid_lines(tmp_path):
     assert {2.75, 3.0, 3.25} <= set(inner.tolist())
     shown = s.data.display(free.id, mesh)
     lines = s.data.patch_outlines(free.id, mesh, shown)
-    assert lines is not None and lines.segments.shape == (len(pairs), 2, 3)
+    # bug: only under the surface (it faces the rising phi: down); now on both sides
+    assert lines is not None and lines.segments.shape == (2 * len(pairs), 2, 3)
+    on_surface = shown.positions[pairs][:, :, 2]
+    above, below = lines.segments[: len(pairs), :, 2], lines.segments[len(pairs) :, :, 2]
+    assert ((above - on_surface) * (below - on_surface) <= 1e-12).all()  # either side
+    assert (np.maximum(above, below) > on_surface).mean() > 0.9  # one of them above
 
 
 def test_the_blocks_in_a_lagoon_store(tmp_path):

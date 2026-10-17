@@ -1087,7 +1087,13 @@ class DataManager:
             segments = np.concatenate([segments, other])
         elif shown.normals is not None and len(shown.normals) == len(shown.positions):
             # off the surface along its normals (a volume's sides face sideways)
-            segments += lift * np.asarray(shown.normals, np.float32)[edges]
+            offset = lift * np.asarray(shown.normals, np.float32)[edges]
+            if item.kind == "iso_surface":
+                # an iso-surface faces the rising field (CFD's free surface: phi rises
+                # into the water, so down): on both of its sides, seen from anywhere
+                segments = np.concatenate([segments + offset, segments - offset])
+            else:
+                segments += offset
         else:
             segments[..., 2] += lift
         return Trails(
