@@ -2415,7 +2415,11 @@ class Session:
         low, high = scaled_range(
             *auto_range(values, str(props.get("range_from", RANGE_FROM[0]))), props
         )
-        self.set_properties(item_id, auto_range=False, vmin=round(low, 6), vmax=round(high, 6))
+        # rounded to significant digits, not decimals: k (1e-6) or epsilon (1e-10) of a
+        # free surface must not become 0 to 0
+        self.set_properties(
+            item_id, auto_range=False, vmin=float(f"{low:.6g}"), vmax=float(f"{high:.6g}")
+        )
         return low, high
 
     def set_visible(self, item_id: str, visible: bool) -> None:

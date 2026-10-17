@@ -3,7 +3,10 @@
 
 Arrows are thinned to about a wanted number on an even grid in the plane of the
 surface (the two directions it spreads most in), so a fine grid does not turn
-into a black mat and a vertical slice gets arrows over its whole height.
+into a black mat and a vertical slice gets arrows over its whole height. The grid's
+spacing comes from the area the surface covers (its triangles), not from its
+bounding box, so a river winding through a wide domain gets the arrows wanted on
+its water, close enough to show how the flow turns.
 """
 
 from __future__ import annotations
@@ -11,19 +14,23 @@ from __future__ import annotations
 import numpy as np
 
 
-def pick_points(points: np.ndarray, candidates: np.ndarray, count: int) -> np.ndarray:
+def pick_points(
+    points: np.ndarray, candidates: np.ndarray, count: int, spacing: float | None = None
+) -> np.ndarray:
     """Indices (from ``candidates``) of about ``count`` points spread evenly: one per
-    cell of a square grid over the surface's two widest directions."""
+    cell of a square grid over the surface's two widest directions, ``spacing`` apart
+    (None: from the candidates' bounding box)."""
     candidates = np.asarray(candidates, dtype=np.int64)
     if candidates.size == 0 or count <= 0:
         return np.zeros(0, np.int64)
     chosen = np.asarray(points, dtype=np.float64)[candidates]
     extent = np.ptp(chosen, axis=0)
     axes = np.argsort(extent)[::-1][:2]
-    area = float(max(extent[axes[0]], 1e-12) * max(extent[axes[1]], 1e-12))
-    if extent[axes[1]] <= 1e-9 * max(extent[axes[0]], 1e-12):  # a line of points
-        area = float(extent[axes[0]] ** 2) / max(count, 1)
-    spacing = np.sqrt(area / max(count, 1))
+    if spacing is None or not spacing > 0:
+        area = float(max(extent[axes[0]], 1e-12) * max(extent[axes[1]], 1e-12))
+        if extent[axes[1]] <= 1e-9 * max(extent[axes[0]], 1e-12):  # a line of points
+            area = float(extent[axes[0]] ** 2) / max(count, 1)
+        spacing = np.sqrt(area / max(count, 1))
     low = chosen[:, axes].min(axis=0)
     cells = np.floor((chosen[:, axes] - low) / spacing).astype(np.int64)
     keys = cells[:, 0] * (int(cells[:, 1].max()) + 1) + cells[:, 1]
@@ -31,9 +38,22 @@ def pick_points(points: np.ndarray, candidates: np.ndarray, count: int) -> np.nd
     return candidates[np.sort(first)]
 
 
-def grid_spacing(points: np.ndarray, count: int) -> float:
-    """The arrow spacing :func:`pick_points` uses for these points."""
-    extent = np.sort(np.ptp(np.asarray(points, dtype=np.float64), axis=0))[::-1]
+def grid_spacing(points: np.ndarray, count: int, triangles: np.ndarray | None = None) -> float:
+    """The spacing of about ``count`` arrows over a surface: from the area of its
+    ``triangles`` (indices into ``points``), or without them (or none with an area)
+    from the bounding box of ``points``."""
+    points = np.asarray(points, dtype=np.float64)
+    if triangles is not None and len(triangles):
+        corners = points[np.asarray(triangles, dtype=np.int64)]
+        area = 0.5 * float(
+            np.linalg.norm(
+                np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]), axis=1
+            ).sum()
+        )
+        if area > 0:
+            return float(np.sqrt(area / max(count, 1)))
+        points = corners.reshape(-1, 3)
+    extent = np.sort(np.ptp(points, axis=0))[::-1]
     area = float(max(extent[0], 1e-12) * max(extent[1], 1e-12))
     return float(np.sqrt(area / max(count, 1)))
 

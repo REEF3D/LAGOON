@@ -970,7 +970,8 @@ class DataManager:
         self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
     ) -> VectorArrows | None:
         """Arrows of an item's "vectors_of" variable at about "vector_count" points
-        spread evenly over its surface as shown. The longest arrows (the variable's
+        spread evenly over its surface as shown (over the area it covers: on a river
+        in a wide domain they all go onto the water). The longest arrows (the variable's
         automatic range, kept from frame to frame) reach about the next arrow, times
         "vector_scale". Vertical parts are exaggerated like the surface; in 2D the
         arrows lie flat on top and show the horizontal part."""
@@ -988,10 +989,11 @@ class DataManager:
         ]
         used = np.unique(shown_triangles)  # not on hidden dry land
         count = int(props.get("vector_count", 400))
-        picked = pick_points(mesh.points, used, count)
+        # spaced for the area shown (the water, not the whole domain's box)
+        spacing = grid_spacing(mesh.points, count, shown_triangles)
+        picked = pick_points(mesh.points, used, count, spacing)
         if not picked.size:
             return None
-        spacing = grid_spacing(mesh.points[used], count)
         _, high = self._range_of(item_id, name, mesh)  # the speed of the longest arrows
         length = 0.9 * spacing * float(props.get("vector_scale", 1.0)) / max(high, 1e-12)
         direction = np.array(vectors[picked], dtype=np.float64)

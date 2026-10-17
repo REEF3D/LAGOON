@@ -19,6 +19,15 @@
 
 ### NHFLOW
 
+- The colour range of a free surface's k, epsilon/omega and eddy viscosity works:
+  *Range min* and *Range max* showed and took only three decimals (1e-6 was
+  0.000), and *Fit range to this frame* (Cmd/Ctrl + F) rounded to six decimals, so
+  k (1e-6) and epsilon (1e-10) got the range 0 to 0. They now keep six significant
+  digits.
+- Vector arrows are spread over the area a surface covers, not over its bounding
+  box: on a river winding through a wide domain the arrows asked for land on the
+  water, close enough to show how the flow turns (before, a few long ones, mostly
+  along the main flow).
 - NHFLOW's direct forcing solids (A 581 - A 589: boxes, cylinders, jacket members,
   spheres, wedges) are shown as a structure of the case: before a run built from
   ctrl.txt, after it from the file NHFLOW writes (`REEF3D_NHFLOW_FORCING_VTP`, with

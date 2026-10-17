@@ -921,6 +921,24 @@ def test_typing_a_range_bound_fixes_the_range(window, reef3d_run):
     assert (shown_now.vmin, shown_now.vmax) == (-0.5, 0.75)
 
 
+def test_range_boxes_keep_tiny_values(window, reef3d_run):
+    """Bug: the range of k, epsilon and the eddy viscosity of a free surface (1e-10 to
+    1e-4) showed as 0.000 to 0.000, and typing or fitting it set 0 to 0."""
+    window.open_case(reef3d_run)
+    window.scene_tree.select("free_surface-1")
+    low, high = window.properties.editors["vmin"], window.properties.editors["vmax"]
+    window.session.set_properties("free_surface-1", auto_range=False, vmin=4.2e-10, vmax=1.15e-6)
+    assert (low.value(), high.value()) == (4.2e-10, 1.15e-6)
+    assert (low.text(), high.text()) == ("4.2e-10", "1.15e-06")
+    assert high.singleStep() == pytest.approx(1e-7)  # a tenth of the range's magnitude
+    high.lineEdit().setText("2.5e-6")
+    high.interpretText()
+    assert window.session.scene.get("free_surface-1").properties["vmax"] == 2.5e-6
+    window.session.set_property("free_surface-1", "auto_range", True)
+    shown = window.session.data.automatic_range("free_surface-1")
+    assert (low.value(), high.value()) == pytest.approx(shown, rel=1e-5)
+
+
 def test_convert_to_lagoon_format(window, reef3d_run, qtbot):
     """File > Convert to LAGOON format writes the store next to the output and the
     case then reads it."""

@@ -7,7 +7,7 @@ import math
 from typing import Any
 
 from PySide6.QtCore import QLocale, Qt, Signal
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QKeySequence, QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from lagoonviz.core.kinds import PropertySpec, kind_spec
+from lagoonviz.core.plotting import number_text, parse_number, partial_number, range_step
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.panels.timeline import ClickSlider
 
@@ -166,6 +167,10 @@ class PropertiesPanel(QWidget):
                 spin.editingFinished.connect(self.session.stack.end_merge)
                 return both
             if key in ("vmin", "vmax"):
+                # significant digits, not three decimals: k (1e-6), epsilon (1e-10)
+                # and the eddy viscosity of a free surface must not show as 0.000
+                spin = _RangeBox()
+                spin.setValue(float(value))
                 # typing a bound fixes the range (automatic range off), the other
                 # bound stays where the colours are now
                 spin.valueChanged.connect(lambda v: self._set_bound(key, v))
@@ -516,17 +521,20 @@ class PropertiesPanel(QWidget):
                 else ""
             )
         if not auto or not coloured:
+            _show_bounds(low_box, high_box)
             return
         try:
             shown = self.session.data.automatic_range(self.item_id)
         except Exception:  # noqa: BLE001 (no data yet: the boxes stay as they are)
             shown = None
         if shown is None:
+            _show_bounds(low_box, high_box)
             return
         for box, value in zip((low_box, high_box), shown, strict=True):
             box.blockSignals(True)
             box.setValue(float(value))
             box.blockSignals(False)
+        _show_bounds(low_box, high_box)
 
 
 class _SpinBox(QDoubleSpinBox):
@@ -542,6 +550,46 @@ class _SpinBox(QDoubleSpinBox):
             super().wheelEvent(event)
         else:
             event.ignore()
+
+
+class _RangeBox(_SpinBox):
+    """A colour range bound: shown and typed with six significant digits (1.15e-06,
+    0.000156909, 2.448), kept as typed (not rounded to decimals), its arrows stepping
+    by a tenth of the range's order of magnitude."""
+
+    #: decimals Qt keeps (it rounds the value to them); the text shows what matters
+    DECIMALS = 30
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setDecimals(self.DECIMALS)
+        self.setRange(-1e30, 1e30)
+        self.setSingleStep(0.1)
+        self.setKeyboardTracking(False)
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802 (Qt naming)
+        return number_text(value)
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802 (Qt naming)
+        value = parse_number(text)
+        return self.value() if value is None else value
+
+    def validate(self, text: str, pos: int):
+        if parse_number(text) is not None:
+            return QValidator.State.Acceptable, text, pos
+        if partial_number(text):
+            return QValidator.State.Intermediate, text, pos
+        return QValidator.State.Invalid, text, pos
+
+    def fixup(self, text: str) -> str:
+        return text if parse_number(text) is not None else number_text(self.value())
+
+
+def _show_bounds(low_box: QDoubleSpinBox, high_box: QDoubleSpinBox) -> None:
+    """The range boxes' arrows step to suit the range they show."""
+    step = range_step(low_box.value(), high_box.value())
+    for box in (low_box, high_box):
+        box.setSingleStep(step)
 
 
 def _number_box(prop: PropertySpec) -> _SpinBox:

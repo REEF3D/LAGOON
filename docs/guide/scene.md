@@ -50,6 +50,9 @@ Surfaces, slices and objects share these properties:
   the diverging maps, a single spike does not wash them out), or the lowest to the
   highest value, as ParaView (every extreme in range, e.g. the deepest scour). Switched off, *Range min* and
   *Range max* hold. *Fit range to this frame* sets them to the current output.
+  They show six significant digits (`1.15e-06`, `0.000156909`, `2.448`), so the
+  tiny values of k, epsilon and the eddy viscosity can be read and typed; their
+  arrows step by a tenth of the range's order of magnitude.
 - **Range [%]** scales the automatic range: 100 % runs from the lowest to the
   highest value, 95 % from 0.95 × min to 0.95 × max (values beyond take the colours
   at the ends), 50 % brings out the small waves. *Fit range to this frame* uses it
@@ -62,7 +65,8 @@ Surfaces, slices and objects share these properties:
   middle; 2 to 11: that many, evenly spaced) are the bar's in all of them.
 - **Contour lines of** a variable, and how many.
 - **Vectors of** a vector field: arrows spread over the surface, how many, and
-  their length.
+  their length. They are spread over the area the surface covers, so a river in a
+  wide domain gets them all on its water; the longest reach about the next arrow.
 
 Bodies, structures and the other objects have a **Material** (steel, concrete,
 rock, ice, wood): its colour, and how the [cinematic looks](cinematic.md) draw it.

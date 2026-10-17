@@ -264,6 +264,13 @@ def test_display_exaggeration_and_range(reef3d_run):
     props = s.scene.get("free_surface-1").properties
     assert props["auto_range"] is False and props["vmax"] == pytest.approx(high, abs=1e-5)
     assert s.stack.undo_label == "Set auto_range, vmin, vmax"
+    # tiny values (k, epsilon, eddy viscosity of a free surface) keep their range
+    mesh = s.data.load("free_surface-1")
+    mesh.point_data["eta"] = np.linspace(7.2e-7, 1.15e-6, mesh.n_points).astype(np.float32)
+    low, high = s.fit_range("free_surface-1")
+    props = s.scene.get("free_surface-1").properties
+    assert 7.2e-7 <= props["vmin"] < 7.4e-7 and 1.13e-6 < props["vmax"] <= 1.15e-6
+    assert (props["vmin"], props["vmax"]) == pytest.approx((low, high), rel=1e-5)
 
 
 def test_variable_none_and_choices(reef3d_run):

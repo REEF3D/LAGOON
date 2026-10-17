@@ -1,9 +1,10 @@
 """Vector arrows on surfaces."""
 
 import numpy as np
+import pytest
 
 from lagoonviz.core import Session
-from lagoonviz.core.vectors import arrow_segments, pick_points
+from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points
 
 
 def test_points_are_thinned_evenly():
@@ -16,6 +17,29 @@ def test_points_are_thinned_evenly():
     # a vertical plane (y = const) is thinned in x and z, not to one column
     vertical = points[:, [0, 2, 1]]
     assert np.ptp(vertical[pick_points(vertical, np.arange(len(points)), 50)][:, 2]) > 4
+
+
+def test_arrows_spaced_for_the_area_covered():
+    """A narrow river across a wide domain gets the arrows wanted on its water, not a
+    few spaced for the domain's bounding box."""
+    xs, ys = np.meshgrid(np.linspace(0, 1000, 201), np.linspace(0, 1000, 201), indexing="ij")
+    points = np.stack([xs.ravel(), ys.ravel(), np.zeros(xs.size)], axis=1)
+    n = 201
+    i, j = np.meshgrid(np.arange(n - 1), np.arange(n - 1), indexing="ij")
+    base = (i * n + j).ravel()
+    quads = np.stack([base, base + n, base + n + 1, base + 1], axis=1)
+    # the water: a diagonal band 50 m wide
+    centre = points[quads].mean(axis=1)
+    wet = np.abs(centre[:, 0] - centre[:, 1]) < 25.0
+    triangles = np.concatenate([quads[wet][:, [0, 1, 2]], quads[wet][:, [0, 2, 3]]])
+    used = np.unique(triangles)
+    box = pick_points(points, used, 400)
+    assert len(box) < 80  # spaced for the whole box: few arrows on the river
+    spacing = grid_spacing(points, 400, triangles)
+    assert spacing == pytest.approx(np.sqrt(50 * 1000 / 400), rel=0.2)  # band: 50 x 1000 m²
+    picked = pick_points(points, used, 400, spacing)
+    assert 250 <= len(picked) <= 700  # cells the banks cut get one too
+    assert grid_spacing(points, 400) == pytest.approx(50.0)  # no triangles: the box
 
 
 def test_arrows_have_a_shaft_and_a_head():
