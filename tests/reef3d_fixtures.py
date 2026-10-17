@@ -456,7 +456,8 @@ def write_run_log(root: Path, solver: str, runs: list[dict]) -> Path:
     """A REEF3D run log (lagoon-format RUN.md) for files already in ``root``.
 
     ``runs``: dicts with ``id``, ``started`` and ``outputs`` = {stream: [(step, time)]},
-    optionally ``domain`` = {"min": [x, y, z], "max": [x, y, z]}; the streams are the
+    optionally ``domain`` = {"min": [x, y, z], "max": [x, y, z]} and ``ctrl`` = the
+    copy of ctrl.txt the run was started with (relative path); the streams are the
     free surface and bed folders ``make_run`` writes.
     """
     import json
@@ -487,6 +488,7 @@ def write_run_log(root: Path, solver: str, runs: list[dict]) -> Path:
                 "started": run["started"],
                 "streams": streams,
                 **({"domain": run["domain"]} if "domain" in run else {}),
+                **({"ctrl": {"file": "ctrl.txt", "copy": run["ctrl"]}} if "ctrl" in run else {}),
             }
         )
         for stream, outputs in run["outputs"].items():

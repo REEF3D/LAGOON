@@ -106,3 +106,29 @@ def test_a_case_written_by_reef3d():
     assert mesh is not None and s.data.frame_index("free_surface-1") == 3
     kinds = {i.kind for i in s.scene}
     assert {"free_surface", "bathymetry", "series", "profile"} <= kinds
+
+
+def test_the_output_interval_of_the_control_file_the_run_started_with(tmp_path):
+    """Bug: ctrl.txt was changed while the run went on (P 30 0.05 at the start, 0.025
+    later): LAGOON's times were half of REEF3D's. P 30 comes from the copy of
+    ctrl.txt the run log names for the shown run."""
+    root = make_run(tmp_path / "changed", frames=4, volume=False, print_interval=0.025)
+    copy = root / "REEF3D_Case" / "ctrl-20261017T154840Z-4f21.txt"
+    copy.parent.mkdir(exist_ok=True)
+    copy.write_text("N 40 3\nP 30 0.05\nP 10 1\n")
+    run = {"id": "20261017T154840Z-4f21", "started": "2026-10-17T15:48:40Z"}
+    run["outputs"] = {"fsf": [(k, 0.05 * k) for k in range(4)], "bed": [(0, 0.0)]}
+    run["ctrl"] = str(copy.relative_to(root))
+    write_run_log(root, "NHFLOW", [run])
+    s = Session()
+    s.open_case(root)
+    assert s.data.case("case-1").print_interval == pytest.approx(0.05)
+    assert s.data.time_range() == pytest.approx((0.0, 0.15, "s"))  # 3 outputs of 0.05 s
+    s.data.dataset("free_surface-1").times = None  # without logged times: P 30 x output
+    s.data._logged = None
+    assert s.data.time_range() == pytest.approx((0.0, 0.15, "s"))
+    # without the copy: ctrl.txt, as before
+    copy.unlink()
+    s = Session()
+    s.open_case(root)
+    assert s.data.case("case-1").print_interval == pytest.approx(0.025)

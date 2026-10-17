@@ -1551,9 +1551,10 @@ def read_ctrl_solver(case_dir: Path) -> str:
     return ""
 
 
-def read_print_interval(case_dir: Path) -> float | None:
-    """Time between outputs from ``ctrl.txt`` (``P 30 dt``), if the run used it."""
-    ctrl = case_dir / "ctrl.txt"
+def read_print_interval(case_dir: Path, ctrl: Path | None = None) -> float | None:
+    """Time between outputs from ``ctrl.txt`` (``P 30 dt``), if the run used it;
+    ``ctrl``: another control file (the copy a run was started with)."""
+    ctrl = case_dir / "ctrl.txt" if ctrl is None else ctrl
     if not ctrl.is_file():
         return None
     try:
@@ -1785,4 +1786,27 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     for dataset in case.datasets.values():
         if isinstance(dataset, SolidDataset):
             dataset.bed_source = case.by_role("bed")
+    started_with = _run_print_interval(case)
+    if started_with is not None:
+        case.print_interval = started_with[0]
     return case
+
+
+def _run_print_interval(case: Case) -> tuple[float | None] | None:
+    """P 30 of the control file the shown run was started with (the copy the run log
+    names, REEF3D_Case/ctrl-<run>.txt): ctrl.txt may have been changed since, while
+    the run goes on (P 30 0.05 at the start, 0.025 now: the times were half of
+    REEF3D's). None when the run log does not have the copy."""
+    runs = [d.run_id for d in case.main_datasets().values() if d.run_id]
+    if not runs:
+        return None
+    try:
+        history = run_log(case.path)
+    except (OSError, ValueError):
+        return None
+    run = history.run(runs[0]) if history is not None else None
+    ctrl = run.record.get("ctrl") if run is not None else None
+    copy = ctrl.get("copy") if isinstance(ctrl, dict) else None
+    if not copy or not (case.path / copy).is_file():
+        return None
+    return (read_print_interval(case.path, case.path / copy),)

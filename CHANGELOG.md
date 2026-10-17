@@ -13,6 +13,10 @@
 - The timeline of a CFD run with AMR from the store follows the stored times: the
   blocks are written before the volume, so for one output they had no time and
   the timeline fell back to P 30 x output (0.1 s where the run was at 0.2 s).
+- The output interval (P 30) comes from the copy of ctrl.txt the shown run was
+  started with (REEF3D_Case/ctrl-<run>.txt, named in the run log): ctrl.txt
+  changed while the run goes on (P 30 0.05 at the start, 0.025 later) made
+  LAGOON's times half of REEF3D's.
 - A CFD case folder opens with its free surface (the level set phi at 0, an
   iso-surface of the volume) and its floating bodies; before, it showed the volume
   only.
