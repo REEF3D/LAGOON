@@ -1279,7 +1279,7 @@ def _frame_objects(
             continue
         overlays = (
             ("contours", data.contour_lines(item_id, mesh, shown), CONTOUR_WIDTH, None),
-            ("vectors", data.vector_arrows(item_id, mesh, shown), VECTOR_WIDTH, None),
+            ("vectors", data.vector_arrows(item_id, mesh, shown), VECTOR_WIDTH, "color"),
             ("trails", data.particle_trails(item_id, mesh), TRAIL_WIDTH, "color"),
             ("grid", data.amr_grid_lines(item_id, mesh, shown), OUTLINE_WIDTH * 0.6, "color"),
             ("outlines", data.patch_outlines(item_id, mesh, shown), OUTLINE_WIDTH, "color"),
@@ -1287,7 +1287,7 @@ def _frame_objects(
         for label, lines, width, own in overlays:
             if lines is None or not lines.visible or not lines.segments.size:
                 continue
-            color = getattr(lines, own) if own else preset.contours
+            color = (getattr(lines, own, None) if own else None) or preset.contours
             out.lines(f"{item_id}#{label}", lines.segments, width, color)
     out.sea()
     profiles = set(data.profile_items())

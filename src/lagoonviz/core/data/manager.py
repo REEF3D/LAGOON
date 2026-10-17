@@ -44,7 +44,7 @@ from lagoonviz.core.data.setup import (
 )
 from lagoonviz.core.kinds import kind_spec
 from lagoonviz.core.scene import MODE_KINDS, SETUP_KINDS, Scene, SceneItem
-from lagoonviz.core.vectors import arrow_segments, spread_points
+from lagoonviz.core.vectors import arrow_segments, split_vectors, spread_points, vector_choices
 
 #: item kinds that show a dataset, and the dataset role they use by default
 DATA_KINDS = {
@@ -141,6 +141,7 @@ class VectorArrows:
     item_id: str
     segments: np.ndarray  # (k, 2, 3) float32
     visible: bool
+    color: str | None = None  # None: the look's contour colour
 
 
 @dataclass
@@ -620,7 +621,7 @@ class DataManager:
         if provider == "vectors":
             dataset = self.dataset(item_id)
             names = [n for n, c in dataset.components.items() if c == 3] if dataset else []
-            return ["none", *names]
+            return vector_choices(names)
         raise ValueError(f"unknown choice provider {provider!r}")
 
     def labelled_choices(self, item_id: str, provider: str) -> list[tuple[str, str]]:
@@ -794,6 +795,8 @@ class DataManager:
         # colours, contour lines, iso-surfaces, arrows
         for key in ("variable", "contour_by", "iso_by", "vectors_of", "streamlines_of"):
             variable = str(item.properties.get(key, "none"))
+            if key == "vectors_of":
+                variable = split_vectors(variable)[0]  # "velocity (white)": velocity
             if variable and variable != "none":
                 arrays.add(variable.partition(".")[0])
         if item.kind in WATER_KINDS:
@@ -977,7 +980,7 @@ class DataManager:
         arrows lie flat on top and show the horizontal part."""
         item = self.scene.get(item_id)
         props = item.properties
-        name = str(props.get("vectors_of", "none"))
+        name, colour = split_vectors(str(props.get("vectors_of", "none")))
         vectors = mesh.point_data.get(name) if name != "none" else None
         if vectors is None or vectors.ndim != 2 or vectors.shape[1] != 3:
             return None
@@ -1004,7 +1007,7 @@ class DataManager:
             direction[:, 2] *= self.exaggeration(item_id)
             base[:, 2] += 2e-3 * float(max(np.ptp(shown.positions, axis=0).max(), 1e-9))
         segments = arrow_segments(base, direction, length)
-        return VectorArrows(item_id, segments, shown.visible)
+        return VectorArrows(item_id, segments, shown.visible, colour)
 
     def patch_outlines(
         self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface

@@ -303,6 +303,8 @@ class SceneRenderer:
         self._gauges: dict[str, gfx.Group] = {}
         #: contour lines of an item; outside ``content``, like the gauges
         self._contours: dict[str, gfx.Line] = {}
+        #: arrows drawn in a colour of their own (white, black, grey): kept on a new look
+        self._own_colours: dict[str, str] = {}
         #: the Diorama look's stand: the sides of the bed and of the water, per item
         self._stand: dict[str, gfx.Mesh] = {}
         self._rims: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # triangles -> open edges
@@ -816,6 +818,8 @@ class SceneRenderer:
         self._fit_shadow()
         self.headlamp.intensity = look["headlamp"]
         for key, line in self._contours.items():
+            if key in self._own_colours:  # arrows in white, black or grey
+                continue
             if not key.endswith("#trails"):  # trails keep their item's colour
                 line.material.color = look.get("contours", "#1e2833")
         cinematic = self.preset is not None
@@ -1167,8 +1171,17 @@ class SceneRenderer:
         self._update_overlay_lines(item_id, lines, 1.2)
 
     def update_vectors(self, item_id: str, arrows: VectorArrows | None) -> None:
-        """Arrows of an item (None or no segments: none), in the contour colour."""
-        self._update_overlay_lines(f"{item_id}#vectors", arrows, 1.4)
+        """Arrows of an item (None or no segments: none), in their colour (white, black,
+        grey) or the look's contour colour."""
+        key = f"{item_id}#vectors"
+        colour = arrows.color if arrows is not None else None
+        if colour is not None:
+            self._own_colours[key] = colour
+        else:
+            self._own_colours.pop(key, None)
+            if arrows is not None:
+                colour = STYLES[self.style_name].get("contours", "#1e2833")
+        self._update_overlay_lines(key, arrows, 1.4, colour)
 
     def update_trails(self, item_id: str, trails: Trails | None) -> None:
         """Paths of an item's particles (None or no segments: none), thin, in its colour."""

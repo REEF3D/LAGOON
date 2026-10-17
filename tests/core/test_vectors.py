@@ -4,7 +4,13 @@ import numpy as np
 import pytest
 
 from lagoonviz.core import Session
-from lagoonviz.core.vectors import arrow_segments, grid_spacing, pick_points, spread_points
+from lagoonviz.core.vectors import (
+    arrow_segments,
+    grid_spacing,
+    pick_points,
+    split_vectors,
+    spread_points,
+)
 
 
 def test_points_are_thinned_evenly():
@@ -57,7 +63,12 @@ def test_velocity_arrows_on_the_free_surface(reef3d_run):
     s = Session()
     s.open_case(reef3d_run)
     surface = "free_surface-1"
-    assert s.data.choices(surface, "vectors") == ["none", "velocity"]
+    assert s.data.choices(surface, "vectors") == [
+        "none",
+        "velocity (white)",
+        "velocity (black)",
+        "velocity (grey)",
+    ]
     mesh = s.data.load(surface)
     assert s.data.vector_arrows(surface, mesh, s.data.display(surface, mesh)) is None  # off
     s.set_property(surface, "vectors_of", "velocity")
@@ -74,3 +85,19 @@ def test_velocity_arrows_on_the_free_surface(reef3d_run):
     s.set_plan_view(True)
     flat = s.data.vector_arrows(surface, mesh, s.data.display(surface, mesh))
     assert np.ptp(flat.segments[..., 2]) < 1e-6  # flat on top in 2D
+    assert flat.color is None  # the bare name (sessions from before): the look's colour
+    for choice, colour in (("white", "#ffffff"), ("black", "#000000"), ("grey", "#808080")):
+        s.set_property(surface, "vectors_of", f"velocity ({choice})")
+        mesh = s.data.load(surface)
+        assert "velocity" in mesh.point_data
+        arrows = s.data.vector_arrows(surface, mesh, s.data.display(surface, mesh))
+        assert arrows.color == colour and arrows.segments.shape == flat.segments.shape
+
+
+def test_vectors_of_names_the_colour():
+    assert split_vectors("velocity (white)") == ("velocity", "#ffffff")
+    assert split_vectors("velocity (grey)") == ("velocity", "#808080")
+    assert split_vectors("velocity") == ("velocity", None)
+    assert split_vectors("wave_direction") == ("wave_direction", None)
+    assert split_vectors("u (top) (black)") == ("u (top)", "#000000")
+    assert split_vectors("none") == ("none", None)

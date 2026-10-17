@@ -24,6 +24,9 @@
   0.000), and *Fit range to this frame* (Cmd/Ctrl + F) rounded to six decimals, so
   k (1e-6) and epsilon (1e-10) got the range 0 to 0. They now keep six significant
   digits.
+- *Vectors of* chooses the arrows' colour too: `velocity (white)`, `velocity
+  (black)` or `velocity (grey)` (they stay so on another look). Sessions saved with
+  plain `velocity` keep the look's contour colour.
 - Vector arrows are spread over the area a surface covers, not over its bounding
   box: on a river winding through a wide domain the arrows asked for land on the
   water, close enough to show how the flow turns (before, a few long ones, mostly

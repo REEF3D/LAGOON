@@ -92,7 +92,8 @@ def _vectors() -> dict[str, PropertySpec]:
             "none",
             "Vectors of",
             provider="vectors",
-            tip="Draw arrows of a vector variable, e.g. the velocity (none: no arrows)",
+            tip="Draw arrows of a vector variable, e.g. the velocity, in white, black or grey "
+            "(none: no arrows)",
         ),
         "vector_count": PropertySpec(
             400, "Arrows", minimum=10, maximum=20000, tip="About how many arrows, evenly spread"

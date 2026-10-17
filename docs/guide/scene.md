@@ -64,8 +64,8 @@ Surfaces, slices and objects share these properties:
   ends under the view and on films, round numbers in figures; 1: the ends and the
   middle; 2 to 11: that many, evenly spaced) are the bar's in all of them.
 - **Contour lines of** a variable, and how many.
-- **Vectors of** a vector field: arrows spread over the surface, how many, and
-  their length. They are spread over the area the surface covers, so a river in a
+- **Vectors of** a vector field and the arrows' colour: `velocity (white)`,
+  `velocity (black)` or `velocity (grey)`; then how many arrows, and their length. They are spread over the area the surface covers, so a river in a
   wide domain gets them all on its water; the longest reach about the next arrow.
 
 Bodies, structures and the other objects have a **Material** (steel, concrete,

@@ -7,11 +7,32 @@ into a black mat and a vertical slice gets arrows over its whole height. The gri
 spacing comes from the area the surface covers (its triangles), not from its
 bounding box, so a river winding through a wide domain gets the arrows wanted on
 its water, close enough to show how the flow turns.
+
+"Vectors of" names the variable and the arrows' colour: ``velocity (white)``,
+``velocity (black)``, ``velocity (grey)``; the bare name (sessions from before,
+SEASTATE's wave directions) takes the look's contour colour.
 """
 
 from __future__ import annotations
 
 import numpy as np
+
+#: the arrows' colours offered with every vector variable
+VECTOR_COLOURS = {"white": "#ffffff", "black": "#000000", "grey": "#808080"}
+
+
+def vector_choices(names) -> list[str]:
+    """The "Vectors of" choices of a dataset's vector variables."""
+    return ["none", *[f"{name} ({colour})" for name in names for colour in VECTOR_COLOURS]]
+
+
+def split_vectors(value: str) -> tuple[str, str | None]:
+    """A "Vectors of" value as (variable, colour #rrggbb or None: the look's)."""
+    value = str(value)
+    name, _, rest = value.rpartition(" (")
+    if name and rest.endswith(")") and rest[:-1] in VECTOR_COLOURS:
+        return name, VECTOR_COLOURS[rest[:-1]]
+    return value, None
 
 
 def pick_points(
