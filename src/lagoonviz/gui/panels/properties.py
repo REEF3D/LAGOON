@@ -82,13 +82,13 @@ class PropertiesPanel(QWidget):
                 editor.setToolTip(prop.tip)
             self.editors[key] = editor
             form.addRow(prop.label, editor)
-
-        if "auto_range" in spec.properties:
-            fit = QPushButton("Fit range to this frame")
-            fit.setToolTip("Fix the colour range to the values of the current frame")
-            fit.clicked.connect(self._fit_range)
-            form.addRow("", fit)
-            self.fit_button = fit
+            if key == "vmax" and "auto_range" in spec.properties:
+                # directly under the range it sets
+                fit = QPushButton("Fit range to this frame")
+                fit.setToolTip("Fix the colour range to the values of the current frame")
+                fit.clicked.connect(self._fit_range)
+                form.addRow("", fit)
+                self.fit_button = fit
         if item.kind == "statistics":
             compute = QPushButton("Compute")
             compute.setToolTip(

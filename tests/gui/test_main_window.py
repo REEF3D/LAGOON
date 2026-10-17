@@ -293,7 +293,15 @@ def test_properties_list_data_variables(window, reef3d_run):
     combo.setCurrentText("velocity.x")
     props = window.session.scene.get("free_surface-1").properties
     assert props["variable"] == "velocity.x"
-    window.properties.fit_button.click()
+    # the Fit range button sits directly under Range max
+    from PySide6.QtWidgets import QFormLayout
+
+    fit = window.properties.fit_button
+    form = fit.parentWidget().layout()
+    assert isinstance(form, QFormLayout)
+    vmax_row = form.getWidgetPosition(window.properties.editors["vmax"])[0]
+    assert form.getWidgetPosition(fit)[0] == vmax_row + 1
+    fit.click()
     assert props["auto_range"] is False and props["vmin"] < props["vmax"]
     assert "frames" in window.properties.info.text()
 
