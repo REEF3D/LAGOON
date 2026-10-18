@@ -80,7 +80,7 @@ In the viewport: left drag rotates, right drag (or Shift + drag) pans, the wheel
 zooms. Blender's middle-mouse navigation works too, and the number keys choose views:
 1 front, 3 side, 7 top (with Ctrl the opposite side), 5 perspective/orthographic,
 Home frames everything. *Probe* (P) and a click on a surface list every value
-there in a box beside the view, following the time. The timeline plays and scrubs through the frames; frames are
+there in a floating window, following the time. The timeline plays and scrubs through the frames; frames are
 read in the background and kept in memory, so stepping back is instant.
 
 *Add → Slice* cuts the volume output with an x, y or z plane; set its position and

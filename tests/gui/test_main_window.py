@@ -549,6 +549,10 @@ def test_probe_box(window, series_run, qtbot):
     assert box.title.text() == probe.name and box.copy_button.isEnabled()
     box.copy()
     assert QGuiApplication.clipboard().text() == probe.text()
+    assert box.isWindow()  # floating: the 3D view keeps its size
+    with qtbot.waitSignal(box.closed, timeout=1000):
+        box.show()
+        box.close()  # closing the window ends Probe
     box.clear("Nothing there")
     assert box.table.rowCount() == 0 and not box.copy_button.isEnabled()
     assert box.note.text() == "Nothing there"

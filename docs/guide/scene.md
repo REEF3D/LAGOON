@@ -116,12 +116,14 @@ The bed can leave out what is under still water (*Hide wet land*).
 ## Reading values
 
 *Probe* in the view's bar (++p++) lists every value at a point, like ParaView's
-point inspection: click on a surface and a box beside the view shows the item, the
+point inspection: click on a surface and a small floating window shows the item, the
 point (x, y, z), the time and output, and all the arrays of its dataset there, not
 only the one it is coloured by (vectors as magnitude and components). A white cross
 marks the point; the values follow the time. *Copy* puts them on the clipboard as
-tab-separated lines; ++escape++ or × ends Probe. Drags still turn the view, and
-without Probe a click does nothing. For values over time, use REEF3D's gauges and
+tab-separated lines. The window floats over LAGOON, so the 3D view keeps its size
+and perspective; move and resize it as you like (it opens at the view's top right
+and stays where you put it). Closing it or ++escape++ ends Probe. Drags still turn
+the view, and without Probe a click does nothing. For values over time, use REEF3D's gauges and
 probes ([Plots](plots.md)).
 
 ## Slices, iso-surfaces, streamlines

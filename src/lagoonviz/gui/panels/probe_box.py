@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The Probe tool's box beside the 3D view: every value at the clicked point.
+"""The Probe tool's window: every value at the clicked point.
 
 Like ParaView's point inspection: with *Probe* on, a click on a surface in the 3D
 view lists the item, the point and all the arrays of its dataset there (vectors as
 magnitude and components). The values follow the timeline; *Copy* puts them on the
 clipboard as tab-separated lines.
+
+The window floats over the main window (a tool window: on top of LAGOON, not of
+other programs), so the 3D view keeps its size and the camera its perspective.
+It can be moved and resized; closing it, or Esc in it, ends Probe.
 """
 
 from __future__ import annotations
@@ -33,13 +37,15 @@ HELP = "Click on a surface in the 3D view to list every value there. Drags still
 class ProbeBox(QFrame):
     """Item, point and all values at the probed point."""
 
-    #: the × button: the Probe tool is to end
+    #: the window closed (or Esc in it): the Probe tool is to end
     closed = Signal()
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
+        super().__init__(parent, Qt.Tool)
         self.setObjectName("probeBox")
-        self.setFixedWidth(260)
+        self.setWindowTitle("Probe")
+        self.resize(280, 360)
+        self.setMinimumSize(200, 160)
         self.probe = None
 
         top = QHBoxLayout()
@@ -56,12 +62,6 @@ class ProbeBox(QFrame):
         self.copy_button.clicked.connect(self.copy)
         self.copy_button.setEnabled(False)
         top.addWidget(self.copy_button)
-        close = QToolButton()
-        close.setText("×")
-        close.setAutoRaise(True)
-        close.setToolTip("End Probe (Esc)")
-        close.clicked.connect(self.closed.emit)
-        top.addWidget(close)
 
         self.note = QLabel(HELP)
         self.note.setObjectName("probeNote")
@@ -90,8 +90,7 @@ class ProbeBox(QFrame):
 
     def apply_theme_colors(self) -> None:
         self.setStyleSheet(
-            f"#probeBox {{ background: {COLORS['panel']};"
-            f" border-left: 1px solid {COLORS['border']}; }}"
+            f"#probeBox {{ background: {COLORS['panel']}; }}"
             f"#probeTitle {{ color: {COLORS['text']}; font-weight: bold; }}"
             f"#probeNote {{ color: {COLORS['dim']}; }}"
             f"QToolButton {{ color: {COLORS['text']}; padding: 2px 6px; }}"
@@ -129,6 +128,16 @@ class ProbeBox(QFrame):
 
     def clear(self, note: str = "") -> None:
         self.set_probe(None, note)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        super().closeEvent(event)
+        self.closed.emit()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if event.key() == Qt.Key_Escape:
+            self.close()
+            return
+        super().keyPressEvent(event)
 
     def copy(self) -> None:
         if self.probe is not None:

@@ -30,8 +30,8 @@ and scroll to zoom. The number keys give the standard views (1 front, 3 side,
 Click an item in the Scene panel to see its settings in the **Properties** panel
 on the right. Set *Colour by* of the free surface to `velocity`, or raise the
 *Vertical scale* of the case to make small waves visible. *Probe* in the view's
-bar (++p++), then a click on the surface, lists every value there in a box beside
-the view; they follow the time.
+bar (++p++), then a click on the surface, lists every value there in a small floating
+window; they follow the time.
 
 ## Play
 

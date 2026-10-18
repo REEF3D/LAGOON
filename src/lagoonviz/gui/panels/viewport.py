@@ -12,8 +12,8 @@ Navigation (mouse and trackpad):
   rotation: any drag pans; from the top everything is drawn flat, front and side
   give 2D elevations; 3D leaves it)
 
-Probe (the button, P): a click on a surface lists every value there in a box
-beside the view, like ParaView's point inspection; Esc ends it.
+Probe (the button, P): a click on a surface lists every value there in a floating
+window, like ParaView's point inspection; Esc ends it.
 
 Frames are read in background threads; the viewport shows the newest frame that
 has arrived, so scrubbing never blocks the window. Without a usable GPU (or in
@@ -29,7 +29,7 @@ import threading
 import traceback
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -449,8 +449,8 @@ class Viewport3D(QWidget):
         self.probe_button.setCheckable(True)
         self.probe_button.setAutoRaise(True)
         self.probe_button.setToolTip(
-            "Probe: click on a surface to list every value there, in a box beside the "
-            "view; they follow the time (I, Esc ends)"
+            "Probe: click on a surface to list every value there, in a floating window; "
+            "they follow the time (P, Esc ends)"
         )
         self.probe_button.toggled.connect(self.set_probing)
         bar.addWidget(self.probe_button)
@@ -484,17 +484,14 @@ class Viewport3D(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(header)
-        #: the Probe tool's box, beside the canvas (not over it: the GPU canvas is
-        #: a native window that widgets do not draw over everywhere)
+        layout.addWidget(self.canvas, 1)
+        #: the Probe tool's window, floating over the main window: the 3D view keeps
+        #: its size (and the camera its perspective); placed at the view's top right
+        #: the first time, then where it was moved to
         self.probe_box = ProbeBox(self)
         self.probe_box.closed.connect(lambda: self.set_probing(False))
         self.probe_box.hide()
-        middle = QHBoxLayout()
-        middle.setContentsMargins(0, 0, 0, 0)
-        middle.setSpacing(0)
-        middle.addWidget(self.canvas, 1)
-        middle.addWidget(self.probe_box)
-        layout.addLayout(middle, 1)
+        self._probe_box_placed = False
         #: the attribution the background maps' sources ask for (© Kartverket, ...)
         self.attribution = QLabel()
         self.attribution.setObjectName("mapAttribution")
@@ -1871,8 +1868,8 @@ class Viewport3D(QWidget):
 
     # ------------------------------------------------------------- probe
     def set_probing(self, on: bool) -> None:
-        """Probe on: clicks on surfaces list their values in the box beside the
-        view; off: the box and the marker go."""
+        """Probe on: clicks on surfaces list their values in the floating Probe
+        window; off: the window and the marker go."""
         on = bool(on)
         if self.probe_button.isChecked() != on:
             self.probe_button.setChecked(on)  # comes back here through toggled
@@ -1882,13 +1879,33 @@ class Viewport3D(QWidget):
         self.probing = on
         if on:
             self.probe_box.clear()
-            self.probe_box.show()
+            self._show_probe_box()
             self.canvas.setCursor(Qt.CrossCursor)
             self.statusMessage.emit("Probe: click on a surface to list its values · Esc ends")
         else:
             self.clear_probe()
             self.probe_box.hide()
             self.canvas.unsetCursor()
+
+    def _show_probe_box(self) -> None:
+        box = self.probe_box
+        if not self._probe_box_placed and self.canvas.isVisible():
+            corner = self.canvas.mapToGlobal(QPoint(self.canvas.width() - box.width() - 12, 12))
+            box.move(corner)
+            self._probe_box_placed = True
+        box.show()
+        box.raise_()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        """The Probe window goes with the view (the 2D plots mode, compare closed)."""
+        super().hideEvent(event)
+        if self.probing:
+            self.probe_box.hide()
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        super().showEvent(event)
+        if self.probing:
+            self._show_probe_box()
 
     def probe_at(self, item_id: str, triangle: int, weights: tuple[float, ...]) -> None:
         """List everything at a point of an item's surface (``triangle`` among those

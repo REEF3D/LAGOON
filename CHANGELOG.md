@@ -5,11 +5,13 @@
 ### Probe
 
 - *Probe* in the 3D view's bar (++p++), like ParaView's point inspection: a click
-  on a surface lists, in a box beside the view, the item, x, y, z, the time and
+  on a surface lists, in a small floating window, the item, x, y, z, the time and
   output, and every array of its dataset there (not only the one drawn; vectors as
   magnitude and components). The arrays drawn show at once, the others are read in
   the background; the values follow the time. A white cross marks the point; *Copy*
-  puts the values on the clipboard; ++escape++ ends it. Drags still turn the view.
+  puts the values on the clipboard; closing the window or ++escape++ ends it.
+  The window floats over LAGOON (moved and resized at will), so the 3D view keeps
+  its size and the camera its perspective. Drags still turn the view.
 - It replaces the orange probe dot: a plain click no longer places one, and the
   Plots panel no longer has a *Probe* row. Use REEF3D's gauges and probes for time
   series. Picks now count among the triangles drawn (dry land and wet bed left
