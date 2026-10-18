@@ -1436,10 +1436,18 @@ def test_the_2d_plots(window, tmp_path, qtbot):
     assert editor.time_changed()
     editor.remove_selected()
 
-    # a case opened in the plots: its time series are in the list
-    before = editor.sources.topLevelItemCount()
-    window.open_case(make_run(tmp_path / "run2", frames=2, print_interval=0.5, series=True))
-    assert editor.sources.topLevelItemCount() > before
+    # a case opened in the plots: what it wrote is in the list
+    def sources():
+        return [
+            editor.sources.topLevelItem(i).text(0)
+            for i in range(editor.sources.topLevelItemCount())
+        ]
+
+    assert "Free surface lines" not in sources()
+    window.open_case(
+        make_run(tmp_path / "fnpf", solver="FNPF", frames=2, print_interval=0.5, profiles=True)
+    )
+    assert "Free surface lines" in sources()
 
     # back to the results: the panels as they were; the figure kept for next time
     window.act_mode_results.trigger()
