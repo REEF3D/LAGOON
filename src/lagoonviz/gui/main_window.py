@@ -720,6 +720,9 @@ class MainWindow(QMainWindow):
     def _on_mode_event(self, event: str, _item_id: str) -> None:
         if event in ("mode", "reset"):
             self._apply_mode()
+        if event in ("added", "removed", "reset") and self.plots_mode:
+            self.plots_editor.fill_sources()  # a case opened or closed: what can be drawn
+            self.plots_editor.changed()
 
     # ------------------------------------------------------------- 2D plots
     def _plots_time(self, _time: float) -> None:
