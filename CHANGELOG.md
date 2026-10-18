@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Measured data on the gauge plots
+
+- A time series item takes a *Measured file* (text columns: time, one column per
+  gauge): drawn dashed in the colour of its line (by name, in order, or as
+  *Measured columns* says; *Measured time shift*), in the Plots panel and the
+  figures made from it. Each line is compared with its measurement over the time
+  shown: RMSE, bias, r, index of agreement d, lag.
+- File properties have a *…* button to choose the file.
+
 ### Clean up a case folder
 
 - *File → Clean up case folder*: what in the folder is not the run shown, by run

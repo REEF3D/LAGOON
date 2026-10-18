@@ -154,6 +154,9 @@ class Trace:
     unit: str
     time: np.ndarray
     values: np.ndarray
+    #: a measured line: the name of the computed line it goes with (drawn dashed in its
+    #: colour); "" for computed lines
+    measured_for: str = ""
 
 
 @dataclass
@@ -334,6 +337,8 @@ class DataManager:
         self._errors: dict[str, str] = {}
         self._resolved: dict[str, str] = {}
         self._auto_ranges: dict[tuple, tuple[float, float]] = {}
+        #: measured files of series items: path -> (modification time, (time, columns))
+        self._measured: dict[Path, tuple] = {}
         #: item -> (the frame's mesh (weak), variable, mode, its range): the automatic
         #: colour range of the frame shown, found once per frame
         self._frame_ranges: dict[str, tuple] = {}
@@ -1435,6 +1440,83 @@ class DataManager:
             Trace(item_id, name, table.units.get(name, ""), table.time, table.columns[name])
             for name in names
         ]
+
+    def measured_path(self, item_id: str) -> Path | None:
+        """The measured file of a series item ("measured"; relative to its case folder)."""
+        item = self.scene.get(item_id)
+        text = str(item.properties.get("measured", "") or "").strip()
+        if not text:
+            return None
+        path = Path(text).expanduser()
+        if not path.is_absolute():
+            folder = self.case_folder(item_id)
+            path = (Path(folder) / path) if folder is not None else path
+        return path
+
+    def measured_table(self, item_id: str) -> tuple[np.ndarray, dict[str, np.ndarray]] | None:
+        """The measured file of a series item (read again when it changes); None
+        without one; ValueError when it cannot be read."""
+        from lagoonviz.core.analysis import read_measurements
+
+        path = self.measured_path(item_id)
+        if path is None:
+            return None
+        try:
+            stamp = path.stat().st_mtime
+        except OSError as error:
+            raise ValueError(f"{path.name}: not found") from error
+        cached = self._measured.get(path)
+        if cached is None or cached[0] != stamp:
+            cached = (stamp, read_measurements(path))
+            self._measured[path] = cached
+        return cached[1]
+
+    def measured_traces(self, item_id: str) -> list[Trace]:
+        """The measured lines of a series item, each with the computed line it goes
+        with ("measured", "measured_columns", "measured_shift"); none if unreadable."""
+        from lagoonviz.core.analysis import match_columns
+
+        try:
+            table = self.measured_table(item_id)
+        except ValueError:
+            return []
+        if table is None:
+            return []
+        time, columns = table
+        props = self.scene.get(item_id).properties
+        shift = float(props.get("measured_shift", 0.0) or 0.0)
+        model = self.traces(item_id)
+        units = {t.name: t.unit for t in model}
+        pairs = match_columns(
+            [t.name for t in model], list(columns), str(props.get("measured_columns", ""))
+        )
+        found = []
+        for name, column in pairs:
+            values = columns[column]
+            unit = units.get(name, "")
+            found.append(Trace(item_id, f"{name} measured", unit, time + shift, values, name))
+        return found
+
+    def comparisons(
+        self, item_id: str, start: float | None = None, end: float | None = None
+    ) -> dict[str, object]:
+        """Each computed line against its measured one (lagoonviz.core.analysis.compare)
+        between ``start`` and ``end``: {line name: Comparison}."""
+        from lagoonviz.core.analysis import compare
+
+        model = {t.name: t for t in self.traces(item_id)}
+        found = {}
+        for measured in self.measured_traces(item_id):
+            computed = model.get(measured.measured_for)
+            if computed is None:
+                continue
+            try:
+                found[computed.name] = compare(
+                    computed.time, computed.values, measured.time, measured.values, start, end
+                )
+            except ValueError:
+                continue
+        return found
 
     def gauge_marks(self, item_id: str, palette: list[str] | None = None) -> GaugeMarks | None:
         """Wave gauges of a series item for the 3D view (flat on top in 2D)."""

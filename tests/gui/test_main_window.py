@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PySide6.QtCore import QSettings, Qt
+from PySide6.QtWidgets import QLineEdit
 
 from lagoonviz.core import Session
 from lagoonviz.gui.main_window import MainWindow
@@ -977,6 +978,29 @@ def test_clean_up_case_folder(window, reef3d_run):
     target = dialog.archive_ticked()
     assert (target / earlier.name / "zarr.json").is_file() and not earlier.exists()
     assert "Moved 1 group" in dialog.done_text
+
+
+def test_measured_data_on_the_plots(window, tmp_path):
+    """A time series item's Measured file: dashed lines in the Plots panel."""
+    import numpy as np
+    from reef3d_fixtures import GAUGES, gauge_eta, make_run
+
+    root = make_run(tmp_path / "flume", frames=3, print_interval=1.0, series=True)
+    t = np.linspace(0.0, 2.0, 101)
+    rows = []
+    for tk in t:
+        values = [gauge_eta(x, np.array([tk]))[0] for x, _ in GAUGES]
+        rows.append(" ".join(f"{v:.5g}" for v in (tk, *values)))
+    (root / "measured.dat").write_text("t P1 P2 P3\n" + "\n".join(rows) + "\n")
+    window.open_case(root)
+    gauges = next(i.id for i in window.session.scene if "wsf" in str(i.properties.get("source")))
+    window.scene_tree.select(gauges)
+    assert isinstance(window.properties.editors["measured"], QLineEdit)
+    window.session.set_property(gauges, "measured", "measured.dat")
+    window.plots.refresh()
+    lines = dict(window.plots.shown_rows())[gauges]
+    assert sum(bool(t.measured_for) for t in lines) == 3
+    window.plots.grab()  # draws the comparison without failing
 
 
 def test_convert_to_lagoon_format(window, reef3d_run, qtbot):

@@ -115,7 +115,9 @@ class PlotsPanel(QWidget):
         if self.session is not None:
             for item_id in series:
                 if shown in (SHOW_ALL, item_id):
-                    self._rows.append((item_id, self.session.data.traces(item_id)))
+                    data = self.session.data
+                    lines = data.traces(item_id) + data.measured_traces(item_id)
+                    self._rows.append((item_id, lines))
         self._ranges = [value_range(t.values for t in traces) for _, traces in self._rows]
         self._static = None
         self.update()
@@ -351,16 +353,22 @@ class PlotsPanel(QWidget):
         painter.save()
         painter.setClipRect(rect.adjusted(0, -1, 0, 1))
         low_t, high_t = self.time_window()
-        for index, trace in enumerate(traces):
+        for trace in traces:
             key = (item_id, trace.name, rect.width(), rect.height(), low_t, high_t, low_v, high_v)
             path = self._paths.get(key)
             if path is None:
                 path = self._path(trace, rect, low_t, high_t, y_of)
                 self._paths[key] = path
-            color = _trace_color(item_id, index)
-            painter.setPen(QPen(color, 1.4))
+            color = _trace_color(item_id, _color_index(traces, trace))
+            pen = QPen(color, 1.4)
+            if trace.measured_for:  # measured: dashed, in its computed line's colour
+                pen.setStyle(Qt.DashLine)
+                pen.setWidthF(1.2)
+            painter.setPen(pen)
             painter.drawPath(path)
         painter.restore()
+        if item_id != SHOW_PROBE and any(t.measured_for for t in traces):
+            self._paint_comparison(painter, metrics, item_id, traces, rect, low_t, high_t)
         if not traces:
             painter.setPen(QColor(COLORS["dim"]))
             painter.drawText(rect, Qt.AlignCenter, "no data: check the item's file and columns")
@@ -390,11 +398,14 @@ class PlotsPanel(QWidget):
         if place == "off":
             return
         entries = []
-        for index, trace in enumerate(traces):
-            text = line_name(item, trace.name) + (f" [{trace.unit}]" if trace.unit else "")
+        for trace in traces:
+            if trace.measured_for:
+                text = f"{line_name(item, trace.measured_for)} measured"
+            else:
+                text = line_name(item, trace.name) + (f" [{trace.unit}]" if trace.unit else "")
             if cursor is not None and values:
                 text += f" = {_format_value(_value_at(trace, cursor))}"
-            entries.append((_trace_color(item_id, index), text))
+            entries.append((_trace_color(item_id, _color_index(traces, trace)), text))
         if place == "in the plot":
             self._legend_inside(painter, metrics, entries, rect)
             return
@@ -405,6 +416,42 @@ class PlotsPanel(QWidget):
                 QRectF(x + 14, rect.top() - TOP + 2, 400, TOP - 4), Qt.AlignVCenter, text
             )
             x += 14 + metrics.horizontalAdvance(text) + 14
+
+    def _paint_comparison(self, painter, metrics, item_id, traces, rect, low_t, high_t) -> None:
+        """Each computed line against its measured one over the time shown, in the
+        row's lower left corner: RMSE, bias, r, index of agreement d, lag."""
+        found = self.session.data.comparisons(item_id, low_t, high_t)
+        if not found:
+            return
+        item = self.session.scene.get(item_id)
+        lines = []
+        for trace in traces:
+            stats = found.get(trace.name)
+            if stats is None or trace.measured_for:
+                continue
+            unit = f" {trace.unit}" if trace.unit else ""
+            lag = f", lag {stats.lag:+.3g} s" if math.isfinite(stats.lag) else ""
+            lines.append(
+                (
+                    _trace_color(item_id, _color_index(traces, trace)),
+                    f"{line_name(item, trace.name)}: RMSE {stats.rmse:.3g}{unit}, bias "
+                    f"{stats.bias:+.3g}, r {stats.r:.3f}, d {stats.skill:.3f}{lag}",
+                )
+            )
+        if not lines:
+            return
+        line_h = metrics.height() + 1
+        rows = max(1, min(len(lines), int((rect.height() - 6) // line_h)))
+        width = max(metrics.horizontalAdvance(text) for _, text in lines[:rows]) + 22
+        box = QRectF(rect.left() + 4, rect.bottom() - rows * line_h - 6, width, rows * line_h + 4)
+        background = QColor(COLORS["base"])
+        background.setAlpha(215)
+        painter.fillRect(box, background)
+        for k, (color, text) in enumerate(lines[:rows]):
+            y = box.top() + 2 + k * line_h
+            painter.fillRect(QRectF(box.left() + 5, y + line_h / 2 - 1, 10, 3), color)
+            painter.setPen(QColor(COLORS["text"]))
+            painter.drawText(QRectF(box.left() + 19, y, width - 20, line_h), Qt.AlignVCenter, text)
 
     @staticmethod
     def _legend_inside(painter, metrics, entries, rect: QRectF) -> None:
@@ -493,6 +540,14 @@ class PlotsPanel(QWidget):
         low, high = self.full_range()
         time = min(max(self.time_at(x), low), high)
         self.session.set_time(time)
+
+
+def _color_index(traces: list[Trace], trace: Trace) -> int:
+    """The colour of a line: its place among the computed lines (a measured line
+    takes its computed line's)."""
+    computed = [t.name for t in traces if not t.measured_for]
+    name = trace.measured_for or trace.name
+    return computed.index(name) if name in computed else len(computed)
 
 
 def _trace_color(item_id: str, index: int) -> QColor:

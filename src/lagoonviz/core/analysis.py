@@ -123,6 +123,9 @@ class Comparison:
     n: int  # values compared
     start: float
     end: float
+    #: the time shift [s] of the computed series that matches the measured best (by
+    #: cross-correlation; positive: the computed one comes later)
+    lag: float = float("nan")
 
 
 def compare(
@@ -165,7 +168,73 @@ def compare(
         n=int(keep.sum()),
         start=float(t_measured[keep][0]),
         end=float(t_measured[keep][-1]),
+        lag=float(_lag(t_measured[keep], sim, obs)),
     )
+
+
+def _lag(time: np.ndarray, sim: np.ndarray, obs: np.ndarray) -> float:
+    """The shift of ``sim`` that correlates best with ``obs`` (both at ``time``),
+    within a quarter of their span; parabolic refinement between samples."""
+    if time.size < 16:
+        return float("nan")
+    dt = float(np.median(np.diff(time)))
+    if not dt > 0:
+        return float("nan")
+    even = np.arange(time[0], time[-1], dt)
+    a = np.interp(even, time, sim)
+    b = np.interp(even, time, obs)
+    a, b = a - a.mean(), b - b.mean()
+    if not (np.any(a) and np.any(b)):
+        return float("nan")
+    n = even.size
+    size = 1 << int(np.ceil(np.log2(2 * n)))
+    corr = np.fft.irfft(np.fft.rfft(a, size) * np.conj(np.fft.rfft(b, size)), size)
+    reach = max(1, n // 4)
+    lags = np.concatenate([corr[: reach + 1], corr[-reach:]])
+    shifts = np.concatenate([np.arange(reach + 1), np.arange(-reach, 0)])
+    k = int(np.argmax(lags))
+    best = float(shifts[k])
+    left, right = lags[k - 1] if k > 0 else None, lags[(k + 1) % lags.size]
+    if left is not None:
+        curve = left - 2 * lags[k] + right
+        if curve < 0:
+            best += 0.5 * (left - right) / curve
+    return best * dt
+
+
+def match_columns(
+    model: list[str], measured: list[str], mapping: str = ""
+) -> list[tuple[str, str]]:
+    """Which measured column goes with which computed line: (computed, measured).
+
+    ``mapping``: "P1 = 2; P4 = G4" (computed = measured, separated by ";" or ",").
+    Without it: the same names (case and spaces aside), then the measured columns
+    left over in order for the computed lines left over (a file without a header:
+    its first value column for the first line plotted, ...)."""
+    pairs = []
+    if mapping.strip():
+        by_name = {m.strip().lower(): m for m in measured}
+        for part in re.split(r"[;,]", mapping):
+            if "=" not in part:
+                continue
+            left, right = (x.strip() for x in part.split("=", 1))
+            column = by_name.get(right.lower())
+            if left in model and column is not None:
+                pairs.append((left, column))
+        return pairs
+    key = {m.replace(" ", "").lower(): m for m in measured}
+    used = set()
+    for name in model:
+        column = key.get(name.replace(" ", "").lower())
+        if column is not None:
+            pairs.append((name, column))
+            used.add(column)
+    rest_model = [n for n in model if n not in {p[0] for p in pairs}]
+    rest_measured = [m for m in measured if m not in used]
+    if len(pairs) < len(model):
+        pairs += list(zip(rest_model, rest_measured, strict=False))
+    order = {name: k for k, name in enumerate(model)}
+    return sorted(pairs, key=lambda p: order[p[0]])
 
 
 _NUMBER = re.compile(r"^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$")

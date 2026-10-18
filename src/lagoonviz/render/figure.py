@@ -156,7 +156,7 @@ def series_rows(
             continue
         traces = data.traces(item_id)
         if traces:
-            rows.append((item_id, traces))
+            rows.append((item_id, traces + data.measured_traces(item_id)))
     return rows
 
 
@@ -177,13 +177,29 @@ def series_figure(
         axes = figure.subplots(len(rows), 1, sharex=True, squeeze=False)[:, 0]
         seconds = session.data.time_in_seconds()
         for ax, (item_id, traces) in zip(axes, rows, strict=True):
+            measured = [t for t in traces if getattr(t, "measured_for", "")]
+            traces = [t for t in traces if not getattr(t, "measured_for", "")]
             units = {t.unit for t in traces}
             item = _row_item(session, item_id)
+            colors = {}
             for index, trace in enumerate(traces):
                 color = (
                     PROBE_COLOR if item_id == "probe" else spec.palette[index % len(spec.palette)]
                 )
+                colors[trace.name] = color
                 ax.plot(trace.time, trace.values, color=color, label=line_name(item, trace.name))
+            for trace in measured:  # dashed, in the computed line's colour
+                name = line_name(item, trace.measured_for)
+                ax.plot(
+                    trace.time,
+                    trace.values,
+                    color=colors.get(trace.measured_for, "0.3"),
+                    linestyle="--",
+                    linewidth=0.9,
+                    label=f"{name} measured",
+                )
+            if measured and len(traces) == 1:
+                place_legend(ax, _row_legend(item), columns=2)
             if len(traces) == 1:
                 ax.set_ylabel(_label(line_name(item, traces[0].name), traces[0].unit))
             else:

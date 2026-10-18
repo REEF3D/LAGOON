@@ -60,6 +60,8 @@ class PropertySpec:
     tip: str = ""
     #: also edit with a slider: "log" (for factors such as exaggeration) or "linear"
     slider: str | None = None
+    #: a file name, chosen with "…" (the file dialog's filter, e.g. "Text (*.txt *.dat)")
+    file: str | None = None
 
 
 def _data_source(role: str) -> dict[str, PropertySpec]:
@@ -368,6 +370,25 @@ KINDS: dict[str, KindSpec] = {
             ),
             "legend_values": PropertySpec(
                 True, "Values at the cursor", tip="The legend gives each line's value at the time"
+            ),
+            "measured": PropertySpec(
+                "",
+                "Measured file",
+                file="Measured data (*.txt *.dat *.csv *.tsv);;All files (*)",
+                tip="Measurements to plot dashed with the lines (the time in the first column, "
+                "one column per gauge; a header of names is allowed), and compared with them: "
+                "RMSE, bias, correlation r, index of agreement d, lag",
+            ),
+            "measured_columns": PropertySpec(
+                "",
+                "Measured columns",
+                tip="Which measured column goes with which line, e.g. P1 = 2; P4 = G4 (empty: "
+                "the same names, else in order)",
+            ),
+            "measured_shift": PropertySpec(
+                0.0,
+                "Measured time shift [s]",
+                tip="Added to the measured times (the moment the wave maker started, ...)",
             ),
         },
     ),

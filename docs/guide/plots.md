@@ -49,6 +49,23 @@ A time series item says how its legend looks: *Line names* (`P1 = gauge 1;
 P4 = gauge 4`; also in the figures made from the plots), *Legend* above the
 plot, in the plot (its upper right corner) or off, and *Values at the cursor*.
 
+## Measured data
+
+A time series item takes a **Measured file** (*…* to choose it; a path relative to
+the case folder is kept relative): a text file with the time in the first column
+and one column per gauge, separated by spaces, tabs, commas or semicolons; lines
+starting with `#` or `%` and a header line of names are allowed. Its columns are
+drawn **dashed** in the colour of the line they go with: the column of the same
+name (`P1`), else in order (the first value column for the first line plotted).
+*Measured columns* says otherwise (`P1 = 2; P4 = G4`), *Measured time shift* moves
+the measured times (the moment the wave maker started).
+
+In the row's lower left corner each line is compared with its measurement **over
+the time shown** (zoom in to compare a part): RMSE, bias (computed minus measured),
+correlation r, Willmott's index of agreement d (1: perfect) and the lag (the shift
+of the computed line that matches best; positive: it comes later). Figures made
+from the plots draw the measured lines dashed too.
+
 ## Free surface lines
 
 **Free surface line** items show the surface elevation along REEF3D's free surface

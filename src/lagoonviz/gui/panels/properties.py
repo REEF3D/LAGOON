@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QLocale, Qt, Signal
@@ -83,7 +84,7 @@ class PropertiesPanel(QWidget):
             if prop.tip:
                 editor.setToolTip(prop.tip)
             self.editors[key] = editor
-            form.addRow(prop.label, editor)
+            form.addRow(prop.label, self._with_file_button(key, prop, editor))
             if key == "vmax" and "auto_range" in spec.properties:
                 # directly under the range it sets
                 fit = QPushButton("Fit range to this frame")
@@ -183,6 +184,42 @@ class PropertiesPanel(QWidget):
         line = QLineEdit(str(value))
         line.editingFinished.connect(lambda: self._set(key, line.text()))
         return line
+
+    def _with_file_button(self, key: str, prop: PropertySpec, editor: QWidget) -> QWidget:
+        """A file property: its text and "…" to choose the file."""
+        if not prop.file or not isinstance(editor, QLineEdit):
+            return editor
+        button = QToolButton()
+        button.setText("…")
+        button.setToolTip(f"Choose the {prop.label.lower()}")
+        button.clicked.connect(lambda: self._choose_file(key, prop))
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.addWidget(editor, 1)
+        layout.addWidget(button)
+        return row
+
+    def _choose_file(self, key: str, prop: PropertySpec) -> None:
+        """The file dialog of a file property; inside the case folder the name is kept
+        relative to it."""
+        from PySide6.QtWidgets import QFileDialog
+
+        if not self.item_id:
+            return
+        folder = self.session.data.case_folder(self.item_id)
+        start = str(folder) if folder is not None else ""
+        path, _ = QFileDialog.getOpenFileName(self, prop.label, start, prop.file or "")
+        if not path:
+            return
+        chosen = Path(path)
+        if folder is not None:
+            try:
+                chosen = chosen.resolve().relative_to(Path(folder).resolve())
+            except ValueError:
+                pass
+        self._set(key, str(chosen))
 
     def _sync_button(self) -> QToolButton:
         button = QToolButton()
