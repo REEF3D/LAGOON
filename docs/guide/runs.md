@@ -63,7 +63,7 @@ output (`REEF3D_SEASTATE_AMR`) opens as an AMR surface coloured by Hs, its
 refined patches outlined, at the times SEASTATE wrote.
 
 Opening a case adds the case and its main items to the scene: the free surface
-(or the AMR surface, when the run wrote one) and the bed, the objects of the same
+(or the Free Surface AMR, when the run wrote one) and the bed, the objects of the same
 run (bodies, mooring lines, structures, DEM elements, ice floes, rod trees,
 particles), and its time series and free surface lines. The run's volume is there too,
 switched off: tick it (or *Volume* in the toolbar) to show it. When a folder

@@ -138,7 +138,7 @@ ROLE_LABELS = {
     "ice": "ice floes",
     "rods": "rod trees",
     "particles": "particles",
-    "amr": "AMR surface",
+    "amr": "free surface AMR",
     "amr_blocks": "AMR blocks",
     "solid": "solids",
     "forcing": "direct forcing solids",

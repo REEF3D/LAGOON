@@ -732,7 +732,7 @@ class StoreAmrDataset(Dataset):
 
     @property
     def label(self) -> str:
-        return f"{self.solver} AMR surface (LAGOON)"
+        return f"{self.solver} free surface AMR (LAGOON)"
 
     def default_variable(self) -> str:
         for name in ("eta", "elevation"):

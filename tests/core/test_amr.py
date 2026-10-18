@@ -75,7 +75,7 @@ def test_other_solvers(tmp_path, solver):
     make_amr(tmp_path, solver, frames=2, ranks=1)
     case = open_case(tmp_path)
     dataset = case.datasets[f"{solver.lower()}_amr"]
-    assert dataset.label == f"{solver} AMR surface"
+    assert dataset.label == f"{solver} free surface AMR"
     assert set(AMR_FIELDS[solver]) <= set(dataset.components)
     mesh = dataset.read(1, ["eta"])
     assert _area(mesh) == pytest.approx(24.0)
@@ -202,7 +202,7 @@ def test_convert_amr_to_the_store(tmp_path):
     # the case now shows the store's AMR surface, drawn as from the VTK files
     case = open_case(tmp_path)
     dataset = case.datasets["nhflow_amr"]
-    assert dataset.label == "NHFLOW AMR surface (LAGOON)"
+    assert dataset.label == "NHFLOW free surface AMR (LAGOON)"
     assert "amr" in case.main_datasets() and case.main_datasets()["amr"] is dataset
     vtk = open_case(tmp_path, stores=False).datasets["nhflow_amr"]
     for index in range(3):

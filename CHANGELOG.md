@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Free Surface AMR
+
+- The AMR surface item is now called *Free Surface AMR* (Add menu, scene, Properties),
+  its datasets "<SOLVER> free surface AMR". It is still what a case opens with in
+  place of the free surface when the run wrote one.
+
 ### Probe
 
 - *Probe* in the 3D view's bar (++p++), like ParaView's point inspection: a click

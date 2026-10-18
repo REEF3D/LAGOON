@@ -1,6 +1,6 @@
 QWidget
-  Name: text 'AMR surface'
-  Kind: label 'AMR surface'
+  Name: text 'Free Surface AMR'
+  Kind: label 'Free Surface AMR'
   Visible: checkbox '' on
   Case: choice 'first case' of ['first case', 'run [case-1]']
   Dataset: choice 'automatic' of ['automatic', 'NHFLOW bed [nhflow_bed]', 'NHFLOW free surface [nhflow_free_surface]', 'NHFLOW volume [nhflow_volume]']

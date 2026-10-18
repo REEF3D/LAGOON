@@ -291,9 +291,9 @@ KINDS: dict[str, KindSpec] = {
         },
     ),
     "amr": KindSpec(
-        "AMR surface",
+        "Free Surface AMR",
         {
-            **_data_source("AMR surface"),
+            **_data_source("free surface AMR"),
             **_colouring("eta", "reef3d"),
             **_contours(),
             **_exaggeration("Scales the surface elevation about the still water level"),
