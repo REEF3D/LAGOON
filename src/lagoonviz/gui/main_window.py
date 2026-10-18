@@ -347,6 +347,12 @@ class MainWindow(QMainWindow):
             tip="The 3D view alone as an image at a size of your choice (as on the screen, "
             "4K, 8K, a width in cm for print): PNG, JPEG or TIFF",
         )
+        self.act_clean_up = self._action(
+            "&Clean up case folder...",
+            self.clean_up_case,
+            tip="Output in the case folder that is not the run shown (earlier runs, other "
+            "solvers, earlier stores): move to LAGOON_archive or delete",
+        )
         self.act_convert = self._action(
             "Convert to LAGOON &format...",
             self.convert_case,
@@ -484,6 +490,7 @@ class MainWindow(QMainWindow):
             file_menu.addAction(action)
         file_menu.addSeparator()
         file_menu.addAction(self.act_convert)
+        file_menu.addAction(self.act_clean_up)
         file_menu.addSeparator()
         file_menu.addAction(self.act_export_script)
         file_menu.addAction(self.act_export_figure)
@@ -1450,6 +1457,33 @@ class MainWindow(QMainWindow):
         from lagoonviz.gui.convert_dialog import convert_case
 
         return convert_case(self, ask=ask)
+
+    def clean_up_case(self, show: bool = True):
+        """File → Clean up case folder: the selected case's folder (or the first)."""
+        from lagoonviz.gui.convert_dialog import case_folder
+        from lagoonviz.gui.housekeeping_dialog import HousekeepingDialog
+
+        folder = case_folder(self)
+        if folder is None:
+            QMessageBox.information(self, "Clean up case folder", "Open a REEF3D case first.")
+            return None
+        case = next(
+            (
+                self.session.data.case(i.id)
+                for i in self.session.scene
+                if i.kind == "case"
+                and self.session.data.case(i.id) is not None
+                and self.session.data.case(i.id).path == folder
+            ),
+            None,
+        )
+        dialog = HousekeepingDialog(folder, case, self)
+        if not show:
+            return dialog
+        if dialog.exec() and dialog.done_text:
+            self.reload_cases()
+            self.statusBar().showMessage(dialog.done_text, 8000)
+        return dialog
 
     def reload_cases(self) -> list[str]:
         """Read the case folders again, keeping items, time and camera. At the last

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Clean up a case folder
+
+- *File → Clean up case folder*: what in the folder is not the run shown, by run
+  and size (leftovers of earlier runs and earlier stores ticked, other solvers'
+  runs listed); moved to `LAGOON_archive/<date>/` or deleted.
+
 ### Input check
 
 - *Check* in the Set-up panel: both input files with the command catalog, M 10 in

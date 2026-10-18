@@ -966,6 +966,19 @@ def test_the_run_monitor(window, reef3d_run):
     assert not panel.follow_box.isChecked()
 
 
+def test_clean_up_case_folder(window, reef3d_run):
+    """File → Clean up case folder: earlier stores come ticked, and are archived."""
+    earlier = reef3d_run / "REEF3D_NHFLOW-20261016T212950Z-f289.lagoon-earlier"
+    earlier.mkdir()
+    (earlier / "zarr.json").write_text("{}")
+    window.open_case(reef3d_run)
+    dialog = window.clean_up_case(show=False)
+    assert [g.kind for g in dialog.ticked()] == ["earlier store"]
+    target = dialog.archive_ticked()
+    assert (target / earlier.name / "zarr.json").is_file() and not earlier.exists()
+    assert "Moved 1 group" in dialog.done_text
+
+
 def test_convert_to_lagoon_format(window, reef3d_run, qtbot):
     """File > Convert to LAGOON format writes the store next to the output and the
     case then reads it."""

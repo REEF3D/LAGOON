@@ -132,6 +132,18 @@ run started**: the run goes on with the copy in REEF3D_Case, and the changed lin
 are listed (`-` as the run has it, `+` as ctrl.txt has it now). *Follow* is
 *File → Follow running simulation*.
 
+### Cleaning up a case folder
+
+A case folder collects the output of every run started in it: REEF3D overwrites
+only the files it writes again, so a shorter run leaves the later outputs of the
+one before, another solver's run leaves its folders, and a new LAGOON store renames
+the one before to `*.lagoon-earlier`. *File → Clean up case folder* lists what is
+not the run shown, by run, with its size: output left over from earlier runs and
+earlier stores come ticked, another solver's run is listed but not ticked. *Move to
+LAGOON_archive* moves the ticked groups into `LAGOON_archive/<date>/` of the folder,
+their paths kept (to be put back by hand); *Delete* deletes them. The run shown and
+DIVEMesh's grid and input files are never offered.
+
 ## LAGOON stores
 
 A run converted to the [LAGOON format](format.md) (*File → Convert to LAGOON
