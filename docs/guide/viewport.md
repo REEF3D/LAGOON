@@ -16,6 +16,7 @@ the mouse over the view):
 | ++1++, ++3++, ++7++ | front, right side, top (with ++ctrl++: back, left, bottom) |
 | ++5++ | perspective or orthographic |
 | ++n++ | north up |
+| ++p++ | Probe: a click lists every value at a point (++escape++ ends it) |
 | ++2++ | the 2D view (see below) |
 | ++home++ or ++period++ | frame everything |
 | arrow keys | move the view (with ++shift++: further) |

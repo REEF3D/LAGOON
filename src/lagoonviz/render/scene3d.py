@@ -849,14 +849,20 @@ class SceneRenderer:
         return None
 
     def set_marker(self, point: tuple[float, float, float] | None) -> None:
-        """Show (or hide) the orange probe marker at a point; it keeps a fixed size on
-        screen and is drawn on top, so it stays visible at any zoom."""
+        """Show (or hide) the Probe tool's point: a small white cross with a dark
+        edge, a fixed size on screen and drawn on top, so it stays visible at any zoom
+        and on any colour."""
         if point is None:
             if self._marker is not None:
                 self._marker.visible = False
             return
         if self._marker is None:
-            material = gfx.PointsMaterial(size=14, color="#e07b39")  # as PROBE_COLOR
+            try:
+                material = gfx.PointsMarkerMaterial(
+                    marker="plus", size=15, color="#ffffff", edge_color="#202020", edge_width=1.5
+                )
+            except (AttributeError, TypeError, ValueError):  # an older pygfx
+                material = gfx.PointsMaterial(size=9, color="#ffffff")
             for name, value in (("depth_test", False), ("render_queue", 4000)):
                 try:
                     setattr(material, name, value)
@@ -872,7 +878,7 @@ class SceneRenderer:
     def update_gauges(self, marks: GaugeMarks) -> None:
         """Wave gauges as thin staffs with a dot at the water, in their plot colours.
 
-        The dots are drawn on top, like the probe marker, so a gauge behind a wave
+        The dots are drawn on top, like the Probe marker, so a gauge behind a wave
         crest is still found.
         """
         rgba = np.array([_rgba(c) for c in marks.colors], np.float32).reshape(-1, 4)

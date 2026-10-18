@@ -107,10 +107,7 @@ def figure_code(
     imports = ["from lagoonviz.render.figure import FigureSpec, save_figure"]
     body = _view(time, camera if content == "view" else None, plan if content == "view" else None)
     body.append(_spec(settings))
-    notes: list[str] = []
-    shown = [i for i in (items or []) if i != "probe"]
-    if items and len(shown) < len(items):
-        notes.append("# the probe's line is drawn in the GUI only")
+    shown = list(items or [])
     start, end = settings.get("start"), settings.get("end")
     if content in ("series", "spectra"):
         name = "series_figure" if content == "series" else "spectrum_figure"
@@ -164,7 +161,6 @@ def figure_code(
         body.append("figure = setup_figure(session, spec)")
     else:
         raise ValueError(f"unknown figure content {content!r}")
-    body += notes
     body.append(f"save_figure(figure, {_path(path)!r}, spec)")
     return _block(f"File > Export figure: {content}", imports, body)
 

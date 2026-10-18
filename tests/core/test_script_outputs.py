@@ -61,7 +61,7 @@ def test_figures_in_the_script(session, tmp_path):
             out / "series.pdf",
             SETTINGS,
             time=1.0,
-            items=[*items, "probe"],
+            items=items,
             window=(0.0, 1.5),
         )
     )
@@ -87,8 +87,6 @@ def test_figures_in_the_script(session, tmp_path):
     script = session.to_script()
     compile(script, "<script>", "exec")
     assert script.count("if MAKE_OUTPUTS:") == 5
-    assert "# the probe's line is drawn in the GUI only" in script
-    assert "'probe'" not in script
     # rebuilding the scene does not write the figures
     Session.from_script(script)
     assert not any(out.iterdir())

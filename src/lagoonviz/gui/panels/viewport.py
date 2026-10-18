@@ -12,6 +12,9 @@ Navigation (mouse and trackpad):
   rotation: any drag pans; from the top everything is drawn flat, front and side
   give 2D elevations; 3D leaves it)
 
+Probe (the button, P): a click on a surface lists every value there in a box
+beside the view, like ParaView's point inspection; Esc ends it.
+
 Frames are read in background threads; the viewport shows the newest frame that
 has arrived, so scrubbing never blocks the window. Without a usable GPU (or in
 tests, which run without a screen) a placeholder takes the viewport's place.
@@ -19,7 +22,6 @@ tests, which run without a screen) a placeholder takes the viewport's place.
 
 from __future__ import annotations
 
-import html
 import logging
 import math
 import os
@@ -39,18 +41,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lagoonviz.core.data.manager import BackgroundLoader, FrameKey
+from lagoonviz.core.data.manager import BackgroundLoader, FrameKey, ProbePoint
 from lagoonviz.core.legend import colour_bars, plain
 from lagoonviz.core.scene import DATA_RESET, VIEW_EVENTS
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.panels.colorbar import ColorBarEntry, ColorBarStrip
+from lagoonviz.gui.panels.probe_box import ProbeBox
 from lagoonviz.gui.perf import PERF
 from lagoonviz.gui.resources import resource_path
 from lagoonviz.gui.theme import COLORS, SERIES_COLORS
 
 log = logging.getLogger("lagoon.viewport")
-#: the probe marker's colour (the dot in the 3D view and before its values in the header)
-PROBE_COLOR = "#e07b39"
 #: the river corridor being edited, drawn over everything
 HIGHLIGHT_SKETCH = "#ffd84a"
 
@@ -99,8 +100,6 @@ class ViewportPlaceholder(QWidget):
     statusMessage = Signal(str)
     #: a frame of an item was drawn (its automatic colour range is that frame's)
     frameShown = Signal(str)
-    #: the probe (orange dot) placed or moved: a Probe, or None when removed
-    probeChanged = Signal(object)
     #: the domain drawn in the 2D top view (x0, x1, y0, y1); never sent here
     domainDrawn = Signal(object)
     #: another area drawn there: (purpose, (x0, x1, y0, y1)); never sent here
@@ -200,12 +199,17 @@ class ViewportPlaceholder(QWidget):
     def canvas_snapshot(self):
         return None
 
+    probing = False
     probe = None
+
+    def set_probing(self, on: bool) -> None:
+        if on:
+            self.statusMessage.emit("Probe needs the 3D view (no GPU here)")
 
     def probe_at(self, item_id: str, triangle: int, weights: tuple[float, ...]) -> None:
         pass
 
-    def clear_probe(self) -> None:
+    def clear_probe(self, note: str = "") -> None:
         pass
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
@@ -294,10 +298,10 @@ class Viewport3D(QWidget):
     statusMessage = Signal(str)
     #: a frame of an item was drawn (its automatic colour range is that frame's)
     frameShown = Signal(str)
-    #: the probe (orange dot) placed or moved: a Probe, or None when removed
-    probeChanged = Signal(object)
     #: (key, mesh, error) from a loader thread, delivered on the GUI thread
     _loaded = Signal(object, object, object)
+    #: the same for the frame a probe reads (every array)
+    _probed = Signal(object, object, object)
     #: a background map item's map was made in a worker thread
     _background_made = Signal(str)
     #: its tiles: (item, had, of)
@@ -385,13 +389,19 @@ class Viewport3D(QWidget):
         #: "extend") and what is being dragged
         self._blocks_edit: dict | None = None
         self.renderer.add_event_handler(self._on_move, "pointer_move")
-        self._probe_at: tuple[str, int, tuple[float, ...]] | None = None
-        #: the last probe (values where the user clicked), shown in the header
+        #: the Probe tool: on or off, the point clicked, what was found there, and
+        #: the frame the marker was placed on
+        self.probing = False
+        self._probe_at: ProbePoint | None = None
         self.probe = None
+        self._marker_key: FrameKey | None = None
+        #: the frame with every array last read for it (key, mesh), and the one asked
+        #: for (asked once: a frame the cache cannot keep is not read over and over)
+        self._probe_full: tuple[FrameKey, object] | None = None
+        self._probe_asked: FrameKey | None = None
 
         self.colorbars = ColorBarStrip(self)
         self.info = QLabel()
-        self.info.setTextFormat(Qt.RichText)  # the probe's orange dot
         bar = QHBoxLayout()
         bar.setContentsMargins(6, 2, 6, 2)
         bar.setSpacing(2)
@@ -434,6 +444,16 @@ class Viewport3D(QWidget):
         self.north_button.clicked.connect(self.point_north)
         self.north_button.hide()
         bar.addWidget(self.north_button)
+        self.probe_button = QToolButton()
+        self.probe_button.setText("Probe")
+        self.probe_button.setCheckable(True)
+        self.probe_button.setAutoRaise(True)
+        self.probe_button.setToolTip(
+            "Probe: click on a surface to list every value there, in a box beside the "
+            "view; they follow the time (I, Esc ends)"
+        )
+        self.probe_button.toggled.connect(self.set_probing)
+        bar.addWidget(self.probe_button)
         self.case_box = QComboBox()
         self.case_box.setToolTip("The case this view shows")
         self.case_box.setSizeAdjustPolicy(QComboBox.AdjustToContents)
@@ -464,7 +484,17 @@ class Viewport3D(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(header)
-        layout.addWidget(self.canvas, 1)
+        #: the Probe tool's box, beside the canvas (not over it: the GPU canvas is
+        #: a native window that widgets do not draw over everywhere)
+        self.probe_box = ProbeBox(self)
+        self.probe_box.closed.connect(lambda: self.set_probing(False))
+        self.probe_box.hide()
+        middle = QHBoxLayout()
+        middle.setContentsMargins(0, 0, 0, 0)
+        middle.setSpacing(0)
+        middle.addWidget(self.canvas, 1)
+        middle.addWidget(self.probe_box)
+        layout.addLayout(middle, 1)
         #: the attribution the background maps' sources ask for (© Kartverket, ...)
         self.attribution = QLabel()
         self.attribution.setObjectName("mapAttribution")
@@ -490,6 +520,7 @@ class Viewport3D(QWidget):
         self._sun_timer.timeout.connect(self._sun_rests)
 
         self._loaded.connect(self._on_loaded)
+        self._probed.connect(self._on_probed)
         self._background_made.connect(self._on_background_made)
         self._background_progress.connect(self._on_background_progress)
         bridge.sceneChanged.connect(self._on_scene)
@@ -784,6 +815,8 @@ class Viewport3D(QWidget):
             f"QToolButton {{ color: {COLORS['text']}; padding: 3px 8px; }}"
         )
         self.info.setStyleSheet(f"color: {COLORS['dim']};")
+        if hasattr(self, "probe_box"):
+            self.probe_box.apply_theme_colors()
         if hasattr(self, "attribution"):
             self.attribution.setStyleSheet(
                 f"color: {COLORS['dim']}; background: {COLORS['panel']}; font-size: 10px;"
@@ -907,7 +940,7 @@ class Viewport3D(QWidget):
             self._update_overlays_now()
 
     def _update_overlays_now(self) -> None:
-        self._update_probe()  # a probe follows the timeline
+        self._update_probe()  # the probed values follow the timeline
         frames = []
         loaded = {}
         for item_id in self.view.item_ids:
@@ -930,13 +963,7 @@ class Viewport3D(QWidget):
             ]
         self.colorbars.set_entries(entries)
         loading = " · loading…" if self.busy else ""
-        if self.probe is not None:
-            # the orange dot of the marker in the view, so the values read as its values
-            self.info.setText(
-                f'<span style="color:{PROBE_COLOR}">\u25cf</span> '
-                + html.escape(self.probe.summary() + loading)
-            )
-        elif frames:
+        if frames:
             self.info.setText(f"output {max(frames)}{loading}")
         else:
             self.info.setText("Open a REEF3D case: File → Open case…" if not loading else loading)
@@ -1075,6 +1102,12 @@ class Viewport3D(QWidget):
         if key == "Escape" and self._blocks_edit is not None:
             self.stop_blocks_editing()
             self.statusMessage.emit("Stopped editing the blocks")
+            return
+        if key == "Escape" and self.probing:
+            self.set_probing(False)
+            return
+        if key in ("p", "P"):
+            self.probe_button.toggle()
             return
         if key in KEY_VIEWS:
             view = KEY_VIEWS[key]
@@ -1799,7 +1832,8 @@ class Viewport3D(QWidget):
             self._edit_blocks("pointer_move", event)
 
     def _on_pointer(self, event) -> None:
-        """A click (press and release without dragging) on a surface probes its values."""
+        """With Probe on, a click (press and release without dragging) on a surface
+        lists its values there; drags turn the view as always."""
         kind = getattr(event, "type", "")
         if self._drawing is not None:
             self._draw_domain(kind, event)
@@ -1810,6 +1844,9 @@ class Viewport3D(QWidget):
         if self._corridor_edit is not None and self._edit_corridor(kind, event):
             return
         if self._blocks_edit is not None and self._edit_blocks(kind, event):
+            return
+        if not self.probing:
+            self._press = None
             return
         x, y = getattr(event, "x", 0.0), getattr(event, "y", 0.0)
         if kind == "pointer_down":
@@ -1827,52 +1864,142 @@ class Viewport3D(QWidget):
         _, _, target, info = press
         item_id = self.view.item_at(target) if target is not None else None
         if item_id is None or not info or "face_index" not in info:
-            self.clear_probe()
+            self.clear_probe("Nothing there: click on a surface")
             return
         weights = tuple(info.get("face_coord", (1 / 3, 1 / 3, 1 / 3)))[:3]
         self.probe_at(item_id, int(info["face_index"]), weights)
 
-    def probe_at(self, item_id: str, triangle: int, weights: tuple[float, ...]) -> None:
-        """Show the values at a point of an item's surface; they follow the timeline."""
-        self._probe_at = (item_id, int(triangle), tuple(float(w) for w in weights))
-        self._update_probe()
-        if self.probe is None:
-            self.clear_probe()
+    # ------------------------------------------------------------- probe
+    def set_probing(self, on: bool) -> None:
+        """Probe on: clicks on surfaces list their values in the box beside the
+        view; off: the box and the marker go."""
+        on = bool(on)
+        if self.probe_button.isChecked() != on:
+            self.probe_button.setChecked(on)  # comes back here through toggled
             return
-        self.statusMessage.emit(self.probe.summary())
-        self.probeChanged.emit(self.probe)
-        self._update_overlays()
+        if on == self.probing:
+            return
+        self.probing = on
+        if on:
+            self.probe_box.clear()
+            self.probe_box.show()
+            self.canvas.setCursor(Qt.CrossCursor)
+            self.statusMessage.emit("Probe: click on a surface to list its values · Esc ends")
+        else:
+            self.clear_probe()
+            self.probe_box.hide()
+            self.canvas.unsetCursor()
+
+    def probe_at(self, item_id: str, triangle: int, weights: tuple[float, ...]) -> None:
+        """List everything at a point of an item's surface (``triangle`` among those
+        drawn, barycentric ``weights``); the values follow the timeline."""
+        data = self.session.data
+        try:
+            at = data.probe_point(item_id, triangle, weights)
+        except Exception:  # noqa: BLE001
+            log.warning("probe failed:\n%s", traceback.format_exc())
+            at = None
+        if at is None:
+            self.clear_probe("Nothing to read there")
+            return
+        if not self.probing:
+            self.set_probing(True)
+        self._probe_at = at
+        self._marker_key = None
+        self._probe_asked = None
+        self._update_probe()
+        if self.probe is not None:
+            x, y, z = self.probe.point
+            self.statusMessage.emit(f"Probe: {self.probe.name} at x {x:.3f}  y {y:.3f}  z {z:.3f}")
         self.redraw()
 
     def _update_probe(self) -> None:
-        if self._probe_at is None:
+        """The probed point's values at the current time: at once from the frame
+        drawn (the arrays it shows), then from the same frame with every array, read
+        in the background (not while the time moves)."""
+        at = self._probe_at
+        if at is None:
             return
-        item_id, triangle, weights = self._probe_at
         data = self.session.data
+        if at.item_id not in self.session.scene or not data.shown(at.item_id):
+            self.clear_probe("The probed item is hidden or gone")
+            return
+        key = data.frame_key(at.item_id)
+        mesh = data.cache.get(key) if key is not None else None
+        full = data.probe_key(at.item_id)
+        whole = None
+        if full is not None:
+            kept = self._probe_full
+            whole = kept[1] if kept is not None and kept[0] == full else data.cache.get(full)
+        use_key, use_mesh = (full, whole) if whole is not None else (key, mesh)
+        if use_mesh is None:
+            return  # the frame is still loading: _on_loaded comes back here
         try:
-            self.probe = data.probe(item_id, triangle, weights)
+            probe = data.probe_values(at, use_mesh, use_key)
         except Exception:  # noqa: BLE001
             log.warning("probe failed:\n%s", traceback.format_exc())
-            self.probe = None
-        if self.probe is None:
-            return
-        marker = self.probe.point
-        key = data.frame_key(item_id)
-        mesh = data.cache.get(key) if key is not None else None
-        if mesh is not None:  # the marker goes where the surface is drawn (exaggeration)
-            shown = data.display(item_id, mesh)
-            nodes = shown.triangles[triangle].astype(int)
-            marker = tuple((shown.positions[nodes].T @ np.asarray(weights, float)).tolist())
-        self.view.set_marker(marker)
+            probe = None
+        note = ""
+        if whole is None and full is not None:
+            if data.moving:
+                note = "all variables once the time rests"
+                if probe is not None:
+                    probe.complete = True  # not "reading" while nothing is read
+            elif self._probe_asked != full:
+                self._probe_asked = full
+                self.loader.request(full, self._probed.emit, owner=(id(self), "probe"))
+        self.probe = probe
+        self.probe_box.set_probe(probe, note)
+        if mesh is not None:
+            self._place_marker(at, key, mesh)
 
-    def clear_probe(self) -> None:
+    def _on_probed(self, key: FrameKey, mesh, error) -> None:
+        at = self._probe_at
+        if at is None:
+            return
+        if error is not None or mesh is None:
+            log.warning("probe: reading %s failed: %s", key, error)
+            if self.probe is not None:
+                self.probe.complete = True
+                self.probe_box.set_probe(self.probe, "the other variables not read")
+            return
+        if key == self.session.data.probe_key(at.item_id):
+            self._probe_full = (key, mesh)
+            self._update_probe()
+
+    def _place_marker(self, at: ProbePoint, key: FrameKey, mesh) -> None:
+        """The marker where the point is drawn (vertical scale, 2D layers); placed
+        again only when the frame drawn changed."""
+        if key == self._marker_key:
+            return
+        self._marker_key = key
+        try:
+            shown = self.session.data.display(at.item_id, mesh)
+            if mesh.n_points == at.n_points:
+                nodes = np.asarray(at.nodes, dtype=int)
+                weights = np.asarray(at.weights, dtype=float)
+            else:  # another grid: the drawn point nearest to the probed one
+                gap = mesh.points.astype(float) - np.asarray(at.point)
+                nodes = np.array([int(np.argmin(np.einsum("ij,ij->i", gap, gap)))])
+                weights = np.ones(1)
+            marker = shown.positions[nodes].astype(float).T @ weights
+        except Exception:  # noqa: BLE001 (no marker rather than a broken view)
+            log.warning("probe marker:\n%s", traceback.format_exc())
+            return
+        self.view.set_marker(tuple(float(v) for v in marker))
+        self.redraw()
+
+    def clear_probe(self, note: str = "") -> None:
+        """Forget the probed point (Probe stays on; ``note`` says why)."""
         self._probe_at = None
-        if self.probe is not None:
+        self._marker_key = None
+        self._probe_full = self._probe_asked = None
+        self.loader.want((id(self), "probe"), None)
+        if self.probe is not None or note:
             self.probe = None
-            self.probeChanged.emit(None)
-            self.view.set_marker(None)
-            self._update_overlays()
-            self.redraw()
+            self.probe_box.clear(note)
+        self.view.set_marker(None)
+        self.redraw()
 
     def _on_interaction(self, _event) -> None:
         self._save_camera.start()

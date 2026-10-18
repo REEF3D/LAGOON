@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Probe
+
+- *Probe* in the 3D view's bar (++p++), like ParaView's point inspection: a click
+  on a surface lists, in a box beside the view, the item, x, y, z, the time and
+  output, and every array of its dataset there (not only the one drawn; vectors as
+  magnitude and components). The arrays drawn show at once, the others are read in
+  the background; the values follow the time. A white cross marks the point; *Copy*
+  puts the values on the clipboard; ++escape++ ends it. Drags still turn the view.
+- It replaces the orange probe dot: a plain click no longer places one, and the
+  Plots panel no longer has a *Probe* row. Use REEF3D's gauges and probes for time
+  series. Picks now count among the triangles drawn (dry land and wet bed left
+  out). `DataManager.probe()` gives every array now (a `Probe` with `rows()` and
+  `text()`); `probe_trace()` is gone.
+- `lagoon --dev-remote`: `{"probe": [item, triangle]}` turns Probe on and clicks.
+
 ### 2D plots
 
 - A third mode, *View → 2D plots* (++ctrl+shift+d++): the figure editor fills the

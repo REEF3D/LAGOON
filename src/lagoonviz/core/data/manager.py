@@ -81,7 +81,7 @@ PLAN_LAYERS = {
 }
 #: kinds drawn as points, one screen-space dot each
 POINT_KINDS = ("particles", "geodat")
-#: kinds drawn as the free surface: the still water level, dry land, the probe
+#: kinds drawn as the free surface: the still water level, dry land
 WATER_KINDS = ("free_surface", "amr")
 #: 2D: gauges and free surface lines on top of everything
 PLAN_MARKS = 4.0
@@ -190,24 +190,98 @@ class SetupMarks:
     highlight: tuple[np.ndarray, np.ndarray] | None = None
 
 
-@dataclass
-class Probe:
-    """Values at a point of an item's surface."""
+@dataclass(frozen=True)
+class ProbePoint:
+    """Where the Probe tool was clicked: the corners of the triangle hit in the
+    mesh drawn then (``n_points`` points) and the weights in it, and the point in
+    model coordinates. Another frame of the same grid reuses the corners; any other
+    mesh (an iso-surface, a coarser frame) the point nearest to ``point``."""
 
     item_id: str
-    name: str
+    nodes: tuple[int, ...]
+    weights: tuple[float, ...]
     point: tuple[float, float, float]
-    values: dict[str, float]
-    variable: str
+    n_points: int
 
-    def summary(self) -> str:
-        """One line: the coloured variable first, then the position."""
-        parts = [self.name]
-        if self.variable in self.values:
-            parts.append(f"{self.variable} = {self.values[self.variable]:.4g}")
+
+@dataclass
+class Probe:
+    """Everything an item has at a point (the Probe tool, like ParaView's)."""
+
+    item_id: str
+    #: the item's name and its case's
+    name: str
+    case: str
+    #: the point in model coordinates (without the vertical scale)
+    point: tuple[float, float, float]
+    #: every array of the dataset there; vectors as their magnitude and components
+    #: (``velocity``, ``velocity.x``, ...), like the colour-by choices
+    values: dict[str, float]
+    time: float | None = None
+    #: REEF3D's output number of the frame
+    output: int | None = None
+    #: False while only the arrays drawn are there (the others are being read)
+    complete: bool = True
+    #: the corners were too far apart to interpolate: the nearest grid point's values
+    nearest: bool = False
+
+    def rows(self) -> list[tuple[str, str]]:
+        """(name, value) to list: the place first, then the variables by name."""
         x, y, z = self.point
-        parts.append(f"x {x:.3f}  y {y:.3f}  z {z:.3f}")
-        return " · ".join(parts)
+        rows = [("x", _number(x)), ("y", _number(y)), ("z", _number(z))]
+        if self.time is not None:
+            rows.append(("time", _number(self.time)))
+        if self.output is not None:
+            rows.append(("output", str(self.output)))
+        rows += [(name, _number(self.values[name])) for name in sorted(self.values, key=_by_name)]
+        return rows
+
+    def text(self) -> str:
+        """Tab-separated lines (name, value) for the clipboard, headed by the item."""
+        head = f"{self.case} · {self.name}" if self.case else self.name
+        return "\n".join([head] + [f"{n}\t{v}" for n, v in self.rows()]) + "\n"
+
+
+def _by_name(name: str) -> tuple:
+    """A vector's components right after its magnitude, otherwise alphabetical."""
+    base, _, component = name.partition(".")
+    return (base.lower(), component)
+
+
+def _number(value: float) -> str:
+    if not np.isfinite(value):
+        return "–"
+    magnitude = abs(value)
+    if magnitude != 0 and (magnitude >= 1e6 or magnitude < 1e-4):
+        return f"{value:.6e}"
+    return f"{value:.6g}"
+
+
+def _values_at(
+    point_data: dict[str, np.ndarray], nodes: np.ndarray, weights: np.ndarray
+) -> dict[str, float]:
+    """Every point array interpolated at the nodes with the weights."""
+    values: dict[str, float] = {}
+    for name, array in point_data.items():
+        array = np.asarray(array)
+        if array.ndim == 0 or array.shape[0] == 0 or not np.issubdtype(array.dtype, np.number):
+            continue
+        corner = array[nodes].astype(np.float64)
+        if corner.ndim == 1:
+            values[name] = float(corner @ weights)
+            continue
+        vector = (corner.reshape(len(nodes), -1) * weights[:, None]).sum(axis=0)
+        if vector.size == 1:
+            values[name] = float(vector[0])
+            continue
+        if vector.size <= 3:
+            values[name] = float(np.linalg.norm(vector))
+            labels = "xyz"
+        else:
+            labels = [str(i) for i in range(vector.size)]
+        for label, component in zip(labels, vector, strict=False):
+            values[f"{name}.{label}"] = float(component)
+    return values
 
 
 @dataclass(frozen=True)
@@ -1831,41 +1905,99 @@ class DataManager:
         low, high = dataset.bounds(0)
         return tuple(float(v) for v in (low + high) / 2)  # type: ignore[return-value]
 
-    def probe_trace(self, probe: Probe) -> Trace | None:
-        """The probe's time series: eta under the orange dot on a free surface (the
-        coloured variable on other surfaces) over all frames, at the nearest grid
-        point. Times as on the timeline. None when the item has nothing to plot."""
-        item = self.scene.get(probe.item_id)
-        dataset = self.dataset(probe.item_id)
-        if dataset is None or item.kind in ("slice", "iso_surface", "iso_volume", "streamlines"):
+    # ------------------------------------------------------------- probe
+    def probe_point(
+        self,
+        item_id: str,
+        triangle: int,
+        weights: tuple[float, ...],
+        mesh: SurfaceMesh | None = None,
+    ) -> ProbePoint | None:
+        """Where a click hit an item: ``triangle`` is the index among the triangles
+        drawn (dry land left out), ``weights`` the barycentric weights in it. ``mesh``
+        the mesh drawn (default: the current frame from the cache)."""
+        if mesh is None:
+            key = self.frame_key(item_id)
+            mesh = self.cache.get(key) if key else None
+        if mesh is None or item_id not in self.scene:
             return None
-        variable = (
-            "eta" if item.kind in WATER_KINDS and "eta" in dataset.components else probe.variable
+        drawn = self._drawn_triangles(item_id, mesh)
+        if drawn is None or not 0 <= int(triangle) < len(drawn):
+            return None
+        nodes = np.asarray(drawn[int(triangle)], dtype=np.int64)
+        w = np.asarray(weights, dtype=np.float64)[: len(nodes)]
+        w = w / w.sum() if w.size == len(nodes) and w.sum() > 0 else np.full(len(nodes), 1 / 3)
+        point = (mesh.points[nodes].astype(np.float64) * w[:, None]).sum(axis=0)
+        return ProbePoint(
+            item_id,
+            tuple(int(n) for n in nodes),
+            tuple(float(v) for v in w),
+            tuple(float(v) for v in point),  # type: ignore[arg-type]
+            mesh.n_points,
         )
-        if not variable or variable == "none":
-            return None
-        where, values = dataset.point_series(variable, probe.point[0], probe.point[1])
-        if dataset.times is not None:
-            times = np.asarray(dataset.times, dtype=np.float64)
-        else:
-            dt = self.print_interval() or 1.0
-            times = np.array([frame.step * dt for frame in dataset.frames], dtype=np.float64)
-        unit = "m" if variable in ("eta", "elevation", "depth", "WL") else ""
-        name = f"{item.name} {variable} at x {where[0]:.1f}, y {where[1]:.1f}"
-        return Trace("probe", name, unit, times, np.asarray(values, dtype=np.float64))
 
-    def probe(
-        self, item_id: str, triangle: int, weights: tuple[float, float, float]
-    ) -> Probe | None:
-        """Values where the mouse hit an item's surface (current frame, from the cache)."""
-        key = self._shown_key(item_id)
-        mesh = self.cache.get(key) if key else None
-        if mesh is None or not 0 <= triangle < mesh.n_triangles:
+    def _drawn_triangles(self, item_id: str, mesh: SurfaceMesh) -> np.ndarray | None:
+        """The triangles as the 3D view draws them (picks count among these)."""
+        if mesh.n_triangles == 0:
             return None
-        point, values = mesh.sample(triangle, weights)
-        item = self.scene.get(item_id)
-        variable = str(item.properties.get("variable", "none"))
-        return Probe(item_id, item.name, tuple(float(v) for v in point), values, variable)
+        return self.display(item_id, mesh).triangles
+
+    def probe_key(self, item_id: str, time: float | None = None) -> FrameKey | None:
+        """The frame an probe reads: the one drawn, with every array, at full
+        detail."""
+        key = self.frame_key(item_id, time)
+        dataset = self.dataset(item_id)
+        if key is None or dataset is None:
+            return None
+        arrays = tuple(sorted(set(key.arrays) | set(dataset.components)))
+        return replace(key, arrays=arrays, detail=1)
+
+    def probe_values(
+        self, at: ProbePoint, mesh: SurfaceMesh, key: FrameKey | None = None
+    ) -> Probe | None:
+        """Everything ``mesh`` (a frame of ``at``'s item) has at the probed point.
+        ``key`` the frame's (its output number, whether it has every array)."""
+        if at.item_id not in self.scene or mesh.n_points == 0:
+            return None
+        nodes = np.asarray(at.nodes, dtype=np.int64)
+        weights = np.asarray(at.weights, dtype=np.float64)
+        nearest = False
+        if mesh.n_points != at.n_points or nodes.max() >= mesh.n_points:
+            # another grid (an iso-surface moves, a coarser frame while playing)
+            gap = mesh.points.astype(np.float64) - np.asarray(at.point)
+            nodes = np.array([int(np.argmin(np.einsum("ij,ij->i", gap, gap)))])
+            weights = np.ones(1)
+            nearest = True
+        point = (mesh.points[nodes].astype(np.float64) * weights[:, None]).sum(axis=0)
+        item = self.scene.get(at.item_id)
+        case_item = self.case_item(at.item_id)
+        output = None
+        dataset = self.dataset(at.item_id)
+        complete = True
+        if key is not None and dataset is not None:
+            if 0 <= key.index < len(dataset.frames):
+                output = int(dataset.frames[key.index].step)
+            complete = set(dataset.components) <= set(key.arrays)
+        return Probe(
+            at.item_id,
+            item.name,
+            case_item.name if case_item is not None else "",
+            tuple(float(v) for v in point),  # type: ignore[arg-type]
+            _values_at(mesh.point_data, nodes, weights),
+            time=float(self.scene.time) if self.time_in_seconds() else None,
+            output=output,
+            complete=complete,
+            nearest=nearest,
+        )
+
+    def probe(self, item_id: str, triangle: int, weights: tuple[float, ...]) -> Probe | None:
+        """Everything at a clicked point of an item, read now (blocking; scripts and
+        tests: the 3D view reads the frame in the background)."""
+        at = self.probe_point(item_id, triangle, weights)
+        key = self.probe_key(item_id)
+        if at is None or key is None:
+            return None
+        return self.probe_values(at, self.load_key(key), key)
 
     def _shown_key(self, item_id: str) -> FrameKey | None:
         return self.frame_key(item_id)

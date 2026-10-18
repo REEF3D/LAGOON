@@ -17,7 +17,7 @@ deletes the request. Only the actions below exist; there is no way to run code.
         {"screenshot": "after.png"},         # waits until the frame is loaded
         {"resize": [1400, 860]},
         {"add": "slice"},                    # like Add in the menu
-        {"probe": ["free_surface-1", 120]},  # like a click on triangle 120
+        {"probe": ["free_surface-1", 120]},  # Probe: like a click on triangle 120
         {"fps": 30},                         # playback speed
         {"clear_cache": true},               # forget loaded frames (timing tests)
         {"diagnose": true},                  # renderer state: items, bounds, camera, sun
@@ -166,9 +166,10 @@ class DevRemote(QObject):
             return f"add {value} -> {window.add_item(str(value))}"
         if name == "probe":
             item_id, triangle, *weights = value
+            window.viewport.set_probing(True)
             window.viewport.probe_at(item_id, int(triangle), tuple(weights or (1, 1, 1)))
             probe = getattr(window.viewport, "probe", None)
-            return f"probe {probe.summary() if probe else None}"
+            return f"probe {probe.rows() if probe else None}"
         if name == "fps":
             window.timeline.fps.setValue(int(value))
             return f"fps {value}"

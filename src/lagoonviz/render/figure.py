@@ -31,7 +31,6 @@ MM = 1 / 25.4  # inches per millimetre
 #: journal column widths [mm]
 WIDTHS = {"single column": 90.0, "1.5 columns": 140.0, "double column": 190.0}
 FORMATS = (".pdf", ".svg", ".eps", ".png", ".tif", ".tiff", ".jpg")
-PROBE_COLOR = "#e07b39"
 
 #: house styles: fonts, line widths and line colours of a kind of figure
 REEF3D_LINES = ["#2a5aa0", "#de5a45", "#3a9a5b", "#c9a227", "#8e5bb0", "#4f8fcf", "#6b6b6b"]
@@ -183,9 +182,7 @@ def series_figure(
             item = _row_item(session, item_id)
             colors = {}
             for index, trace in enumerate(traces):
-                color = (
-                    PROBE_COLOR if item_id == "probe" else spec.palette[index % len(spec.palette)]
-                )
+                color = spec.palette[index % len(spec.palette)]
                 colors[trace.name] = color
                 ax.plot(trace.time, trace.values, color=color, label=line_name(item, trace.name))
             for trace in measured:  # dashed, in the computed line's colour
@@ -219,7 +216,7 @@ def series_figure(
 
 
 def _row_item(session: Session, item_id: str):
-    """The time series item of a row of plots (None: the probe's)."""
+    """The time series item of a row of plots (None when it is not in the scene)."""
     return session.scene.get(item_id) if item_id in session.scene else None
 
 
@@ -232,8 +229,6 @@ def _row_legend(item) -> str:
 
 
 def _row_name(session: Session, item_id: str) -> str:
-    if item_id == "probe":
-        return "probe"
     return session.scene.get(item_id).name if item_id in session.scene else item_id
 
 
@@ -296,9 +291,7 @@ def spectrum_figure(
                 except ValueError:
                     continue
                 waves = wave_parameters(f, s)
-                color = (
-                    PROBE_COLOR if item_id == "probe" else spec.palette[index % len(spec.palette)]
-                )
+                color = spec.palette[index % len(spec.palette)]
                 unit = f" {trace.unit}" if trace.unit else ""
                 label = (
                     f"{line_name(item, trace.name)}: $H_{{m0}}$ = {waves.hm0:.3g}{unit}, "

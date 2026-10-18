@@ -115,9 +115,14 @@ The bed can leave out what is under still water (*Hide wet land*).
 
 ## Reading values
 
-Click on a surface in the 3D view to read its values there (in the status bar):
-the orange marker stays where it was put and its values follow the time, and the
-Plots panel adds them over time. Click on empty space to remove it.
+*Probe* in the view's bar (++p++) lists every value at a point, like ParaView's
+point inspection: click on a surface and a box beside the view shows the item, the
+point (x, y, z), the time and output, and all the arrays of its dataset there, not
+only the one it is coloured by (vectors as magnitude and components). A white cross
+marks the point; the values follow the time. *Copy* puts them on the clipboard as
+tab-separated lines; ++escape++ or × ends Probe. Drags still turn the view, and
+without Probe a click does nothing. For values over time, use REEF3D's gauges and
+probes ([Plots](plots.md)).
 
 ## Slices, iso-surfaces, streamlines
 

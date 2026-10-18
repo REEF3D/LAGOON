@@ -193,7 +193,7 @@ def test_session_shows_a_converted_case(converted):
     surface = s.data.load("free_surface-1")
     assert surface is not None and surface.points.shape[0] > 0
     probe = s.data.probe("free_surface-1", 3, (1.0, 0.0, 0.0))
-    assert probe is not None
+    assert probe is not None and "eta" in probe.values
 
 
 def test_sigma_and_level_offsets():

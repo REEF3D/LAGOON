@@ -14,10 +14,9 @@ enough for live updates; publication figures will be redrawn with matplotlib.
 from __future__ import annotations
 
 import math
-from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QComboBox, QSizePolicy, QWidget
 
@@ -35,16 +34,11 @@ RIGHT = 14
 TOP = 22  # room for the row title and legend
 BOTTOM = 24  # room for the time axis labels under the last row
 ROW_GAP = 8
-#: the probe's colour: its row in the plots and the dot in the 3D view
-PROBE_COLOR = "#e07b39"
-#: what the plots show: everything, only the probe, or one series item (its id)
-SHOW_ALL, SHOW_PROBE = "", "probe"
+#: what the plots show: everything, or one series item (its id)
+SHOW_ALL = ""
 
 
 class PlotsPanel(QWidget):
-    #: the probe's time series, read in a worker thread: (generation, Trace or None)
-    _probe_ready = Signal(int, object)
-
     def __init__(self, bridge: SessionBridge | None = None, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("plots")
@@ -62,11 +56,6 @@ class PlotsPanel(QWidget):
         # slowed playing down noticeably)
         self._static: QPixmap | None = None
         self._static_key: tuple | None = None
-        # the probe (orange dot): its time series, read in the background
-        self._probe_trace: Trace | None = None
-        self._probe_generation = 0
-        self._probe_pool = ThreadPoolExecutor(1, thread_name_prefix="lagoon-probe")
-        self._probe_ready.connect(self._on_probe_trace)
         # which plots are shown
         self.show_box = QComboBox(self)
         self.show_box.setToolTip("Which plots are shown")
@@ -88,12 +77,10 @@ class PlotsPanel(QWidget):
 
     # ------------------------------------------------------------- data
     def refresh(self) -> None:
-        """Reload the rows from the scene (items, columns, files) and the probe."""
+        """Reload the rows from the scene (items, columns, files)."""
         self._rows = []
         self._paths.clear()
         choices = [("All plots", SHOW_ALL)]
-        if self._probe_trace is not None:
-            choices.append(("Probe (orange dot)", SHOW_PROBE))
         series = []
         if self.session is not None:
             data = self.session.data
@@ -110,8 +97,6 @@ class PlotsPanel(QWidget):
         if shown not in [value for _, value in choices]:
             shown = SHOW_ALL
         self._fill_show_box(choices, shown)
-        if self._probe_trace is not None and shown in (SHOW_ALL, SHOW_PROBE):
-            self._rows.append((SHOW_PROBE, [self._probe_trace]))
         if self.session is not None:
             for item_id in series:
                 if shown in (SHOW_ALL, item_id):
@@ -142,44 +127,13 @@ class PlotsPanel(QWidget):
         super().resizeEvent(event)
         self._place_show_box()
 
-    # ------------------------------------------------------------- probe
-    def set_probe(self, probe) -> None:
-        """Plot the time series under the probe (orange dot); None removes it."""
-        self._probe_generation += 1
-        if probe is None or self.session is None:
-            self._probe_trace = None
-            self.refresh()
-            return
-        generation = self._probe_generation
-        data = self.session.data
-
-        def read() -> None:
-            try:
-                trace = data.probe_trace(probe)
-            except Exception:  # noqa: BLE001 (no plot rather than a broken window)
-                trace = None
-            self._probe_ready.emit(generation, trace)
-
-        self._probe_pool.submit(read)
-
-    def _on_probe_trace(self, generation: int, trace) -> None:
-        if generation != self._probe_generation:
-            return  # the probe moved on meanwhile
-        self._probe_trace = trace
-        if trace is not None and self.show_box.currentData() not in (SHOW_ALL, SHOW_PROBE):
-            self.show_box.setCurrentIndex(0)
-        self.refresh()
-
     @property
     def row_ids(self) -> list[str]:
         return [item_id for item_id, _ in self._rows]
 
     def shown_rows(self) -> list[tuple[str, list]]:
-        """(item id, traces) of the rows shown now (the probe as "probe"), for figures."""
-        return [
-            ("probe" if item_id == SHOW_PROBE else item_id, traces)
-            for item_id, traces in self._rows
-        ]
+        """(item id, traces) of the rows shown now, for figures."""
+        return list(self._rows)
 
     def full_range(self) -> tuple[float, float]:
         starts, ends = [], []
@@ -367,7 +321,7 @@ class PlotsPanel(QWidget):
             painter.setPen(pen)
             painter.drawPath(path)
         painter.restore()
-        if item_id != SHOW_PROBE and any(t.measured_for for t in traces):
+        if any(t.measured_for for t in traces):
             self._paint_comparison(painter, metrics, item_id, traces, rect, low_t, high_t)
         if not traces:
             painter.setPen(QColor(COLORS["dim"]))
@@ -377,21 +331,10 @@ class PlotsPanel(QWidget):
         """Title and legend above a row (or the legend inside it, or none, as the item
         says), with each line's name and its value at the cursor."""
         x = rect.left() + 2
-        item = None
-        if item_id == SHOW_PROBE:  # the orange dot of the 3D view, then its title
-            painter.setPen(QColor(PROBE_COLOR))
-            painter.drawText(
-                QRectF(x, rect.top() - TOP + 2, 20, TOP - 4), Qt.AlignVCenter, "\u25cf"
-            )
-            x += metrics.horizontalAdvance("\u25cf") + 4
-            title = "Probe"
-        else:
-            item = self.session.scene.get(item_id)
-            title = item.name
-        place = (
-            str(item.properties.get("plot_legend", "above the plot")) if item else "above the plot"
-        )
-        values = bool(item.properties.get("legend_values", True)) if item else True
+        item = self.session.scene.get(item_id)
+        title = item.name
+        place = str(item.properties.get("plot_legend", "above the plot"))
+        values = bool(item.properties.get("legend_values", True))
         painter.setPen(QColor(COLORS["text"]))
         painter.drawText(QRectF(x, rect.top() - TOP + 2, 400, TOP - 4), Qt.AlignVCenter, title)
         x += metrics.horizontalAdvance(title) + 14
@@ -551,8 +494,6 @@ def _color_index(traces: list[Trace], trace: Trace) -> int:
 
 
 def _trace_color(item_id: str, index: int) -> QColor:
-    if item_id == SHOW_PROBE:
-        return QColor(PROBE_COLOR)
     return QColor(SERIES_COLORS[index % len(SERIES_COLORS)])
 
 

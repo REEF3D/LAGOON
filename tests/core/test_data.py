@@ -462,19 +462,59 @@ def test_a_short_restart_does_not_hide_the_long_run(tmp_path):
 
 
 def test_probe_values_on_a_surface(reef3d_run):
+    """Probe: every array of the dataset at the clicked point, not only the drawn."""
     s = Session()
     s.open_case(reef3d_run)
+    s.set_time(1.0)
     mesh = s.data.load("free_surface-1")
-    triangle = 7
-    probe = s.data.probe("free_surface-1", triangle, (0.2, 0.3, 0.5))
+    triangle, weights = 7, np.array([0.2, 0.3, 0.5])
+    probe = s.data.probe("free_surface-1", triangle, tuple(weights))
+    full = s.data.load_key(s.data.probe_key("free_surface-1"))
     nodes = mesh.triangles[triangle].astype(int)
-    expected = mesh.points[nodes].T @ np.array([0.2, 0.3, 0.5])
-    np.testing.assert_allclose(probe.point, expected, rtol=1e-6)
-    assert probe.values["eta"] == pytest.approx(
-        float(mesh.point_data["eta"][nodes] @ np.array([0.2, 0.3, 0.5])), rel=1e-5
-    )
-    assert probe.summary().startswith("Free surface · eta = ")
+    np.testing.assert_allclose(probe.point, mesh.points[nodes].T @ weights, rtol=1e-6)
+    dataset = s.data.dataset("free_surface-1")
+    for name, components in dataset.components.items():
+        assert name in probe.values  # all of them, drawn or not
+        if components == 1:
+            expected = float(full.point_data[name][nodes].astype(float) @ weights)
+            assert probe.values[name] == pytest.approx(expected, rel=1e-5, abs=1e-9)
+    assert probe.complete and not probe.nearest
+    assert probe.name == "Free surface"
+    assert probe.output == dataset.frames[s.data.frame_key("free_surface-1").index].step
+    rows = dict(probe.rows())
+    assert {"x", "y", "z", "eta"} <= set(rows)
+    text = probe.text()
+    assert text.splitlines()[0].endswith("Free surface") and "\neta\t" in text
     assert s.data.probe("free_surface-1", 10**9, (1, 0, 0)) is None
+
+
+def test_probe_follows_the_time_and_other_grids(reef3d_run):
+    """The same grid at another time: the same corners; another mesh (an iso-surface,
+    a coarser frame): the nearest point, said so."""
+    from dataclasses import replace
+
+    from lagoonviz.core.data.mesh import SurfaceMesh
+
+    s = Session()
+    s.open_case(reef3d_run)
+    s.set_time(0.0)
+    s.data.load("free_surface-1")
+    at = s.data.probe_point("free_surface-1", 5, (1.0, 0.0, 0.0))
+    s.set_time(2.0)
+    key = s.data.probe_key("free_surface-1")
+    later = s.data.load_key(key)
+    probe = s.data.probe_values(at, later, key)
+    node = at.nodes[0]
+    assert probe.values["eta"] == pytest.approx(float(later.point_data["eta"][node]))
+    assert not probe.nearest
+    other = SurfaceMesh(
+        np.array([[0, 0, 0], at.point, [9, 9, 9]], np.float32),
+        np.array([[0, 1, 2]], np.uint32),
+        {"u": np.array([[0, 0, 0], [3, 4, 0], [0, 0, 0]], np.float32)},
+    )
+    moved = s.data.probe_values(replace(at, n_points=99), other)
+    assert moved.nearest and moved.values == {"u": 5.0, "u.x": 3.0, "u.y": 4.0, "u.z": 0.0}
+    np.testing.assert_allclose(moved.point, at.point, rtol=1e-6)
 
 
 def test_probe_vector_components(reef3d_run):
@@ -950,25 +990,6 @@ def test_ice_floes_and_rod_trees(tmp_path):
     np.testing.assert_allclose(radius_at_base, 0.05, atol=1e-5)
     np.testing.assert_allclose(tube.point_data["hydro_force"][:16, 0], 1.0)  # per rod
     np.testing.assert_allclose(tube.point_data["hydro_force"][16:32, 0], 2.0)
-
-
-def test_probe_time_series(reef3d_run):
-    """The probe gives eta over all frames at the grid point under it, read with a
-    few bytes per frame; it matches the full frames."""
-    from reef3d_fixtures import eta
-
-    s = Session()
-    s.open_case(reef3d_run)
-    s.set_time(1.0)
-    mesh = s.data.load("free_surface-1")
-    probe = s.data.probe("free_surface-1", 5, (1.0, 0.0, 0.0))
-    trace = s.data.probe_trace(probe)
-    assert trace is not None and trace.unit == "m" and "eta" in trace.name
-    assert len(trace.time) == len(trace.values) == 3
-    x, y = mesh.points[mesh.triangles[5, 0], :2]
-    expected = [eta(np.array([x]), np.array([y]), frame)[0] for frame in range(3)]
-    np.testing.assert_allclose(trace.values, expected, atol=1e-5)
-    np.testing.assert_allclose(trace.time, [0.0, 1.0, 2.0])
 
 
 def test_an_empty_store_folder_says_so(tmp_path):

@@ -530,28 +530,32 @@ def test_plots_draw_their_lines_once_while_playing(window, series_run):
     assert plots._static is not picture  # a new size draws the lines again
 
 
-def test_probe_time_series_in_the_plots(window, series_run, qtbot):
-    """The orange dot on the free surface plots eta there over the run, and a box
-    chooses which plots are shown."""
+def test_probe_box(window, series_run, qtbot):
+    """The Probe tool's box lists the item, the point and every value, and copies
+    them; the plots have no probe row any more."""
+    from PySide6.QtGui import QGuiApplication
+
+    from lagoonviz.gui.panels.probe_box import ProbeBox
+
     window.open_case(series_run)
-    session, plots = window.session, window.plots
+    session = window.session
     session.data.load("free_surface-1")
     probe = session.data.probe("free_surface-1", 5, (1.0, 0.0, 0.0))
-    plots.set_probe(probe)
-    qtbot.waitUntil(lambda: "probe" in plots.row_ids, timeout=5000)
-    assert plots.row_ids[0] == "probe" and len(plots.row_ids) > 1  # with the gauges
+    box = ProbeBox()
+    qtbot.addWidget(box)
+    box.set_probe(probe)
+    names = [box.table.item(r, 0).text() for r in range(box.table.rowCount())]
+    assert names[:3] == ["x", "y", "z"] and "eta" in names
+    assert box.title.text() == probe.name and box.copy_button.isEnabled()
+    box.copy()
+    assert QGuiApplication.clipboard().text() == probe.text()
+    box.clear("Nothing there")
+    assert box.table.rowCount() == 0 and not box.copy_button.isEnabled()
+    assert box.note.text() == "Nothing there"
+    plots = window.plots
     labels = [plots.show_box.itemText(i) for i in range(plots.show_box.count())]
-    assert labels[:2] == ["All plots", "Probe (orange dot)"] and not plots.show_box.isHidden()
-    plots.show_box.setCurrentIndex(1)
-    plots.refresh()
-    assert plots.row_ids == ["probe"]
-    plots.show_box.setCurrentIndex(2)  # the gauges only
-    plots.refresh()
-    assert "probe" not in plots.row_ids
-    plots.set_probe(None)
-    assert "Probe (orange dot)" not in [
-        plots.show_box.itemText(i) for i in range(plots.show_box.count())
-    ]
+    assert not any("Probe" in label for label in labels) and "probe" not in plots.row_ids
+    window.viewport.set_probing(True)  # the placeholder without a GPU: no error
 
 
 def test_hidden_series_leave_the_plot(window, series_run):
