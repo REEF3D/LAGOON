@@ -1537,18 +1537,20 @@ CTRL_SOLVERS = {2: "SFLOW", 3: "FNPF", 5: "NHFLOW", 6: "CFD"}
 
 
 def read_ctrl_solver(case_dir: Path) -> str:
-    """The solver ``ctrl.txt`` sets up (``A 10``), "" without one."""
+    """The solver ``ctrl.txt`` sets up (``A 10``; REEF3D's default: CFD), "" without
+    the file."""
     ctrl = Path(case_dir) / "ctrl.txt"
     if not ctrl.is_file():
         return ""
+    found = "CFD"
     try:
         for line in ctrl.read_text(errors="replace").splitlines():
             fields = line.split("//")[0].split()
             if len(fields) >= 3 and fields[:2] == ["A", "10"]:
-                return CTRL_SOLVERS.get(int(float(fields[2])), "")
+                found = CTRL_SOLVERS.get(int(float(fields[2])), "")
     except (OSError, ValueError):
         return ""
-    return ""
+    return found
 
 
 def read_print_interval(case_dir: Path, ctrl: Path | None = None) -> float | None:

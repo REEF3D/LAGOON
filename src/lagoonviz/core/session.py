@@ -1471,6 +1471,22 @@ class Session:
         self.divemesh_done(case_id)
         return code
 
+    def check_input(self, case_id: str | None = None):
+        """Check a case's input before a run (the first case by default): ctrl.txt
+        and control.txt together, DIVEMesh's grid for them, and what the run will
+        cost; a :class:`lagoonviz.core.input_check.InputReport` (``print(report.text())``).
+        Edits not saved yet are checked as they are on disk."""
+        from lagoonviz.core.input_check import check_case
+
+        if case_id is None:
+            case_id = next((i.id for i in self.scene if i.kind == "case"), None)
+        if case_id is None:
+            raise ValueError("open a case first")
+        folder = self.data.case_folder(case_id)
+        if folder is None:
+            raise ValueError(f"{case_id}: no case folder")
+        return check_case(folder)
+
     def divemesh_done(self, case_id: str) -> None:
         """After DIVEMesh has run on a case: read its outputs again and give the case a
         grid item if it has none (the GUI runs DIVEMesh itself and calls this)."""

@@ -789,3 +789,14 @@ def test_one_grid_in_the_river_tab_and_a_note_when_curvgrid_is_another(window, f
     assert "curvgrid.dat is another grid" not in tab.quality.text()
     window.session.move_corridor_point("left", 3, 3.0, 1.95)
     assert "curvgrid.dat is another grid" in tab.quality.text()
+
+
+def test_the_input_check_from_the_panel(window, flume):
+    """Check: both input files, DIVEMesh's grid, the cost, in a window."""
+    window.open_case(flume)
+    panel = window.setup_panel
+    assert panel.check_button.isEnabled()
+    report = panel.check_input()
+    assert report is not None and any("run DIVEMesh first" in p.message for p in report.errors)
+    assert panel._check_dialog.isVisible()
+    assert "Input check" in panel.message.text()

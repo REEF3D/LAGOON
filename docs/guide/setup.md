@@ -464,6 +464,23 @@ NorKyst; NLOD 2.0 / CC BY 4.0); Open-Meteo.com (CC BY 4.0) with Copernicus/ECMWF
 (ERA5, GloFAS) and Météo-France / Copernicus Marine (sea level, currents);
 Kartverket (NLOD 2.0), NOAA CO-OPS, the IOC Sea Level Station Monitoring Facility.
 
+## Checking the input
+
+*Check* (in the Set-up panel) looks at the input before a run, as it is saved:
+
+- each file's commands, as for the editor (unknown commands, missing values, a
+  command with no effect in the solver);
+- the number of processes (M 10) in both files, and DIVEMesh's grid file for each
+  (`DIVEMesh_Grid/grid-000001.dat` ...): a grid made for fewer processes, none at
+  all, or a `control.txt`, `geo.dat` or `solid.stl` changed after DIVEMesh made it;
+- no 3D output (neither P 20 nor P 30), no end (neither N 41 nor N 45);
+- what the run will cost: the cells, per process (a note for very few or very many),
+  and, when the last run in the folder had the same grid, the time per iteration and
+  for N 41.
+
+Errors (REEF3D or DIVEMesh would stop) come first, then warnings and notes.
+`session.check_input()` gives the same in a script.
+
 ## Running DIVEMesh
 
 *Run DIVEMesh* (in the Set-up panel, the toolbar in the set-up, *File → Run

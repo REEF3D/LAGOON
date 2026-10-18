@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Input check
+
+- *Check* in the Set-up panel: both input files with the command catalog, M 10 in
+  ctrl.txt and control.txt, DIVEMesh's grid files for the processes (missing, extra,
+  older than control.txt, geo.dat or solid.stl), no 3D output, no end; the cells,
+  per process, and the time per iteration and for N 41 from the last run in the
+  folder. `session.check_input()` in scripts.
+- Without A 10, ctrl.txt sets up CFD (REEF3D's default) when choosing what a case
+  opens with.
+
 ### Run monitor
 
 - A *Run monitor* tab beside the plots: state (running, finished, stopped, not

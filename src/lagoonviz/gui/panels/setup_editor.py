@@ -20,6 +20,7 @@ the *Sea* tab reads the sea at the case (``sea_setup``).
 
 from __future__ import annotations
 
+import html
 import logging
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from PySide6.QtGui import QBrush, QColor, QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
     QCompleter,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -40,6 +42,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QTabWidget,
+    QTextBrowser,
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -446,12 +449,19 @@ class SetupPanel(QWidget):
             "Save control.txt and run DIVEMesh in the case folder: the grid, solids and bed"
         )
         self.run_button.clicked.connect(lambda: self.run_divemesh())
+        self.check_button = QPushButton("Check")
+        self.check_button.setToolTip(
+            "Check the input before a run: ctrl.txt and control.txt together, DIVEMesh's "
+            "grid for them, and what the run will cost"
+        )
+        self.check_button.clicked.connect(lambda: self.check_input())
         top = QHBoxLayout()
         top.setContentsMargins(4, 4, 4, 0)
         top.addWidget(QLabel("Case"))
         top.addWidget(self.case_box, 1)
         top.addWidget(self.save_button)
         top.addWidget(self.run_button)
+        top.addWidget(self.check_button)
 
         self.tabs = QTabWidget()
         self.editors = {name: InputEditor(self, name) for name in FILES}
@@ -539,11 +549,28 @@ class SetupPanel(QWidget):
             self.sea_tab.refresh()
         running = self.process is not None
         self.run_button.setEnabled(has_case and not running)
+        self.check_button.setEnabled(has_case)
         self.run_button.setText("DIVEMesh running…" if running else "Run DIVEMesh")
         if not has_case:
             self.status("Open a case folder (File → Open case…) to edit its input files.")
         elif not self.message.text():
             self._describe()
+
+    def check_input(self):
+        """The input check of the case in a window (lagoonviz.core.input_check)."""
+        if not self.case_id:
+            return None
+        try:
+            report = self.session.check_input(self.case_id)
+        except (OSError, ValueError) as error:
+            self.status(str(error), error=True)
+            return None
+        unsaved = self.session.inputs_modified(self.case_id)
+        dialog = InputCheckDialog(report, unsaved, self)
+        self.status(f"Input check: {report.summary()}", error=not report.ok)
+        dialog.show()
+        self._check_dialog = dialog  # kept while it is open
+        return report
 
     def _describe(self) -> None:
         setup = self.session.data.case_setup(self.case_id)
@@ -735,3 +762,50 @@ class SetupPanel(QWidget):
         self.process = None
         self.status("DIVEMesh could not be started (see its output)", True)
         self.refresh()
+
+
+class InputCheckDialog(QDialog):
+    """The findings of an input check, errors first, and what the run will cost."""
+
+    COLOURS = {"error": "#c0392b", "warning": "#b8860b", "note": "#2b6fb6"}
+
+    def __init__(self, report, unsaved: list[str], parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Input check")
+        self.resize(640, 420)
+        self.report = report
+        view = QTextBrowser()
+        view.setOpenLinks(False)
+        rows = []
+        for finding in report.problems:
+            colour = self.COLOURS.get(finding.level, COLORS["dim"])
+            rows.append(
+                f'<tr><td style="color:{colour}"><b>{finding.level}</b></td>'
+                f"<td><code>{html.escape(finding.where)}</code></td>"
+                f"<td>{html.escape(finding.message)}</td></tr>"
+            )
+        facts = "".join(
+            f'<tr><td style="color:{COLORS["dim"]}">{html.escape(name)}</td>'
+            f"<td>{html.escape(value)}</td></tr>"
+            for name, value in report.facts
+        )
+        note = (
+            f"<p><i>Not saved yet, not checked: {html.escape(', '.join(unsaved))}. "
+            "Save to check them.</i></p>"
+            if unsaved
+            else ""
+        )
+        view.setHtml(
+            f"<p><b>{html.escape(report.summary())}</b> ({html.escape(report.solver)})</p>"
+            + note
+            + (f'<table cellspacing="6">{"".join(rows)}</table>' if rows else "")
+            + (f'<h4>The run</h4><table cellspacing="6">{facts}</table>' if facts else "")
+        )
+        close = QPushButton("Close")
+        close.clicked.connect(self.close)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        layout = QVBoxLayout(self)
+        layout.addWidget(view)
+        layout.addLayout(buttons)
