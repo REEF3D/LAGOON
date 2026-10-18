@@ -28,10 +28,15 @@ from typing import Any
 import numpy as np
 
 FORMAT = "lagoon-figure"
-VERSION = 1
+VERSION = 2  # 2: data tables, x-y panels
 SUFFIX = ".lagoonfig"
-#: what a panel draws: lines over time, their spectra, free surface lines along x, the 3D view
-PANEL_KINDS = ("time", "spectrum", "profile", "view")
+#: what a panel draws: lines over time, their spectra, free surface lines along x, the 3D
+#: view, any column over any column of the figure's tables
+PANEL_KINDS = ("time", "spectrum", "profile", "view", "xy")
+#: how an x-y line is drawn
+PLOT_KINDS = ("line", "scatter", "step", "bar", "fill")
+#: the curve fitted to an x-y line ("" none; lagoonviz.core.tables.FIT_MODELS)
+FIT_KINDS = ("", "linear", "quadratic", "cubic", "exponential", "power", "logarithmic")
 #: what a line's data is: a time series column or a free surface line line (measured
 #: files go with either)
 LINE_DATA = ("series", "profile")
@@ -82,10 +87,22 @@ class Line:
     width: float = 0.0  # 0: the style's line width
     data: str = "series"  # "series" (a time series column) or "profile" (a free surface line line)
     legend: bool = True  # named in the panel's legend
+    # a column of one of the figure's tables (``FigureTemplate.tables``): its name, and
+    # the column for x (empty: the table's first)
+    table: str = ""
+    x: str = ""
+    plot: str = "line"  # PLOT_KINDS
+    axis: str = "left"  # the y axis: "left" or "right"
+    fit: str = ""  # FIT_KINDS: a fitted curve drawn with it, its equation in the legend
 
     @property
     def measured(self) -> bool:
         return bool(self.file)
+
+    @property
+    def tabled(self) -> bool:
+        """A column of one of the figure's tables."""
+        return bool(self.table)
 
     @property
     def theory(self) -> bool:
@@ -97,6 +114,8 @@ class Line:
             return self.label
         if self.measured:
             return f"{Path(self.file).stem} {self.column}"
+        if self.tabled:
+            return self.column
         if self.data == "profile":
             number = self.column.split()[0] if self.column else "?"
             return f"line {number} theory" if self.theory else f"line {number}"
@@ -145,6 +164,13 @@ class Panel:
     # views: where the colour bars go (BAR_PLACES) and their length (of the image)
     bar_place: str = "below"
     bar_length: float = 0.7
+    # x-y panels (and the x axis of others): label (empty: from the column), range,
+    # logarithmic; the right y axis' label
+    xlabel: str = ""
+    xmin: float | None = None
+    xmax: float | None = None
+    logx: bool = False
+    y2label: str = ""
 
 
 @dataclass
@@ -159,6 +185,9 @@ class FigureTemplate:
     title: str = ""
     columns: int = 1  # panels fill a grid of this many columns, row by row
     letters: bool = False  # (a), (b), ... before the panels' titles
+    #: the figure's data tables: lagoonviz.core.tables.TableSpec as dicts (name, source,
+    #: formulas, ...); their lines name them
+    tables: list[dict] = field(default_factory=list)
 
     # ------------------------------------------------------------- files
     def to_dict(self) -> dict[str, Any]:
@@ -196,7 +225,25 @@ class FigureTemplate:
                 values["bar_place"] = "below"
             panels.append(Panel(lines=lines, notes=notes, **values))
         values = {k: v for k, v in data.items() if k in cls.__dataclass_fields__ and k != "panels"}
+        values["tables"] = [t for t in values.get("tables", []) if isinstance(t, dict)]
         return cls(panels=panels, **values)
+
+    def table_specs(self):
+        """The tables as lagoonviz.core.tables.TableSpec."""
+        from lagoonviz.core.tables import TableSpec
+
+        return [TableSpec.from_dict(t) for t in self.tables]
+
+    def load_tables(self, session=None) -> dict:
+        """The figure's tables, read (name -> DataTable; one that cannot be read is
+        left out and named in ``table_errors``)."""
+        found, self.table_errors = {}, {}
+        for spec in self.table_specs():
+            try:
+                found[spec.name] = spec.load(session)
+            except (OSError, ValueError, KeyError) as error:
+                self.table_errors[spec.name] = str(error)
+        return found
 
     def save(self, path: str | Path) -> Path:
         path = Path(path).expanduser()
@@ -213,6 +260,14 @@ class FigureTemplate:
                         )
                     except ValueError:
                         pass
+        for table in data["tables"]:
+            source = str(table.get("source", ""))
+            if source.startswith("file:"):
+                try:
+                    relative = Path(source[5:]).resolve().relative_to(path.resolve().parent)
+                    table["source"] = f"file:{relative}"
+                except ValueError:
+                    pass
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return path
 
@@ -224,6 +279,10 @@ class FigureTemplate:
             for line in panel.lines:
                 if line.file and not Path(line.file).is_absolute():
                     line.file = str((path.parent / line.file).resolve())
+        for table in template.tables:
+            source = str(table.get("source", ""))
+            if source.startswith("file:") and not Path(source[5:]).is_absolute():
+                table["source"] = f"file:{(path.parent / source[5:]).resolve()}"
         return template
 
 
@@ -238,6 +297,8 @@ class LineData:
     values: np.ndarray
     unit: str
     name: str
+    x_name: str = ""  # a table's line: its x column and unit
+    x_unit: str = ""
 
 
 def series_columns(session) -> dict[str, tuple[str, list[str]]]:
@@ -289,10 +350,19 @@ def profile_columns(session) -> dict[str, tuple[str, list[tuple[str, str]]]]:
     return found
 
 
-def resolve(session, line: Line, time: float | None = None) -> LineData:
-    """The values of a line: from the first open case that has its file, or from
-    its measured file. Free surface line lines are taken at ``time`` (None: the
-    scene's)."""
+def resolve(session, line: Line, time: float | None = None, tables: dict | None = None) -> LineData:
+    """The values of a line: a column of one of the figure's ``tables`` (over its x
+    column), from the first open case that has its file, or from its measured file.
+    Free surface line lines are taken at ``time`` (None: the scene's)."""
+    if line.tabled:
+        table = (tables or {}).get(line.table)
+        if table is None:
+            raise KeyError(f"no table {line.table!r}")
+        x_name = line.x or table.names[0]
+        x = table.column(x_name)
+        y = table.column(line.column)
+        unit = table.units.get(line.column, "")
+        return LineData(line, x, y, unit, line.title(), x_name, table.units.get(x_name, ""))
     if line.data == "profile" and not line.measured:
         return _resolve_profile(session, line, session.scene.time if time is None else time)
     if line.measured:
@@ -375,7 +445,7 @@ def fits(line: Line, kind: str) -> bool:
     spectrum panels, free surface lines onto profile panels, measured files onto any."""
     if kind == "view":
         return False
-    if line.measured:
+    if line.measured or line.tabled or kind == "xy":
         return True
     return (kind == "profile") == (line.data == "profile")
 

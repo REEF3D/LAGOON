@@ -418,11 +418,13 @@ def place_legend(
     columns: int = 0,
     size: float | None = None,
     frame: bool = False,
+    items: tuple[list, list] | None = None,
 ) -> None:
     """A line panel's legend where ``place`` says (LEGEND_PLACES): "auto" inside where
     it covers least, when there are several lines; outside right, above or below the
-    axes; "off" none. ``columns`` 0: one, or a row of up to four above and below."""
-    handles, labels = ax.get_legend_handles_labels()
+    axes; "off" none. ``columns`` 0: one, or a row of up to four above and below.
+    ``items``: (handles, labels) to name (default: the axes' own)."""
+    handles, labels = items if items is not None else ax.get_legend_handles_labels()
     count = len(labels) if entries is None else entries
     if place == "off" or not labels or (place == "auto" and count < 2):
         return
@@ -543,7 +545,7 @@ def template_spec(template, dpi: int = 300, **overrides) -> FigureSpec:
 
 
 #: natural heights of line panels [mm]; views take 9/16 of their width
-PANEL_HEIGHTS = {"time": 30.0, "spectrum": 34.0, "profile": 32.0}
+PANEL_HEIGHTS = {"time": 30.0, "spectrum": 34.0, "profile": 32.0, "xy": 45.0}
 #: a colour bar under a view panel [mm]: the bar, and with its ticks and label
 BAR_MM = 3.0
 BAR_ROOM_MM = 13.0
@@ -566,6 +568,10 @@ def template_figure(
     if not template.panels:
         raise ValueError("the figure has no panels: drag a time series onto it")
     missing: list[str] = []
+    tables = template.load_tables(session) if getattr(template, "tables", None) else {}
+    missing += [
+        f"table {name}: {error}" for name, error in getattr(template, "table_errors", {}).items()
+    ]
     rows = layout(template)
     columns = max(int(template.columns or 1), 1)
     cell_mm = spec.width_mm / columns
@@ -602,9 +608,12 @@ def template_figure(
                             bars if panel.colour_bars else [],
                             (images or {}).get(index),
                         )
+                    elif panel.kind == "xy":
+                        ax = figure.add_subplot(cell)
+                        default = _xy_panel(ax, panel, spec, missing, tables, session)
                     else:
                         ax = figure.add_subplot(cell)
-                        default = _lines_panel(ax, session, panel, spec, missing)
+                        default = _lines_panel(ax, session, panel, spec, missing, tables)
                 except Exception as error:  # noqa: BLE001 (named in the figure's list)
                     missing.append(f"panel {index + 1}: {error}")
                     ax = figure.add_subplot(cell)
@@ -649,7 +658,9 @@ def _letter(index: int) -> str:
     return letters
 
 
-def _lines_panel(ax, session: Session, panel, spec: FigureSpec, missing: list[str]) -> str:
+def _lines_panel(
+    ax, session: Session, panel, spec: FigureSpec, missing: list[str], tables: dict | None = None
+) -> str:
     """The lines of a time, spectrum or free surface line panel; returns its default title."""
     from lagoonviz.core.analysis import compare, spectrum, wave_parameters
     from lagoonviz.core.figure_template import resolve
@@ -658,7 +669,7 @@ def _lines_panel(ax, session: Session, panel, spec: FigureSpec, missing: list[st
     drawn = []
     for index, line in enumerate(panel.lines):
         try:
-            data = resolve(session, line, when)
+            data = resolve(session, line, when, tables)
         except (KeyError, OSError, ValueError) as error:
             missing.append(f"{line.title()}: {error}")
             continue
@@ -774,6 +785,114 @@ def _lines_panel(ax, session: Session, panel, spec: FigureSpec, missing: list[st
         getattr(panel, "legend_frame", False),
     )
     return title
+
+
+def _line_style(line, color: str, label: str, spec: FigureSpec) -> dict:
+    style = {"color": color, "label": label if getattr(line, "legend", True) else "_nolegend_"}
+    if line.linestyle and line.linestyle != "none":
+        style["linestyle"] = line.linestyle
+    if line.width:
+        style["linewidth"] = line.width
+    return style
+
+
+def _xy_panel(ax, panel, spec: FigureSpec, missing: list[str], tables: dict, session=None) -> str:
+    """Columns of the figure's tables over their x columns: lines, points, steps, bars
+    or filled areas, on the left or right y axis, with fitted curves."""
+    from lagoonviz.core.figure_template import resolve
+    from lagoonviz.core.tables import fit
+
+    right = None
+    drawn: list[tuple[object, object]] = []
+    for index, line in enumerate(panel.lines):
+        try:
+            data = resolve(session, line, None, tables)
+        except (KeyError, OSError, ValueError) as error:
+            missing.append(f"{line.title()}: {error}")
+            continue
+        target = ax
+        if getattr(line, "axis", "left") == "right":
+            right = right or ax.twinx()
+            target = right
+        color = line.color or spec.palette[index % len(spec.palette)]
+        x = np.asarray(data.time, np.float64)
+        y = np.asarray(data.values, np.float64)
+        style = _line_style(line, color, data.name, spec)
+        kind = getattr(line, "plot", "line")
+        marker = line.marker or ("o" if kind == "scatter" else "")
+        if kind == "scatter":
+            target.plot(
+                x,
+                y,
+                linestyle="none",
+                marker=marker,
+                markersize=3.5,
+                markerfacecolor="none" if line.marker in ("", "o", "s", "^") else color,
+                color=color,
+                label=style["label"],
+            )
+        elif kind == "step":
+            target.step(x, y, where="mid", **style)
+        elif kind == "bar":
+            finite = np.sort(x[np.isfinite(x)])
+            width = 0.8 * float(np.min(np.diff(finite))) if finite.size > 1 else 0.8
+            target.bar(x, y, width=width, color=color, label=style["label"], linewidth=0)
+        elif kind == "fill":
+            target.fill_between(x, y, color=color, alpha=0.25, linewidth=0)
+            target.plot(x, y, **style)
+        else:
+            if marker:
+                style.update(marker=marker, markersize=3, markerfacecolor="none")
+            target.plot(x, y, **style)
+        model = getattr(line, "fit", "")
+        if model:
+            try:
+                curve = fit(x, y, model)
+            except (ValueError, np.linalg.LinAlgError) as error:
+                missing.append(f"{line.title()} fit: {error}")
+            else:
+                finite = x[np.isfinite(x)]
+                xs = np.linspace(float(finite.min()), float(finite.max()), 200)
+                label = f"{curve.equation}, $R^2$ = {curve.r2:.4f}"
+                target.plot(xs, curve(xs), color=color, linestyle="--", linewidth=0.8, label=label)
+        drawn.append((data, target))
+    if not drawn:
+        return ""
+    first = drawn[0][0]
+    ax.set_xlabel(panel.xlabel or _label(first.x_name or "x", first.x_unit))
+    left = [d for d, t in drawn if t is ax]
+    units = {d.unit for d in left if d.unit}
+    if len(left) == 1:
+        ax.set_ylabel(panel.ylabel or _label(left[0].name, left[0].unit))
+    elif left:
+        ax.set_ylabel(panel.ylabel or (f"[{units.pop()}]" if len(units) == 1 else ""))
+    if right is not None:
+        on_right = [d for d, t in drawn if t is right]
+        default = _label(on_right[0].name, on_right[0].unit) if len(on_right) == 1 else ""
+        right.set_ylabel(getattr(panel, "y2label", "") or default)
+    if getattr(panel, "logx", False):
+        ax.set_xscale("log")
+    if panel.logy:
+        ax.set_yscale("log")
+    if getattr(panel, "xmin", None) is not None or getattr(panel, "xmax", None) is not None:
+        ax.set_xlim(panel.xmin, panel.xmax)
+    if panel.ymin is not None or panel.ymax is not None:
+        ax.set_ylim(panel.ymin, panel.ymax)
+    handles, labels = ax.get_legend_handles_labels()
+    if right is not None:
+        more = right.get_legend_handles_labels()
+        handles, labels = handles + more[0], labels + more[1]
+    named = [(h, n) for h, n in zip(handles, labels, strict=True) if not n.startswith("_")]
+    place_legend(
+        ax,
+        getattr(panel, "legend", "auto"),
+        len(named),
+        getattr(panel, "legend_columns", 0),
+        getattr(panel, "legend_size", None),
+        getattr(panel, "legend_frame", False),
+        items=([h for h, _ in named], [n for _, n in named]),
+    )
+    return ""
 
 
 def _view_panel(figure, cell, session: Session, panel, spec, width_mm, bars, image):
