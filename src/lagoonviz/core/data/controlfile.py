@@ -458,7 +458,10 @@ class Catalog:
             if info is None:
                 problems.append(
                     Problem(
-                        number, line.code, f"{line.code} is not a {self.program} command: ignored"
+                        number,
+                        line.code,
+                        f"{line.code} is not in LAGOON's list of {self.program} commands (from its "
+                        "user guide): a typo (then ignored), or newer than the list",
                     )
                 )
                 continue

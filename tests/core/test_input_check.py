@@ -62,7 +62,7 @@ def test_no_output_no_end_and_unknown_commands(tmp_path):
     report = check_case(write_inputs(tmp_path / "case", ctrl_extra="Q 9999 1\n"))
     messages = " | ".join(p.message for p in report.problems)
     assert "no 3D output" in messages and "no end" in messages
-    assert "Q 9999 is not a REEF3D command" in messages
+    assert "Q 9999 is not in LAGOON's list of REEF3D commands" in messages
     missing = tmp_path / "empty"
     missing.mkdir()
     assert len(check_case(missing).errors) == 2  # neither file
