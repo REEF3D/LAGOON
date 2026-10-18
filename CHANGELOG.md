@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Wave analysis
+
+- *View → Wave analysis* over a time window: spectra of the lines ticked with Hm0,
+  Tp, Tm01, Tm02 and zero-crossing H1/3, Hmax, T1/3; reflection from two or three
+  gauges (Mansard and Funke, Goda and Suzuki): incident and reflected spectra, Kr;
+  the response (RAO) of a motion to a wave gauge: gain, phase, coherence. Tables to
+  the clipboard, figures as PDF, SVG, PNG; `lagoonviz.core.waves` in scripts.
+
 ### Measured data on the gauge plots
 
 - A time series item takes a *Measured file* (text columns: time, one column per

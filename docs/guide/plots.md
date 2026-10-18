@@ -78,7 +78,31 @@ some of the lines (`1, 3`); with *Wave theory* on, the theory FNPF wrote is draw
 dashed. The value axis stays fixed while playing, so the waves move through a
 steady frame.
 
-## Spectra and comparisons
+## Wave analysis
 
-The spectra of the plotted series (with $H_{m0}$ and $T_p$), and comparisons with
-measured data, are made as paper figures: see [Paper figures](figures.md).
+*View → Wave analysis* works over a time window (the Plots panel's when it opens;
+*From*, *to*) with Welch's method (*segments*, half overlapping):
+
+- **Spectra**: the lines ticked (measured ones dashed) and a table of their wave
+  parameters: $H_{m0} = 4\sqrt{m_0}$, $T_p$, $T_{m01} = m_0/m_1$,
+  $T_{m02} = \sqrt{m_0/m_2}$ from the spectrum; $H_{1/3}$, $H_{max}$, $T_{1/3}$ and
+  the number of waves from zero down-crossings.
+- **Reflection**: two or three gauges along the wave direction (their x from the
+  gauge file), and the water depth (the case's still water level to start with):
+  the incident and reflected spectra fitted per frequency (Mansard and Funke; with
+  two gauges Goda and Suzuki), $K_r$ and the incident and reflected $H_{m0}$.
+  Frequencies at which a gauge spacing is near a multiple of half a wave length
+  cannot be separated: shaded, and left out of $K_r$.
+- **Response (RAO)**: a wave gauge in, a motion out (a 6DOF column): gain
+  $|S_{xy}|/S_{xx}$, phase (positive: the motion comes later) and coherence; the
+  gain is drawn strong where the coherence reaches the value asked for, and the
+  largest RAO is given with its period.
+
+*Copy table* puts the numbers on the clipboard (tab separated, for a spreadsheet),
+*Save figure* writes the tab's figure as PDF, SVG or PNG. In a script:
+`lagoonviz.core.waves` (`zero_crossing`, `reflection`, `transfer`) and
+`lagoonviz.core.analysis` (`spectrum`, `wave_parameters`, `compare`), drawn with
+`lagoonviz.render.wave_figures`.
+
+Spectra and comparisons with measured data are also made as paper figures: see
+[Paper figures](figures.md).

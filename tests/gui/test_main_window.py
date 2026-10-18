@@ -1003,6 +1003,24 @@ def test_measured_data_on_the_plots(window, tmp_path):
     window.plots.grab()  # draws the comparison without failing
 
 
+def test_wave_analysis_window(window, tmp_path):
+    """View → Wave analysis: spectra and wave parameters of the gauges ticked."""
+    from reef3d_fixtures import make_run
+
+    root = make_run(tmp_path / "flume", frames=3, print_interval=1.0, series=True)
+    window.open_case(root)
+    dialog = window.open_wave_analysis()
+    assert dialog.checked()  # the gauges ticked
+    dialog.compute()
+    assert dialog.spectra_table.rowCount() == len(dialog.checked())
+    text = dialog.copy_table()
+    assert text.startswith("line\tHm0")
+    path = dialog.save_figure(str(tmp_path / "spectra.pdf"))
+    assert path and (tmp_path / "spectra.pdf").is_file()
+    dialog.tabs.setCurrentIndex(1)  # reflection: computed or a message, never a failure
+    dialog.tabs.setCurrentIndex(2)
+
+
 def test_convert_to_lagoon_format(window, reef3d_run, qtbot):
     """File > Convert to LAGOON format writes the store next to the output and the
     case then reads it."""

@@ -382,6 +382,12 @@ class MainWindow(QMainWindow):
             self.open_figure_editor,
             tip="Build a figure by dragging time series onto panels; keep it as a template",
         )
+        self.act_wave_analysis = self._action(
+            "&Wave analysis...",
+            self.open_wave_analysis,
+            tip="Spectra and wave parameters of the gauges, reflection, and the response "
+            "(RAO) of a floating body, over the plots' time window",
+        )
         self.act_compare = self._action(
             "&Compare side by side",
             self.toggle_compare,
@@ -518,6 +524,7 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         for dock in self.docks.values():
             view_menu.addAction(dock.toggleViewAction())
+        view_menu.addAction(self.act_wave_analysis)
         theme_menu = view_menu.addMenu("&Theme")
         current = str(self.settings.value("view/theme", DEFAULT_THEME))
         self.theme_actions = {}
@@ -1363,6 +1370,15 @@ class MainWindow(QMainWindow):
         from lagoonviz.gui.export_figure import export_figure
 
         return export_figure(self)
+
+    def open_wave_analysis(self):
+        """View → Wave analysis, over the Plots panel's time window."""
+        from lagoonviz.gui.wave_analysis import WaveAnalysisDialog
+
+        dialog = WaveAnalysisDialog(self.session, self.plots.time_window(), self)
+        dialog.show()
+        self._wave_analysis = dialog  # kept while it is open
+        return dialog
 
     def open_figure_editor(self):
         """File → Figure editor: a figure built by hand, kept as a template."""
