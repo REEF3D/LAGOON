@@ -953,6 +953,19 @@ def test_range_boxes_keep_tiny_values(window, reef3d_run):
     assert (low.value(), high.value()) == pytest.approx(shown, rel=1e-5)
 
 
+def test_the_run_monitor(window, reef3d_run):
+    """A tab beside the plots: how the latest run of the case is going."""
+    assert "run" in window.docks
+    window.open_case(reef3d_run)
+    panel = window.run_monitor
+    panel.poll()
+    assert "no run" in panel.state.text()  # the fixture has no run log
+    panel.follow_box.setChecked(True)  # File → Follow running simulation
+    assert window.act_follow.isChecked()
+    window.set_follow(False)
+    assert not panel.follow_box.isChecked()
+
+
 def test_convert_to_lagoon_format(window, reef3d_run, qtbot):
     """File > Convert to LAGOON format writes the store next to the output and the
     case then reads it."""

@@ -50,6 +50,7 @@ from lagoonviz.gui.panels import (
     PlotsPanel,
     ProfilesPanel,
     PropertiesPanel,
+    RunMonitorPanel,
     SceneTreePanel,
     SetupPanel,
     TimelinePanel,
@@ -61,7 +62,7 @@ from lagoonviz.gui.theme import DEFAULT_THEME, THEME_LOOKS, apply_theme
 log = logging.getLogger(__name__)
 SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
-LAYOUT_VERSION = 4
+LAYOUT_VERSION = 5  # 5: the Run monitor
 #: the items the toolbar adds (the Add menu has them all)
 #: items that cut a case's volume (made for the case of the selected item)
 VOLUME_TOOLS = ("slice", "iso_surface", "iso_volume", "streamlines", "volume")
@@ -144,6 +145,8 @@ class MainWindow(QMainWindow):
         self.timeline.keyRequested.connect(self.add_camera_key)
         self.plots = PlotsPanel(self.bridge)
         self.profiles = ProfilesPanel(self.bridge)
+        self.run_monitor = RunMonitorPanel(self.bridge)
+        self.run_monitor.follow = lambda on: self.set_follow(on)
         self.console = ConsolePanel(self.bridge)
         self.setup_panel = SetupPanel(self.bridge, self.settings)
         # the Map tab draws the domain in the 3D view's 2D top view
@@ -194,6 +197,9 @@ class MainWindow(QMainWindow):
         # free surface lines share the plots' place, as a tab next to them
         self._dock("profiles", "Free surface lines", self.profiles, Qt.BottomDockWidgetArea)
         self.tabifyDockWidget(self.docks["plots"], self.docks["profiles"])
+        # how the latest run is going, a tab there too
+        self._dock("run", "Run monitor", self.run_monitor, Qt.BottomDockWidgetArea)
+        self.tabifyDockWidget(self.docks["profiles"], self.docks["run"])
         self.docks["plots"].raise_()
         self._default_state = self.saveState(LAYOUT_VERSION)
         self._sized = False
@@ -1478,6 +1484,7 @@ class MainWindow(QMainWindow):
             self._follow_timer.setInterval(FOLLOW_SECONDS * 1000)
             self._follow_timer.timeout.connect(self._check_for_new_output)
         self.act_follow.setChecked(bool(on))
+        self.run_monitor.set_following(on)
         if on:
             self._signatures = self._case_signatures()
             self._follow_timer.start()

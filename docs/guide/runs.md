@@ -111,6 +111,27 @@ running simulation appear, and the scene, time and camera stay. *File → Follow
 running simulation* does this by itself whenever the simulation writes, and keeps
 the timeline at the newest output.
 
+### Run monitor
+
+The *Run monitor* (a tab beside the plots) shows how the latest run of a case is
+going, read every few seconds from its run log (REEF3D_Case) and REEF3D_Log:
+
+- whether it is running, finished, stopped, or **not responding** (no end written
+  and no iteration for much longer than one takes: killed, crashed or hanging);
+- iteration and simulation time, against N 45 and N 41 of the control file the run
+  was started with, as a progress bar;
+- the time step, the speed (simulated seconds per wall hour, wall seconds per
+  iteration over the last 50), the wall time so far, and the time **to the end**
+  with the clock time it will be done;
+- the outputs written, and the largest velocity;
+- small plots of the time step and the largest velocity over the last iterations.
+
+Warnings say when the time step drops to a tenth of the usual, the largest velocity
+rises to five times the usual, a value is NaN, or **ctrl.txt was changed after the
+run started**: the run goes on with the copy in REEF3D_Case, and the changed lines
+are listed (`-` as the run has it, `+` as ctrl.txt has it now). *Follow* is
+*File → Follow running simulation*.
+
 ## LAGOON stores
 
 A run converted to the [LAGOON format](format.md) (*File → Convert to LAGOON

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Run monitor
+
+- A *Run monitor* tab beside the plots: state (running, finished, stopped, not
+  responding), iteration and time against N 45 and N 41, time step, speed, wall
+  time so far and to the end (with the clock time), outputs, largest velocity, and
+  small plots of the time step and the velocity. Warnings for a time step that
+  collapses, a velocity that runs away, NaN, a log gone quiet, and ctrl.txt changed
+  after the run started (the changes listed). *Follow* switches File → Follow
+  running simulation.
+
 ### CFD cases
 
 - A case folder opens with the run of the solver ctrl.txt sets up (A 10): a CFD
