@@ -295,9 +295,28 @@ def _results(p: QPainter) -> None:
     p.restore()
 
 
+def _plots(p: QPainter) -> None:
+    """2D plots: axes, measured points and a fitted curve."""
+    p.drawLine(QPointF(10, 8), QPointF(10, 54))
+    p.drawLine(QPointF(10, 54), QPointF(58, 54))
+    p.save()
+    p.setPen(QPen(QColor(COLORS["accent"]), 4, Qt.SolidLine, Qt.RoundCap))
+    path = QPainterPath(QPointF(14, 48))
+    path.cubicTo(28, 46, 40, 34, 56, 12)
+    p.drawPath(path)
+    p.restore()
+    p.save()
+    p.setBrush(QColor(COLORS["cursor"]))
+    p.setPen(Qt.NoPen)
+    for x, y in ((20, 42), (32, 40), (42, 26), (52, 22)):
+        p.drawEllipse(QPointF(x, y), 3.5, 3.5)
+    p.restore()
+
+
 DRAWINGS: dict[str, Draw] = {
     "setup": _setup,
     "results": _results,
+    "plots": _plots,
     "open_case": _folder,
     "open": _open,
     "save": _save,

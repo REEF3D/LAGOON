@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QToolButton,
     QWidget,
 )
@@ -77,6 +78,8 @@ CHOOSE_DATA = (
     "streamlines",
     "statistics",
 )
+#: the window setting of the figure last shown in the 2D plots (its template, JSON)
+PLOTS_KEY = "plots/template"
 #: the window setting of the memory use mode (lagoonviz.core.memory)
 MEMORY_KEY = "performance/memory"
 TOOLBAR_KINDS = (
@@ -136,7 +139,12 @@ class MainWindow(QMainWindow):
         self.viewports.setObjectName("viewports")
         self.viewports.setChildrenCollapsible(False)
         self.viewports.addWidget(self.viewport)
-        self.setCentralWidget(self.viewports)
+        # the middle of the window: the 3D views, or the 2D plots (the figure editor)
+        self.central = QStackedWidget()
+        self.central.setObjectName("central")
+        self.central.addWidget(self.viewports)
+        self.setCentralWidget(self.central)
+        self.plots_editor = None  # made when the 2D plots are first shown
         self.viewport2 = None
         self.scene_tree = SceneTreePanel(self.bridge)
         self.properties = PropertiesPanel(self.bridge)
@@ -208,6 +216,7 @@ class MainWindow(QMainWindow):
         self.scene_tree.itemPicked.connect(self._item_picked)
         self.bridge.historyChanged.connect(self._on_history)
         self.bridge.sceneChanged.connect(self._on_mode_event)
+        self.bridge.timeChanged.connect(self._plots_time)
 
         self._build_actions()
         self._build_menus()
@@ -297,9 +306,17 @@ class MainWindow(QMainWindow):
             lambda: self.setup_panel.save(),
             tip="Write the edited ctrl.txt and control.txt of the case shown in the Set-up panel",
         )
+        self.act_mode_plots = self._action(
+            "2D &plots",
+            lambda: self.set_mode("plots"),
+            "Ctrl+Shift+D",
+            tip="Figures of the runs' time series, measured data and tables: x-y plots, "
+            "columns from expressions, fits; paper figures kept as templates",
+        )
+        self.act_mode_plots.setIconText("2D plots")
         self.mode_group = QActionGroup(self)
         self.mode_group.setExclusive(True)
-        for action in (self.act_mode_setup, self.act_mode_results):
+        for action in (self.act_mode_setup, self.act_mode_results, self.act_mode_plots):
             action.setCheckable(True)
             self.mode_group.addAction(action)
         self.act_mode_results.setChecked(True)
@@ -380,7 +397,8 @@ class MainWindow(QMainWindow):
         self.act_figure_editor = self._action(
             "Figure &editor...",
             self.open_figure_editor,
-            tip="Build a figure by dragging time series onto panels; keep it as a template",
+            tip="The 2D plots: build a figure by dragging time series and table columns "
+            "onto panels; keep it as a template",
         )
         self.act_wave_analysis = self._action(
             "&Wave analysis...",
@@ -521,6 +539,7 @@ class MainWindow(QMainWindow):
         view_menu = bar.addMenu("&View")
         view_menu.addAction(self.act_mode_setup)
         view_menu.addAction(self.act_mode_results)
+        view_menu.addAction(self.act_mode_plots)
         view_menu.addSeparator()
         for dock in self.docks.values():
             view_menu.addAction(dock.toggleViewAction())
@@ -612,6 +631,7 @@ class MainWindow(QMainWindow):
         bar.addSeparator()
         bar.addAction(self.act_mode_setup)
         bar.addAction(self.act_mode_results)
+        bar.addAction(self.act_mode_plots)
         # only in the set-up: QToolBar hides the action's button with the action
         self.run_divemesh_button = bar.addAction(self.act_run_divemesh)
         bar.addSeparator()
@@ -663,6 +683,7 @@ class MainWindow(QMainWindow):
             (self.act_reload, "reload"),
             (self.act_mode_setup, "setup"),
             (self.act_mode_results, "results"),
+            (self.act_mode_plots, "plots"),
         ):
             action.setIcon(icon(name))
         for kind in TOOLBAR_KINDS:
@@ -686,7 +707,12 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- modes
     def set_mode(self, mode: str) -> None:
-        """Set-up or results (the toolbar's two buttons, View menu)."""
+        """Set-up, results or 2D plots (the toolbar's mode buttons, View menu). The 2D
+        plots are the window's: the session stays in the set-up or results it was in."""
+        if mode == "plots":
+            self.show_plots()
+            return
+        self.leave_plots()
         if mode != self.session.mode:
             self.session.set_mode(mode)
         self._apply_mode()
@@ -694,6 +720,96 @@ class MainWindow(QMainWindow):
     def _on_mode_event(self, event: str, _item_id: str) -> None:
         if event in ("mode", "reset"):
             self._apply_mode()
+
+    # ------------------------------------------------------------- 2D plots
+    def _plots_time(self, _time: float) -> None:
+        if self.plots_mode and self.plots_editor is not None:
+            self.plots_editor.time_changed()
+
+    @property
+    def plots_mode(self) -> bool:
+        """The 2D plots fill the window's middle (instead of the 3D views)."""
+        return self.central.currentIndex() == 1
+
+    def _make_plots_editor(self):
+        """The figure editor as the 2D plots page; the last figure comes back."""
+        try:
+            import matplotlib  # noqa: F401
+        except ImportError:
+            QMessageBox.warning(
+                self, "2D plots", "The plots need matplotlib; run setup_lagoon.command again."
+            )
+            return None
+        import json
+
+        from lagoonviz.core.figure_template import FigureTemplate
+        from lagoonviz.gui.figure_editor import FigureEditor
+
+        template = None
+        saved = self.settings.value(PLOTS_KEY)
+        if saved:
+            try:
+                template = FigureTemplate.from_dict(json.loads(str(saved)))
+            except (ValueError, TypeError, KeyError):
+                log.info("the last 2D plot could not be read:\n%s", traceback.format_exc())
+        editor = FigureEditor(self, template, embedded=True)
+        self.central.addWidget(editor)
+        return editor
+
+    def show_plots(self):
+        """View → 2D plots: the figure editor fills the window; the panels make way
+        (the timeline stays: free surface lines and 3D views follow its time)."""
+        if self.full_screen:
+            self.toggle_full_screen(False)
+        if self.plots_editor is None:
+            self.plots_editor = self._make_plots_editor()
+            if self.plots_editor is None:
+                self._apply_mode()
+                return None
+        editor = self.plots_editor
+        if not self.plots_mode:
+            self._before_plots = (
+                self.saveState(LAYOUT_VERSION),
+                [name for name, dock in self.docks.items() if not dock.isHidden()],
+            )
+            for name, dock in self.docks.items():
+                if name != "timeline":
+                    dock.hide()
+            self.central.setCurrentWidget(editor)
+            editor.fill_sources()
+            editor.rebuild()
+            editor.changed()
+            self.statusBar().showMessage(
+                "2D plots: drag time series or table columns onto the figure; Set-up or "
+                "Results go back to the 3D view",
+                8000,
+            )
+        self.act_mode_plots.setChecked(True)
+        return editor
+
+    def leave_plots(self) -> None:
+        """Back to the 3D views, with the panels as they were."""
+        if not self.plots_mode:
+            return
+        self.central.setCurrentWidget(self.viewports)
+        state, shown = self._before_plots
+        self._before_plots = None
+        self.restoreState(state, LAYOUT_VERSION)
+        for name in shown:
+            self.docks[name].show()
+        self._keep_plot()
+
+    def _keep_plot(self) -> None:
+        """The figure of the 2D plots, for the next start."""
+        if self.plots_editor is None:
+            return
+        import json
+
+        template = self.plots_editor.template
+        if template.panels or template.tables:
+            self.settings.setValue(PLOTS_KEY, json.dumps(template.to_dict()))
+        else:
+            self.settings.remove(PLOTS_KEY)
 
     def _item_picked(self, item_id: str) -> None:
         """An item clicked in the scene: its properties come to the front (the Set-up
@@ -718,8 +834,11 @@ class MainWindow(QMainWindow):
     def _apply_mode(self) -> None:
         """The window for the mode: the timeline rests in the set-up."""
         setup = self.session.mode == "setup"
-        self.act_mode_setup.setChecked(setup)
-        self.act_mode_results.setChecked(not setup)
+        if self.plots_mode:
+            self.act_mode_plots.setChecked(True)
+        else:
+            self.act_mode_setup.setChecked(setup)
+            self.act_mode_results.setChecked(not setup)
         if setup and self.timeline.play_button.isChecked():
             self.timeline.play_button.setChecked(False)
         self.timeline.setEnabled(not setup)
@@ -729,7 +848,9 @@ class MainWindow(QMainWindow):
         self.act_fit_range.setEnabled(not setup)
         self.act_run_divemesh.setVisible(setup)
         switched = getattr(self, "_shown_mode", "results") != self.session.mode
-        if setup and not self.full_screen:
+        if self.plots_mode:
+            pass  # the panels come back as they were when the plots are left
+        elif setup and not self.full_screen:
             dock = self.docks["setup"]
             dock.show()
             dock.raise_()
@@ -1121,6 +1242,7 @@ class MainWindow(QMainWindow):
             widget.update()
 
     def reset_layout(self) -> None:
+        self.leave_plots()
         self.restoreState(self._default_state, LAYOUT_VERSION)
         for dock in self.docks.values():
             dock.show()
@@ -1133,10 +1255,13 @@ class MainWindow(QMainWindow):
         if self.ask_before_discard and not self.setup_panel.ask_to_save(self):
             event.ignore()
             return
+        self._keep_plot()
         if self.full_screen:
             # closed in the full screen viewer: keep the window as it was before it,
             # panels and toolbar included, for the next start
             state, _maximized, geometry, _shown = self._before_full_screen
+        elif self.plots_mode:  # the panels as they were before the 2D plots
+            state, geometry = self._before_plots[0], self.saveGeometry()
         else:
             state, geometry = self.saveState(LAYOUT_VERSION), self.saveGeometry()
         self.settings.setValue("window/geometry", geometry)
@@ -1381,10 +1506,9 @@ class MainWindow(QMainWindow):
         return dialog
 
     def open_figure_editor(self):
-        """File → Figure editor: a figure built by hand, kept as a template."""
-        from lagoonviz.gui.figure_editor import open_figure_editor
-
-        return open_figure_editor(self)
+        """File → Figure editor: the 2D plots, a figure built by hand, kept as a
+        template."""
+        return self.show_plots()
 
     def export_image(self, path: str | Path | None = None, **settings) -> str | None:
         """File → Export image: the 3D view alone at a size of one's choice."""
@@ -1416,6 +1540,9 @@ class MainWindow(QMainWindow):
         if on == self.full_screen:
             self.act_full_screen.setChecked(on)
             return
+        if on and self.plots_mode:  # the 3D view's full screen: from the 2D plots too
+            self.leave_plots()
+            self._apply_mode()
         if on:
             self._before_full_screen = (
                 self.saveState(LAYOUT_VERSION),

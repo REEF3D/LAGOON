@@ -88,6 +88,7 @@ nav:
       - The 3D view: guide/viewport.md
       - Timeline and camera paths: guide/timeline.md
       - Plots and wave profiles: guide/plots.md
+      - 2D plots: guide/plots2d.md
       - Paper figures: guide/figures.md
       - Films: guide/films.md
       - Cinematic looks and path tracing: guide/cinematic.md

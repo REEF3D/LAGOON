@@ -40,6 +40,7 @@ dependencies = [
     "matplotlib>=3.8",  # paper figures (File > Export figure)
     "pillow>=9.5",  # map tiles, GeoTIFF without rasterio
     "scipy>=1.10",  # bathymetry onto the grid (TIN, inverse distance)
+    "openpyxl>=3.1",  # 2D plots: tables from Excel files
 ]
 
 [project.optional-dependencies]

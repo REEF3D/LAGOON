@@ -1351,3 +1351,112 @@ def test_frame_and_fit_range_shortcuts(window, reef3d_run):
     props = window.session.scene.get("free_surface-1").properties
     assert props["auto_range"] is False and props["vmin"] < props["vmax"]
     assert "Colour range" in window.statusBar().currentMessage()
+
+
+def test_the_2d_plots(window, tmp_path, qtbot):
+    """View > 2D plots: the figure editor fills the window (the panels make way and
+    come back); tables, columns from expressions, x-y panels with fits, live update,
+    the figure kept for the next start."""
+    pytest.importorskip("matplotlib")
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.core.figure_template import Line
+
+    run = make_run(tmp_path / "run", frames=4, print_interval=0.5, series=True)
+    window.open_case(run)
+    window.docks["console"].hide()
+    window.act_mode_plots.trigger()
+    editor = window.plots_editor
+    assert window.plots_mode and window.central.currentWidget() is editor
+    assert window.act_mode_plots.isChecked() and not window.act_mode_results.isChecked()
+    assert {n for n, d in window.docks.items() if not d.isHidden()} == {"timeline"}
+    assert window.open_figure_editor() is editor  # File > Figure editor: the same page
+    editor.reject()  # Esc does not close the page
+    assert editor.isVisible()
+
+    # a data file as a table; a column from an expression; on the clipboard
+    data = tmp_path / "flume.dat"
+    data.write_text(
+        "H [m]\tT [s]\tKr [-]\n0.05\t1.0\t0.10\n0.10\t1.2\t0.18\n0.15\t1.4\t0.27\n0.20\t1.6\t0.35\n"
+    )
+    assert editor.add_table("file", source=f"file:{data}", name="flume") == "flume"
+    assert editor.data_table_box.currentData() == "flume"
+    assert (editor.data_view.columnCount(), editor.data_view.rowCount()) == (3, 4)
+    assert editor.add_column("H2", "H**2")
+    assert editor.template.tables[0]["formulas"] == {"H2": "H**2"}
+    assert editor.data_view.columnCount() == 4
+    assert editor.copy_data().splitlines()[0].split("\t") == ["H", "T", "Kr", "H2"]
+    assert not editor.add_column("bad", "nonsense + 1")  # not computed: said so
+    assert "bad" in editor.data_info.text()
+    editor.template.tables[0]["formulas"].pop("bad")
+    # the table's columns are sources; one onto the figure makes an x-y panel
+    names = [
+        editor.sources.topLevelItem(i).text(0) for i in range(editor.sources.topLevelItemCount())
+    ]
+    top = editor.sources.topLevelItem(names.index("flume (table)"))
+    kr = next(
+        top.child(i) for i in range(top.childCount()) if top.child(i).text(0).startswith("Kr")
+    )
+    line = kr.data(0, Qt.UserRole)
+    assert line.table == "flume" and line.x == "H"
+    editor.add_line(line)
+    assert [p.kind for p in editor.template.panels] == ["xy"]
+    assert editor.panel_layout is not None and editor.line_layout.isRowVisible(editor.fit_box)
+    editor.plot_box.setCurrentIndex(editor.plot_box.findData("scatter"))
+    editor.fit_box.setCurrentIndex(editor.fit_box.findData("linear"))
+    editor.x_box.setCurrentIndex(editor.x_box.findData("T"))
+    drawn = editor.template.panels[0].lines[0]
+    assert (drawn.plot, drawn.fit, drawn.x) == ("scatter", "linear", "T")
+    editor.tree.setCurrentItem(editor.tree.topLevelItem(0))
+    assert editor.panel_layout.isRowVisible(editor.logx_box)
+    assert not editor.panel_layout.isRowVisible(editor.start_box)
+    editor.xlabel_box.setText("$T$ [s]")
+    editor.xlabel_box.editingFinished.emit()
+    assert editor.template.panels[0].xlabel == "$T$ [s]"
+    editor.draw_preview()
+    assert not editor.preview.pixmap().isNull() and editor.problems.text() == ""
+    # a time series as a table too
+    key = next(iter(window.session.data.case("case-1").series))
+    assert editor.add_table("series", source=f"series:{key}", name="gauges")
+    assert editor._tables["gauges"].rows > 0
+    # live: the file changes, the figure follows
+    editor.live_box.setChecked(True)
+    assert editor._live.isActive() and not editor._check_live()
+    import os
+
+    data.write_text(data.read_text() + "0.25\t1.8\t0.44\n")
+    stat = data.stat()
+    os.utime(data, (stat.st_atime, stat.st_mtime + 5))
+    assert editor._check_live() and editor._tables["flume"].rows == 5
+    editor.live_box.setChecked(False)
+    # free surface lines follow the timeline in the plots; x-y panels do not
+    assert not editor.time_changed()
+    editor.add_panel("profile")
+    editor.template.panels[-1].lines.append(Line("x", "eta", data="profile"))
+    assert editor.time_changed()
+    editor.remove_selected()
+
+    # back to the results: the panels as they were; the figure kept for next time
+    window.act_mode_results.trigger()
+    assert not window.plots_mode and window.central.currentWidget() is window.viewports
+    shown = {n for n, d in window.docks.items() if not d.isHidden()}
+    assert "console" not in shown and {"scene", "properties", "timeline"} <= shown
+    assert window.act_mode_results.isChecked()
+    second = MainWindow(Session(), settings=window.settings)
+    second.ask_before_discard = False
+    qtbot.addWidget(second)
+    kept = second.show_plots()
+    assert [p.kind for p in kept.template.panels] == ["xy"]
+    assert kept.template.tables[0]["name"] == "flume"
+    # New: an empty figure, the tables stay
+    kept.new_figure()
+    assert kept.template.panels == [] and len(kept.template.tables) == 2
+
+
+def test_full_screen_from_the_2d_plots(window):
+    pytest.importorskip("matplotlib")
+    window.show_plots()
+    window.toggle_full_screen(True)
+    assert not window.plots_mode and window.full_screen
+    window.toggle_full_screen(False)
+    assert window.act_mode_results.isChecked()

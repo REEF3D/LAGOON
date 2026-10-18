@@ -76,7 +76,8 @@ class DataTable:
             try:
                 value = evaluate(expression, self.columns)
             except (ValueError, KeyError, TypeError, ZeroDivisionError, SyntaxError) as error:
-                self.errors[name] = str(error)
+                # (a KeyError's str() is its message in quotes)
+                self.errors[name] = str(error.args[0]) if error.args else str(error)
                 continue
             value = np.asarray(value, dtype=np.float64)
             if value.ndim == 0:

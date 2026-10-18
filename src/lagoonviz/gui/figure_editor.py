@@ -39,9 +39,13 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -50,9 +54,11 @@ from PySide6.QtWidgets import (
 
 from lagoonviz.core.figure_template import (
     BAR_PLACES,
+    FIT_KINDS,
     LEGEND_PLACES,
     LINE_STYLES,
     MARKERS,
+    PLOT_KINDS,
     SUFFIX,
     FigureTemplate,
     Line,
@@ -72,7 +78,17 @@ PANEL_LABELS = {
     "spectrum": "Spectrum",
     "profile": "Free surface lines",
     "view": "3D view",
+    "xy": "X-Y (table columns)",
 }
+#: what the editor offers to make a table from
+TABLE_SOURCES = {
+    "file": "Data file (text, CSV, Excel)…",
+    "series": "A time-series file of the case…",
+    "profile": "Free surface lines at the current time…",
+    "collect": "Values over all open runs…",
+}
+#: how often a live figure looks for changed data [ms]
+LIVE_MS = 2000
 
 STYLE_NAMES = {"-": "solid", "--": "dashed", ":": "dotted", "-.": "dash-dot", "none": "no line"}
 
@@ -135,15 +151,21 @@ class FigureTree(QTreeWidget):
 
 
 class FigureEditor(QDialog):
-    """A non-modal window: one figure, edited live."""
+    """One figure, edited live: the 2D plots mode of the main window (``embedded``),
+    or a window of its own."""
 
-    def __init__(self, window, template: FigureTemplate | None = None) -> None:
+    def __init__(
+        self, window, template: FigureTemplate | None = None, embedded: bool = False
+    ) -> None:
         super().__init__(window)
         from lagoonviz.render.figure import STYLES, WIDTHS
 
         self.main_window = window
         self.session = window.session
         self.template = template or FigureTemplate()
+        self.embedded = embedded
+        if embedded:  # a page of the main window, not a window
+            self.setWindowFlags(Qt.Widget)
         self.setWindowTitle("Figure editor")
         self.resize(1100, 640)
         self._updating = False
@@ -154,10 +176,21 @@ class FigureEditor(QDialog):
         self.sources.itemDoubleClicked.connect(self._source_double_clicked)
         add_file = QPushButton("Add measured file…")
         add_file.clicked.connect(self.add_measured_file)
+        add_table = QPushButton("Add table")
+        table_menu = QMenu(add_table)
+        for kind, label in TABLE_SOURCES.items():
+            table_menu.addAction(label, lambda kind=kind: self.add_table(kind))
+        add_table.setMenu(table_menu)
+        add_table.setToolTip(
+            "A table of columns for X-Y panels: a data file, a time-series file, the free "
+            "surface lines now, or values collected over the open runs; new columns from "
+            "expressions in the Data tab"
+        )
         left = QWidget()
         column = QVBoxLayout(left)
         column.setContentsMargins(0, 0, 0, 0)
         column.addWidget(self.sources, 1)
+        column.addWidget(add_table)
         column.addWidget(add_file)
 
         # the figure and the settings of what is selected
@@ -189,7 +222,11 @@ class FigureEditor(QDialog):
         column.setContentsMargins(0, 0, 0, 0)
         column.addWidget(self.tree, 1)
         column.addLayout(buttons)
-        column.addWidget(self.settings_stack)
+        settings = QScrollArea()  # the panels' settings are many: they scroll
+        settings.setWidget(self.settings_stack)
+        settings.setWidgetResizable(True)
+        settings.setFrameShape(QScrollArea.NoFrame)
+        column.addWidget(settings)
 
         # the figure as it will be written
         self.preview = QLabel("Drag a time series onto the figure")
@@ -198,13 +235,28 @@ class FigureEditor(QDialog):
         self.problems = QLabel()
         self.problems.setWordWrap(True)
         self.problems.setStyleSheet("color: #c4302b;")
+        figure_page = QWidget()
+        page = QVBoxLayout(figure_page)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.addWidget(self.preview, 1)
+        self.view_tabs = QTabWidget()
+        self.view_tabs.addTab(figure_page, "Figure")
+        self.view_tabs.addTab(self._data_page(), "Data")
         right = QWidget()
         column = QVBoxLayout(right)
         column.setContentsMargins(0, 0, 0, 0)
-        column.addWidget(self.preview, 1)
+        column.addWidget(self.view_tabs, 1)
         column.addWidget(self.problems)
         actions = QHBoxLayout()
+        self.live_box = QCheckBox("Live")
+        self.live_box.setToolTip(
+            "Draw again when the data change: tables' files and the time series of a "
+            "running simulation"
+        )
+        self.live_box.toggled.connect(self._live_toggled)
+        actions.addWidget(self.live_box)
         for text, slot in (
+            ("New", self.new_figure),
             ("Open template…", self.open_template),
             ("Save template…", self.save_template),
             ("Export figure…", self.export),
@@ -225,8 +277,17 @@ class FigureEditor(QDialog):
         self._redraw.setSingleShot(True)
         self._redraw.setInterval(250)
         self._redraw.timeout.connect(self.draw_preview)
+        self._live = QTimer(self)
+        self._live.setInterval(LIVE_MS)
+        self._live.timeout.connect(self._check_live)
+        self._stamps: tuple = ()
+        self._tables: dict = {}
         self.fill_sources()
         self.rebuild()
+        if embedded:  # Return in a field is not a click on the window's first button
+            for button in self.findChildren(QPushButton):
+                button.setAutoDefault(False)
+                button.setDefault(False)
 
     # ------------------------------------------------------------- forms
     def _figure_form(self, styles, widths) -> QWidget:
@@ -318,6 +379,15 @@ class FigureEditor(QDialog):
         self.start_box = _number(0, 1e7, " s", "start")
         self.end_box = _number(0, 1e7, " s", "end")
         self.compare_box = QCheckBox("Statistics: first line against the measured one")
+        self.xlabel_box = QLineEdit()
+        self.xlabel_box.setPlaceholderText("automatic (the x column)")
+        self.xmin_box = QLineEdit()
+        self.xmax_box = QLineEdit()
+        for box in (self.xmin_box, self.xmax_box):
+            box.setPlaceholderText("automatic")
+        self.logx_box = QCheckBox("Logarithmic x axis")
+        self.y2label_box = QLineEdit()
+        self.y2label_box.setPlaceholderText("automatic (lines on the right axis)")
         form.addRow("Panel", self.kind_box)
         form.addRow("Title", self.panel_title_box)
         form.addRow("Columns", self.span_box)
@@ -327,6 +397,10 @@ class FigureEditor(QDialog):
         form.addRow("", self.bars_box)
         form.addRow("Colour bars", self.bar_place_box)
         form.addRow("Bar length", self.bar_length_box)
+        form.addRow("x label", self.xlabel_box)
+        form.addRow("x min", self.xmin_box)
+        form.addRow("x max", self.xmax_box)
+        form.addRow("", self.logx_box)
         form.addRow("y label", self.ylabel_box)
         form.addRow("y min", self.ymin_box)
         form.addRow("y max", self.ymax_box)
@@ -334,6 +408,7 @@ class FigureEditor(QDialog):
         form.addRow("From", self.start_box)
         form.addRow("To", self.end_box)
         form.addRow("", self.compare_box)
+        form.addRow("Right y label", self.y2label_box)
         form.addRow("Legend", self.legend_box)
         form.addRow("Legend columns", self.legend_columns_box)
         form.addRow("Legend text", self.legend_size_box)
@@ -341,9 +416,24 @@ class FigureEditor(QDialog):
         form.addRow("Notes", self.notes_box)
         for box in (self.kind_box, self.view_box, self.bar_place_box, self.legend_box):
             box.currentIndexChanged.connect(self._panel_changed)
-        for box in (self.ylabel_box, self.ymin_box, self.ymax_box, self.panel_title_box):
+        for box in (
+            self.ylabel_box,
+            self.ymin_box,
+            self.ymax_box,
+            self.panel_title_box,
+            self.xlabel_box,
+            self.xmin_box,
+            self.xmax_box,
+            self.y2label_box,
+        ):
             box.editingFinished.connect(self._panel_changed)
-        for box in (self.logy_box, self.compare_box, self.bars_box, self.legend_frame_box):
+        for box in (
+            self.logy_box,
+            self.compare_box,
+            self.bars_box,
+            self.legend_frame_box,
+            self.logx_box,
+        ):
             box.toggled.connect(self._panel_changed)
         for box in (
             self.start_box,
@@ -376,9 +466,14 @@ class FigureEditor(QDialog):
             self.ymin_box: lines,
             self.ymax_box: lines,
             self.logy_box: lines,
-            self.start_box: lines,
-            self.end_box: lines,
+            self.start_box: lines and kind != "xy",
+            self.end_box: lines and kind != "xy",
             self.compare_box: kind == "time",
+            self.xlabel_box: kind == "xy",
+            self.xmin_box: kind == "xy",
+            self.xmax_box: kind == "xy",
+            self.logx_box: kind == "xy",
+            self.y2label_box: kind == "xy",
         }
         for widget, visible in shown.items():
             self.panel_layout.setRowVisible(widget, visible)
@@ -402,6 +497,23 @@ class FigureEditor(QDialog):
         self.width_line_box = _number(0, 10, " pt", "style's")
         self.in_legend_box = QCheckBox("In the legend")
         self.in_legend_box.setToolTip("Name this line in the panel's legend")
+        self.x_box = QComboBox()
+        self.x_box.setToolTip("The table's column for x")
+        self.plot_box = QComboBox()
+        for kind in PLOT_KINDS:
+            self.plot_box.addItem(kind, kind)
+        self.axis_box = QComboBox()
+        self.axis_box.addItem("left", "left")
+        self.axis_box.addItem("right", "right")
+        self.fit_box = QComboBox()
+        for kind in FIT_KINDS:
+            self.fit_box.addItem(kind or "no fit", kind)
+        self.fit_box.setToolTip("A curve fitted to the points, its equation and R² in the legend")
+        self.line_layout = form
+        form.addRow("x column", self.x_box)
+        form.addRow("Draw as", self.plot_box)
+        form.addRow("y axis", self.axis_box)
+        form.addRow("Fit", self.fit_box)
         form.addRow("Label", self.label_box)
         form.addRow("Colour", self.color_button)
         form.addRow("Line", self.linestyle_box)
@@ -410,7 +522,14 @@ class FigureEditor(QDialog):
         form.addRow("", self.in_legend_box)
         self.in_legend_box.toggled.connect(self._line_changed)
         self.label_box.editingFinished.connect(self._line_changed)
-        for box in (self.linestyle_box, self.marker_box):
+        for box in (
+            self.linestyle_box,
+            self.marker_box,
+            self.x_box,
+            self.plot_box,
+            self.axis_box,
+            self.fit_box,
+        ):
             box.currentIndexChanged.connect(self._line_changed)
         self.width_line_box.valueChanged.connect(self._line_changed)
         return form_widget
@@ -441,7 +560,27 @@ class FigureEditor(QDialog):
             self.sources.addTopLevelItem(top)
         for path in self._measured:
             self._add_measured_item(path)
+        self._tables = self.template.load_tables(self.session)
+        for spec in self.template.table_specs():
+            table = self._tables.get(spec.name)
+            top = QTreeWidgetItem([f"{spec.name} (table)"])
+            top.setToolTip(0, spec.source)
+            top.setFlags(top.flags() & ~Qt.ItemIsDragEnabled)
+            if table is None:
+                top.setText(
+                    0, f"{spec.name} (table: {self.template.table_errors.get(spec.name, '?')})"
+                )
+            else:
+                first = table.names[0] if table.names else ""
+                for name in table.names:
+                    unit = f" [{table.units[name]}]" if table.units.get(name) else ""
+                    child = QTreeWidgetItem([name + unit])
+                    child.setData(0, ROLE, Line("", name, table=spec.name, x=first))
+                    top.addChild(child)
+            self.sources.addTopLevelItem(top)
         self.sources.expandAll()
+        if hasattr(self, "data_table_box"):
+            self._fill_data_tables()
 
     def add_measured_file(self, path: str | None = None) -> None:
         if not path:
@@ -476,6 +615,261 @@ class FigureEditor(QDialog):
         if isinstance(line, Line):
             self.add_line(copy.copy(line), self.panel_of(self.tree.currentItem()))
 
+    # ------------------------------------------------------------- tables
+    def _table_name(self, wanted: str) -> str:
+        names = {t["name"] for t in self.template.tables}
+        name, n = wanted, 2
+        while name in names:
+            name, n = f"{wanted} {n}", n + 1
+        return name
+
+    def add_table(self, kind: str, source: str | None = None, name: str | None = None):
+        """A table for X-Y panels (TABLE_SOURCES); ``source`` skips the questions."""
+        from PySide6.QtWidgets import QInputDialog
+
+        from lagoonviz.core.tables import TableSpec
+
+        collect: dict[str, str] = {}
+        if source is None:
+            if kind == "file":
+                path, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "Data file",
+                    "",
+                    "Data (*.dat *.txt *.csv *.tsv *.xlsx);;All files (*)",
+                )
+                if not path:
+                    return None
+                source, name = f"file:{path}", name or Path(path).stem
+            elif kind == "series":
+                keys = list(series_columns(self.session))
+                if not keys:
+                    QMessageBox.information(self, "Add table", "No time-series files in the case.")
+                    return None
+                key, ok = QInputDialog.getItem(
+                    self, "Add table", "Time-series file", keys, 0, False
+                )
+                if not ok:
+                    return None
+                source, name = f"series:{key}", name or key
+            elif kind == "profile":
+                keys = list(profile_columns(self.session))
+                if not keys:
+                    QMessageBox.information(self, "Add table", "No free surface lines in the case.")
+                    return None
+                key, ok = QInputDialog.getItem(
+                    self, "Add table", "Free surface lines", keys, 0, False
+                )
+                if not ok:
+                    return None
+                when = float(self.session.scene.time)
+                source, name = f"profile:{key}@{when:g}", name or f"{key} at {when:g} s"
+            else:
+                text, ok = QInputDialog.getMultiLineText(
+                    self,
+                    "Values over all open runs",
+                    "One value a line: name = time-series file: expression, e.g.\n"
+                    "Fz max = nhflow_6dof_forces_0: max(Fz)\nHm0 P3 = nhflow_wsf_hg: hm0(P3)",
+                )
+                if not ok or not text.strip():
+                    return None
+                for row in text.splitlines():
+                    if "=" in row:
+                        left, right = row.split("=", 1)
+                        collect[left.strip()] = right.strip()
+                source, name = "collect:", name or "runs"
+        spec = TableSpec(self._table_name(name or "table"), source, collect=collect)
+        self.template.tables.append(spec.to_dict())
+        self.fill_sources()
+        self.changed()
+        return spec.name
+
+    def _data_page(self) -> QWidget:
+        """The Data tab: a table's columns, new ones from expressions."""
+        page = QWidget()
+        column = QVBoxLayout(page)
+        column.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        self.data_table_box = QComboBox()
+        self.data_table_box.currentIndexChanged.connect(lambda _i: self._show_data())
+        add_column = QPushButton("Add column…")
+        add_column.setToolTip(
+            "A column from an expression of the others, e.g. 100 * P1, sqrt(u**2 + v**2), "
+            "max(Fz) - min(Fz), smooth(eta, 11), where(t > 10, eta, nan)"
+        )
+        add_column.clicked.connect(lambda: self.add_column())
+        remove_column = QPushButton("Remove column")
+        remove_column.clicked.connect(self.remove_column)
+        remove_table = QPushButton("Remove table")
+        remove_table.clicked.connect(self.remove_table)
+        copy_button = QPushButton("Copy")
+        copy_button.setToolTip("The table on the clipboard, tab separated")
+        copy_button.clicked.connect(self.copy_data)
+        row.addWidget(self.data_table_box, 1)
+        for button in (add_column, remove_column, remove_table, copy_button):
+            row.addWidget(button)
+        self.data_view = QTableWidget()
+        self.data_view.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.data_info = QLabel()
+        self.data_info.setWordWrap(True)
+        column.addLayout(row)
+        column.addWidget(self.data_view, 1)
+        column.addWidget(self.data_info)
+        return page
+
+    def _fill_data_tables(self) -> None:
+        current = self.data_table_box.currentData()
+        self.data_table_box.blockSignals(True)
+        self.data_table_box.clear()
+        for spec in self.template.tables:
+            self.data_table_box.addItem(spec["name"], spec["name"])
+        index = self.data_table_box.findData(current)
+        self.data_table_box.setCurrentIndex(index if index >= 0 else 0)
+        self.data_table_box.blockSignals(False)
+        self._show_data()
+
+    def _spec_dict(self, name: str) -> dict | None:
+        return next((t for t in self.template.tables if t["name"] == name), None)
+
+    def _show_data(self, limit: int = 2000) -> None:
+        name = self.data_table_box.currentData()
+        table = self._tables.get(name) if name else None
+        view = self.data_view
+        view.clear()
+        if table is None:
+            view.setRowCount(0)
+            view.setColumnCount(0)
+            error = self.template.table_errors.get(name, "") if name else ""
+            self.data_info.setText(error or "Add a table (left) to see its columns here.")
+            return
+        names = table.names
+        rows = min(table.rows, limit)
+        view.setColumnCount(len(names))
+        view.setRowCount(rows)
+        headers = []
+        for name_ in names:
+            unit = f" [{table.units[name_]}]" if table.units.get(name_) else ""
+            formula = f"\n= {table.formulas[name_]}" if name_ in table.formulas else ""
+            headers.append(name_ + unit + formula)
+        view.setHorizontalHeaderLabels(headers)
+        if table.labels:
+            view.setVerticalHeaderLabels(table.labels[:rows])
+        for c, name_ in enumerate(names):
+            values = table.columns[name_]
+            for r in range(min(rows, len(values))):
+                cell = QTableWidgetItem(f"{values[r]:.6g}")
+                cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                view.setItem(r, c, cell)
+        more = f", the first {limit} shown" if table.rows > limit else ""
+        errors = "; ".join(f"{k}: {v}" for k, v in table.errors.items())
+        self.data_info.setText(
+            f"{table.rows} rows, {len(names)} columns{more} · {table.source}"
+            + (f"\nNot computed: {errors}" if errors else "")
+        )
+
+    def add_column(self, name: str | None = None, expression: str | None = None) -> bool:
+        """A column of the table shown, from an expression of its columns."""
+        from PySide6.QtWidgets import QInputDialog
+
+        table_name = self.data_table_box.currentData()
+        spec = self._spec_dict(table_name) if table_name else None
+        if spec is None:
+            return False
+        if expression is None:
+            text, ok = QInputDialog.getText(
+                self,
+                "Add column",
+                "name = expression (the columns by name, e.g. eta_cm = 100 * P1)",
+            )
+            if not ok or "=" not in text:
+                return False
+            name, expression = (part.strip() for part in text.split("=", 1))
+        spec.setdefault("formulas", {})[name] = expression
+        self.fill_sources()
+        self.changed()
+        table = self._tables.get(table_name)
+        return table is not None and name in table.columns
+
+    def remove_column(self) -> None:
+        table_name = self.data_table_box.currentData()
+        spec = self._spec_dict(table_name) if table_name else None
+        column = self.data_view.currentColumn()
+        table = self._tables.get(table_name)
+        if spec is None or table is None or column < 0:
+            return
+        name = table.names[column]
+        if name not in spec.get("formulas", {}):
+            self.data_info.setText(f"{name} is read from the source; only computed columns go")
+            return
+        del spec["formulas"][name]
+        self.fill_sources()
+        self.changed()
+
+    def remove_table(self) -> None:
+        name = self.data_table_box.currentData()
+        if not name:
+            return
+        self.template.tables = [t for t in self.template.tables if t["name"] != name]
+        for panel in self.template.panels:
+            panel.lines = [line for line in panel.lines if line.table != name]
+        self.fill_sources()
+        self.rebuild()
+        self.changed()
+
+    def copy_data(self) -> str:
+        from PySide6.QtGui import QGuiApplication
+
+        table = self._tables.get(self.data_table_box.currentData() or "")
+        text = table.text() if table is not None else ""
+        QGuiApplication.clipboard().setText(text)
+        return text
+
+    # ------------------------------------------------------------- live
+    def _live_toggled(self, on: bool) -> None:
+        if on:
+            self._stamps = self._data_stamps()
+            self._live.start()
+        else:
+            self._live.stop()
+
+    def _data_stamps(self) -> tuple:
+        """When the figure's data last changed: its tables' files and the time series
+        its lines and tables read."""
+        stamps = [spec.stamp() for spec in self.template.table_specs()]
+        keys = {line.source for p in self.template.panels for line in p.lines if line.source}
+        keys |= {t["source"][7:] for t in self.template.tables if t["source"].startswith("series:")}
+        for item in self.session.scene:
+            if item.kind != "case":
+                continue
+            case = self.session.data.case(item.id)
+            for key in sorted(keys):
+                series = case.series.get(key) if case is not None else None
+                if series is not None:
+                    try:
+                        stamps.append(series.path.stat().st_mtime)
+                    except OSError:
+                        stamps.append(0.0)
+        for path in sorted(
+            {line.file for p in self.template.panels for line in p.lines if line.file}
+        ):
+            try:
+                stamps.append(Path(path).stat().st_mtime)
+            except OSError:
+                stamps.append(0.0)
+        return tuple(stamps)
+
+    def _check_live(self) -> bool:
+        if not self.isVisible():  # drawn when shown again (the stamps stay old)
+            return False
+        stamps = self._data_stamps()
+        if stamps == self._stamps:
+            return False
+        self._stamps = stamps
+        self._tables = self.template.load_tables(self.session)
+        self._show_data()
+        self.draw_preview()
+        return True
+
     # ------------------------------------------------------------- editing
     def panel_of(self, item: QTreeWidgetItem | None) -> int | None:
         """The panel index of a tree item (a panel, or a line in it); None: none."""
@@ -499,7 +893,8 @@ class FigureEditor(QDialog):
             or not 0 <= panel < len(self.template.panels)
             or not fits(line, self.template.panels[panel].kind)
         ):
-            panel = self.add_panel("profile" if line.data == "profile" else "time")
+            kind = "xy" if line.tabled else "profile" if line.data == "profile" else "time"
+            panel = self.add_panel(kind)
         self.template.panels[panel].lines.append(line)
         self.rebuild(select=(panel, len(self.template.panels[panel].lines) - 1))
         self.changed()
@@ -611,6 +1006,11 @@ class FigureEditor(QDialog):
             self.legend_columns_box.setValue(int(p.legend_columns or 0))
             self.legend_size_box.setValue(float(p.legend_size or 0))
             self.legend_frame_box.setChecked(bool(p.legend_frame))
+            self.xlabel_box.setText(p.xlabel)
+            self.xmin_box.setText("" if p.xmin is None else f"{p.xmin:g}")
+            self.xmax_box.setText("" if p.xmax is None else f"{p.xmax:g}")
+            self.logx_box.setChecked(p.logx)
+            self.y2label_box.setText(p.y2label)
             if self.notes_box.toPlainText() != notes_text(p.notes):
                 self.notes_box.setPlainText(notes_text(p.notes))
             self._panel_rows(p.kind)
@@ -623,6 +1023,22 @@ class FigureEditor(QDialog):
             self.marker_box.setCurrentIndex(max(self.marker_box.findData(item.marker), 0))
             self.width_line_box.setValue(item.width)
             self.in_legend_box.setChecked(item.legend)
+            self.x_box.clear()
+            table = self._tables.get(item.table)
+            for name in table.names if table is not None else []:
+                self.x_box.addItem(name, name)
+            self.x_box.setCurrentIndex(max(self.x_box.findData(item.x), 0))
+            self.plot_box.setCurrentIndex(max(self.plot_box.findData(item.plot), 0))
+            self.axis_box.setCurrentIndex(max(self.axis_box.findData(item.axis), 0))
+            self.fit_box.setCurrentIndex(max(self.fit_box.findData(item.fit), 0))
+            xy = template.panels[panel].kind == "xy"
+            for widget, shown in (
+                (self.x_box, item.tabled),
+                (self.plot_box, xy),
+                (self.axis_box, xy),
+                (self.fit_box, xy),
+            ):
+                self.line_layout.setRowVisible(widget, shown)
         self._updating = False
 
     def _figure_changed(self) -> None:
@@ -663,6 +1079,10 @@ class FigureEditor(QDialog):
         p.legend_size = self.legend_size_box.value() or None
         p.legend_frame = self.legend_frame_box.isChecked()
         p.notes = parse_notes(self.notes_box.toPlainText())
+        p.xlabel = self.xlabel_box.text().strip()
+        p.xmin, p.xmax = _float(self.xmin_box.text()), _float(self.xmax_box.text())
+        p.logx = self.logx_box.isChecked()
+        p.y2label = self.y2label_box.text().strip()
         self._panel_rows(p.kind)
         self.tree.topLevelItem(panel).setText(0, self._panel_label(panel + 1, p))
         self.changed()
@@ -695,6 +1115,11 @@ class FigureEditor(QDialog):
         item.marker = self.marker_box.currentData()
         item.width = self.width_line_box.value()
         item.legend = self.in_legend_box.isChecked()
+        if item.tabled and self.x_box.currentData():
+            item.x = self.x_box.currentData()
+        item.plot = self.plot_box.currentData() or "line"
+        item.axis = self.axis_box.currentData() or "left"
+        item.fit = self.fit_box.currentData() or ""
         self.tree.currentItem().setText(0, item.title())
         self.changed()
 
@@ -714,6 +1139,33 @@ class FigureEditor(QDialog):
     def changed(self) -> None:
         """Draw the preview again soon (edits come in bursts)."""
         self._redraw.start()
+
+    def time_changed(self) -> bool:
+        """The scene's time moved: panels drawn at the scene's time (free surface
+        lines, 3D views without a time of their own) are drawn again."""
+        if any(
+            p.lines
+            and p.kind == "profile"
+            and p.time is None
+            or p.kind == "view"
+            and p.time is None
+            for p in self.template.panels
+        ):
+            self.changed()
+            return True
+        return False
+
+    def reject(self) -> None:
+        """Esc: closes the window; the 2D plots page stays."""
+        if not self.embedded:
+            super().reject()
+
+    def new_figure(self) -> None:
+        """An empty figure (the tables stay: they are often drawn again)."""
+        self.template = FigureTemplate(tables=self.template.tables)
+        self.fill_sources()
+        self.rebuild()
+        self.changed()
 
     # ------------------------------------------------------------- drawing
     def figure(self, dpi: int = 300):

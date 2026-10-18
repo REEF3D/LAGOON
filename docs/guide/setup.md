@@ -23,6 +23,9 @@ forth shows each mode as you left it. A case that has not run yet opens in the
 set-up. The switch is a command like any other: it can be undone, and a script
 switches with `session.set_mode("setup")` or `session.set_mode("results")`.
 
+The third button, *2D plots* (++ctrl+shift+d++), puts the figure editor in place
+of the 3D view without changing the mode of the session ([2D plots](plots2d.md)).
+
 ## Starting a case
 
 *File → Open case…* opens a folder that has input files or output. For a case

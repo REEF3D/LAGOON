@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### 2D plots
+
+- A third mode, *View → 2D plots* (++ctrl+shift+d++): the figure editor fills the
+  window; the panels come back as they were with *Set-up* or *Results*. The figure
+  shown is kept for the next start; *New* starts another (the tables stay).
+- **Tables**: data files (text columns with units in brackets, CSV with decimal
+  commas, Excel), a time-series file, the free surface lines at a moment, or
+  values collected over all open runs. The *Data* tab shows them, adds columns
+  from expressions (`100 * P1`, `sqrt(u**2 + v**2)`, `hm0(P3)`, ...) and copies them.
+- **X-y panels**: a column against another as line, points, steps, bars or filled
+  area; a right y axis; logarithmic axes; fitted curves (linear to cubic,
+  exponential, power, logarithmic) with equation and R².
+- *Live* draws the figure again when its files or a running simulation's time
+  series change; free surface lines and 3D views follow the timeline.
+- `lagoonviz.core.tables` in scripts: `read_table`, `evaluate`, `fit`, `TableSpec`.
+
 ### Wave analysis
 
 - *View → Wave analysis* over a time window: spectra of the lines ticked with Hm0,

@@ -32,17 +32,21 @@ Labels may hold `$\eta$`-style mathematics without LaTeX installed.
 
 ## The figure editor
 
-*File → Figure editor…* builds figures of several panels:
+The figure editor builds figures of several panels. It is the window's
+[2D plots](plots2d.md) mode (*View → 2D plots*, or *File → Figure editor…*), which
+also draws tables of data in x-y panels:
 
 - **Left**: what can be drawn: the time-series files and free surface lines of the open
-  cases, and measured files added with *Add measured file*.
+  cases, measured files added with *Add measured file*, and the columns of the
+  figure's tables (*Add table*).
 - **Middle**: the figure's panels (time series, spectra, free surface lines, 3D views)
   and their lines. Drag a column onto a panel, or double-click it, to add it; onto
   empty space for a new panel. Under it, the settings of what is selected: of the
   figure (style, size, a grid of columns, panel letters (a), (b), ...), of a panel
   (title, how many columns it spans, notes, its moment in time; a 3D view panel
   takes the 3D view as it is when asked), of a line.
-- **Right**: the figure as it will be written, drawn again after each change.
+- **Right**: the figure as it will be written, drawn again after each change; the
+  *Data* tab shows the tables and adds columns from expressions.
 
 Notes are placed with `x, y: text` (fractions of the panel) and may hold
 `$LaTeX$`.
