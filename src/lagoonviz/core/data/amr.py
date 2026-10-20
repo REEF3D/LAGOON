@@ -407,7 +407,7 @@ class AmrDataset(Dataset):
 
     @property
     def label(self) -> str:
-        return f"{self.solver} AMR surface"
+        return f"{self.solver} free surface AMR"
 
     def default_variable(self) -> str:
         for name in ("eta", "elevation", "Hs"):  # (Hs: SEASTATE's AMR maps)

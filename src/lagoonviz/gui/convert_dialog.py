@@ -62,7 +62,7 @@ ROLE_NAMES = {
     "volume": "volume",
     "free_surface": "free surface",
     "bed": "bed",
-    "amr": "AMR surface",
+    "amr": "free surface AMR",
 }
 
 

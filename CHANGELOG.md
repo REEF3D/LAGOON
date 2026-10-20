@@ -2,25 +2,11 @@
 
 ## Unreleased
 
-### Blocks for coasts and estuaries
+### Free Surface AMR
 
-- Edges spaced by the cells at their ends (*Spacing*: 60 m at a mouth to 1.5 km
-  offshore; or growing from both ends up to a largest cell): the cells follow from
-  the length, across the blocks, each edge turned its way. *Cells from spacing*
-  after corners were moved.
-- Circular arcs (an edge's curve): the open sea's side of a block.
-- *Follow the water* (with geo.dat): an edge laid on land a margin from the water
-  below F 60, bending no tighter than a radius; dragging its corner slides it along
-  the shore. `lagoonviz.core.waterline` in scripts.
-- *Import blocks.dat*: a grid made elsewhere as the case's blocks (its faces'
-  nodes kept, the interfaces and boundaries found), to go on with in the Blocks tab.
-- Open faces of block 0 (a tide edge set in ctrl.txt: C 11 2 kept). *Pick edge* in
-  the 2D view.
-- *Attach river*: a river block on a part of an edge, along the river drawn on the
-  map, its banks bending onto the cut, the discharge in at its upstream face.
-- *Pieces*: a block written as several blocks for the processes (cut along i or j,
-  G 54 naming the pieces); *Balance* cuts the blocks for M 10's processes, and the
-  tab says how evenly REEF3D would share the cells out.
+- The AMR surface item is now called *Free Surface AMR* (Add menu, scene, Properties),
+  its datasets "<SOLVER> free surface AMR". It is still what a case opens with in
+  place of the free surface when the run wrote one.
 
 ### Probe
 

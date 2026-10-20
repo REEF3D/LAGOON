@@ -33,7 +33,7 @@ Edit
 Add
   Case
   Free surface
-  AMR surface
+  Free Surface AMR
   Bed
   Volume
   Time series
