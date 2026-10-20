@@ -25,6 +25,9 @@ edge meet there, node for node.
 - *Import blocks.dat*: a grid made elsewhere (its faces' nodes kept) to go on with.
 - *Attach river*: a river block on a part of the chosen edge, along the river drawn
   in the River tab, its discharge in at its upstream face.
+- *Over time*: the chosen block's discharge in at its -i face (from GloFAS or a
+  file) or its water level at its +i face (a file) as discharge-<b>.dat or
+  waterlevel-<b>.dat, *Write the series* (REEF3D's G 54 types 3 and 4).
 - *Tide*: block 0's open sea face as a Riemann edge (B 520) driven by the tide:
   from tidal constituents, a tide gauge or a file of levels, as background-1.dat
   (or B 511), *Write the tide*; *Make grid* writes the edge's zone.
@@ -81,6 +84,11 @@ CURVE_LABELS = {
     "arc": "Circular arc through its point",
     "nodes": "Through its nodes (imported)",
 }
+SERIES_SOURCES = {"glofas": "GloFAS (the river's daily discharge)", "file": "A file"}
+SERIES_FACES = {
+    "inflow": "Discharge in at face -i (discharge-<b>.dat)",
+    "outflow": "Water level at face +i (waterlevel-<b>.dat)",
+}
 TIDE_SOURCES = {
     "constants": "Tidal constituents",
     "observed": "A tide gauge, observed",
@@ -128,6 +136,10 @@ class FaceRow(QWidget):
         text = f"{', '.join(chain)} · {cells} cells"
         if shared:
             text += " · interface: " + ", ".join(shared)
+        series = b.bc_series(self.face)
+        if series is not None:
+            text += f" · over time: {mb.SERIES_FILES[b.bc_type(self.face)].format(series)}"
+            text += " (a value here makes it constant again)"
         self.info.setText(text)
         kind = b.bc_type(self.face)
         value = b.bc_value(self.face)
@@ -404,6 +416,47 @@ class MultiblockTab(QWidget):
             "drawn in the River tab (Draw the river), else the corridor's line"
         )
         self.river_button.clicked.connect(self.attach_river)
+        # an open face over time
+        self.series_face = QComboBox()
+        for key, label in SERIES_FACES.items():
+            self.series_face.addItem(label, key)
+        self.series_source = QComboBox()
+        for key, label in SERIES_SOURCES.items():
+            self.series_source.addItem(label, key)
+        self.series_face.currentIndexChanged.connect(lambda _i: self._series_rows())
+        self.series_source.currentIndexChanged.connect(lambda _i: self._series_rows())
+        self.series_file = QLineEdit()
+        self.series_file.setPlaceholderText("time value: seconds, or date and time (UTC)")
+        series_browse = QPushButton("…")
+        series_browse.setMaximumWidth(30)
+        series_browse.clicked.connect(self._choose_series)
+        self.series_start = QDateTimeEdit()
+        self.series_start.setTimeSpec(Qt.UTC)
+        self.series_start.setDisplayFormat("yyyy-MM-dd HH:mm 'UTC'")
+        self.series_start.setCalendarPopup(True)
+        self.series_start.setDateTime(QDateTime.currentDateTimeUtc().addDays(-30))
+        self.series_start.setToolTip("When the run starts (t = 0)")
+        self.series_days = QDoubleSpinBox()
+        self.series_days.setRange(0.0, 36500.0)
+        self.series_days.setValue(3.0)
+        self.series_days.setSuffix(" days")
+        self.series_days.setSpecialValueText("the file's")
+        self.series_days.setToolTip("How long the run is: the series cut to it (GloFAS: needed)")
+        self.series_scale = QDoubleSpinBox()
+        self.series_scale.setRange(-1e6, 1e6)
+        self.series_scale.setDecimals(4)
+        self.series_scale.setValue(1.0)
+        self.series_scale.setToolTip(
+            "The values times this (a tributary's share, a gauge upstream of the face)"
+        )
+        self.series_button = QPushButton("Write the series")
+        self.series_button.setToolTip(
+            "discharge-<b>.dat or waterlevel-<b>.dat for the chosen block, its face over "
+            "time (G 54 b 3 b or b 4 b; at once in ctrl.txt if the grid was made)"
+        )
+        self.series_button.clicked.connect(self.write_series)
+        self.series_info = QLabel()
+        self.series_info.setWordWrap(True)
         # the tide at the open sea
         self.tide_source = QComboBox()
         for key, label in TIDE_SOURCES.items():
@@ -535,6 +588,22 @@ class MultiblockTab(QWidget):
         river_form.addRow("Discharge", self.discharge)
         river_form.addRow("", self.river_button)
         self.river_width.setValue(200.0)
+        series_box = QGroupBox("Over time (the chosen block)")
+        series_form = self.series_form = QFormLayout(series_box)
+        series_form.addRow("Face", self.series_face)
+        series_form.addRow("From", self.series_source)
+        series_file_row = QHBoxLayout()
+        series_file_row.addWidget(self.series_file, 1)
+        series_file_row.addWidget(series_browse)
+        self.series_file_row = QWidget()
+        self.series_file_row.setLayout(series_file_row)
+        series_form.addRow("File", self.series_file_row)
+        series_form.addRow("Start", self.series_start)
+        series_form.addRow("Length", self.series_days)
+        series_form.addRow("Times", self.series_scale)
+        series_form.addRow("", self.series_button)
+        series_form.addRow(self.series_info)
+        self._series_rows()
         tide_box = QGroupBox("Tide")
         tide_form = self.tide_form = QFormLayout(tide_box)
         tide_form.addRow("From", self.tide_source)
@@ -592,7 +661,8 @@ class MultiblockTab(QWidget):
         body = QWidget()
         column = QVBoxLayout(body)
         column.setContentsMargins(0, 0, 0, 0)
-        for box in (edit_box, block_box, edge_box, water_box, river_box, tide_box, grid_box):
+        boxes = (edit_box, block_box, edge_box, water_box, river_box, series_box, tide_box)
+        for box in (*boxes, grid_box):
             column.addWidget(box)
         column.addStretch(1)
         self.form = body
@@ -1018,6 +1088,46 @@ class MultiblockTab(QWidget):
             ),
             f"A river block on edge {name}: drag its points, or change its cells",
         )
+
+    def _series_rows(self) -> None:
+        level = self.series_face.currentData() == "outflow"
+        model = self.series_source.model()
+        model.item(self.series_source.findData("glofas")).setEnabled(not level)
+        if level:
+            self.series_source.setCurrentIndex(self.series_source.findData("file"))
+        glofas = self.series_source.currentData() == "glofas"
+        self.series_form.setRowVisible(self.series_file_row, not glofas)
+
+    def _choose_series(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "A series", "", "Series (*.txt *.dat *.csv);;All (*)"
+        )
+        if path:
+            self.series_file.setText(path)
+
+    def write_series(self) -> None:
+        k = self.block.currentIndex()
+        if k < 1:
+            self.message.emit("Over time: choose a block 1.. (block 0's river: Sea tab)", True)
+            return
+        options = {
+            "start": self.series_start.dateTime().toUTC().toString(Qt.ISODate),
+            "days": self.series_days.value() or None,
+            "outflow": self.series_face.currentData() == "outflow",
+            "scale": self.series_scale.value(),
+        }
+        if self.series_source.currentData() == "glofas":
+            options["glofas"] = True
+        else:
+            options["file"] = self.series_file.text().strip()
+        found = []
+
+        def write():
+            found.append(self.session.write_block_series(k, case=self.case, **options))
+
+        if self._run(write) and found:
+            self.series_info.setText(found[0].text())
+            self.message.emit(f"Block {k} over time: {found[0].file}", False)
 
     def _tide_rows(self) -> None:
         source = self.tide_source.currentData()

@@ -26,6 +26,11 @@
   gauge (observed or predicted) or a file of levels: `background-1.dat` and B 510,
   or the constituents as B 511; B 515 for a tide travelling along the coast.
   `session.write_tide`, `lagoonviz.core.tide`.
+- **A river over time**: a block's discharge in at its -i face from GloFAS or a
+  file (`discharge-<b>.dat`, G 54 b 3), or its water level at its +i face from a
+  file (`waterlevel-<b>.dat`, G 54 b 4), in the *Over time* box;
+  `session.write_block_series`. Blocks.dat's G 54 types 3 and 4 are read back on
+  import. Needs REEF3D's G 54 time series.
 - **Faster smoothing**: blocks are smoothed on coarser grids first, then by
   red-black over-relaxed sweeps until they settle; *Smoothing* is now the most
   sweeps. A change to one block makes only that block again. The imported Tagus

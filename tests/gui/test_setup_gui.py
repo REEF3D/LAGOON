@@ -949,3 +949,41 @@ def test_the_blocks_tab_writes_the_tide(window, tmp_path):
     tab.write_tide()
     assert "levels of levels.txt" in tab.tide_info.text()
     assert not s.input_file("ctrl.txt").all("B 515")
+
+
+def test_the_blocks_tab_writes_an_open_face_over_time(window, tmp_path):
+    case = tmp_path / "river"
+    case.mkdir()
+    (case / "control.txt").write_text("B 1 1.0\nB 10 0.0 1.0 0.0 1.0 0.0 5.0\nR 20 1\n")
+    (case / "ctrl.txt").write_text("A 10 5\nG 50 1\nF 60 0.0\n")
+    window.open_case(case)
+    panel = window.setup_panel
+    tab = panel.blocks_tab
+    s = window.session
+    s.start_multiblock([0, 1000, 0, 500], cells=(20, 10))
+    s.extrude_block("b0_e", 400.0, cells=10)
+    tab.refresh()
+    hydrograph = tmp_path / "q.txt"
+    hydrograph.write_text("t Q\n0 336\n7200 2000\n")
+    # block 0 is refused
+    tab.block.setCurrentIndex(0)
+    tab.write_series()
+    assert "choose a block 1" in panel.message.text()
+    # a water level: from a file only
+    tab.block.setCurrentIndex(1)
+    tab.series_face.setCurrentIndex(tab.series_face.findData("outflow"))
+    assert tab.series_source.currentData() == "file"
+    assert tab.series_form.isRowVisible(tab.series_file_row)
+    tab.series_face.setCurrentIndex(tab.series_face.findData("inflow"))
+    tab.series_file.setText(str(hydrograph))
+    tab.series_days.setValue(0.0)  # the file's own times
+    tab.series_scale.setValue(0.5)
+    tab.write_series()
+    assert (case / "discharge-1.dat").is_file()
+    assert "168 - 1000 m3/s" in tab.series_info.text()
+    assert s.multiblock().blocks[1].bc_series("i0") == 1
+    assert s.input_file("ctrl.txt").all("G 54") == [[1, 3, 1]]  # the grid's G 50 1: at once
+    assert "discharge-1.dat" in tab.faces["i0"].info.text()
+    # GloFAS: hidden file row
+    tab.series_source.setCurrentIndex(tab.series_source.findData("glofas"))
+    assert not tab.series_form.isRowVisible(tab.series_file_row)

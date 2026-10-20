@@ -28,9 +28,11 @@ The **boundaries** of the faces without an interface (``bc``): ``wall`` (default
 ``inflow`` (a discharge ``value`` in m3/s) or ``outflow`` (a water level ``value`` in
 m). On block 0 they are DIVEMesh's sides (C 11 inflow, C 14 outflow: REEF3D's B 60
 1, W 10, F 62); on the blocks 1.. REEF3D's ``G 54 b 1 Q`` (the -i face) and
-``G 54 b 2 WL`` (the +i face). An ``open`` face of block 0 has a condition of its own
-in ctrl.txt (a tide edge, B 520): DIVEMesh's side gets the code ``value`` (2 when
-none).
+``G 54 b 2 WL`` (the +i face), or over time with a ``series`` (its file's number):
+``G 54 b 3 n`` the discharge from discharge-<n>.dat, ``G 54 b 4 n`` the level from
+waterlevel-<n>.dat (lines "t value"; :func:`series_text`). An ``open`` face of
+block 0 has a condition of its own in ctrl.txt (a tide edge, B 520): DIVEMesh's
+side gets the code ``value`` (2 when none).
 
 Edges are spaced by a ``spacing`` (the cells at their ends, a largest cell; the
 cells follow from the length), made circular ``arc``s, laid along the water
@@ -65,6 +67,10 @@ BCS = ("wall", "inflow", "outflow", "open", "tide")
 EDGE_OF = {"i0": 1, "i1": 2, "j0": 3, "j1": 4}
 #: an open face's DIVEMesh side code when none is given (ctrl.txt sets the condition)
 OPEN_CODE = 2
+#: the file of an open face's series (G 54 types 3 and 4) by its number
+SERIES_FILES = {"inflow": "discharge-{}.dat", "outflow": "waterlevel-{}.dat"}
+#: G 54's type of an open face: constant, over time
+G54_TYPES = {"inflow": (1, 3), "outflow": (2, 4)}
 #: the growth of the cells from a fine end when an edge's spacing has a largest cell
 GROWTH = 1.1
 BEDS = ("geo", "flat")
@@ -344,6 +350,11 @@ class Block:
     def bc_value(self, face: str) -> float | None:
         value = self.bc.get(face, {}).get("value")
         return None if value is None else float(value)
+
+    def bc_series(self, face: str) -> int | None:
+        """The number of the face's series file (G 54 types 3, 4), None: constant."""
+        series = self.bc.get(face, {}).get("series")
+        return None if series is None else int(series)
 
     def to_dict(self) -> dict:
         data = {"name": self.name, "faces": {f: list(self.faces[f]) for f in FACES}}
@@ -811,7 +822,16 @@ class Topology:
         }
         return replace(self, vertices=dict(self.vertices), edges=edges, blocks=list(self.blocks))
 
-    def with_bc(self, block: int, face: str, kind: str, value: float | None = None) -> Topology:
+    def with_bc(
+        self,
+        block: int,
+        face: str,
+        kind: str,
+        value: float | None = None,
+        series: int | None = None,
+    ) -> Topology:
+        """The boundary of a face: ``kind``, its ``value``, and for an inflow or
+        outflow the number of its ``series`` file (over time, G 54 types 3, 4)."""
         if face not in FACES:
             raise ValueError(f"face must be one of {', '.join(FACES)}, got {face!r}")
         if kind not in BCS:
@@ -823,6 +843,10 @@ class Topology:
             bc.pop(face, None)
         else:
             bc[face] = {"type": kind} | ({"value": float(value)} if value is not None else {})
+            if series is not None:
+                if kind not in SERIES_FILES:
+                    raise ValueError(f"a series only for an inflow or outflow, not {kind}")
+                bc[face]["series"] = int(series)
         blocks[int(block)] = replace(b, bc=bc)
         return replace(self, vertices=dict(self.vertices), edges=dict(self.edges), blocks=blocks)
 
@@ -1663,7 +1687,17 @@ def check(topology: Topology) -> list[Issue]:
                     )
                 continue
             value = block.bc_value(face)
-            if value is None:
+            if block.bc_series(face) is not None and b == 0:
+                issues.append(
+                    Issue(
+                        "error",
+                        f"block 0, face {FACE_NAMES[face]}: over time only on the blocks 1.. "
+                        "(G 54); block 0's river: the Sea tab's River (hydrograph.dat, B 60 2)",
+                        where,
+                        b,
+                    )
+                )
+            if value is None and block.bc_series(face) is None:
                 what = "discharge (m3/s)" if kind == "inflow" else "water level (m)"
                 issues.append(
                     Issue("error", f"block {b}, face {FACE_NAMES[face]}: no {what}", where, b)
@@ -1757,6 +1791,44 @@ def bed_heights(topology: Topology, x, y, geo_points=None) -> np.ndarray:
     return np.full(np.shape(x), float(topology.z))
 
 
+@dataclass(frozen=True)
+class Series:
+    """An open face of a block over time (G 54 types 3, 4), as written."""
+
+    block: int
+    kind: str  # "inflow" (discharge, m3/s) or "outflow" (water level, m)
+    times: np.ndarray  # s from the start of the run
+    values: np.ndarray
+    unit: str
+    source: str
+
+    @property
+    def file(self) -> str:
+        return SERIES_FILES[self.kind].format(self.block)
+
+    @property
+    def g54(self) -> int:
+        return G54_TYPES[self.kind][1]
+
+    def text(self) -> str:
+        what = "discharge" if self.kind == "inflow" else "water level"
+        v = self.values
+        return (
+            f"{self.file}: {what} {v.min():.4g} - {v.max():.4g} {self.unit} (mean "
+            f"{v.mean():.4g}) over {self.times[-1] - self.times[0]:.6g} s, {len(v)} values; "
+            f"{self.source}"
+        )
+
+
+def series_text(times, values, note: str = "", unit: str = "m3/s") -> str:
+    """An open face's series file for REEF3D (G 54 types 3, 4): "t value" a line,
+    t in s from the start of the run, ``note`` and the columns as # comments."""
+    lines = [f"# {line}" for line in note.splitlines() if line.strip()]
+    lines.append(f"# t (s), {'discharge' if unit == 'm3/s' else 'water level'} ({unit})")
+    lines += [f"{float(t):.10g} {float(v):.6g}" for t, v in zip(times, values, strict=True)]
+    return "\n".join(lines) + "\n"
+
+
 def blocks_text(nodes: list[tuple[np.ndarray, np.ndarray, np.ndarray]]) -> str:
     """blocks.dat: the number of blocks, then per block "ni nj" and x y zb of every
     node, i fastest."""
@@ -1828,9 +1900,14 @@ def settings(topology: Topology) -> Settings:
         last = len(t.cuts(b)) - 2
         for f in FACES:
             kind = block.bc_type(f)
-            if kind in ("inflow", "outflow") and block.bc_value(f) is not None:
-                piece = 0 if f == "i0" or block.split == "j" else last
-                g54.append([index[(b, piece)], 1 if kind == "inflow" else 2, block.bc_value(f)])
+            if kind not in G54_TYPES:
+                continue
+            piece = 0 if f == "i0" or block.split == "j" else last
+            series = block.bc_series(f)
+            if series is not None:
+                g54.append([index[(b, piece)], G54_TYPES[kind][1], series])
+            elif block.bc_value(f) is not None:
+                g54.append([index[(b, piece)], G54_TYPES[kind][0], block.bc_value(f)])
     xs, ys, steps = [], [], []
     for g in t.grids():
         if g is None:
@@ -2156,7 +2233,8 @@ def bcs_from_inputs(control, ctrl) -> dict:
     """The boundaries of the faces from the input files: block 0's sides (C 11 -
     C 14 of control.txt: 21 a wall, 1 on -i the inflow of W 10, 2 on +i the outflow
     of F 62, others open with their code) and the G 54 lines of ctrl.txt (b 1 Q:
-    inflow on -i, b 2 WL: outflow on +i). ``control``, ``ctrl``: their ControlFiles
+    inflow on -i, b 2 WL: outflow on +i; b 3 n, b 4 n: the same over time from
+    series file n). ``control``, ``ctrl``: their ControlFiles
     (or None)."""
     out: dict = {}
     face_of = {"C 11": "i0", "C 14": "i1", "C 13": "j0", "C 12": "j1"}
@@ -2178,6 +2256,9 @@ def bcs_from_inputs(control, ctrl) -> dict:
     for row in ctrl.all("G 54") if ctrl is not None else []:
         if len(row) >= 3:
             b, kind, value = int(row[0]), int(row[1]), float(row[2])
-            face = "i0" if kind == 1 else "i1"
-            out[(b, face)] = {"type": "inflow" if kind == 1 else "outflow", "value": value}
+            if kind not in (1, 2, 3, 4):
+                continue
+            face = "i0" if kind in (1, 3) else "i1"
+            bc = {"type": "inflow" if kind in (1, 3) else "outflow"}
+            out[(b, face)] = bc | ({"series": int(value)} if kind > 2 else {"value": value})
     return out

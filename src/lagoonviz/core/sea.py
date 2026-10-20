@@ -760,6 +760,38 @@ def river(
     B 60 2) or a side as a patch (``target`` its number: ``hydrograph_Q_<n>.dat``, B
     440 n, B 421 n 1). A table in ``LAGOON_Sea``. With ``apply`` ctrl.txt follows (one
     undo step)."""
+    hours, q, p, spot = glofas(session, case_id, start, end, at, openmeteo)
+    t0 = mo._utc(start)
+    folder = case_folder(session, case_id)
+    t = hours - t0.timestamp()
+    if target in ("B 60", "ioflow", None):
+        written = mo.two_column(folder / "hydrograph.dat", t, q)
+        target = "B 60"
+    else:
+        side = int(target)
+        if side not in SIDES:
+            raise ValueError(f"no side {target}: 1 x min, 2 y max, 3 y min, 4 x max")
+        written = mo.two_column(folder / f"hydrograph_Q_{side}.dat", t, q)
+        target = side
+    note = glofas_note(p, spot)
+    table = mo.write_table(
+        folder / FOLDER / f"GloFAS-{t0:%Y%m%d%H}.dat",
+        t0.timestamp(),
+        {"Q": q},
+        hours,
+        {"Q": "m3/s"},
+        note,
+    )
+    found = River(hours, q, p.lat, p.lon, p.distance, spot, [written, table], str(target))
+    if apply:
+        apply_river(session, case_id, found)
+    return found
+
+
+def glofas(session, case_id: str, start, end, at=None, openmeteo: om.OpenMeteo | None = None):
+    """GloFAS's daily discharge at the case (:func:`river_place`, or ``at`` = (x, y) in
+    the model), hourly from ``start`` to ``end``: (times s since 1970, discharge
+    m3/s, GloFAS's point, the :class:`Place` asked for)."""
     where = frame(session, case_id)
     if at is not None:
         lon, lat = where.lonlat(at[0], at[1])
@@ -774,35 +806,17 @@ def river(
     )
     hours = np.arange(t0.timestamp(), t1.timestamp() + 1.0, 3600.0)
     ok = np.isfinite(daily.columns["Q"])
+    if not ok.any():
+        raise mo.MetoceanError(f"GloFAS has no discharge at {spot.label}")
     q = np.interp(hours, daily.time[ok], daily.columns["Q"][ok])
-    folder = case_folder(session, case_id)
-    t = hours - t0.timestamp()
-    if target in ("B 60", "ioflow", None):
-        written = mo.two_column(folder / "hydrograph.dat", t, q)
-        target = "B 60"
-    else:
-        side = int(target)
-        if side not in SIDES:
-            raise ValueError(f"no side {target}: 1 x min, 2 y max, 3 y min, 4 x max")
-        written = mo.two_column(folder / f"hydrograph_Q_{side}.dat", t, q)
-        target = side
-    p = daily.point
-    note = (
-        f"GloFAS river discharge (Open-Meteo) at {p.lat:.3f} N {p.lon:.3f} E, {p.distance:.1f} "
-        f"km from {spot.label}; daily values, hourly between them"
+    return hours, q, daily.point, spot
+
+
+def glofas_note(point, spot: Place) -> str:
+    return (
+        f"GloFAS river discharge (Open-Meteo) at {point.lat:.3f} N {point.lon:.3f} E, "
+        f"{point.distance:.1f} km from {spot.label}; daily values, hourly between them"
     )
-    table = mo.write_table(
-        folder / FOLDER / f"GloFAS-{t0:%Y%m%d%H}.dat",
-        t0.timestamp(),
-        {"Q": q},
-        hours,
-        {"Q": "m3/s"},
-        note,
-    )
-    found = River(hours, q, p.lat, p.lon, p.distance, spot, [written, table], str(target))
-    if apply:
-        apply_river(session, case_id, found)
-    return found
 
 
 def apply_river(session, case_id: str, found: River) -> None:

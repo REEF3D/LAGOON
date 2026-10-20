@@ -1634,9 +1634,7 @@ class Session:
 
         def reef3d(f):
             f.set("G 50", [1], kinds="int")
-            f.remove("G 54")
-            for b, kind, value in found.g54:
-                f.add("G 54", [b, kind, value], kinds=["int", "int", "double"])
+            _g54(f, found.g54)
             if found.inflow is not None:
                 f.set("B 60", [1], kinds="int")
                 f.set("W 10", [found.inflow])
@@ -1740,6 +1738,104 @@ class Session:
             commands.append(command)
         if commands:
             self.stack.execute(Batch(commands, script, "Tide"))
+        return found
+
+    def write_block_series(
+        self,
+        block: int,
+        start=None,
+        days: float | None = None,
+        file=None,
+        glofas: bool = False,
+        outflow: bool = False,
+        at=None,
+        scale: float = 1.0,
+        case: str | None = None,
+    ):
+        """An open face of a block 1.. over time (REEF3D's G 54 types 3, 4): the
+        discharge in at its -i face, or with ``outflow`` the water level at its +i
+        face, from a ``file`` ("time value" a line: seconds from the start, or a date
+        and time with ``start``) or from GloFAS (``glofas``: the river's daily
+        discharge at the face's middle, or at ``at`` = (x, y), hourly from ``start``
+        over ``days``); times 0 - ``days`` when both are given, the values times
+        ``scale``. Writes discharge-<block>.dat (waterlevel-<block>.dat), the face's
+        boundary and, if the grid was made (G 50 1), its G 54 line. One undo step;
+        returns the :class:`~lagoonviz.core.multiblock.Series`."""
+        import datetime as dt
+
+        import numpy as np
+
+        from lagoonviz.core import multiblock as mb
+        from lagoonviz.core import tide as tides
+
+        case_id = self._case_id(case)
+        b = int(block)
+        topology = self._multiblock_of(case_id)
+        if not 0 < b < len(topology.blocks):
+            raise ValueError(f"no block {block}: over time only on the blocks 1.. (G 54)")
+        kind, face = ("outflow", "i1") if outflow else ("inflow", "i0")
+        if glofas:
+            if outflow:
+                raise ValueError("GloFAS gives a discharge: an inflow, not a water level")
+            if start is None or not days:
+                raise ValueError("GloFAS needs the start of the run and its length (days)")
+            from lagoonviz.core import sea
+            from lagoonviz.core.geo import metocean as mo
+
+            where = tuple(at) if at is not None else mb._face_middle(topology, b, face)
+            t0 = mo._utc(start)
+            hours, values, point, spot = sea.glofas(
+                self, case_id, t0, t0 + dt.timedelta(days=float(days)), where
+            )
+            times = hours - t0.timestamp()
+            note = sea.glofas_note(point, spot) + f"; from {t0:%Y-%m-%d %H:%M} UTC"
+        elif file is not None:
+            times, values = tides.read_levels(file, start)
+            note = f"from {Path(file).name}" + (f", t 0 at {start} UTC" if start else "")
+        else:
+            raise ValueError("give a file or glofas=True")
+        if days:
+            times, values = _window(times, values, 0.0, float(days) * 86400.0)
+        values = np.asarray(values, float) * float(scale)
+        if scale != 1.0:
+            note += f", times {scale:g}"
+        unit = "m" if outflow else "m3/s"
+        found = mb.Series(b, kind, np.asarray(times, float), values, unit, note)
+        folder = self.data.case_folder(case_id)
+        if folder is None:
+            raise ValueError(f"{case_id}: no case folder")
+
+        words = [str(b)]
+        for key, value, default in (
+            ("start", str(start) if start is not None else None, None),
+            ("days", days, None),
+            ("file", str(file) if file is not None else None, None),
+            ("glofas", glofas, False),
+            ("outflow", outflow, False),
+            ("at", list(at) if at is not None else None, None),
+            ("scale", scale, 1.0),
+        ):
+            if value != default:
+                words.append(f"{key}={value!r}")
+        script = "session.write_block_series(" + ", ".join(words)
+        script += f", case={case!r})" if case else ")"
+        changed = topology.with_bc(b, face, kind, float(values.mean()), series=b)
+        commands = [
+            WriteCaseFile(
+                folder / found.file,
+                case_id,
+                mb.series_text(times, values, note, unit),
+                "",
+                found.file,
+            ),
+            self._case_file(case_id, mb.FILE, changed.text(), "", "Open face over time"),
+        ]
+        if self.input_file("ctrl.txt", case_id).values("G 50") == [1]:
+            rows = mb.settings(changed).g54
+            command = self._input_edit("ctrl.txt", case_id, lambda f: _g54(f, rows), "", "ctrl.txt")
+            if command is not None:
+                commands.append(command)
+        self.stack.execute(Batch(commands, script, "Open face over time"))
         return found
 
     def set_input_text(self, file: str, text: str, case: str | None = None) -> None:
@@ -3290,3 +3386,23 @@ def _open_edges(f, tides) -> None:
         f.set("B 90", [1], kinds="int")
     if "B 92" not in f:
         f.set("B 92", [0], kinds="int")
+
+
+def _g54(f, rows) -> None:
+    """ctrl.txt's G 54 lines: the open faces of the blocks 1.. (the series' file
+    number of types 3 and 4 an int)."""
+    f.remove("G 54")
+    for b, kind, value in rows:
+        last = "int" if kind > 2 else "double"
+        f.add("G 54", [b, kind, int(value) if kind > 2 else value], kinds=["int", "int", last])
+
+
+def _window(times, values, t0: float, t1: float):
+    """A series from t0 to t1: its points inside, and its values at the ends (held
+    beyond its own ends)."""
+    import numpy as np
+
+    times, values = np.asarray(times, float), np.asarray(values, float)
+    inside = (times > t0) & (times < t1)
+    t = np.concatenate([[t0], times[inside], [t1]])
+    return t, np.interp(t, times, values)

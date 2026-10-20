@@ -409,6 +409,41 @@ and bending onto the cut's ends, cells *Cell length* long (twice those across wh
 not given). Its i runs downstream: the *Discharge* comes in at its -i face (G 54).
 Its banks are edges to drag, space or lay along the water like any other.
 
+### A river over time
+
+A block 1.. takes its discharge (or its water level) **over time** in the *Over
+time* box, for the block chosen in the *Block* box:
+
+- **Face**: the discharge in at its -i face (`discharge-<b>.dat`, REEF3D's
+  `G 54 b 3 b`) or the water level at its +i face (`waterlevel-<b>.dat`,
+  `G 54 b 4 b`); b is the block's number in the Blocks tab.
+- **From** *GloFAS*: the river's daily discharge (Copernicus, 5 km, from 1984, via
+  Open-Meteo) at the middle of the face, hourly between the days, from *Start* over
+  *Length* (needs the case's georeference). Or *A file*: "time value" a line, the
+  time in seconds from the start of the run or a date and time (UTC, taken from
+  *Start*); a header and `#` comments are skipped. A gauge record from SNIRH, the
+  USGS or NVE as exported does.
+- **Length**: the series cut to the run (its values at 0 and at the end
+  interpolated); *the file's* keeps the file's times. **Times** scales the values
+  (a tributary's share, a gauge upstream of the face).
+
+*Write the series* writes the file (`#` lines saying where it came from) and makes
+the face's boundary the series; with the grid made (G 50 1 in ctrl.txt) the G 54
+lines follow at once, else at *Make grid*. The face's row then shows the file; a
+value typed there makes it constant again. REEF3D interpolates linearly in time and
+holds the end values. The level at an outflow still rises from F 60 over F 64's
+steps. Block 0 has no G 54 face: its river is the Sea tab's *River*
+(`hydrograph.dat`, B 60 2).
+
+`G 54 b 3 n` and `b 4 n` need a REEF3D with the multi-block G 54 time series
+(types 3 and 4). In a script:
+
+```python
+session.write_block_series(5, "2026-01-19T00:00", days=30, glofas=True)
+session.write_block_series(5, file="almourol.csv", start="2026-01-19T00:00", scale=1.05)
+session.write_block_series(2, file="levels.txt", outflow=True)
+```
+
 ### Pieces for the processes
 
 REEF3D runs each block 1.. on one process, and shares block 0 out over all of them
