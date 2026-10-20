@@ -65,6 +65,11 @@ class FakeOpenMeteo:
         hourly_names = params["hourly"].split(",")
         t = _hours(params)
         hourly: dict = {"time": t.tolist()}
+        if api == "archive" and params.get("models") == "cerra":  # 12 m/s to mid 2021
+            end = dt.datetime(2021, 7, 1, tzinfo=dt.UTC).timestamp()
+            hourly["wind_speed_10m"] = [12.0 if s < end else None for s in t]
+            hourly["wind_direction_10m"] = [260.0 if s < end else None for s in t]
+            return {**base, "hourly": hourly}
         if api == "archive":
             hourly["wind_speed_10m"] = (10.0 + 0 * t).tolist()
             hourly["wind_direction_10m"] = (250.0 + 0 * t).tolist()

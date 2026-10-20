@@ -394,6 +394,12 @@ def test_the_sea_tab_anywhere(window, tmp_path, monkeypatch, qtbot):
     tab.levels_button.click()
     qtbot.waitUntil(lambda: tab._runner is None, timeout=20000)
     assert any(i.name.startswith("NOAA gauge") for i in window.session.scene)
+    # CERRA's wind with ERA5's waves: still JONSWAP, its credit
+    tab.source.setCurrentIndex(tab.source.findData("Open-Meteo, CERRA wind"))
+    assert tab.spectrum_button.text() == "Set the waves (JONSWAP)"
+    assert "CERRA" in tab.credit.text()
+    tab.storm_button.click()
+    qtbot.waitUntil(lambda: tab._runner is None and tab.table.rowCount() == 2, timeout=20000)
     # back to MET Norway by hand: the spectrum file again
     tab.source.setCurrentIndex(tab.source.findData("MET Norway"))
     assert tab.spectrum_button.text() == "Write spectrum-file-2d.dat"

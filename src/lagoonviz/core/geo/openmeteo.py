@@ -5,7 +5,9 @@
 - **Waves**: ERA5-Ocean (ECMWF's reanalysis, 0.5°, hourly, 1940 - a few days ago)
   from Open-Meteo's marine API: significant wave height, peak period (the mean
   period when the peak period is not served) and the direction the waves come from;
-  the wind at 10 m from ERA5 (Open-Meteo's archive API).
+  the wind at 10 m from ERA5 (Open-Meteo's archive API), or from CERRA (``wind``
+  "cerra": the Copernicus European Regional Reanalysis, 5.5 km, Europe, 1985 - mid
+  2021 on Open-Meteo; ERA5's wind where and when CERRA has none). CERRA has no waves.
 - **Water level and current**: the sea level above mean sea level with the tide
   and the surge, and the surface current, from Open-Meteo's marine API (Météo-France's
   SMOC, about 8 km, hourly, from 2022).
@@ -66,6 +68,9 @@ OCEAN_SPACING = 4000.0
 #: places asked for in one request (Open-Meteo answers a list)
 BATCH = 50
 
+#: the reanalyses the wind may come from (Open-Meteo's archive API's ``models``)
+WIND_MODELS = {"era5": "ERA5", "cerra": "CERRA"}
+
 #: m/s per unit Open-Meteo may give a speed in
 SPEED_UNITS = {"m/s": 1.0, "km/h": 1.0 / 3.6, "kn": 0.514444, "knots": 0.514444, "mp/h": 0.44704}
 
@@ -124,16 +129,28 @@ class OpenMeteo:
         return answer if isinstance(answer, list) else [answer]
 
     # ------------------------------------------------------------- waves
-    def waves(self, lat: float, lon: float, start, end, progress: Progress | None = None) -> Series:
+    def waves(
+        self,
+        lat: float,
+        lon: float,
+        start,
+        end,
+        progress: Progress | None = None,
+        wind: str = "era5",
+    ) -> Series:
         """Hourly Hs, Tp, where the waves come from, the wind speed and where it
         comes from at the ERA5 cell nearest to (lat, lon) in the sea, ``start`` to
-        ``end`` (UTC), asked a year at a time."""
+        ``end`` (UTC), asked a year at a time. ``wind`` "cerra": the wind from CERRA
+        (5.5 km), ERA5's where CERRA has none."""
+        if wind not in WIND_MODELS:
+            raise MetoceanError(f"unknown wind {wind!r}: {', '.join(WIND_MODELS)}")
         start, end = _utc(start), _utc(end)
         if end < ERA5_START:
             raise MetoceanError("ERA5 starts in 1940")
         start = max(start, ERA5_START)
         years = list(range(start.year, end.year + 1))
         times, cols, point, period = [], {}, None, "wave_peak_period"
+        from_cerra = []
         for number, year in enumerate(years):
             if progress is not None:
                 progress(number / len(years), f"ERA5 waves {year} (Open-Meteo)")
@@ -145,29 +162,40 @@ class OpenMeteo:
                 if times:
                     break  # ERA5 ends here (a few days behind)
                 raise
-            wind = self._wind(lat, lon, a, b)
             if point is None:
                 point = _point(answer, lat, lon)
             t = np.asarray(hourly["time"], np.float64)
             times.append(t)
+            speed, towards, have = self._winds(lat, lon, a, b, t, wind)
+            from_cerra.append(have)
             for name, values in (
                 ("Hs", hourly.get("wave_height")),
                 ("Tp", hourly.get(period)),
                 ("dir_from", hourly.get("wave_direction")),
-                ("wind", _on(wind, "wind_speed_10m", t)),
-                ("wind_from", _on(wind, "wind_direction_10m", t)),
+                ("wind", speed),
+                ("wind_from", towards),
             ):
                 cols.setdefault(name, []).append(_floats(values, len(t)))
         if progress is not None:
             progress(1.0, "ERA5 waves")
         if not times:
             raise MetoceanError(f"no ERA5 waves between {start:%Y-%m-%d} and {end:%Y-%m-%d}")
+        source = "ERA5" if period == "wave_peak_period" else "ERA5 (Tp: the mean period)"
+        if wind == "cerra":
+            t = np.concatenate(times)
+            inside = (t >= start.timestamp()) & (t <= end.timestamp())
+            cerra, hours = int(np.concatenate(from_cerra)[inside].sum()), int(inside.sum())
+            source += (
+                f", wind CERRA ({cerra} of {hours} hours; ERA5's in the others)"
+                if cerra < hours
+                else ", wind CERRA"
+            )
         series = Series(
             np.concatenate(times),
             {k: np.concatenate(v) for k, v in cols.items()},
             {"Hs": "m", "Tp": "s", "dir_from": "deg", "wind": "m/s", "wind_from": "deg"},
             point,
-            "ERA5" if period == "wave_peak_period" else "ERA5 (Tp: the mean period)",
+            source,
         )
         keep = np.isfinite(series.columns["Hs"])
         if not keep.any():
@@ -200,14 +228,32 @@ class OpenMeteo:
             return self._waves(lat, lon, a, b, "wave_period")
         return hourly, answer, period
 
-    def _wind(self, lat, lon, a, b) -> dict:
+    def _winds(self, lat, lon, a, b, t, wind):
+        """The wind speed and where it comes from at the times t: ERA5's, or with
+        ``wind`` "cerra" CERRA's where it has them, ERA5's elsewhere; and where it
+        came from CERRA."""
+        if wind == "era5":
+            era5 = self._wind(lat, lon, a, b)
+            no = np.zeros(len(t), bool)
+            return _on(era5, "wind_speed_10m", t), _on(era5, "wind_direction_10m", t), no
+        cerra = self._wind(lat, lon, a, b, "cerra")
+        speed = _floats(_on(cerra, "wind_speed_10m", t), len(t))
+        towards = _floats(_on(cerra, "wind_direction_10m", t), len(t))
+        have = np.isfinite(speed) & np.isfinite(towards)
+        if not have.all():
+            era5 = self._wind(lat, lon, a, b)
+            speed = np.where(have, speed, _floats(_on(era5, "wind_speed_10m", t), len(t)))
+            towards = np.where(have, towards, _floats(_on(era5, "wind_direction_10m", t), len(t)))
+        return speed, towards, have
+
+    def _wind(self, lat, lon, a, b, model: str = "era5") -> dict:
         try:
             answer = self.get(
                 "archive",
                 latitude=round(lat, 5),
                 longitude=round(lon, 5),
                 hourly=["wind_speed_10m", "wind_direction_10m"],
-                models="era5",
+                models=model,
                 wind_speed_unit="ms",
                 start_date=f"{a:%Y-%m-%d}",
                 end_date=f"{b:%Y-%m-%d}",

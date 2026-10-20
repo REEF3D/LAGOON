@@ -546,6 +546,12 @@ elsewhere):
   **Météo-France's** sea level with the tide and the surge and its surface currents
   (SMOC, 8 km, hourly, from 2022). Free for non-commercial use; for commercial use
   give the key of an Open-Meteo plan in *API key* (kept in LAGOON's settings).
+- **Open-Meteo, CERRA wind**: as Open-Meteo, the wind from **CERRA** (the Copernicus
+  European Regional Reanalysis, 5.5 km, hourly, Europe, 1985 to mid 2021 on
+  Open-Meteo) instead of ERA5's 0.5°: closer to the coast and in fjords and
+  estuaries. CERRA has no waves (they stay ERA5's); where or when it has no wind
+  (outside Europe, after mid 2021) ERA5's stands in, and the table says for how
+  many hours.
 
 It reads at the middle of the wave generation side (C 1x = 6), else at the domain's
 centre; the tab says where and from which source.

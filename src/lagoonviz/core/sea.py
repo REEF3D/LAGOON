@@ -48,7 +48,11 @@ SIDE_STEP = 100.0
 DRY_KM = 1.2
 #: the sources of the sea
 MET_NORWAY, OPEN_METEO = "MET Norway", "Open-Meteo"
-SOURCES = (MET_NORWAY, OPEN_METEO)
+#: Open-Meteo's ERA5 waves with CERRA's wind (5.5 km, Europe, 1985 - mid 2021)
+CERRA = "Open-Meteo, CERRA wind"
+SOURCES = (MET_NORWAY, OPEN_METEO, CERRA)
+#: the wind of Open-Meteo's sources
+WIND = {OPEN_METEO: "era5", CERRA: "cerra"}
 #: where MET Norway's hindcasts reach (NORA3: the Nordic seas, the North Sea and the
 #: Barents Sea; NorKyst: the Norwegian coast): lat, lon box
 MET_BOX = (54.0, 82.0, -12.0, 45.0)
@@ -167,7 +171,7 @@ def _source(session, case_id: str, source: str | None) -> str:
 def _waves(source: str, lat, lon, start, end, progress, nora3=None, openmeteo=None) -> mo.Series:
     if source == MET_NORWAY:
         return (nora3 or mo.Nora3()).series(lat, lon, start, end, progress)
-    return (openmeteo or om.OpenMeteo()).waves(lat, lon, start, end, progress)
+    return (openmeteo or om.OpenMeteo()).waves(lat, lon, start, end, progress, WIND[source])
 
 
 # ======================================================================== storms
@@ -193,7 +197,9 @@ def find_storms(
         return found, point, where
     start = dt.datetime(first_year, 1, 1, tzinfo=dt.UTC)
     end = min(dt.datetime(last_year, 12, 31, 23, tzinfo=dt.UTC), dt.datetime.now(dt.UTC))
-    series = (openmeteo or om.OpenMeteo()).waves(where.lat, where.lon, start, end, progress)
+    series = (openmeteo or om.OpenMeteo()).waves(
+        where.lat, where.lon, start, end, progress, WIND[source]
+    )
     return mo.storms(series, count), series.point, where
 
 
@@ -226,9 +232,11 @@ def conditions(
     start_s = mo._utc(start).timestamp()
     stamp = f"{mo._utc(start):%Y%m%d%H}"
     out = Written()
-    if _source(session, case_id, source) == OPEN_METEO:
+    source = _source(session, case_id, source)
+    if source in WIND:
+        meteo = openmeteo or om.OpenMeteo()
         return _conditions_openmeteo(
-            session, case_id, where, spot, folder, start, end, progress, openmeteo or om.OpenMeteo()
+            session, case_id, where, spot, folder, start, end, progress, meteo, WIND[source]
         )
     nora3 = nora3 or mo.Nora3()
 
@@ -291,7 +299,9 @@ def conditions(
     return out
 
 
-def _conditions_openmeteo(session, case_id, where, spot, folder, start, end, progress, meteo):
+def _conditions_openmeteo(
+    session, case_id, where, spot, folder, start, end, progress, meteo, wind="era5"
+):
     start_s = mo._utc(start).timestamp()
     stamp = f"{mo._utc(start):%Y%m%d%H}"
     out = Written()
@@ -301,7 +311,7 @@ def _conditions_openmeteo(session, case_id, where, spot, folder, start, end, pro
             return None
         return lambda f, text: progress(low + (high - low) * f, text)
 
-    waves = meteo.waves(spot.lat, spot.lon, start, end, part(0.0, 0.6))
+    waves = meteo.waves(spot.lat, spot.lon, start, end, part(0.0, 0.6), wind)
     columns = dict(waves.columns)
     to = (np.asarray(waves.columns["dir_from"]) + 180.0) % 360.0
     columns["beta"] = mo.model_angle(to, where.north_deg, where.rotation_deg)  # B 105
@@ -562,7 +572,7 @@ def boundaries(
     where = frame(session, case_id)
     setup = session.data.case_setup(case_id)
     swl = setup.water_level if setup is not None and setup.water_level is not None else 0.0
-    if _source(session, case_id, source) == OPEN_METEO:
+    if _source(session, case_id, source) in WIND:
         oceans = _side_oceans(session, case_id, where, swl, start, end, progress, openmeteo)
         found = [side_series(oceans[s], where, s, swl, dry_km=0.01) for s in SIDES]
         ocean = oceans[next(iter(SIDES))]

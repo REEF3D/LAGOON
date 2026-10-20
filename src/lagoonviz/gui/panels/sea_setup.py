@@ -61,6 +61,11 @@ ATTRIBUTION = {
     "Open-Meteo": "Data: Open-Meteo.com (CC BY 4.0; free for non-commercial use, an API key "
     "for commercial use): ERA5 waves (Copernicus/ECMWF, 0.5°, from 1940), sea level with the "
     "tide and currents (Météo-France SMOC, 8 km, from 2022).",
+    "Open-Meteo, CERRA wind": "Data: Open-Meteo.com (CC BY 4.0; free for non-commercial "
+    "use, an API key for commercial use): ERA5 waves (Copernicus/ECMWF, 0.5°, from 1940), "
+    "the wind from CERRA (Copernicus European Regional Reanalysis, 5.5 km, Europe, 1985 to "
+    "mid 2021; ERA5's wind outside it), sea level with the tide and currents (Météo-France "
+    "SMOC, 8 km, from 2022).",
 }
 RIVER_ATTRIBUTION = "River: GloFAS (Copernicus/ECMWF, 5 km, daily, from 1984) via Open-Meteo."
 GAUGE_ATTRIBUTION = (
@@ -115,8 +120,9 @@ class SeaTab(QWidget):
             self.source.addItem(name, name)
         self.source.setToolTip(
             "MET Norway: NORA3 (3 km, 2D spectra) and NorKyst, Norwegian waters. Open-Meteo: "
-            "ERA5 waves and Météo-France's sea level and currents, anywhere. Automatic: MET "
-            "Norway in its waters, else Open-Meteo"
+            "ERA5 waves and Météo-France's sea level and currents, anywhere; with CERRA "
+            "wind: the wind at 5.5 km (Europe, 1985 to mid 2021; it has no waves). "
+            "Automatic: MET Norway in its waters, else Open-Meteo"
         )
         self.source.currentIndexChanged.connect(lambda _i: self.refresh())
         self.api_key = QLineEdit(str(QSettings().value(KEY_SETTING, "") or ""))
@@ -522,7 +528,7 @@ class SeaTab(QWidget):
         when = _py(self.peak.dateTime())
         apply = self.set_ctrl.isChecked()
 
-        if self.chosen_source() == sea.OPEN_METEO:
+        if self.chosen_source() != sea.MET_NORWAY:
             self._waves(case_id, when, apply)
             return
 

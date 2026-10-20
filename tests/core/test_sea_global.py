@@ -226,3 +226,26 @@ def test_an_api_key_for_commercial_use(monkeypatch):
     assert "apikey=abc" in address
     monkeypatch.setattr(om, "API_KEY", "")
     assert om.url("flood", latitude=1).startswith("https://flood-api.open-meteo.com/v1/flood?")
+
+
+def test_cerra_wind(meteo, case):
+    from lagoonviz.core import sea
+
+    s, _ = _session(case)
+    items = s.sea_conditions("2021-06-30T00:00Z", "2021-07-01T12:00Z", source=sea.CERRA)
+    waves = s.data.series(items[0])
+    wind = waves.columns["wind"]
+    assert wind[0] == 12.0 and wind[23] == 12.0  # CERRA's to the end of June 2021
+    assert wind[24] == 10.0 and wind[-1] == 10.0  # ERA5's after
+    assert waves.columns["wind_from"][0] == 260.0
+    asked = [a for a in meteo.asked if "archive" in a]
+    assert any("models=cerra" in a for a in asked) and any("models=era5" in a for a in asked)
+    text = next(case.glob("LAGOON_Sea/ERA5-*.dat")).read_text()
+    assert "wind CERRA (24 of 37 hours; ERA5's in the others)" in text
+    # all CERRA's: no ERA5 wind asked for
+    meteo.asked.clear()
+    found = s.find_storms(2020, 2020, count=1, source=sea.CERRA)
+    assert found[0].wind == 12.0
+    assert not any("models=era5&" in a or a.endswith("models=era5") for a in meteo.asked)
+    with pytest.raises(om.MetoceanError, match="unknown wind"):
+        om.OpenMeteo().waves(LAT, LON, "2020-01-01", "2020-01-02", wind="nora3")

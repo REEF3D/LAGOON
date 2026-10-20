@@ -2340,7 +2340,8 @@ class Session:
     ) -> list:
         """The largest wave events at a case (default the last ten years):
         :class:`~lagoonviz.core.geo.metocean.Storm` s, the highest first. ``source``:
-        "MET Norway" (NORA3) or "Open-Meteo" (ERA5); default MET Norway in its waters,
+        "MET Norway" (NORA3), "Open-Meteo" (ERA5) or "Open-Meteo, CERRA wind" (ERA5's
+        waves, CERRA's wind); default MET Norway in its waters,
         Open-Meteo elsewhere. Read at the middle of the wave generation side (else the
         domain's centre); the case needs a georeference. Not an undo step."""
         from lagoonviz.core import sea
