@@ -308,9 +308,12 @@ The topology is kept in `blocks.json` in the case folder: the *corners*, the
 their points) and the *blocks*, each with its four faces `i0`, `i1`, `j0`, `j1`
 (-i, +i, -j, +j) as chains of edges (`"-e"` runs edge `e` backwards). Blocks that
 share an edge share its nodes: that is the interface. Each block is meshed by
-transfinite interpolation from its faces, then *Smoothing* sweeps of Winslow's
-equations; the nodes of a wall slide along it, so cells stay square at the banks (not on a
-face that is partly an interface, a river joining it: there they stay even).
+transfinite interpolation from its faces, then smoothed by Winslow's equations: on
+grids half as fine first, then until no node moves more than a ten-thousandth of a
+cell (*Smoothing*: the most sweeps on each grid). The nodes of a wall slide along it
+for the first 200 sweeps, so cells stay square at the banks (not on a face that is
+partly an interface, a river joining it: there they stay even). A change to one
+block makes only that block again.
 
 - **Start** lays one block over the domain, **Draw** one over an area you drag in
   the 2D top view (a further one when there are blocks), **From corridor** makes
@@ -364,9 +367,38 @@ water, smooth, and the shore inside them is wetted and dried. Three tools lay th
   corners lays it again, so a corner slides along the coast; dragging a point of it
   shapes it by hand from then on (*Stop following* too).
 
-A face of block 0 can be **open**: its condition is set in ctrl.txt by hand (a tide
-edge, B 520 with a background): DIVEMesh's side keeps its code (C 11 2), no W 10 or
-F 62. The other blocks' open faces are an inflow or an outflow (G 54).
+A face of block 0 can be **open**: its condition is set in ctrl.txt by hand:
+DIVEMesh's side keeps its code (C 11 2), no W 10 or F 62. The other blocks' open
+faces are an inflow or an outflow (G 54).
+
+### The tide at the open sea
+
+A face of block 0 can take the **tide**: REEF3D drives it as an open edge (B 520
+method 3, a Riemann edge) with background 1, the water level the *Tide* box writes:
+
+- **From** *Tidal constituents* (a line each: name, amplitude in m and Greenwich
+  phase in degrees, as tide tables, FES2014 or TPXO give them: M2, S2, N2, K2, K1,
+  O1, P1, Q1, M4, MS4), with the nodal corrections and astronomical arguments of
+  *Start*; *A tide gauge, observed* or *predicted* (*Find* lists the gauges nearest
+  to the case, as the Sea tab; its mean over the run taken away: gauges have
+  datums of their own); or *A file of levels* (time and level a line: seconds from
+  the start, or dates and times in UTC).
+- *Start* (UTC, t = 0 of the run), *Length* and *Every* make the series
+  `background-1.dat` ("t eta 0 0": no background current, as for a standing tide at
+  a coast; *With the long-wave current*: "t eta", REEF3D adds eta sqrt(g/h) along
+  the direction). *Ramp*: the tide rises from nothing over that time (B 510).
+- *As constituents in REEF3D* writes the constituents as B 511 instead (REEF3D sums
+  them; the nodal corrections of the start held over the run).
+- *Travels along the coast* (B 515): the tide holds at a point (*Holds at x*, *y*)
+  and travels along *Direction* at the long-wave speed of *At the speed of* metres
+  of water: a tide running along a coast past the open side.
+
+**Write the tide** writes `background-1.dat` and B 510 (B 511, B 515) in ctrl.txt,
+one undo step. Then the face's boundary *Tide*; *Make grid* writes DIVEMesh's side
+(C 1x 2) and an open edge for each tide face: B 520 (method 3), B 521 (the face's
+edge of block 0: -i x-, +i x+, -j y-, +j y+), B 523 (background 1); zones of
+other kinds are kept, B 90 1 (and B 92 0 without waves) set. REEF3D takes tide
+edges on block 0 only.
 
 **Attach river** (the *River* box) puts a river block on a part of the chosen
 edge (one on the outline): along the river drawn in the River tab (*Draw the
@@ -438,7 +470,12 @@ session.move_block_vertex("b0_ne", 102.0, 55.0)
 session.set_block_edge("b0_e", cells=16, curve="through", ratio=1.0)
 session.set_block_face(0, "i0", "inflow", 50.0)
 session.set_block_face(1, "i1", "outflow", 2.5)
-session.set_block_face(0, "i0", "open", 2)        # a tide edge: C 11 2, B 520 by hand
+session.set_block_face(0, "i0", "open", 2)        # C 11 2, its condition by hand
+session.write_tide("2026-01-19T00:00", days=30,
+                   constants="M2 1.00 61\nS2 0.35 89\nN2 0.21 44\nK1 0.07 52",
+                   direction=90.0, reference=(43761.1, 42647.5), depth=5800.0)
+session.write_tide("2026-01-19T00:00", days=3, gauge=session.find_gauges()[0])
+session.set_block_face(0, "i0", "tide")           # B 520 3 / B 521 / B 523 at Make grid
 session.set_block_edge("b0_w", curve="arc")
 session.set_block_spacing("b0_s", 1500.0, 60.0)   # first and last cell (m), across
 session.set_block_spacing("b1_n", 150.0, 150.0, largest=300.0, growth=1.05)

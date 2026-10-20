@@ -1674,7 +1674,7 @@ class Session:
         """The tide at the open sea for a run from ``start`` (UTC) over ``days``
         (:mod:`lagoonviz.core.tide`): from tidal ``constants`` ("M2 1.00 61" a line:
         amplitude m, Greenwich phase deg; or a file), a file of ``levels`` or a tide
-        ``gauge`` (:meth:`find_gauges`, or "IOC:casc"; ``predicted`` instead of
+        ``gauge`` (:meth:`find_gauges`, or "SOURCE:CODE"; ``predicted`` instead of
         observed), as REEF3D's background 1: background-1.dat ("t eta 0 0", or "t
         eta" with ``current``) and B 510 (mode 2, ``ramp`` s, travelling along
         ``direction`` deg), or with ``harmonic`` the constituents as B 511; with a

@@ -417,7 +417,7 @@ class MultiblockTab(QWidget):
         self.constants.setMaximumHeight(110)
         self.gauge = QComboBox()
         self.gauge.setEditable(True)
-        self.gauge.setToolTip('A tide gauge as "SOURCE:CODE" (e.g. "IOC:casc"), or Find')
+        self.gauge.setToolTip('A tide gauge as "SOURCE:CODE", as Find lists them')
         self.find_button = QPushButton("Find")
         self.find_button.setToolTip("The tide gauges nearest to the case (needs its georeference)")
         self.find_button.clicked.connect(self.find_gauges)

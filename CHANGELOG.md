@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Blocks for coasts and estuaries
+
+- Edges spaced by the cells at their ends (*Spacing*: 60 m at a mouth to 1.5 km
+  offshore; or growing from both ends up to a largest cell): the cells follow from
+  the length, across the blocks, each edge turned its way. *Cells from spacing*
+  after corners were moved.
+- Circular arcs (an edge's curve): the open sea's side of a block.
+- *Follow the water* (with geo.dat): an edge laid on land a margin from the water
+  below F 60, bending no tighter than a radius; dragging its corner slides it along
+  the shore. `lagoonviz.core.waterline` in scripts.
+- *Import blocks.dat*: a grid made elsewhere as the case's blocks (its faces'
+  nodes kept, the interfaces and boundaries found), to go on with in the Blocks tab.
+- Open faces of block 0 (C 11 2 kept). *Pick edge* in the 2D view.
+- *Attach river*: a river block on a part of an edge, along the river drawn on the
+  map, its banks bending onto the cut, the discharge in at its upstream face.
+- *Pieces*: a block written as several blocks for the processes (cut along i or j,
+  G 54 naming the pieces); *Balance* cuts the blocks for M 10's processes, and the
+  tab says how evenly REEF3D would share the cells out.
+- **The tide at the open sea**: a *Tide* face of block 0 is a Riemann edge (B 520,
+  B 521, B 523 written at *Make grid*) on background 1, which the *Tide* box writes
+  from tidal constituents (nodal corrections and astronomical arguments), a tide
+  gauge (observed or predicted) or a file of levels: `background-1.dat` and B 510,
+  or the constituents as B 511; B 515 for a tide travelling along the coast.
+  `session.write_tide`, `lagoonviz.core.tide`.
+- **Faster smoothing**: blocks are smoothed on coarser grids first, then by
+  red-black over-relaxed sweeps until they settle; *Smoothing* is now the most
+  sweeps. A change to one block makes only that block again. The imported Tagus
+  grid settles in 1.1 s (2000 sweeps took 3.1 s and had not settled); grids made
+  before come out a little different (smoother) when made again.
+
+### Bathymetry of one's own
+
+- Points files with a header: x, y and z by its names (EMODnet's survey files,
+  `.emo`: longitude, latitude, average depth) or as chosen (*Columns*); the
+  overlay dialog shows what it reads. Soundings many times the grid's cells are
+  averaged per cell first.
+- geo.dat reaches over a case's blocks and 5 % beyond them.
+
 ### Free Surface AMR
 
 - The AMR surface item is now called *Free Surface AMR* (Add menu, scene, Properties),

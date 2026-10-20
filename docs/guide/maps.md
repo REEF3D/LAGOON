@@ -158,7 +158,13 @@ GeoTIFF and only the part of a large one that is needed).
   or the chart's datum notes, about half the spring tidal range) puts them on the
   land's zero. Or *A file of mine…*: a GeoTIFF, an Esri ASCII grid
   (`.asc`) or an x y z text file (soundings: spaces, tabs, commas or semicolons;
-  a header line is skipped). Give its CRS if the file does not name one
+  a header line is skipped). A points file with a header names its columns:
+  x, y and z are found by them (longitude, latitude and the *average depth* of
+  EMODnet's survey files, `.emo`, e.g. the Tagus' 590_HR_RioTejo), or given as
+  *Columns* (their names, or numbers from 1); the dialog shows what it reads and
+  the range of z, so the sign (*depths*) is plain. Soundings many times as many
+  as the grid's cells (a multibeam survey of millions of points) are averaged in
+  each cell first. Give its CRS if the file does not name one
   (`EPSG:4326` for longitude and latitude, `model` for model coordinates) and
   tick *depths* when the values are positive down. *Make geo.dat* asks where to
   store `geo.dat` (a draft case started on the map goes to that folder, with its
@@ -172,7 +178,9 @@ GeoTIFF and only the part of a large one that is needed).
   metres; at most *Most points* (4 million by default, 0: no limit), coarser where
   the domain would need more (DIVEMesh reads, bins and interpolates every point and
   writes them out again for ParaView; geo.dat takes some 35 bytes a point), and writes it in model coordinates, with `G 10 1`
-  in `control.txt`. A progress bar shows how far it is; *Cancel* keeps the
+  in `control.txt`. A case with blocks (the Blocks tab) gets geo.dat over its
+  blocks and 5 % of their size beyond them, whatever B 10 says, so edges can be
+  laid along the water just outside them. A progress bar shows how far it is; *Cancel* keeps the
   geo.dat there was. The *geo.dat points* item then shows the points written
   (zoom in to see their spacing). A raster
   is sampled bilinearly; scattered points are interpolated linearly on their
