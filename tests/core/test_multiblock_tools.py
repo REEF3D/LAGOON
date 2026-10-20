@@ -255,3 +255,105 @@ def test_following_the_water_needs_the_bed(estuary):
     s.start_multiblock([0, 1000, -300, 150], cells=(20, 10))
     with pytest.raises(ValueError, match="geo.dat"):
         s.follow_water("b0_n", margin=40, radius=60)
+
+
+# ---------------------------------------------------------------- pieces
+def test_blocks_cut_into_pieces_for_the_processes():
+    t = M.from_box((0, 100, 0, 50), (20, 10)).extruded("b0_e", 200.0, 40)
+    t = t.with_bc(1, "j1", "wall")
+    # block 1: i along the shared edge (10 cells), j outwards (40 cells)
+    t = t.with_block(1, pieces=4, split="j")
+    assert t.cuts(1) == [0, 10, 20, 30, 40] and t.piece_lengths(1) == [10] * 4
+    out = t.output()
+    assert [(b, k) for b, k, _x, _y in out] == [(0, 0), (1, 0), (1, 1), (1, 2), (1, 3)]
+    # the pieces share their cut lines node for node
+    _b, _k, x1, y1 = out[1]
+    _b, _k, x2, y2 = out[2]
+    assert np.allclose(x1[-1], x2[0]) and np.allclose(y1[-1], y2[0])
+    assert sum((x.shape[0] - 1) * (x.shape[1] - 1) for _b, _k, x, _y in out) == 200 + 400
+    assert t.depth(1, "j0") == 10 and t.depth(1, "i0") == 10
+    assert not [i for i in M.check(t) if i.level == "error"]
+    data = json.loads(t.text())
+    assert data["blocks"][1]["pieces"] == 4 and data["blocks"][1]["split"] == "j"
+    # too short pieces, block 0 cut, an inflow on a face the pieces would share
+    assert any("at least" in i.text for i in M.check(t.with_block(1, pieces=10)))
+    assert any("DIVEMesh shares it" in i.text for i in M.check(t.with_block(0, pieces=2)))
+    river = M.from_box((0, 100, 0, 50), (20, 10)).extruded("b0_e", 200.0, 40)
+    river = river.with_bc(1, "i0", "inflow", 5.0).with_block(1, pieces=2, split="j")
+    assert any("cut it along i" in i.text for i in M.check(river))
+
+
+def test_the_g54_lines_name_the_pieces():
+    t = three_blocks().with_bc(2, "i0", "inflow", 5.0).with_block(1, pieces=2, split="i")
+    # (block 1 is 10 x 12: two pieces of 5 along i)
+    found = M.settings(t)
+    assert found.g54 == [[3, 1, 5.0]]  # block 2 is blocks.dat's block 3 now
+
+
+def test_balancing_the_processes():
+    t = M.from_box((0, 100, 0, 100), (20, 20))  # block 0: 400 cells
+    t = t.extruded("b0_e", 800.0, 160)  # block 1: 20 x 160 = 3200 cells
+    one = M.balance(t, 4)
+    assert one.native == 400 + 8 * 20  # with the ring on its shared face
+    assert one.imbalance > 2  # block 1 alone on one process
+    even = M.balanced(t, 4)
+    assert even.blocks[0].pieces == 1 and even.blocks[1].pieces > 1
+    assert M.balance(even, 4).imbalance < 1.1
+    assert min(even.piece_lengths(1)) >= M.PIECE_MIN
+    assert not [i for i in M.check(even) if i.level == "error"]
+    assert "4 processes" in M.balance(even, 4).text()
+
+
+# ---------------------------------------------------------------- a river
+def test_a_river_on_a_part_of_an_edge():
+    bay = M.from_box((0, 1000, 0, 500), (40, 20))
+    bay = bay.extruded("b0_e", 400.0, 16)  # block 1, the bay, east of block 0
+    far = bay.edges["b0_e_x"]
+    # a river from the east, winding, into the middle of the bay's far side (x = 1400)
+    line = np.column_stack([np.linspace(3000, 1300, 40), 250 + 150 * np.sin(np.linspace(0, 6, 40))])
+    t = bay.attached_river("b0_e_x", line, cells=4, step=25.0, discharge=12.0)
+    river = t.blocks[-1]
+    assert river.name == "river" and river.bc == {"i0": {"type": "inflow", "value": 12.0}}
+    assert len(t.blocks) == 3 and t.size(2)[1] == 4
+    # the bay's far side cut in three, the river on the middle piece
+    cut = [f for f in M.FACES if len(t.blocks[1].faces[f]) == 3]
+    assert len(cut) == 1 and M.interface_count(t) == 2
+    piece = M._ref(river.faces["i1"][0])[0]
+    assert t.edges[piece].cells == 4
+    assert sum(t.edges[M._ref(n)[0]].cells for n in t.blocks[1].faces[cut[0]]) == far.cells
+    # it follows the line, and meets the side where the line crosses it
+    x, y = t.block_nodes(2)
+    middle_line = np.column_stack([x[x.shape[0] // 2], y[y.shape[0] // 2]])
+    assert np.hypot(*(middle_line[0] - line[0])).min() < 30.0
+    crossing = np.interp(1400.0, line[::-1, 0], line[::-1, 1])
+    assert abs(middle_line[-1, 0] - 1400.0) < 1e-6
+    assert abs(middle_line[-1, 1] - crossing) < 25.0  # (to a cell of the side)
+    assert not [i for i in M.check(t) if i.level == "error"]
+    assert M.settings(t).g54 == [[2, 1, 12.0]]
+    # by width: cells of the edge's (25 m each) that make it
+    wide = bay.attached_river("b0_e_x", line, width=100.0)
+    assert wide.size(2)[1] == 4
+    with pytest.raises(ValueError, match="outline"):
+        bay.attached_river("b0_e", line, cells=4)
+
+
+def test_the_session_attaches_a_river_and_balances(estuary):
+    s = Session()
+    s.open_case(estuary)
+    s.start_multiblock([0, 1000, 0, 500], cells=(40, 20))
+    s.extrude_block("b0_e", 400.0, cells=16)
+    with pytest.raises(ValueError, match="draw the river"):
+        s.attach_river("b0_e_x", cells=4)
+    line = [(3000.0, 250.0), (2000.0, 300.0), (1300.0, 240.0)]
+    s.attach_river("b0_e_x", line, cells=4, discharge=12.0)
+    assert len(s.multiblock().blocks) == 3
+    assert "session.attach_river('b0_e_x', [[3000.0, 250.0]" in s.to_script()
+    s.set_input("ctrl.txt", "M 10", [4])
+    assert s.processes() == 4
+    s.balance_blocks()
+    t = s.multiblock()
+    assert sum(b.pieces for b in t.blocks[1:]) > 2
+    assert s.multiblock_balance().processes == 4
+    assert "session.balance_blocks()" in s.to_script()
+    s.make_multiblock_grid()
+    assert int((estuary / "blocks.dat").read_text().split()[0]) == len(t.output())

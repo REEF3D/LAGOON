@@ -1385,6 +1385,76 @@ class Session:
             "Space block edge",
         )
 
+    def attach_river(
+        self,
+        edge: str,
+        line=None,
+        cells: int | None = None,
+        width: float | None = None,
+        step: float | None = None,
+        discharge: float | None = None,
+        case: str | None = None,
+    ) -> None:
+        """A river block on a part of an edge on the outline
+        (:meth:`~lagoonviz.core.multiblock.Topology.attached_river`): along ``line``
+        (upstream first; default the river drawn on the map, else the corridor's
+        line), ``cells`` of the edge's cells wide (or about ``width`` m), cells about
+        ``step`` m long, the ``discharge`` (m3/s) in at its upstream face."""
+        case_id = self._case_id(case)
+        given = line
+        if line is None:
+            line = self.river_line(case_id)
+            if line is None:
+                corridor = self.corridor(case_id)
+                line = corridor.centreline() if corridor is not None else None
+        if line is None:
+            raise ValueError("draw the river first (River tab: Draw the river), or give its line")
+        words = [repr(edge)]
+        if given is not None:
+            words.append(repr([[round(float(a), 3), round(float(b), 3)] for a, b in given]))
+        for key, value in (("cells", cells), ("width", width), ("step", step)):
+            if value is not None:
+                words.append(f"{key}={value!r}")
+        if discharge is not None:
+            words.append(f"discharge={float(discharge)!r}")
+        self._change_multiblock(
+            case,
+            lambda t: t.attached_river(edge, line, cells, width, step, discharge),
+            "session.attach_river(" + ", ".join(words),
+            "Attach river",
+        )
+
+    def processes(self, case: str | None = None) -> int:
+        """The processes a case runs on: M 10 of ctrl.txt (else control.txt), else 1."""
+        case_id = self._case_id(case)
+        for file in ("ctrl.txt", "control.txt"):
+            try:
+                value = self.input_file(file, case_id).value("M 10")
+            except ValueError:
+                value = None
+            if value:
+                return max(int(value), 1)
+        return 1
+
+    def multiblock_balance(self, processes: int | None = None, case: str | None = None):
+        """How the processes share the blocks' cells (:class:`~lagoonviz.core.
+        multiblock.Balance`; default M 10's processes)."""
+        from lagoonviz.core import multiblock as mb
+
+        case_id = self._case_id(case)
+        n = int(processes) if processes else self.processes(case_id)
+        return mb.balance(self._multiblock_of(case_id), n)
+
+    def balance_blocks(self, processes: int | None = None, case: str | None = None) -> None:
+        """Cut the blocks 1.. into pieces so that the processes (default M 10) get about
+        as many cells each (REEF3D puts each piece on one process, block 0 over all)."""
+        from lagoonviz.core import multiblock as mb
+
+        case_id = self._case_id(case)
+        n = int(processes) if processes else self.processes(case_id)
+        script = "session.balance_blocks(" + (f"{int(processes)}" if processes else "")
+        self._change_multiblock(case, lambda t: mb.balanced(t, n), script, "Balance blocks")
+
     def fit_block_cells(self, case: str | None = None) -> None:
         """The cells of every edge with a spacing from its length as it is now (after
         corners were moved), carried across the blocks."""
@@ -1528,8 +1598,9 @@ class Session:
         """Write the blocks as blocks.dat and set the case up for them, one undo step:
         R 20 1 and the sides of block 0 (C 11 - C 14) in control.txt, its box (B 10's x
         and y; its heights and B 1 kept); G 50 1, the native in- and outflow (B 60 1,
-        W 10, F 62) and the open faces of the other blocks (G 54) in ctrl.txt. Refused
-        while a rule is broken. Returns the grid's quality."""
+        W 10, F 62) and the open faces of the other blocks (G 54) in ctrl.txt; blocks cut
+        into pieces (for the processes) are written piece by piece, and the G 54 lines
+        name the pieces. Refused while a rule is broken. Returns the grid's quality."""
         from lagoonviz.core import multiblock as mb
 
         case_id = self._case_id(case)
@@ -1546,7 +1617,7 @@ class Session:
         if topology.bed == "geo" and setup is not None and (setup.path / "geo.dat").is_file():
             points = setup.geo_points(limit=10**9)
         nodes = []
-        for x, y in topology.grids():
+        for _b, _k, x, y in topology.output():  # the pieces of cut blocks one by one
             nodes.append((x, y, mb.bed_heights(topology, x, y, points)))
         found = mb.settings(topology)
         control = self.input_file("control.txt", case_id)

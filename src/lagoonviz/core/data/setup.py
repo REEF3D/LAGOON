@@ -1585,9 +1585,15 @@ def _multiblock_marks(setup: CaseSetup, water_z: float) -> list[Mark]:
         if g is None:
             continue
         x, y = g
+        for cut in t.cuts(b)[1:-1]:  # where the block is cut into pieces for the processes
+            line = np.column_stack(
+                [x[:, cut], y[:, cut]] if block.split == "i" else [x[cut], y[cut]]
+            )
+            lines.append(_polyline(line, water_z))
         nj, ni = x.shape[0] - 1, x.shape[1] - 1
         centre = (float(x[nj // 2, ni // 2]), float(y[nj // 2, ni // 2]), water_z)
-        labels.append((f"{b}: {block.name}", centre))
+        pieces = f" ({block.pieces} pieces)" if block.pieces > 1 else ""
+        labels.append((f"{b}: {block.name}{pieces}", centre))
         for face in mb.FACES:
             kind = block.bc_type(face)
             if kind == "wall":

@@ -313,19 +313,25 @@ def _ref(name: str) -> tuple[str, bool]:
 @dataclass
 class Block:
     """A block: the edge chain of each face (``FACES``), the boundary of its faces
-    without an interface (``bc``: face -> {"type": ..., "value": ...}) and its
-    smoothing sweeps."""
+    without an interface (``bc``: face -> {"type": ..., "value": ...}), its
+    smoothing sweeps, and the ``pieces`` it is written as (cut along ``split``,
+    "i" or "j", into equal parts: blocks.dat's blocks, each on one process)."""
 
     name: str
     faces: dict
     bc: dict = field(default_factory=dict)
     smoothing: int = 100
     slide: bool = True
+    pieces: int = 1
+    split: str = "i"
 
     def __post_init__(self) -> None:
         self.faces = {f: [str(e) for e in (self.faces.get(f) or [])] for f in FACES}
         self.bc = {f: dict(v) for f, v in (self.bc or {}).items() if f in FACES}
         self.smoothing = max(int(self.smoothing), 0)
+        self.pieces = max(int(self.pieces), 1)
+        if self.split not in ("i", "j"):
+            raise ValueError(f"split must be 'i' or 'j', got {self.split!r}")
 
     def bc_type(self, face: str) -> str:
         return str(self.bc.get(face, {}).get("type", "wall"))
@@ -342,6 +348,9 @@ class Block:
         data["smoothing"] = self.smoothing
         if not self.slide:
             data["slide"] = False
+        if self.pieces > 1:
+            data["pieces"] = self.pieces
+            data["split"] = self.split
         return data
 
     @classmethod
@@ -352,6 +361,8 @@ class Block:
             dict(data.get("bc") or {}),
             int(data.get("smoothing", 100)),
             bool(data.get("slide", True)),
+            int(data.get("pieces", 1)),
+            str(data.get("split", "i")),
         )
 
 
@@ -447,16 +458,21 @@ class Topology:
         return x, y
 
     def _sliding(self, block: int) -> list:
-        """For each edge of the block's outline that no other block shares: a function
-        that moves its inner nodes along the edge to where the grid line from the
-        inside meets it (the nodes keep their order, the edge's ends stay)."""
+        """For each edge of the block's outline that no other block shares (on a face
+        that is no interface anywhere): a function that moves its inner nodes along
+        the edge to where the grid line from the inside meets it (the nodes keep their
+        order, the edge's ends stay)."""
         uses = self.edge_uses()
         out = []
         for face in FACES:
             first = 0
-            for name, back in self.face_edges(block, face):
+            chain = self.face_edges(block, face)
+            # a face that is partly an interface (a river joining it) keeps its nodes:
+            # sliding would crowd them against the fixed part
+            partly = any(len(uses.get(name, [])) > 1 for name, _ in chain)
+            for name, back in chain:
                 n = self.edges[name].cells
-                if len(uses.get(name, [])) == 1 and n > 1:
+                if len(uses.get(name, [])) == 1 and n > 1 and not partly:
                     line = self.edges[name].line(self.vertices)
                     if back:
                         line = line[::-1]
@@ -505,6 +521,54 @@ class Topology:
         if nj0 != nj1:
             out.append(f"faces -i and +i have {nj0} and {nj1} cells (must be equal)")
         return out
+
+    def cuts(self, block: int) -> list[int]:
+        """Where a block is cut into its pieces: node indices along its ``split``
+        direction, from 0 to its cells that way."""
+        b = self.blocks[block]
+        ni, nj = self.size(block)
+        n = ni if b.split == "i" else nj
+        k = max(1, min(b.pieces, n))
+        return [int(round(v)) for v in np.linspace(0.0, n, k + 1)]
+
+    def piece_lengths(self, block: int) -> list[int]:
+        c = self.cuts(block)
+        return [b - a for a, b in zip(c[:-1], c[1:], strict=True)]
+
+    def output(self) -> list[tuple[int, int, np.ndarray, np.ndarray]]:
+        """blocks.dat's blocks in order: (block, piece, x, y), each block's pieces one
+        after the other (the blocks that are not cut: one piece)."""
+        out = []
+        for b, g in enumerate(self.grids()):
+            if g is None:
+                raise ValueError(f"block {b} cannot be made: " + "; ".join(self.face_problems(b)))
+            x, y = g
+            c = self.cuts(b)
+            for k, (lo, hi) in enumerate(zip(c[:-1], c[1:], strict=True)):
+                if self.blocks[b].split == "i":
+                    out.append((b, k, x[:, lo : hi + 1], y[:, lo : hi + 1]))
+                else:
+                    out.append((b, k, x[lo : hi + 1], y[lo : hi + 1]))
+        return out
+
+    def output_index(self) -> dict[tuple[int, int], int]:
+        """(block, piece) -> its number in blocks.dat."""
+        out, n = {}, 0
+        for b in range(len(self.blocks)):
+            for k in range(len(self.cuts(b)) - 1):
+                out[(b, k)] = n
+                n += 1
+        return out
+
+    def depth(self, block: int, face: str) -> int:
+        """How many cells deep the block (its piece at that face) is behind a face."""
+        ni, nj = self.size(block)
+        across = face in ("i0", "i1")
+        b = self.blocks[block]
+        if b.pieces > 1 and (b.split == "i") == across:
+            lengths = self.piece_lengths(block)
+            return lengths[0] if face in ("i0", "j0") else lengths[-1]
+        return ni if across else nj
 
     def grids(self) -> list[tuple[np.ndarray, np.ndarray] | None]:
         """The nodes of every block (None for a block that cannot be made)."""
@@ -876,6 +940,133 @@ class Topology:
             blocks.append(replace(block, faces=faces))
         return replace(self, vertices=vertices, edges=edges, blocks=blocks)
 
+    def _vertex_at(self, p, tol: float = 1e-6) -> str | None:
+        """The vertex nearest to p within ``tol`` (None: none)."""
+        best = None
+        for name, v in self.vertices.items():
+            d = math.hypot(v[0] - p[0], v[1] - p[1])
+            if d <= tol and (best is None or d < best[0]):
+                best = (d, name)
+        return None if best is None else best[1]
+
+    def _edge_between(self, a: str, b: str) -> str | None:
+        for name, e in self.edges.items():
+            if {e.start, e.end} == {a, b}:
+                return name
+        return None
+
+    def attached_river(
+        self,
+        edge: str,
+        line,
+        cells: int | None = None,
+        width: float | None = None,
+        step: float | None = None,
+        discharge: float | None = None,
+        smoothing: int = 500,
+        name: str = "river",
+    ) -> Topology:
+        """A river block on a part of an edge on the outline (a river into a bay): the
+        edge cut where the river ``line`` (upstream first) meets it, ``cells`` of its
+        cells wide (or about ``width`` m), the block along the line upstream from
+        there, its banks parallel to the line and ending on the cut, cells about
+        ``step`` m long (default twice those across). Its i runs downstream: the
+        upstream face -i takes the ``discharge`` (G 54), the face on the edge +i."""
+        uses = self.edge_uses()
+        if edge not in self.edges or len(uses.get(edge, [])) != 1:
+            raise ValueError(f"{edge!r} is not an edge on the outline of the grid")
+        line = np.asarray(line, float).reshape(-1, 2)
+        if len(line) < 2:
+            raise ValueError("the river needs a line of two points at least")
+        e = self.edges[edge]
+        nodes = e.nodes(self.vertices)
+        n = e.cells
+        dense = e.line(self.vertices)
+        # where the river meets the edge: its first crossing from upstream, else the
+        # point of the edge nearest the river's end
+        at, upto = None, len(line) - 1
+        for i in range(len(line) - 1):
+            p0, p1 = line[i], line[i + 1]
+            for q0, q1 in zip(dense[:-1], dense[1:], strict=True):
+                hit = _crossing(p0, p1, q0, q1)
+                if hit is not None:
+                    at, upto = hit, i
+                    break
+            if at is not None:
+                break
+        if at is None:
+            at = dense[int(np.argmin(np.hypot(*(dense - line[-1]).T)))]
+        m = int(np.argmin(np.hypot(*(nodes - at).T)))
+        reach = 0.5 * float(np.min(np.hypot(*np.diff(nodes, axis=0).T)))
+        if cells is None:
+            if width is None:
+                raise ValueError("give the river's width or its cells across")
+            local = np.hypot(*(nodes[min(m + 1, n)] - nodes[max(m - 1, 0)]))
+            cells = max(2, int(round(float(width) / max(0.5 * local, 1e-9))))
+        k = int(cells)
+        if k >= n:
+            raise ValueError(f"the river is as wide as edge {edge} or wider ({k} of {n} cells)")
+        k0 = min(max(m - k // 2, 0), n - k)
+        a_xy, b_xy = nodes[k0].copy(), nodes[k0 + k].copy()
+        t = self
+        if 0 < k0:
+            t = t.split_edge(edge, *a_xy)
+        va = t._vertex_at(a_xy, reach) if k0 > 0 else e.start
+        if k0 + k < n:
+            t = t.split_edge(t._edge_between(va, e.end) if k0 > 0 else edge, *b_xy)
+        vb = t._vertex_at(b_xy, reach) if k0 + k < n else e.end
+        piece = t._edge_between(va, vb) if va and vb else None
+        if piece is None:
+            raise ValueError(f"edge {edge} could not be cut for the river")
+        a_xy, b_xy = np.asarray(t.vertices[va], float), np.asarray(t.vertices[vb], float)
+        mid = t.edges[piece].nodes(t.vertices)
+        middle = mid[len(mid) // 2] if k % 2 == 0 else 0.5 * (mid[k // 2] + mid[k // 2 + 1])
+        # the river's line, upstream to the middle of the cut
+        river = np.vstack([line[: upto + 1], middle])
+        keep = np.concatenate([[True], np.hypot(*np.diff(river, axis=0).T) > 1e-9])
+        centre = curvi.resample(river[keep], 2000)
+        length = float(curvi.lengths(centre)[-1])
+        half = 0.5 * float(np.hypot(*(b_xy - a_xy)))
+        tangent = np.gradient(centre, axis=0)
+        tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
+        tangent = curvi._smooth(tangent, 10.0)
+        tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
+        normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])  # to the left
+        end_t = tangent[-1]
+        right_is_a = end_t[0] * (a_xy - middle)[1] - end_t[1] * (a_xy - middle)[0] < 0
+        right_end, left_end = (a_xy, b_xy) if right_is_a else (b_xy, a_xy)
+        right = centre - half * normal
+        left = centre + half * normal
+        s = curvi.lengths(centre)
+        blend = min(0.5 * length, 4.0 * 2.0 * half)
+        w = np.clip((s - (length - blend)) / max(blend, 1e-9), 0.0, 1.0)
+        w = w * w * (3.0 - 2.0 * w)  # smooth onto the cut's ends
+        right += w[:, None] * (right_end - right[-1])
+        left += w[:, None] * (left_end - left[-1])
+        across = 2.0 * half / k
+        along = int(max(round(length / float(step or 2.0 * across)), RING))
+        vertices = dict(t.vertices)
+        up_r = _fresh(f"{name}_up_r", vertices)
+        vertices[up_r] = (float(right[0, 0]), float(right[0, 1]))
+        up_l = _fresh(f"{name}_up_l", vertices)
+        vertices[up_l] = (float(left[0, 0]), float(left[0, 1]))
+        r_end, l_end = (va, vb) if right_is_a else (vb, va)
+        count = int(min(max(round(length / (4.0 * half)), 4), 150))
+        edges = dict(t.edges)
+        rb, lb, up = (_fresh(f"{name}_{k_}", edges) for k_ in ("right", "left", "up"))
+        edges[rb] = Edge(up_r, r_end, along, shape_points(right, count), "through")
+        edges[lb] = Edge(up_l, l_end, along, shape_points(left, count), "through")
+        edges[up] = Edge(up_r, up_l, k, curve="straight")
+        faces = {
+            "i0": [up],
+            "i1": [piece if t.edges[piece].start == r_end else f"-{piece}"],
+            "j0": [rb],
+            "j1": [lb],
+        }
+        bc = {"i0": {"type": "inflow", "value": float(discharge)}} if discharge else {}
+        block = Block(_fresh_block(name, t.blocks), faces, bc, int(smoothing))
+        return replace(t, vertices=vertices, edges=edges, blocks=[*t.blocks, block])
+
     def with_native(self, block: int) -> Topology:
         """Block ``block`` first: block 0, the grid of the run."""
         k = int(block)
@@ -958,6 +1149,25 @@ def _slider(face: str, first: int, cells: int, line: np.ndarray):
         by[k] = np.interp(at, ds, dense[:, 1])
 
     return slide
+
+
+def _crossing(p0, p1, q0, q1):
+    """Where segment p0-p1 crosses segment q0-q1 (None: they do not)."""
+    r, d = p1 - p0, q1 - q0
+    den = r[0] * d[1] - r[1] * d[0]
+    if abs(den) < 1e-12:
+        return None
+    w = q0 - p0
+    t = (w[0] * d[1] - w[1] * d[0]) / den
+    u = (w[0] * r[1] - w[1] * r[0]) / den
+    if 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0:
+        return p0 + t * r
+    return None
+
+
+def _fresh_block(name: str, blocks) -> str:
+    taken = {b.name for b in blocks}
+    return _fresh(name, taken)
 
 
 def _fresh(name: str, taken) -> str:
@@ -1202,7 +1412,7 @@ def check(topology: Topology) -> list[Issue]:
         if len(use) != 2:
             continue
         for (a, _), (b, fb) in (use, use[::-1]):
-            depth = t.size(b)[0 if fb in ("i0", "i1") else 1]
+            depth = t.depth(b, fb)
             if depth < DEEP_MIN or (a == 0 and depth < RING):
                 level = "error"
             elif depth < RING:
@@ -1220,6 +1430,59 @@ def check(topology: Topology) -> list[Issue]:
                     b,
                 )
             )
+    # pieces: block 0 is cut by DIVEMesh itself; each piece deep enough
+    for b, block in enumerate(t.blocks):
+        if block.pieces <= 1:
+            continue
+        where = _face_middle(t, b, "j0")
+        if b == 0:
+            issues.append(
+                Issue(
+                    "error",
+                    "block 0 is not cut into pieces: DIVEMesh shares it out over the "
+                    "processes itself (M 10)",
+                    where,
+                    0,
+                )
+            )
+            continue
+        lengths = t.piece_lengths(b)
+        if min(lengths) < DEEP_MIN:
+            issues.append(
+                Issue(
+                    "error",
+                    f"block {b} ({block.name}): pieces of {min(lengths)} cells along "
+                    f"{block.split}; at least {DEEP_MIN} (fewer pieces)",
+                    where,
+                    b,
+                )
+            )
+        valued = [f for f in ("i0", "i1") if block.bc_type(f) in ("inflow", "outflow")]
+        if block.split == "j" and valued:
+            issues.append(
+                Issue(
+                    "error",
+                    f"block {b} ({block.name}): its {block.bc_type(valued[0])} face would be "
+                    "shared by the pieces: cut it along i",
+                    where,
+                    b,
+                )
+            )
+        shared = t.interface_faces(b)
+        ends = ("j0", "j1") if block.split == "i" else ("i0", "i1")
+        for face in ends:
+            others = {o for name in shared[face] for o, _f in uses.get(name, []) if o != b}
+            if 0 in others:
+                issues.append(
+                    Issue(
+                        "warning",
+                        f"block {b} ({block.name}): its pieces meet block 0 side by side on "
+                        f"face {FACE_NAMES[face]}: see that DIVEMesh finds every interface "
+                        "(multiblock.log)",
+                        _face_middle(t, b, face),
+                        b,
+                    )
+                )
     # boundaries
     native_in = native_out = 0
     for b, block in enumerate(t.blocks):
@@ -1407,11 +1670,14 @@ def settings(topology: Topology) -> Settings:
     inflow = next((native.bc_value(f) for f in FACES if native.bc_type(f) == "inflow"), None)
     level = next((native.bc_value(f) for f in FACES if native.bc_type(f) == "outflow"), None)
     g54 = []
+    index = t.output_index()
     for b, block in enumerate(t.blocks[1:], start=1):
+        last = len(t.cuts(b)) - 2
         for f in FACES:
             kind = block.bc_type(f)
             if kind in ("inflow", "outflow") and block.bc_value(f) is not None:
-                g54.append([b, 1 if kind == "inflow" else 2, block.bc_value(f)])
+                piece = 0 if f == "i0" or block.split == "j" else last
+                g54.append([index[(b, piece)], 1 if kind == "inflow" else 2, block.bc_value(f)])
     xs, ys, steps = [], [], []
     for g in t.grids():
         if g is None:
@@ -1458,6 +1724,134 @@ def from_corridor(corridor) -> Topology:
         )
         t = Topology(vertices, edges, [block], bed=t.bed)
     return t
+
+
+# ================================================================== processes
+#: the shortest piece the balancing cuts (cells along the cut direction)
+PIECE_MIN = RING
+
+
+@dataclass(frozen=True)
+class Balance:
+    """How a run of ``processes`` shares out the grid, as REEF3D does: block 0 (with
+    its ring) evenly over all processes by DIVEMesh, then the pieces of the other
+    blocks, the largest first, each onto the process with the fewest cells.
+    ``loads``: the cells of each process; ``ranks``: blocks.dat's block -> process."""
+
+    processes: int
+    loads: list
+    ranks: dict
+    native: int
+
+    @property
+    def mean(self) -> float:
+        return float(sum(self.loads)) / max(len(self.loads), 1)
+
+    @property
+    def imbalance(self) -> float:
+        """The busiest process over the mean (1: even)."""
+        return max(self.loads) / self.mean if self.mean > 0 else 1.0
+
+    def text(self) -> str:
+        return (
+            f"{self.processes} processes: {self.mean:,.0f} cells each on average, the "
+            f"busiest {max(self.loads):,.0f} ({100 * (self.imbalance - 1):.0f} % more)"
+        )
+
+
+def native_cells(topology: Topology) -> int:
+    """Block 0's cells with DIVEMesh's ring on its faces with an interface."""
+    ni, nj = topology.size(0)
+    shared = topology.interface_faces(0)
+    ring = sum(RING * (nj if f in ("i0", "i1") else ni) for f in FACES if shared[f])
+    return int(ni * nj + ring)
+
+
+def balance(topology: Topology, processes: int) -> Balance:
+    """The cells each process gets (:class:`Balance`)."""
+    n = max(int(processes), 1)
+    native = native_cells(topology)
+    loads = [native / n] * n
+    index = topology.output_index()
+    pieces = []
+    for b in range(1, len(topology.blocks)):
+        ni, nj = topology.size(b)
+        lengths = topology.piece_lengths(b)
+        other = nj if topology.blocks[b].split == "i" else ni
+        pieces += [(index[(b, k)], length * other) for k, length in enumerate(lengths)]
+    pieces.sort(key=lambda p: -p[1])  # (stable: in block order among equals)
+    ranks = {}
+    for out, cells in pieces:
+        r = int(np.argmin(loads))
+        ranks[out] = r
+        loads[r] += cells
+    return Balance(n, [float(v) for v in loads], ranks, native)
+
+
+def balanced(topology: Topology, processes: int, tolerance: float = 1.05) -> Topology:
+    """The blocks 1.. cut into pieces so that ``processes`` share the cells evenly:
+    each block first into pieces of about what a process has room for beside its
+    share of block 0, then, while the busiest process has more than ``tolerance``
+    times the mean, the one more cut that helps most, up to about two pieces a
+    process. The cuts with the least cost win: the busiest process's cells plus
+    0.4 % of the mean for every piece (each piece has interfaces to exchange).
+    Pieces have PIECE_MIN cells at least; a block is cut along its longer
+    direction, along i if it has an inflow or outflow."""
+    n = max(int(processes), 1)
+    native = native_cells(topology)
+    total = native + sum(
+        topology.size(k)[0] * topology.size(k)[1] for k in range(1, len(topology.blocks))
+    )
+    room = max(total / n - native / n, 1.0)  # what a process takes beside block 0
+    blocks = []
+    for k, b in enumerate(topology.blocks):
+        if k == 0:
+            blocks.append(replace(b, pieces=1))
+            continue
+        ni, nj = topology.size(k)
+        valued = any(b.bc_type(f) in ("inflow", "outflow") for f in ("i0", "i1"))
+        split = "i" if valued or ni >= nj else "j"
+        along = ni if split == "i" else nj
+        most = max(along // PIECE_MIN, 1)
+        pieces = int(min(max(round(ni * nj / room), 1), most))
+        blocks.append(replace(b, pieces=pieces, split=split))
+
+    def with_blocks(new):
+        return replace(
+            topology, vertices=dict(topology.vertices), edges=dict(topology.edges), blocks=new
+        )
+
+    t = with_blocks(blocks)
+
+    mean = total / n
+
+    def score(top):  # the busiest process, and a little for every piece
+        busiest = max(balance(top, n).loads)
+        return busiest + 0.004 * mean * sum(b.pieces for b in top.blocks)
+
+    best = (score(t), t)
+    for _ in range(2 * n + len(t.blocks)):
+        if balance(t, n).imbalance <= tolerance:
+            break
+        choice = None
+        for k in range(1, len(t.blocks)):
+            b = t.blocks[k]
+            ni, nj = t.size(k)
+            along = ni if b.split == "i" else nj
+            if along // (b.pieces + 1) < PIECE_MIN:
+                continue
+            new = list(t.blocks)
+            new[k] = replace(b, pieces=b.pieces + 1)
+            trial = with_blocks(new)
+            load = max(balance(trial, n).loads)
+            if choice is None or load < choice[0]:
+                choice = (load, trial)
+        if choice is None:
+            break
+        t = choice[1]  # (even when it does not help yet: the next cut may)
+        if score(t) < best[0]:
+            best = (score(t), t)
+    return best[1]
 
 
 def mean_spacing(topology: Topology) -> float:
