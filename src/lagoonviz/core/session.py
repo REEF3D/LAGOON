@@ -1263,11 +1263,174 @@ class Session:
         self._put_multiblock(case, made, script, "Blocks from corridor")
 
     def move_block_vertex(self, name: str, x: float, y: float, case: str | None = None) -> None:
-        """Move a corner (vertex) of the blocks: every edge from it follows."""
+        """Move a corner (vertex) of the blocks: every edge from it follows; an edge
+        that follows the water is laid along it again (the corner onto it)."""
         script = f"session.move_block_vertex({name!r}, {float(x)!r}, {float(y)!r}"
-        self._change_multiblock(
-            case, lambda t: t.moved_vertex(name, x, y), script, "Move block corner"
+        case_id = self._case_id(case)
+
+        def change(t):
+            moved = t.moved_vertex(name, x, y)
+            for edge, e in t.edges.items():
+                if e.water and name in (e.start, e.end):
+                    moved = self._lay_along_water(moved, edge, case_id, **e.water)
+            return moved
+
+        self._change_multiblock(case, change, script, "Move block corner")
+
+    def water_level(self, case: str | None = None) -> float:
+        """The still water level of a case: F 60 of its ctrl.txt, else 0."""
+        try:
+            return float(self.input_file("ctrl.txt", self._case_id(case)).value("F 60", 0.0))
+        except ValueError:
+            return 0.0
+
+    def _lay_along_water(
+        self,
+        topology,
+        edge: str,
+        case_id: str,
+        margin: float = 0.0,
+        radius: float = 0.0,
+        level: float | None = None,
+        corners: bool = True,
+    ):
+        from lagoonviz.core import waterline
+
+        setup = self.data.case_setup(case_id)
+        if setup is None or not (setup.path / "geo.dat").is_file():
+            raise ValueError("following the water needs the bed: geo.dat in the case folder")
+        points = setup.geo_points(limit=10**9)
+        if level is None:
+            level = self.water_level(case_id)
+        e = topology.edges[edge]
+        found = waterline.waterline(
+            points,
+            e.line(topology.vertices),
+            float(level),
+            float(margin),
+            float(radius),
+            corners=bool(corners),
         )
+        water = {"margin": float(margin), "radius": float(radius)}
+        if not corners:
+            water["corners"] = False
+        if level is not None and float(level) != self.water_level(case_id):
+            water["level"] = float(level)
+        length = float(waterline.curvi.lengths(found.line)[-1])
+        count = int(min(max(round(2.0 * length / max(radius, 1e-9)) + 1, 3), 200))
+        return topology.followed(edge, found.line, water, points=count)
+
+    def follow_water(
+        self,
+        edge: str,
+        margin: float = 0.0,
+        radius: float = 0.0,
+        level: float | None = None,
+        corners: bool = True,
+        case: str | None = None,
+    ) -> None:
+        """Lay an edge along the water (:mod:`lagoonviz.core.waterline`): on land
+        ``margin`` m from the water below ``level`` (default F 60), bending no
+        tighter than ``radius`` m, between the points of the shore nearest its two
+        corners (they move there; ``corners`` False: they stay, the edge joining the
+        shore from them), the way round nearer to where it is now. Needs geo.dat.
+        Moving one of its corners later lays it again."""
+        case_id = self._case_id(case)
+        script = (
+            f"session.follow_water({edge!r}, margin={float(margin)!r}, radius={float(radius)!r}"
+        )
+        if level is not None:
+            script += f", level={float(level)!r}"
+        if not corners:
+            script += ", corners=False"
+        self._change_multiblock(
+            case,
+            lambda t: self._lay_along_water(t, edge, case_id, margin, radius, level, corners),
+            script,
+            "Follow the water",
+        )
+
+    def set_block_spacing(
+        self,
+        edge: str,
+        start: float | None,
+        end: float | None = None,
+        largest: float | None = None,
+        growth: float | None = None,
+        across: bool = True,
+        case: str | None = None,
+    ) -> None:
+        """Space an edge's nodes by the cells at its ends (m; ``end`` default
+        ``start``), growing evenly from one to the other, or, with a ``largest``
+        cell, by ``growth`` from each end up to it; its cells follow from its length
+        (and go on across the blocks). ``across``: the edges across the blocks from it
+        without a spacing get it too. ``start`` None: no spacing."""
+        spacing = None
+        if start is not None:
+            spacing = {"start": float(start), "end": float(end if end is not None else start)}
+            if largest:
+                spacing["max"] = float(largest)
+                spacing["growth"] = float(growth or 1.1)
+        words = f"{edge!r}, {start!r}"
+        if start is not None:
+            words += f", {spacing['end']!r}"
+            if largest:
+                words += f", largest={float(largest)!r}, growth={spacing['growth']!r}"
+        if not across:
+            words += ", across=False"
+        self._change_multiblock(
+            case,
+            lambda t: t.with_spacing(edge, spacing, across),
+            f"session.set_block_spacing({words}",
+            "Space block edge",
+        )
+
+    def fit_block_cells(self, case: str | None = None) -> None:
+        """The cells of every edge with a spacing from its length as it is now (after
+        corners were moved), carried across the blocks."""
+        self._change_multiblock(
+            case, lambda t: t.fitted_cells(), "session.fit_block_cells(", "Cells from spacing"
+        )
+
+    def import_blocks(
+        self, path: str | Path | None = None, smoothing: int = 2000, case: str | None = None
+    ) -> int:
+        """A blocks.dat made elsewhere (default: the case's) as the case's blocks:
+        their faces as edges of their own nodes, the interfaces where faces share
+        nodes, the boundaries from control.txt (C 11 - C 14) and ctrl.txt (G 54),
+        ``smoothing`` sweeps inside each block. Without geo.dat the nodes' bed is
+        written as geo.dat, so Make grid gives it back. One undo step; returns the
+        number of blocks."""
+        import numpy as np
+
+        from lagoonviz.core import multiblock as mb
+
+        case_id = self._case_id(case)
+        setup = self.data.case_setup(case_id, create=True)
+        if setup is None:
+            raise ValueError(f"{case_id}: no case folder")
+        source = Path(path) if path else setup.path / mb.GRID_FILE
+        nodes = mb.read_blocks(source)
+        if not nodes:
+            raise ValueError(f"{source}: not a blocks.dat (or no blocks in it)")
+        bcs = mb.bcs_from_inputs(
+            self.input_file("control.txt", case_id), self.input_file("ctrl.txt", case_id)
+        )
+        topology = mb.from_blocks(nodes, bcs=bcs, smoothing=int(smoothing))
+        script = "session.import_blocks(" + (f"{str(path)!r}, " if path else "")
+        script += f"smoothing={int(smoothing)}" + (f", case={case!r})" if case else ")")
+        commands = [self._case_file(case_id, mb.FILE, topology.text(), script, "Import blocks")]
+        geo = setup.path / "geo.dat"
+        if not geo.is_file():
+            rows = np.vstack(
+                [np.column_stack([x.ravel(), y.ravel(), z.ravel()]) for x, y, z in nodes]
+            )
+            text = "\n".join(f"{a:.10g} {b:.10g} {c:.6g}" for a, b, c in rows) + "\n"
+            commands.append(WriteCaseFile(geo, case_id, text, "", "geo.dat", setup.geo_changed))
+        if not self._multiblock_items(case_id):
+            commands.append(AddItem("multiblock", None, {"case": case_id}))
+        self.stack.execute(Batch(commands, script, "Import blocks"))
+        return len(nodes)
 
     def move_block_point(
         self, edge: str, index: int, x: float, y: float, case: str | None = None

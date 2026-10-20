@@ -28,7 +28,14 @@ The **boundaries** of the faces without an interface (``bc``): ``wall`` (default
 ``inflow`` (a discharge ``value`` in m3/s) or ``outflow`` (a water level ``value`` in
 m). On block 0 they are DIVEMesh's sides (C 11 inflow, C 14 outflow: REEF3D's B 60
 1, W 10, F 62); on the blocks 1.. REEF3D's ``G 54 b 1 Q`` (the -i face) and
-``G 54 b 2 WL`` (the +i face).
+``G 54 b 2 WL`` (the +i face). An ``open`` face of block 0 has a condition of its own
+in ctrl.txt (a tide edge, B 520): DIVEMesh's side gets the code ``value`` (2 when
+none).
+
+Edges are spaced by a ``spacing`` (the cells at their ends, a largest cell; the
+cells follow from the length), made circular ``arc``s, laid along the water
+(:mod:`lagoonviz.core.waterline`), and a blocks.dat made elsewhere is read back into
+a topology by :func:`from_blocks` (its faces' nodes kept as ``"nodes"`` edges).
 
 :func:`check` lists what DIVEMesh and REEF3D would refuse or warn about (the
 **rules**), :func:`quality` how good the cells are, :func:`blocks_text` writes
@@ -39,6 +46,7 @@ i fastest).
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -51,8 +59,12 @@ GRID_FILE = "blocks.dat"
 #: the faces of a block in its index frame: -i, +i, -j, +j (DIVEMesh's faces 0 .. 3)
 FACES = ("i0", "i1", "j0", "j1")
 FACE_NAMES = {"i0": "-i", "i1": "+i", "j0": "-j", "j1": "+j"}
-CURVES = ("straight", "through", "bspline")
-BCS = ("wall", "inflow", "outflow")
+CURVES = ("straight", "through", "bspline", "arc", "nodes")
+BCS = ("wall", "inflow", "outflow", "open")
+#: an open face's DIVEMesh side code when none is given (ctrl.txt sets the condition)
+OPEN_CODE = 2
+#: the growth of the cells from a fine end when an edge's spacing has a largest cell
+GROWTH = 1.1
 BEDS = ("geo", "flat")
 #: DIVEMesh's ring of block 0 (R 21's default): the blocks behind its interfaces must
 #: be at least this many cells deep
@@ -68,7 +80,17 @@ CLASSES = ("good", "fair", "poor", "folded")
 # ====================================================================== edges
 @dataclass
 class Edge:
-    """A line from vertex ``start`` to vertex ``end`` cut into ``cells`` cells."""
+    """A line from vertex ``start`` to vertex ``end`` cut into ``cells`` cells.
+
+    ``curve``: ``"straight"``; ``"through"`` the points; a ``"bspline"`` they pull on;
+    a circular ``"arc"`` through its first point; ``"nodes"``: straight from point to
+    point, the points being the nodes of an imported grid (kept exactly while the
+    cells are as many; more or fewer keep their grading).
+
+    How the nodes are spaced along it: ``spacing`` (``{"start": m, "end": m}``, and a
+    largest cell ``"max"`` with the ``"growth"`` from each end) or ``ratio`` (last
+    cell / first). ``water``: the edge follows the water (``{"level", "margin",
+    "radius"}``, :mod:`lagoonviz.core.waterline`): its points are where it was put."""
 
     start: str
     end: str
@@ -76,6 +98,8 @@ class Edge:
     points: np.ndarray = field(default_factory=lambda: np.zeros((0, 2)))
     curve: str = "through"
     ratio: float = 1.0
+    spacing: dict | None = None
+    water: dict | None = None
 
     def __post_init__(self) -> None:
         self.points = np.asarray(self.points, float).reshape(-1, 2)
@@ -83,6 +107,8 @@ class Edge:
         self.ratio = float(self.ratio) if float(self.ratio) > 0 else 1.0
         if self.curve not in CURVES:
             raise ValueError(f"curve must be one of {', '.join(CURVES)}, got {self.curve!r}")
+        self.spacing = check_spacing(self.spacing)
+        self.water = dict(self.water) if self.water else None
 
     def controls(self, vertices: dict) -> np.ndarray:
         """Its start, shaping points and end (k + 2, 2)."""
@@ -94,23 +120,59 @@ class Edge:
         p = self.controls(vertices)
         if self.curve == "straight" or len(p) == 2:
             return curvi._straight(p, 1)
+        if self.curve == "arc":
+            return arc_through(p[0], p[1], p[-1])
+        if self.curve == "nodes":
+            return p
         return curvi.catmull_rom(p) if self.curve == "through" else curvi.bspline(p)
 
+    def length(self, vertices: dict) -> float:
+        return float(curvi.lengths(self.line(vertices))[-1])
+
+    def fractions(self) -> np.ndarray:
+        """Where its ``cells + 1`` nodes lie, as fractions of its length (0 .. 1):
+        by ``spacing``, or graded by ``ratio`` (an imported edge's: :meth:`nodes`)."""
+        n = self.cells
+        if n == 1:
+            return np.array([0.0, 1.0])
+        if self.spacing:
+            w = spacing_sizes(n, self.spacing)
+        elif abs(self.ratio - 1.0) < 1e-12:
+            return np.linspace(0.0, 1.0, n + 1)
+        else:
+            w = (self.ratio ** (1.0 / (n - 1))) ** np.arange(n)
+        return np.concatenate([[0.0], np.cumsum(w)]) / w.sum()
+
     def nodes(self, vertices: dict) -> np.ndarray:
-        """Its ``cells + 1`` nodes along the line (graded by ``ratio``), (n + 1, 2)."""
+        """Its ``cells + 1`` nodes along the line (spaced by ``spacing`` or graded by
+        ``ratio``; an imported edge's own nodes), (n + 1, 2)."""
         line = self.line(vertices)
         s = curvi.lengths(line)
         n = self.cells
-        if abs(self.ratio - 1.0) < 1e-12 or n == 1:
-            t = np.linspace(0.0, 1.0, n + 1)
+        if self.curve == "nodes" and len(self.points) and not self.spacing and self.ratio == 1.0:
+            if n == len(line) - 1:
+                t = s / s[-1] if s[-1] > 0 else np.linspace(0.0, 1.0, n + 1)
+            else:  # as many cells as asked, graded as imported
+                old = s / s[-1] if s[-1] > 0 else np.linspace(0.0, 1.0, len(line))
+                t = np.interp(np.linspace(0.0, 1.0, n + 1), np.linspace(0.0, 1.0, len(line)), old)
         else:
-            g = self.ratio ** (1.0 / (n - 1))
-            w = g ** np.arange(n)
-            t = np.concatenate([[0.0], np.cumsum(w)]) / w.sum()
+            t = self.fractions()
         at = t * s[-1]
         out = np.column_stack([np.interp(at, s, line[:, 0]), np.interp(at, s, line[:, 1])])
         out[0], out[-1] = vertices[self.start], vertices[self.end]  # exactly on the vertices
         return out
+
+    def end_sizes(self, vertices: dict) -> tuple[float, float]:
+        """The lengths of its first and last cell as they are (m)."""
+        nodes = self.nodes(vertices)
+        d = np.hypot(*np.diff(nodes, axis=0).T)
+        return float(d[0]), float(d[-1])
+
+    def wanted_cells(self, vertices: dict) -> int | None:
+        """The cells its ``spacing`` asks for over its length (None: no spacing)."""
+        if not self.spacing:
+            return None
+        return cells_for(self.length(vertices), self.spacing)
 
     def to_dict(self) -> dict:
         data = {"start": self.start, "end": self.end, "cells": self.cells}
@@ -120,12 +182,125 @@ class Edge:
             data["curve"] = self.curve
         if self.ratio != 1.0:
             data["ratio"] = self.ratio
+        if self.spacing:
+            data["spacing"] = dict(self.spacing)
+        if self.water:
+            data["water"] = dict(self.water)
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> Edge:
-        known = ("start", "end", "cells", "points", "curve", "ratio")
+        known = ("start", "end", "cells", "points", "curve", "ratio", "spacing", "water")
         return cls(**{k: data[k] for k in known if k in data})
+
+
+def check_spacing(spacing) -> dict | None:
+    """An edge's spacing made sure of: start and end (m, > 0), a largest cell
+    ``max`` (m, or none) with ``growth`` (> 1)."""
+    if not spacing:
+        return None
+    spacing = dict(spacing)
+    try:
+        start, end = float(spacing["start"]), float(spacing.get("end", spacing["start"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"spacing needs start (and end) in m: {spacing!r}") from error
+    if not (start > 0 and end > 0):
+        raise ValueError("the spacing at the ends must be more than 0 m")
+    out = {"start": start, "end": end}
+    if spacing.get("max") not in (None, 0, 0.0):
+        largest = float(spacing["max"])
+        if largest < max(start, end):
+            raise ValueError("the largest cell must be at least as long as those at the ends")
+        out["max"] = largest
+        growth = float(spacing.get("growth") or GROWTH)
+        if not growth > 1.0:
+            raise ValueError("the growth must be more than 1 (1.1: 10 % a cell)")
+        out["growth"] = growth
+    return out
+
+
+def spacing_sizes(n: int, spacing: dict) -> np.ndarray:
+    """The relative lengths of ``n`` cells by a spacing: from ``start`` to ``end``
+    growing evenly (geometric), or, with a largest cell ``max``, growing by
+    ``growth`` from each end up to it."""
+    a, b = spacing["start"], spacing["end"]
+    k = np.arange(n, dtype=float)
+    if "max" not in spacing:
+        if n == 1:
+            return np.ones(1)
+        return a * (b / a) ** (k / (n - 1))
+    g, m = spacing["growth"], spacing["max"]
+    return np.minimum(np.minimum(a * g**k, b * g ** (n - 1 - k)), m)
+
+
+def cells_for(length: float, spacing: dict) -> int:
+    """The cells a spacing asks for over ``length`` m."""
+    a, b = spacing["start"], spacing["end"]
+    length = float(length)
+    if length <= max(a, b):
+        return 1
+    if "max" not in spacing:
+        if abs(b - a) <= 1e-9 * max(a, b):
+            return max(1, int(round(length / a)))
+        g = (length - a) / (length - b)  # the growth of a geometric series from a to b
+        if g <= 0 or abs(g - 1.0) < 1e-12:
+            return max(1, int(round(2 * length / (a + b))))
+        return max(1, int(round(1 + math.log(b / a) / math.log(g))))
+    low, high = 1, 2
+    while spacing_sizes(high, spacing).sum() < length:
+        high *= 2
+        if high > 10**6:
+            raise ValueError("the spacing asks for more than a million cells")
+    while high - low > 1:  # the fewest cells that reach the length
+        mid = (low + high) // 2
+        if spacing_sizes(mid, spacing).sum() >= length:
+            high = mid
+        else:
+            low = mid
+    fewer = spacing_sizes(low, spacing).sum()
+    return low if length - fewer < spacing_sizes(high, spacing).sum() - length else high
+
+
+def arc_through(a, m, b, samples: int = 400) -> np.ndarray:
+    """The circular arc from ``a`` through ``m`` to ``b`` as a dense polyline (a
+    straight line when the three lie on one)."""
+    a, m, b = (np.asarray(p, float) for p in (a, m, b))
+    d = 2.0 * (a[0] * (m[1] - b[1]) + m[0] * (b[1] - a[1]) + b[0] * (a[1] - m[1]))
+    scale = max(np.hypot(*(b - a)), np.hypot(*(m - a)), 1e-12)
+    if abs(d) < 1e-9 * scale**2:
+        return curvi._straight(np.vstack([a, b]), 1)
+    sa, sm, sb = a @ a, m @ m, b @ b
+    centre = np.array(
+        [
+            (sa * (m[1] - b[1]) + sm * (b[1] - a[1]) + sb * (a[1] - m[1])) / d,
+            (sa * (b[0] - m[0]) + sm * (a[0] - b[0]) + sb * (m[0] - a[0])) / d,
+        ]
+    )
+    radius = np.hypot(*(a - centre))
+    ta, tm, tb = (math.atan2(p[1] - centre[1], p[0] - centre[0]) for p in (a, m, b))
+    # the way round from a to b that passes m
+    ccw = lambda t: (t - ta) % (2 * math.pi)  # noqa: E731
+    sweep = ccw(tb) if ccw(tm) < ccw(tb) else ccw(tb) - 2 * math.pi
+    t = ta + sweep * np.linspace(0.0, 1.0, max(int(samples), 8))
+    out = np.column_stack([centre[0] + radius * np.cos(t), centre[1] + radius * np.sin(t)])
+    out[0], out[-1] = a, b
+    return out
+
+
+def shape_points(line: np.ndarray, count: int = 0) -> np.ndarray:
+    """Points of a polyline (its ends left out) that a Catmull-Rom curve through
+    them follows it by: ``count``, or as many as it needs (more where it bends)."""
+    line = np.asarray(line, float)
+    s = curvi.lengths(line)
+    if s[-1] <= 0 or len(line) < 3:
+        return np.zeros((0, 2))
+    if count <= 0:  # by its turning: about one point per 15° of turn, 3 .. 120
+        d = np.diff(line, axis=0)
+        heading = np.unwrap(np.arctan2(d[:, 1], d[:, 0]))
+        turn = float(np.abs(np.diff(heading)).sum())
+        count = int(min(max(round(math.degrees(turn) / 15.0) + 2, 3), 120))
+    at = np.linspace(0.0, s[-1], count + 2)[1:-1]
+    return np.column_stack([np.interp(at, s, line[:, 0]), np.interp(at, s, line[:, 1])])
 
 
 def _ref(name: str) -> tuple[str, bool]:
@@ -368,27 +543,156 @@ class Topology:
         return replace(self, vertices=vertices, edges=dict(self.edges), blocks=list(self.blocks))
 
     def moved_point(self, edge: str, index: int, x: float, y: float) -> Topology:
+        """A point of an edge moved (an edge that followed the water is shaped by hand
+        from then on)."""
         if edge not in self.edges:
             raise ValueError(f"no edge {edge!r}")
         e = self.edges[edge]
         points = e.points.copy()
         points[int(index)] = (float(x), float(y))
         edges = dict(self.edges)
-        edges[edge] = replace(e, points=points)
+        edges[edge] = replace(e, points=points, water=None)
         return replace(self, vertices=dict(self.vertices), edges=edges, blocks=list(self.blocks))
 
     def with_edge(self, edge: str, **options) -> Topology:
-        """One edge changed (``cells``, ``curve``, ``ratio``, ``points``); a new
-        number of cells goes on across the blocks to the opposite faces (single
-        edges there), so that opposite faces keep the same number of cells."""
+        """One edge changed (``cells``, ``curve``, ``ratio``, ``points``, ``spacing``,
+        ``water``); a new number of cells goes on across the blocks to the opposite
+        faces (single edges there), so that opposite faces keep the same number of
+        cells. A spacing sets the cells of the edge and of those across the blocks
+        from it (the most any of their spacings asks for). An edge made an ``"arc"``
+        gets one point, the middle of its line (bulged out of its block when
+        straight)."""
         if edge not in self.edges:
             raise ValueError(f"no edge {edge!r}")
         edges = dict(self.edges)
-        edges[edge] = replace(edges[edge], **options)
+        old = edges[edge]
+        if options.get("curve") == "arc" and old.curve != "arc" and "points" not in options:
+            options["points"] = [self._arc_middle(edge)]
+        edges[edge] = replace(old, **options)
         result = replace(self, vertices=dict(self.vertices), edges=edges, blocks=list(self.blocks))
         if "cells" in options:
             result = result._propagate(edge)
+        if options.get("spacing"):
+            result = result.fitted_cells([edge])
         return result
+
+    def _arc_middle(self, edge: str) -> tuple[float, float]:
+        """Where an edge's arc passes: the middle of its line, or, for a straight one,
+        a quarter of its length out of its block (to its left without a block)."""
+        e = self.edges[edge]
+        line = e.line(self.vertices)
+        s = curvi.lengths(line)
+        mid = np.array([np.interp(0.5 * s[-1], s, line[:, k]) for k in (0, 1)])
+        a, c = np.asarray(self.vertices[e.start]), np.asarray(self.vertices[e.end])
+        chord = c - a
+        size = float(np.hypot(*chord))
+        off = abs((mid - a)[0] * chord[1] - (mid - a)[1] * chord[0]) / max(size, 1e-12)
+        if off > 1e-3 * size:
+            return float(mid[0]), float(mid[1])
+        normal = np.array([-chord[1], chord[0]]) / max(size, 1e-12)
+        uses = self.edge_uses().get(edge, [])
+        if uses:
+            try:
+                x, y = self.block_nodes(uses[0][0])
+                if np.dot(normal, 0.5 * (a + c) - (x.mean(), y.mean())) < 0:
+                    normal = -normal
+            except (ValueError, KeyError):
+                pass
+        p = 0.5 * (a + c) + 0.25 * size * normal
+        return float(p[0]), float(p[1])
+
+    def cell_groups(self) -> list[set[str]]:
+        """Edges whose cells go together: those on opposite faces of a block (faces of
+        one edge each), and on through the blocks beyond."""
+        parent = {name: name for name in self.edges}
+
+        def root(n):
+            while parent[n] != n:
+                parent[n] = parent[parent[n]]
+                n = parent[n]
+            return n
+
+        for b in range(len(self.blocks)):
+            for fa, fb in (("i0", "i1"), ("j0", "j1")):
+                ca = [n for n, _ in self.face_edges(b, fa)]
+                cb = [n for n, _ in self.face_edges(b, fb)]
+                if len(ca) == 1 and len(cb) == 1 and ca[0] in parent and cb[0] in parent:
+                    parent[root(ca[0])] = root(cb[0])
+        groups: dict[str, set[str]] = {}
+        for name in self.edges:
+            groups.setdefault(root(name), set()).add(name)
+        return list(groups.values())
+
+    def across(self, edge: str) -> dict[str, bool]:
+        """The edges whose cells go with ``edge``'s (itself included) and whether each
+        runs the same way (its start across from ``edge``'s start)."""
+        if edge not in self.edges:
+            raise ValueError(f"no edge {edge!r}")
+        found = {edge: True}
+        todo = [edge]
+        while todo:
+            name = todo.pop()
+            for b in range(len(self.blocks)):
+                for fa, fb in (("i0", "i1"), ("i1", "i0"), ("j0", "j1"), ("j1", "j0")):
+                    ca, cb = self.face_edges(b, fa), self.face_edges(b, fb)
+                    if len(ca) != 1 or len(cb) != 1 or ca[0][0] != name:
+                        continue
+                    other, back = cb[0]
+                    if other in found or other not in self.edges:
+                        continue
+                    found[other] = found[name] == (ca[0][1] == back)
+                    todo.append(other)
+        return found
+
+    def with_spacing(self, edge: str, spacing: dict | None, across: bool = True) -> Topology:
+        """An edge's spacing (None: none), with ``across`` also on the edges across the
+        blocks from it that have none (turned to run their way); the cells from it."""
+        spacing = check_spacing(spacing)
+        names = self.across(edge) if across and spacing else {edge: True}
+        edges = dict(self.edges)
+        for name, same in names.items():
+            if name != edge and edges[name].spacing:
+                continue
+            own = spacing
+            if spacing and not same:
+                own = dict(spacing, start=spacing["end"], end=spacing["start"])
+            edges[name] = replace(edges[name], spacing=own)
+        result = replace(self, vertices=dict(self.vertices), edges=edges, blocks=list(self.blocks))
+        return result.fitted_cells([edge]) if spacing else result
+
+    def fitted_cells(self, edges=None) -> Topology:
+        """The cells from the spacings: each group of edges whose cells go together
+        (:meth:`cell_groups`) gets the most cells any spacing in it asks for over its
+        edge's length. ``edges``: only the groups of these (default all)."""
+        chosen = None if edges is None else set(edges)
+        new = dict(self.edges)
+        for group in self.cell_groups():
+            if chosen is not None and not group & chosen:
+                continue
+            wanted = [self.edges[n].wanted_cells(self.vertices) for n in group]
+            wanted = [w for w in wanted if w]
+            if not wanted:
+                continue
+            for name in group:
+                new[name] = replace(new[name], cells=max(wanted))
+        return replace(self, vertices=dict(self.vertices), edges=new, blocks=list(self.blocks))
+
+    def followed(self, edge: str, line, water: dict | None = None, points: int = 0) -> Topology:
+        """An edge laid along ``line`` (from its start to its end): its two corners
+        moved to the line's ends, its shape through ``points`` points of it (0: as
+        many as the line has bends, :func:`shape_points`), ``water`` kept with it."""
+        if edge not in self.edges:
+            raise ValueError(f"no edge {edge!r}")
+        line = np.asarray(line, float)
+        e = self.edges[edge]
+        vertices = dict(self.vertices)
+        vertices[e.start] = (float(line[0, 0]), float(line[0, 1]))
+        vertices[e.end] = (float(line[-1, 0]), float(line[-1, 1]))
+        inner = shape_points(line, points)
+        edges = dict(self.edges)
+        edges[edge] = replace(e, points=inner, curve="through", water=water)
+        result = replace(self, vertices=vertices, edges=edges, blocks=list(self.blocks))
+        return result.fitted_cells([edge]) if e.spacing else result
 
     def _propagate(self, start: str) -> Topology:
         """Cells of edge ``start`` carried to the opposite faces (single edges)."""
@@ -922,6 +1226,19 @@ def check(topology: Topology) -> list[Issue]:
                         b,
                     )
                 )
+            if kind == "open":
+                if b != 0:
+                    issues.append(
+                        Issue(
+                            "error",
+                            f"block {b}, face {FACE_NAMES[face]}: open faces (a condition of "
+                            "their own in ctrl.txt) only on block 0; the others take an inflow "
+                            "or an outflow (G 54)",
+                            where,
+                            b,
+                        )
+                    )
+                continue
             value = block.bc_value(face)
             if value is None:
                 what = "discharge (m3/s)" if kind == "inflow" else "water level (m)"
@@ -1068,14 +1385,20 @@ def settings(topology: Topology) -> Settings:
     side_of = {"i0": "C 11", "i1": "C 14", "j0": "C 13", "j1": "C 12"}
     code = {"wall": 21, "inflow": 1, "outflow": 2}
     native = t.blocks[0]
-    sides = {side_of[f]: code[native.bc_type(f)] for f in FACES}
+    sides = {}
+    for f in FACES:
+        kind = native.bc_type(f)
+        if kind == "open":  # its own condition in ctrl.txt (a tide edge): the code given
+            sides[side_of[f]] = int(native.bc_value(f) or OPEN_CODE)
+        else:
+            sides[side_of[f]] = code[kind]
     inflow = next((native.bc_value(f) for f in FACES if native.bc_type(f) == "inflow"), None)
     level = next((native.bc_value(f) for f in FACES if native.bc_type(f) == "outflow"), None)
     g54 = []
     for b, block in enumerate(t.blocks[1:], start=1):
         for f in FACES:
             kind = block.bc_type(f)
-            if kind != "wall" and block.bc_value(f) is not None:
+            if kind in ("inflow", "outflow") and block.bc_value(f) is not None:
                 g54.append([b, 1 if kind == "inflow" else 2, block.bc_value(f)])
     xs, ys, steps = [], [], []
     for g in t.grids():
@@ -1137,3 +1460,137 @@ def summary(topology: Topology) -> str:
     """One line: blocks, cells, interfaces."""
     q = quality(topology)
     return f"{q.text()}; {count(interface_count(topology), 'interface edge')}"
+
+
+# ===================================================================== import
+def _face_lines(x: np.ndarray, y: np.ndarray) -> dict[str, np.ndarray]:
+    """A block's four faces as node lines in its index directions."""
+    return {
+        "j0": np.column_stack([x[0], y[0]]),
+        "j1": np.column_stack([x[-1], y[-1]]),
+        "i0": np.column_stack([x[:, 0], y[:, 0]]),
+        "i1": np.column_stack([x[:, -1], y[:, -1]]),
+    }
+
+
+def from_blocks(
+    nodes: list,
+    names: list[str] | None = None,
+    bcs: dict | None = None,
+    smoothing: int = 0,
+) -> Topology:
+    """A topology from the nodes of a multi-block grid (as :func:`read_blocks` gives
+    them, a blocks.dat made elsewhere): its faces cut where another block's face
+    starts or ends on them, the pieces edges of their own nodes (``"nodes"``), shared
+    where two faces have the same nodes: the interfaces. The blocks keep their nodes
+    on the faces (no sliding) and get ``smoothing`` sweeps inside. ``bcs``: (block,
+    face) -> {"type", "value"}."""
+    from scipy.spatial import cKDTree
+
+    grids = [(np.asarray(g[0], float), np.asarray(g[1], float)) for g in nodes]
+    if not grids:
+        raise ValueError("no blocks")
+    faces = [_face_lines(x, y) for x, y in grids]
+    every = np.vstack([line for f in faces for line in f.values()])
+    extent = float(max(every.max(axis=0) - every.min(axis=0)))
+    tol = max(1e-6 * extent, 1e-6)
+    tree = cKDTree(every)
+    owner = []  # (block, face, index) of each row of every
+    for b, f in enumerate(faces):
+        for face, line in f.items():
+            owner += [(b, face, k) for k in range(len(line))]
+    # where the faces are cut: their ends, and where a run of nodes shared with
+    # another block's face starts or ends
+    cuts = {(b, face): {0, len(line) - 1} for b, f in enumerate(faces) for face, line in f.items()}
+    for b, f in enumerate(faces):
+        for face, line in f.items():
+            shared = np.zeros(len(line), bool)
+            for k, p in enumerate(line):
+                for row in tree.query_ball_point(p, tol):
+                    if owner[row][0] != b:
+                        shared[k] = True
+                        break
+            for k in range(len(line)):
+                before = shared[k - 1] if k else False
+                after = shared[k + 1] if k + 1 < len(line) else False
+                if shared[k] and (not before or not after):
+                    cuts[(b, face)].add(k)
+    # the corners: named in the order found
+    vertices: dict[str, tuple[float, float]] = {}
+    spots: list[np.ndarray] = []
+
+    def vertex(p) -> str:
+        for name, q in zip(vertices, spots, strict=True):
+            if np.hypot(*(p - q)) <= tol:
+                return name
+        name = f"v{len(vertices)}"
+        vertices[name] = (float(p[0]), float(p[1]))
+        spots.append(np.asarray(p, float))
+        return name
+
+    edges: dict[str, Edge] = {}
+    known: dict[tuple, str] = {}  # (start, middle, end) rounded -> edge name
+
+    def key(piece):
+        mid = piece[len(piece) // 2] if len(piece) > 2 else 0.5 * (piece[0] + piece[-1])
+        return tuple(np.round(np.concatenate([piece[0], mid, piece[-1]]) / tol).astype(np.int64))
+
+    blocks = []
+    for b, f in enumerate(faces):
+        chains = {}
+        for face in FACES:
+            line = f[face]
+            marks = sorted(cuts[(b, face)])
+            chain = []
+            for k0, k1 in zip(marks[:-1], marks[1:], strict=True):
+                piece = line[k0 : k1 + 1]
+                ahead, back = key(piece), key(piece[::-1])
+                if ahead in known:
+                    chain.append(known[ahead])
+                    continue
+                if back in known:
+                    chain.append("-" + known[back])
+                    continue
+                name = f"b{b}_{face}" + (f"_{len(chain) + 1}" if len(marks) > 2 else "")
+                name = _fresh(name, edges)
+                edges[name] = Edge(
+                    vertex(piece[0]), vertex(piece[-1]), len(piece) - 1, piece[1:-1], "nodes"
+                )
+                known[ahead] = name
+                chain.append(name)
+            chains[face] = chain
+        name = names[b] if names and b < len(names) else f"block {b}"
+        bc = {face: dict(v) for (k, face), v in (bcs or {}).items() if k == b}
+        blocks.append(Block(name, chains, bc, int(smoothing), slide=False))
+    return Topology(vertices, edges, blocks)
+
+
+def bcs_from_inputs(control, ctrl) -> dict:
+    """The boundaries of the faces from the input files: block 0's sides (C 11 -
+    C 14 of control.txt: 21 a wall, 1 on -i the inflow of W 10, 2 on +i the outflow
+    of F 62, others open with their code) and the G 54 lines of ctrl.txt (b 1 Q:
+    inflow on -i, b 2 WL: outflow on +i). ``control``, ``ctrl``: their ControlFiles
+    (or None)."""
+    out: dict = {}
+    face_of = {"C 11": "i0", "C 14": "i1", "C 13": "j0", "C 12": "j1"}
+    for code, face in face_of.items():
+        values = control.values(code) if control is not None else None
+        if not values:
+            continue
+        kind = int(values[0])
+        if kind == 21:
+            continue
+        if kind == 1 and face == "i0":
+            w10 = ctrl.values("W 10") if ctrl is not None else None
+            out[(0, face)] = {"type": "inflow"} | ({"value": float(w10[0])} if w10 else {})
+        elif kind == 2 and face == "i1":
+            f62 = ctrl.values("F 62") if ctrl is not None else None
+            out[(0, face)] = {"type": "outflow"} | ({"value": float(f62[0])} if f62 else {})
+        else:
+            out[(0, face)] = {"type": "open", "value": float(kind)}
+    for row in ctrl.all("G 54") if ctrl is not None else []:
+        if len(row) >= 3:
+            b, kind, value = int(row[0]), int(row[1]), float(row[2])
+            face = "i0" if kind == 1 else "i1"
+            out[(b, face)] = {"type": "inflow" if kind == 1 else "outflow", "value": value}
+    return out
