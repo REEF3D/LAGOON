@@ -2085,6 +2085,11 @@ class Session:
                     "crs='model' for a file in model coordinates"
                 )
         domain = self.data.backgrounds.domain(case_id)
+        topology = self.multiblock(case_id)
+        if topology is not None and topology.edges:  # the blocks, with a margin round them
+            from lagoonviz.core import multiblock as mb
+
+            domain = mb.bed_area(topology, domain)
         if domain is None:
             raise ValueError("the domain is not known: set B 10 first (set_domain)")
         given_spacing = spacing

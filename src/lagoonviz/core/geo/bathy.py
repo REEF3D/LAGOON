@@ -76,9 +76,12 @@ class Bathymetry:
         return f"{self.name}: {n} points"
 
 
-def load(path: str | Path, crs: str | None = None, depths: bool = False) -> Bathymetry:
-    """A bathymetry file: GeoTIFF or .asc (a raster), else x y z points. ``crs``: the
-    CRS when the file does not name one (a raster's own is kept unless given)."""
+def load(
+    path: str | Path, crs: str | None = None, depths: bool = False, columns=None
+) -> Bathymetry:
+    """A bathymetry file: GeoTIFF or .asc (a raster), else x y z points (``columns``:
+    which are x, y and z, :func:`~lagoonviz.core.geo.raster.read_points`). ``crs``:
+    the CRS when the file does not name one (a raster's own is kept unless given)."""
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix in RASTER_SUFFIXES:
@@ -87,7 +90,8 @@ def load(path: str | Path, crs: str | None = None, depths: bool = False) -> Bath
             raise RasterError(f"{path.name} is a picture, not heights")
         return Bathymetry(path.name, raster.crs, raster=raster, depths=depths)
     if suffix in POINT_SUFFIXES or suffix == "":
-        return Bathymetry(path.name, crs_of(crs), points=read_points(path), depths=depths)
+        points = read_points(path, columns=columns)
+        return Bathymetry(path.name, crs_of(crs), points=points, depths=depths)
     raise RasterError(f"{path.name}: LAGOON reads GeoTIFF, .asc and x y z text files")
 
 
@@ -115,6 +119,7 @@ def interpolate(points: np.ndarray, xs: np.ndarray, ys: np.ndarray, method: str 
     points = points[np.isfinite(points).all(axis=1)]
     if len(points) == 0:
         raise RasterError("no points with heights")
+    points = binned(points, xs, ys)
     gx, gy = np.meshgrid(np.asarray(xs, float), np.asarray(ys, float))
     targets = np.column_stack([gx.ravel(), gy.ravel()])
     tree = cKDTree(points[:, :2])
@@ -137,6 +142,33 @@ def interpolate(points: np.ndarray, xs: np.ndarray, ys: np.ndarray, method: str 
     if holes.any():
         values[holes] = points[tree.query(targets[holes])[1], 2]
     return values.reshape(gx.shape)
+
+
+#: soundings this many times as many as the grid's cells or more are averaged per
+#: cell first (a survey of millions of points onto a coarser grid)
+DENSE = 4
+
+
+def binned(points: np.ndarray, xs, ys) -> np.ndarray:
+    """Dense soundings (DENSE times the cells or more) as the mean of those in each
+    cell of the grid (xs, ys), at the mean of their places; others as they are."""
+    xs, ys = np.asarray(xs, float), np.asarray(ys, float)
+    if len(xs) < 2 or len(ys) < 2:
+        return points
+    dx, dy = xs[1] - xs[0], ys[1] - ys[0]
+    col = np.rint((points[:, 0] - xs[0]) / dx)
+    row = np.rint((points[:, 1] - ys[0]) / dy)
+    inside = (col >= 0) & (col < len(xs)) & (row >= 0) & (row < len(ys))
+    if inside.sum() < DENSE * len(xs) * len(ys) and len(points) < 4_000_000:
+        return points
+    cell = (row[inside] * len(xs) + col[inside]).astype(np.int64)
+    count = np.bincount(cell, minlength=len(xs) * len(ys))
+    used = count > 0
+    means = [
+        np.bincount(cell, points[inside, k], minlength=len(xs) * len(ys))[used] / count[used]
+        for k in range(3)
+    ]
+    return np.vstack([np.column_stack(means), points[~inside]])
 
 
 def fill_holes(heights: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:

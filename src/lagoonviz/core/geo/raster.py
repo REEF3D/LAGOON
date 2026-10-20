@@ -26,7 +26,24 @@ from lagoon_format.geo import epsg_code
 from lagoonviz.core.geo.crs import transformer
 
 RASTER_SUFFIXES = (".tif", ".tiff", ".asc")
-POINT_SUFFIXES = (".xyz", ".txt", ".csv", ".dat", ".pts")
+POINT_SUFFIXES = (".xyz", ".txt", ".csv", ".dat", ".pts", ".emo")
+#: the names of columns a header may give: x (easting, longitude), y, z (the
+#: average first: EMODnet's survey files give the minimum, maximum and average depth)
+COLUMN_NAMES = (
+    ("longitude", "lon", "long", "x", "easting", "east"),
+    ("latitude", "lat", "y", "northing", "north"),
+    (
+        "average depth",
+        "average",
+        "mean depth",
+        "mean",
+        "depth",
+        "elevation",
+        "height",
+        "z",
+        "value",
+    ),
+)
 
 
 class RasterError(ValueError):
@@ -372,11 +389,70 @@ def _geokeys(tags: dict) -> tuple[str | None, bool]:
     return None, point
 
 
-def read_points(path: str | Path, limit: int | None = None) -> np.ndarray:
+def header(path: str | Path) -> list[str]:
+    """The names of a points file's columns, from a header line before its numbers
+    ([] when there is none)."""
+    try:
+        with Path(path).open("r", encoding="utf-8", errors="replace") as file:
+            head = [file.readline() for _ in range(20)]
+    except OSError:
+        return []
+    names = []
+    for line in head:
+        if re.match(r"^\s*[-+.\d]", line):
+            break
+        if line.strip() and not line.lstrip().startswith("#"):
+            sep = ";" if ";" in line else ("," if "," in line else ("\t" if "\t" in line else None))
+            names = [w.strip().strip('"') for w in (line.split(sep) if sep else line.split())]
+    return names
+
+
+def pick_columns(names: list[str], columns=None) -> tuple[int, int, int]:
+    """The x, y and z columns (0-based) of a points file: as given (indices, or names
+    of its header), else found by the header's names (COLUMN_NAMES), else the first
+    three."""
+    if columns is not None:
+        out = []
+        for c in columns:
+            if isinstance(c, str) and not c.strip().lstrip("-").isdigit():
+                found = [k for k, n in enumerate(names) if n.lower() == c.strip().lower()]
+                if not found:
+                    raise RasterError(f"no column {c!r} (the columns: {', '.join(names)})")
+                out.append(found[0])
+            else:
+                out.append(int(c))
+        if len(out) != 3:
+            raise RasterError("give three columns: x, y and z")
+        return out[0], out[1], out[2]
+    lowered = [n.lower() for n in names]
+    out = []
+    for wanted in COLUMN_NAMES:
+        match = next(
+            (lowered.index(w) for w in wanted if w in lowered and lowered.index(w) not in out),
+            None,
+        )
+        if match is None:
+            match = next(
+                (k for w in wanted for k, n in enumerate(lowered) if w in n and k not in out),
+                None,
+            )
+        if match is None:
+            return 0, 1, 2
+        out.append(match)
+    return out[0], out[1], out[2]
+
+
+def read_points(path: str | Path, limit: int | None = None, columns=None) -> np.ndarray:
     """Scattered points ``x y z`` per line (separated by spaces, tabs, commas or
     semicolons; lines that do not start with a number, e.g. a header, are skipped),
-    as (n, 3) float. A letter before the numbers (geo.dat with G 19) is skipped."""
+    as (n, 3) float. A letter before the numbers (geo.dat with G 19) is skipped.
+    ``columns``: which columns are x, y and z (indices from 0, or names of the
+    header); default: by the header's names (EMODnet's ``.emo``: longitude, latitude,
+    average depth), else the first three."""
     path = Path(path)
+    picked = pick_columns(header(path), columns)
+    if picked != (0, 1, 2):
+        return _read_columns(path, limit, picked)
     fast = _read_points_fast(path, limit)
     if fast is not None:
         return fast
@@ -399,6 +475,26 @@ def read_points(path: str | Path, limit: int | None = None) -> np.ndarray:
                 break
     if not rows:
         raise RasterError(f"{path.name}: no x y z points")
+    return np.asarray(rows, float)
+
+
+def _read_columns(path: Path, limit: int | None, picked: tuple[int, int, int]) -> np.ndarray:
+    """Points from chosen columns of a delimited text file (a header skipped; rows
+    without numbers there left out)."""
+    rows = []
+    with path.open("r", encoding="utf-8", errors="replace") as file:
+        for line in file:
+            if not re.match(r"^\s*[-+.\d]", line):
+                continue
+            parts = re.split(r"[\s,;]+", line.strip()) if ";" not in line else line.split(";")
+            try:
+                rows.append(tuple(float(parts[k]) for k in picked))
+            except (ValueError, IndexError):
+                continue
+            if limit is not None and len(rows) >= limit:
+                break
+    if not rows:
+        raise RasterError(f"{path.name}: no points in columns {', '.join(map(str, picked))}")
     return np.asarray(rows, float)
 
 

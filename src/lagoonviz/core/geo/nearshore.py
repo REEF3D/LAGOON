@@ -237,17 +237,20 @@ class Overlay:
 
 def spec_of(entry) -> dict:
     """An overlay as given (a path, or a dict with ``path`` and optionally ``crs``,
-    ``depths``, ``below_msl``) in its full form."""
+    ``depths``, ``below_msl``, ``columns``) in its full form."""
     if isinstance(entry, str | Path):
         entry = {"path": str(entry)}
     if not isinstance(entry, dict) or not entry.get("path"):
         raise ValueError(f"an overlay needs a path, got {entry!r}")
-    return {
+    spec = {
         "path": str(Path(str(entry["path"])).expanduser()),
         "crs": entry.get("crs") or None,
         "depths": bool(entry.get("depths", False)),
         "below_msl": float(entry.get("below_msl", 0.0) or 0.0),
     }
+    if entry.get("columns"):  # x, y, z of a points file (indices or the header's names)
+        spec["columns"] = list(entry["columns"])
+    return spec
 
 
 def load_overlay(entry, bounds=None) -> Overlay:
@@ -263,13 +266,14 @@ def load_overlay(entry, bounds=None) -> Overlay:
     if icesat2.is_atl24(path):
         bathy = icesat2.soundings(icesat2.files_in(path), bounds)
         return Overlay(bathy, spec["below_msl"], True, spec)
+    columns = spec.get("columns")
     if spec["crs"] == "model":  # already in the model's coordinates
-        bathy = load(path, None, spec["depths"])
+        bathy = load(path, None, spec["depths"], columns)
         bathy.crs = "model"
         if bathy.raster is not None:
             bathy.raster.crs = "model"
     else:
-        bathy = load(path, spec["crs"], spec["depths"])
+        bathy = load(path, spec["crs"], spec["depths"], columns)
     return Overlay(bathy, spec["below_msl"], False, spec)
 
 

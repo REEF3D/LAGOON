@@ -2007,6 +2007,34 @@ def balanced(topology: Topology, processes: int, tolerance: float = 1.05) -> Top
     return best[1]
 
 
+#: geo.dat reaches this part of the blocks' size beyond them (room to lay edges along
+#: the water outside the blocks as they are)
+BED_MARGIN = 0.05
+
+
+def bed_area(topology: Topology, domain=None) -> tuple | None:
+    """The area geo.dat needs for the blocks: the box round their edges (and the
+    ``domain`` (x0, x1, y0, y1, ...) when given), BED_MARGIN of its size beyond."""
+    lines = []
+    for e in topology.edges.values():
+        try:
+            lines.append(e.line(topology.vertices))
+        except (KeyError, ValueError):
+            continue
+    if not lines:
+        return tuple(domain) if domain is not None else None
+    every = np.vstack(lines)
+    x0, y0 = every.min(axis=0)
+    x1, y1 = every.max(axis=0)
+    if domain is not None:
+        x0, x1 = min(x0, domain[0]), max(x1, domain[1])
+        y0, y1 = min(y0, domain[2]), max(y1, domain[3])
+    pad = BED_MARGIN * max(x1 - x0, y1 - y0)
+    box = (float(x0 - pad), float(x1 + pad), float(y0 - pad), float(y1 + pad))
+    rest = tuple(domain[4:6]) if domain is not None and len(domain) >= 6 else (0.0, 1.0)
+    return box + tuple(float(v) for v in rest)
+
+
 def mean_spacing(topology: Topology) -> float:
     return settings(topology).spacing
 

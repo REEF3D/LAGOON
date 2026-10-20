@@ -188,9 +188,10 @@ class OverlayDialog(QDialog):
     """How a file of one's own is read: its CRS, depths or heights, and how far its
     zero (a chart's datum) lies below mean sea level."""
 
-    def __init__(self, name: str, parent=None) -> None:
+    def __init__(self, name: str, parent=None, path: str | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Over the download: {name}")
+        self.path = path
         form = QFormLayout(self)
         self.crs = QLineEdit()
         self.crs.setPlaceholderText("the file's own, else the case's")
@@ -203,21 +204,72 @@ class OverlayDialog(QDialog):
             "astronomical tide, about half the spring tidal range), from the chart's "
             "datum notes or tide tables"
         )
+        self.columns = QLineEdit()
+        self.columns.setPlaceholderText("found from the header, else the first three")
+        self.columns.setToolTip(
+            "Which columns are x, y and z: their names in the header (e.g. Longitude, "
+            "Latitude, Average depth) or their numbers from 1"
+        )
+        self.preview = QLabel()
+        self.preview.setWordWrap(True)
+        self.columns.editingFinished.connect(self._preview)
         form.addRow("Its CRS", self.crs)
         form.addRow(self.depths)
         form.addRow("Its zero below MSL", self.below_msl)
+        form.addRow("Columns", self.columns)
+        form.addRow(self.preview)
+        self._preview(first=True)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
+    def chosen_columns(self) -> list | None:
+        text = self.columns.text().strip()
+        if not text:
+            return None
+        words = [w.strip() for w in text.split(",") if w.strip()]
+        return [int(w) - 1 if w.isdigit() else w for w in words]
+
+    def _preview(self, first: bool = False) -> None:
+        """What the file's columns are and the z of its first points."""
+        from lagoonviz.core.geo.raster import (
+            POINT_SUFFIXES,
+            RasterError,
+            header,
+            pick_columns,
+            read_points,
+        )
+
+        if not self.path or Path(self.path).suffix.lower() not in POINT_SUFFIXES:
+            self.preview.setText("")
+            return
+        names = header(self.path)
+        try:
+            picked = pick_columns(names, self.chosen_columns())
+            points = read_points(self.path, limit=2000, columns=self.chosen_columns())
+        except (RasterError, ValueError, OSError) as error:
+            self.preview.setText(f"Cannot read it so: {error}")
+            return
+        label = [names[k] if k < len(names) else f"column {k + 1}" for k in picked]
+        z = points[:, 2]
+        self.preview.setText(
+            f"x, y, z: {', '.join(label)}; z of the first {len(z):,} points from "
+            f"{z.min():g} to {z.max():g}"
+        )
+        if first and any("depth" in n.lower() for n in label[2:]):
+            self.depths.setChecked(z.mean() > 0)  # depths, positive down
+
     def spec(self, path: str) -> dict:
-        return {
+        spec = {
             "path": path,
             "crs": self.crs.text().strip() or None,
             "depths": self.depths.isChecked(),
             "below_msl": self.below_msl.value(),
         }
+        if self.chosen_columns():
+            spec["columns"] = self.chosen_columns()
+        return spec
 
 
 def describe_overlay(spec: dict) -> str:
@@ -234,6 +286,8 @@ def describe_overlay(spec: dict) -> str:
         words.append("depths")
     if spec.get("below_msl"):
         words.append(f"zero {float(spec['below_msl']):g} m below MSL")
+    if spec.get("columns"):
+        words.append("columns " + ", ".join(str(c) for c in spec["columns"]))
     return "  ·  ".join(words)
 
 
@@ -1033,13 +1087,14 @@ class MapTab(QWidget):
             self,
             "Over the download",
             str(self.session.data.case_folder(self.case_id) or Path.home()),
-            "Bathymetry (*.tif *.tiff *.asc *.xyz *.txt *.csv *.dat *.pts *.h5);;All files (*)",
+            "Bathymetry (*.tif *.tiff *.asc *.xyz *.txt *.csv *.dat *.pts *.emo *.h5);;"
+            "All files (*)",
         )
         for path in chosen:
             if icesat2.is_atl24(path):
                 spec = {"path": path, "crs": None, "depths": False, "below_msl": 0.0}
             else:
-                dialog = OverlayDialog(Path(path).name, self)
+                dialog = OverlayDialog(Path(path).name, self, path)
                 if dialog.exec() != QDialog.Accepted:
                     continue
                 spec = dialog.spec(path)
