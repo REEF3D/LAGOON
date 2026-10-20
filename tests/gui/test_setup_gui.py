@@ -870,3 +870,36 @@ def test_the_blocks_tab_spaces_edges_follows_the_water_and_imports(window, tmp_p
     assert "read from blocks.dat" in panel.message.text()
     assert topology.blocks[0].bc_type("i0") == "open"
     assert mb.check(topology) == [] or not [i for i in mb.check(topology) if i.level == "error"]
+
+
+def test_the_blocks_tab_attaches_a_river_and_cuts_blocks_for_the_processes(window, tmp_path):
+    case = tmp_path / "bay"
+    case.mkdir()
+    (case / "control.txt").write_text("B 1 1.0\nB 10 0.0 1.0 0.0 1.0 0.0 5.0\nR 20 1\n")
+    (case / "ctrl.txt").write_text("A 10 5\nG 50 1\nF 60 10.0\nM 10 4\n")
+    window.open_case(case)
+    panel = window.setup_panel
+    tab = panel.blocks_tab
+    s = window.session
+    s.start_multiblock([0, 1000, 0, 500], cells=(40, 20))
+    s.extrude_block("b0_e", 400.0, cells=16)
+    s.draw_river([(3000.0, 250.0), (2000.0, 300.0), (1300.0, 240.0)])
+    tab.refresh()
+    tab.edge.setCurrentIndex(tab.edge.findText("b0_e_x"))
+    tab.river_cells.setValue(4)
+    tab.discharge.setValue(12.0)
+    tab.attach_river()
+    t = s.multiblock()
+    assert len(t.blocks) == 3 and t.blocks[2].bc == {"i0": {"type": "inflow", "value": 12.0}}
+    assert "A river block on edge b0_e_x" in panel.message.text()
+    # a block in pieces, then balanced for M 10's processes
+    tab.block.setCurrentIndex(1)
+    assert tab.pieces.isEnabled()
+    tab.split.setCurrentIndex(tab.split.findData("j"))
+    tab.pieces.setValue(2)
+    assert (s.multiblock().blocks[1].pieces, s.multiblock().blocks[1].split) == (2, "j")
+    tab.block.setCurrentIndex(0)
+    assert not tab.pieces.isEnabled()  # (block 0: DIVEMesh shares it out)
+    tab.balance()
+    assert "4 processes" in tab.balance_info.text()
+    assert "cut for 4 processes" in panel.message.text()

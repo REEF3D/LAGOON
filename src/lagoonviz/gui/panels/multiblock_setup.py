@@ -23,6 +23,11 @@ edge meet there, node for node.
   (F 60), bending no tighter than a radius (needs geo.dat); moving its corners
   lays it again.
 - *Import blocks.dat*: a grid made elsewhere (its faces' nodes kept) to go on with.
+- *Attach river*: a river block on a part of the chosen edge, along the river drawn
+  in the River tab, its discharge in at its upstream face.
+- *Pieces*: a block written as several blocks (each runs on one process);
+  *Balance* cuts the blocks for M 10's processes, and the tab says how even the
+  processes' shares are.
 - *Rules* lists what DIVEMesh and REEF3D would refuse (red) or warn about, the set-up
   marks them where they are, with the cells' quality; *Make grid* writes blocks.dat,
   R 20 1, the sides of block 0, G 50 1 and the G 54 lines of the open faces.
@@ -242,6 +247,19 @@ class MultiblockTab(QWidget):
         self.native_button.clicked.connect(self.make_native)
         self.remove_block_button = QPushButton("Remove block")
         self.remove_block_button.clicked.connect(self.remove_block)
+        self.pieces = QSpinBox()
+        self.pieces.setRange(1, 999)
+        self.pieces.setKeyboardTracking(False)
+        self.pieces.setToolTip(
+            "Written as this many blocks (equal parts): REEF3D runs each on one process. "
+            "Block 0 is shared out over the processes by DIVEMesh itself"
+        )
+        self.split = QComboBox()
+        self.split.addItem("along i", "i")
+        self.split.addItem("along j", "j")
+        self.split.setToolTip("Which way the block is cut into its pieces")
+        self.pieces.valueChanged.connect(lambda _v: self._commit_pieces())
+        self.split.activated.connect(lambda _i: self._commit_pieces())
         self.faces = {face: FaceRow(face) for face in mb.FACES}
         for row_widget in self.faces.values():
             row_widget.changed.connect(self._set_face)
@@ -250,6 +268,11 @@ class MultiblockTab(QWidget):
         block_form.addRow("Block", self.block)
         block_form.addRow("Name", self.block_name)
         block_form.addRow("Smoothing", self.smoothing)
+        cut = QHBoxLayout()
+        cut.addWidget(self.pieces)
+        cut.addWidget(self.split)
+        cut.addStretch(1)
+        block_form.addRow("Pieces", cut)
         for face, row_widget in self.faces.items():
             block_form.addRow(FACE_LABELS[face], row_widget)
         buttons = QHBoxLayout()
@@ -347,6 +370,36 @@ class MultiblockTab(QWidget):
         self.unfollow_button.clicked.connect(self.stop_following)
         self.water_info = QLabel()
         self.water_info.setWordWrap(True)
+        # a river onto a part of the edge
+        self.river_width = _metres("How wide the river block is (its cells across from the edge's)")
+        self.river_cells = QSpinBox()
+        self.river_cells.setRange(0, 10_000)
+        self.river_cells.setSpecialValueText("from the width")
+        self.river_cells.setToolTip("Cells across the river: that many of the edge's cells")
+        self.river_step = _metres("How long the river's cells are along it (none: twice across)")
+        self.river_step.setMinimum(0.0)
+        self.river_step.setSpecialValueText("twice across")
+        self.discharge = QDoubleSpinBox()
+        self.discharge.setRange(0.0, 1e6)
+        self.discharge.setDecimals(3)
+        self.discharge.setSuffix(" m3/s")
+        self.discharge.setSpecialValueText("none")
+        self.discharge.setToolTip("The discharge in at the river's upstream face (G 54 b 1 Q)")
+        self.river_button = QPushButton("Attach river")
+        self.river_button.setToolTip(
+            "A river block on a part of the chosen edge (on the outline): along the river "
+            "drawn in the River tab (Draw the river), else the corridor's line"
+        )
+        self.river_button.clicked.connect(self.attach_river)
+        # the processes
+        self.balance_button = QPushButton("Balance")
+        self.balance_button.setToolTip(
+            "Cut the blocks 1.. into pieces so that M 10's processes get about as many "
+            "cells each (block 0 is shared out by DIVEMesh, each piece runs on one)"
+        )
+        self.balance_button.clicked.connect(self.balance)
+        self.balance_info = QLabel()
+        self.balance_info.setWordWrap(True)
         self.finer_button = QPushButton("Finer")
         self.finer_button.setToolTip("Twice the cells on every edge")
         self.finer_button.clicked.connect(lambda: self.scale(2.0))
@@ -385,6 +438,14 @@ class MultiblockTab(QWidget):
         water_form.addRow(follow)
         water_form.addRow(self.water_info)
         self.water_box = water_box
+        river_box = QGroupBox("River")
+        river_form = QFormLayout(river_box)
+        river_form.addRow("Width", self.river_width)
+        river_form.addRow("Cells across", self.river_cells)
+        river_form.addRow("Cell length", self.river_step)
+        river_form.addRow("Discharge", self.discharge)
+        river_form.addRow("", self.river_button)
+        self.river_width.setValue(200.0)
 
         # ---- the rules and the grid
         self.quality = QLabel()
@@ -402,12 +463,16 @@ class MultiblockTab(QWidget):
         grid_form = QFormLayout(grid_box)
         grid_form.addRow(self.quality)
         grid_form.addRow("Rules", self.rules)
+        balance_row = QHBoxLayout()
+        balance_row.addWidget(self.balance_button)
+        balance_row.addWidget(self.balance_info, 1)
+        grid_form.addRow("Processes", balance_row)
         grid_form.addRow("", self.make_button)
 
         body = QWidget()
         column = QVBoxLayout(body)
         column.setContentsMargins(0, 0, 0, 0)
-        for box in (edit_box, block_box, edge_box, water_box, grid_box):
+        for box in (edit_box, block_box, edge_box, water_box, river_box, grid_box):
             column.addWidget(box)
         column.addStretch(1)
         self.form = body
@@ -492,9 +557,15 @@ class MultiblockTab(QWidget):
             return
         block = topology.blocks[k]
         self.block_name.setText(block.name)
-        self.smoothing.blockSignals(True)
+        for widget in (self.smoothing, self.pieces, self.split):
+            widget.blockSignals(True)
         self.smoothing.setValue(block.smoothing)
-        self.smoothing.blockSignals(False)
+        self.pieces.setValue(block.pieces)
+        self.split.setCurrentIndex(self.split.findData(block.split))
+        for widget in (self.smoothing, self.pieces, self.split):
+            widget.blockSignals(False)
+        self.pieces.setEnabled(k > 0)
+        self.split.setEnabled(k > 0)
         ok = not topology.face_problems(k)
         for row_widget in self.faces.values():
             if ok:
@@ -590,6 +661,13 @@ class MultiblockTab(QWidget):
             self.quality.setText(mb.quality(topology).text())
             self.quality.setStyleSheet("")
         self.make_button.setEnabled(not errors)
+        try:
+            processes = self.session.processes(self.case)
+            self.balance_info.setText(
+                mb.balance(topology, processes).text() if not errors else f"M 10: {processes}"
+            )
+        except (ValueError, KeyError):
+            self.balance_info.setText("")
 
     # ------------------------------------------------------------- edits
     def _run(self, action, done: str = "") -> bool:
@@ -782,6 +860,43 @@ class MultiblockTab(QWidget):
                 across=self.space_across.isChecked(),
                 case=self.case,
             )
+        )
+
+    def _commit_pieces(self) -> None:
+        k = self.block.currentIndex()
+        topology = self.topology()
+        if k <= 0 or topology is None:
+            return
+        block = topology.blocks[k]
+        pieces, split = self.pieces.value(), self.split.currentData()
+        if (block.pieces, block.split) != (pieces, split):
+            self._run(
+                lambda: self.session.set_block_options(
+                    k, pieces=pieces, split=split, case=self.case
+                )
+            )
+
+    def balance(self) -> None:
+        self._run(
+            lambda: self.session.balance_blocks(case=self.case),
+            f"The blocks cut for {self.session.processes(self.case)} processes (M 10)",
+        )
+
+    def attach_river(self) -> None:
+        name = self.edge.currentText()
+        if not name:
+            return
+        cells = self.river_cells.value() or None
+        self._run(
+            lambda: self.session.attach_river(
+                name,
+                cells=cells,
+                width=None if cells else self.river_width.value(),
+                step=self.river_step.value() or None,
+                discharge=self.discharge.value() or None,
+                case=self.case,
+            ),
+            f"A river block on edge {name}: drag its points, or change its cells",
         )
 
     def fit_cells(self) -> None:

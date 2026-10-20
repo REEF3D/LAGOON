@@ -309,7 +309,8 @@ their points) and the *blocks*, each with its four faces `i0`, `i1`, `j0`, `j1`
 (-i, +i, -j, +j) as chains of edges (`"-e"` runs edge `e` backwards). Blocks that
 share an edge share its nodes: that is the interface. Each block is meshed by
 transfinite interpolation from its faces, then *Smoothing* sweeps of Winslow's
-equations; the nodes of a wall slide along it, so cells stay square at the banks.
+equations; the nodes of a wall slide along it, so cells stay square at the banks (not on a
+face that is partly an interface, a river joining it: there they stay even).
 
 - **Start** lays one block over the domain, **Draw** one over an area you drag in
   the 2D top view (a further one when there are blocks), **From corridor** makes
@@ -367,11 +368,39 @@ A face of block 0 can be **open**: its condition is set in ctrl.txt by hand (a t
 edge, B 520 with a background): DIVEMesh's side keeps its code (C 11 2), no W 10 or
 F 62. The other blocks' open faces are an inflow or an outflow (G 54).
 
+**Attach river** (the *River* box) puts a river block on a part of the chosen
+edge (one on the outline): along the river drawn in the River tab (*Draw the
+river*; else the corridor's line), from upstream to where it meets the edge. The
+edge is cut there, *Cells across* of its cells wide (or as many as make *Width*),
+and the river block runs upstream from the cut, its banks parallel to the river
+and bending onto the cut's ends, cells *Cell length* long (twice those across when
+not given). Its i runs downstream: the *Discharge* comes in at its -i face (G 54).
+Its banks are edges to drag, space or lay along the water like any other.
+
+### Pieces for the processes
+
+REEF3D runs each block 1.. on one process, and shares block 0 out over all of them
+(DIVEMesh). A large block beside a small block 0 then keeps one process busy while
+the others wait. *Pieces* writes a block as that many blocks in blocks.dat, cut in
+equal parts along i or j; the pieces meet node for node, the G 54 lines name the
+pieces at the faces (an inflow on the first piece, an outflow on the last). The
+blocks stay one block here, to edit. A block with an inflow or outflow is cut along
+i; pieces need 5 cells at least along the cut.
+
+**Balance** cuts the blocks 1.. for the processes of M 10. Each block gets about
+as many pieces as fit a process beside its share of block 0, then one more cut at
+a time where it helps most, until the busiest process has at most 5 % more cells
+than the mean (each piece also costs some exchange). Under *Rules* the tab says
+how the processes share the cells, as REEF3D does it: block 0 with its ring evenly
+over all, then the pieces, the largest first, each onto the process with the
+fewest cells. The set-up draws the cuts as lines and names a block's pieces.
+
 So a coast with an estuary is laid out in a few steps: one block over the sea, its
 corners where the coast meets the open sea and on the banks of the mouth, its open
 side an arc, its two sides along the water, spaced from fine at the mouth to coarse
 offshore; then *Add block* at the mouth for the narrows and again for the bay, its
-far corners on the river, its sides along the water.
+far corners on the river, its sides along the water; *Attach river* on the bay's
+far side; *Balance* for the processes.
 
 The tab lists the **rules** the grid breaks, and the set-up marks them where they
 are (red: errors, Make grid waits; orange: warnings):
@@ -416,6 +445,10 @@ session.set_block_spacing("b1_n", 150.0, 150.0, largest=300.0, growth=1.05)
 session.follow_water("b0_n", margin=800.0, radius=3000.0)   # with geo.dat
 session.fit_block_cells()
 session.import_blocks(smoothing=2000)              # the case's blocks.dat
+session.attach_river("b2_n", cells=16, step=100.0, discharge=336.0)
+session.set_block_options(2, pieces=3, split="i")  # written as 3 blocks
+session.balance_blocks()                           # for M 10's processes
+print(session.multiblock_balance().text())
 issues, quality = session.multiblock_check()
 session.make_multiblock_grid()
 ```

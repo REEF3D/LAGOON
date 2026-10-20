@@ -16,6 +16,11 @@
   nodes kept, the interfaces and boundaries found), to go on with in the Blocks tab.
 - Open faces of block 0 (a tide edge set in ctrl.txt: C 11 2 kept). *Pick edge* in
   the 2D view.
+- *Attach river*: a river block on a part of an edge, along the river drawn on the
+  map, its banks bending onto the cut, the discharge in at its upstream face.
+- *Pieces*: a block written as several blocks for the processes (cut along i or j,
+  G 54 naming the pieces); *Balance* cuts the blocks for M 10's processes, and the
+  tab says how evenly REEF3D would share the cells out.
 
 ### Probe
 
