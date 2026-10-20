@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Blocks for coasts and estuaries
+
+- Edges spaced by the cells at their ends (*Spacing*: 60 m at a mouth to 1.5 km
+  offshore; or growing from both ends up to a largest cell): the cells follow from
+  the length, across the blocks, each edge turned its way. *Cells from spacing*
+  after corners were moved.
+- Circular arcs (an edge's curve): the open sea's side of a block.
+- *Follow the water* (with geo.dat): an edge laid on land a margin from the water
+  below F 60, bending no tighter than a radius; dragging its corner slides it along
+  the shore. `lagoonviz.core.waterline` in scripts.
+- *Import blocks.dat*: a grid made elsewhere as the case's blocks (its faces'
+  nodes kept, the interfaces and boundaries found), to go on with in the Blocks tab.
+- Open faces of block 0 (a tide edge set in ctrl.txt: C 11 2 kept). *Pick edge* in
+  the 2D view.
+
 ### Probe
 
 - *Probe* in the 3D view's bar (++p++), like ParaView's point inspection: a click

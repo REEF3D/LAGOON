@@ -1487,6 +1487,7 @@ class Viewport3D(QWidget):
         "drag": "Drag the corners and the points of the edges in the 2D view",
         "cut": "Click an edge to cut it in two there",
         "extend": "Click an edge on the outline to add a block outside it",
+        "pick": "Click an edge to choose it in the Blocks tab",
     }
 
     def start_blocks_editing(self, case_id: str = "", mode: str = "drag") -> None:

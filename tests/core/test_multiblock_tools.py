@@ -74,9 +74,7 @@ def test_circular_arcs():
     ((px, _py),) = t.edges["b0_w"].points
     assert px == pytest.approx(-12.5)
     assert t.edges["b0_w"].line(t.vertices)[:, 0].min() == pytest.approx(-12.5, abs=0.01)
-    assert not [
-        i for i in M.check(t) if i.level == "error"
-    ]
+    assert not [i for i in M.check(t) if i.level == "error"]
 
 
 # ---------------------------------------------------------------- the water

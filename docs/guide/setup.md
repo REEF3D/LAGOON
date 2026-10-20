@@ -315,8 +315,9 @@ equations; the nodes of a wall slide along it, so cells stay square at the banks
   the 2D top view (a further one when there are blocks), **From corridor** makes
   the River tab's corridor block 0. **Remove** takes the blocks away with
   `blocks.json`.
-- In the 2D top view: **Drag points** moves corners and the points of curved
-  edges; **Cut edge** cuts the edge clicked in two at that point (a new corner);
+- In the 2D top view: **Drag points** moves corners (the points of their edges
+  go along, the more the nearer they are) and the points of curved edges;
+  **Cut edge** cuts the edge clicked in two at that point (a new corner);
   **Add block** puts a block outside the edge clicked, *Depth* deep with *Cells*
   across, sharing that edge. Esc stops. Each change is an undo step.
 - **Block**: its name, smoothing and four faces. A face shows its edges, cells and
@@ -325,7 +326,52 @@ equations; the nodes of a wall slide along it, so cells stay square at the banks
   **Block 0** makes the block chosen the grid of the run; **Remove block**.
 - **Edge**: cells (they go on to the opposite face and through the blocks beyond,
   so the counts always match), curve and grading. **Finer** and **Coarser** double
-  or halve every edge.
+  or halve every edge. **Pick edge** (in the 2D view) chooses the edge clicked.
+- **Import blocks.dat**: a grid made elsewhere (a script, another program) as the
+  case's blocks, to go on with here. Each face is cut where another block's face
+  starts or ends on it; the pieces are edges *through their nodes* (the nodes kept
+  exactly; more or fewer cells keep their grading), shared where two faces have the
+  same nodes: the interfaces. The boundaries come from control.txt (C 11 – C 14 of
+  block 0: an inflow with W 10, an outflow with F 62, other codes *open*) and the G 54
+  lines of ctrl.txt. The inside of each block is made again (2000 sweeps of
+  smoothing). Without geo.dat the nodes' bed is written as geo.dat, so *Make grid*
+  gives it back.
+
+### Coasts and estuaries
+
+The faces of the blocks of a coast or an estuary lie on land a little beyond the
+water, smooth, and the shore inside them is wetted and dried. Three tools lay them:
+
+- **Circular arc** (an edge's *Curve*): through the edge's corners and one point,
+  the open sea's side of a block round a mouth. Made an arc, a straight edge bulges
+  out of its block by a quarter of its length; drag the point.
+- **Spacing**: *By the cells at its ends* spaces an edge's nodes by the length of
+  its first and last cell (*At the start*, *At the end*), growing evenly from one to
+  the other (60 m at a mouth to 1.5 km offshore, say), or, with a *Largest* cell, by
+  *Growth* from each end up to it (fine at both ends of a bay). The cells follow from
+  the edge's length; *And the edges across the blocks* gives the edges whose cells
+  go with it the same spacing, turned their way, and they all take the most cells
+  any of their spacings asks for. After corners were moved, **Cells from spacing**
+  sets the counts again. The tab says how long the end cells are now.
+- **Along the water** (with geo.dat): **Follow the water** lays the edge on land,
+  *Margin* m from the water below *Water below* (F 60), bending no tighter than
+  *Bend radius* (land spits and inlets narrower than twice it are passed over, never
+  nearer the water than the margin, to about a third of the smaller of margin and
+  radius). It runs along the shore between the points nearest its corners, the way
+  round nearer to where the edge is now; *Its corners onto the shore* moves them
+  there (off: they stay, the edge joining the shore from them). Dragging one of its
+  corners lays it again, so a corner slides along the coast; dragging a point of it
+  shapes it by hand from then on (*Stop following* too).
+
+A face of block 0 can be **open**: its condition is set in ctrl.txt by hand (a tide
+edge, B 520 with a background): DIVEMesh's side keeps its code (C 11 2), no W 10 or
+F 62. The other blocks' open faces are an inflow or an outflow (G 54).
+
+So a coast with an estuary is laid out in a few steps: one block over the sea, its
+corners where the coast meets the open sea and on the banks of the mouth, its open
+side an arc, its two sides along the water, spaced from fine at the mouth to coarse
+offshore; then *Add block* at the mouth for the narrows and again for the bay, its
+far corners on the river, its sides along the water.
 
 The tab lists the **rules** the grid breaks, and the set-up marks them where they
 are (red: errors, Make grid waits; orange: warnings):
@@ -363,6 +409,13 @@ session.move_block_vertex("b0_ne", 102.0, 55.0)
 session.set_block_edge("b0_e", cells=16, curve="through", ratio=1.0)
 session.set_block_face(0, "i0", "inflow", 50.0)
 session.set_block_face(1, "i1", "outflow", 2.5)
+session.set_block_face(0, "i0", "open", 2)        # a tide edge: C 11 2, B 520 by hand
+session.set_block_edge("b0_w", curve="arc")
+session.set_block_spacing("b0_s", 1500.0, 60.0)   # first and last cell (m), across
+session.set_block_spacing("b1_n", 150.0, 150.0, largest=300.0, growth=1.05)
+session.follow_water("b0_n", margin=800.0, radius=3000.0)   # with geo.dat
+session.fit_block_cells()
+session.import_blocks(smoothing=2000)              # the case's blocks.dat
 issues, quality = session.multiblock_check()
 session.make_multiblock_grid()
 ```

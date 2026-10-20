@@ -800,3 +800,73 @@ def test_the_input_check_from_the_panel(window, flume):
     assert report is not None and any("run DIVEMesh first" in p.message for p in report.errors)
     assert panel._check_dialog.isVisible()
     assert "Input check" in panel.message.text()
+
+
+def test_the_blocks_tab_spaces_edges_follows_the_water_and_imports(window, tmp_path):
+    import numpy as np
+
+    from lagoonviz.core import multiblock as mb
+
+    case = tmp_path / "estuary"
+    case.mkdir()
+    (case / "control.txt").write_text("C 11 2\nB 1 1.0\nB 10 0.0 1.0 0.0 1.0 0.0 5.0\nR 20 1\n")
+    (case / "ctrl.txt").write_text("A 10 5\nG 50 1\nF 60 10.0\n")
+    xs, ys = np.arange(-200.0, 1201.0, 10.0), np.arange(-400.0, 701.0, 10.0)
+    gx, gy = np.meshgrid(xs, ys)
+    water = (gy < 0) | ((np.abs(gx - 500) < 100) & (gy < 300))  # the sea and a bay
+    np.savetxt(
+        case / "geo.dat", np.column_stack([gx.ravel(), gy.ravel(), np.where(water, 0, 20).ravel()])
+    )
+    window.open_case(case)
+    panel = window.setup_panel
+    tab = panel.blocks_tab
+    window.session.start_multiblock([0, 1000, -300, 150], cells=(20, 10))
+    tab.refresh()
+    assert not tab.import_button.isEnabled()  # no blocks.dat yet
+    # an edge picked in the 2D view
+    tab.pick_button.setChecked(True)
+    window.viewport.blockEdgePicked.emit(panel.case_id, "pick", "b0_n", 500.0, 150.0)
+    assert tab.edge.currentText() == "b0_n"
+    assert tab.follow_button.isEnabled() and tab.level.value() == 10.0
+    # along the water
+    tab.margin.setValue(40.0)
+    tab.radius.setValue(60.0)
+    tab.follow_water()
+    edge = window.session.multiblock().edges["b0_n"]
+    assert edge.water == {"margin": 40.0, "radius": 60.0}
+    assert "follows the water" in tab.water_info.text() and tab.unfollow_button.isEnabled()
+    tab.stop_following()
+    assert window.session.multiblock().edges["b0_n"].water is None
+    # spaced by the cells at its ends, across the block
+    tab.space_start.setValue(20.0)
+    tab.space_end.setValue(80.0)
+    tab.spaced.setChecked(True)
+    t = window.session.multiblock()
+    assert t.edges["b0_n"].spacing == {"start": 20.0, "end": 80.0}
+    assert t.edges["b0_s"].spacing == {"start": 20.0, "end": 80.0}
+    assert t.edges["b0_s"].cells == t.edges["b0_n"].cells and not tab.cells.isEnabled()
+    assert "cells now" in tab.sizes.text()
+    tab.fit_cells()
+    # an arc
+    tab.edge.setCurrentIndex(tab.edge.findText("b0_w"))
+    tab.curve.setCurrentIndex(tab.curve.findData("arc"))
+    tab.curve.activated.emit(tab.curve.currentIndex())
+    assert window.session.multiblock().edges["b0_w"].curve == "arc"
+    # the open face (a tide edge)
+    row = tab.faces["i0"]
+    row.kind.setCurrentIndex(row.kind.findData("open"))
+    row.kind.activated.emit(row.kind.currentIndex())
+    assert window.session.multiblock().blocks[0].bc_type("i0") == "open"
+    assert not row.value.isEnabled()
+    # a blocks.dat made elsewhere, imported
+    tab.make_grid()
+    assert (case / "blocks.dat").is_file()
+    tab.remove()
+    tab.refresh()
+    assert tab.import_button.isEnabled()
+    tab.import_blocks()
+    topology = window.session.multiblock()
+    assert topology is not None and all(e.curve == "nodes" for e in topology.edges.values())
+    assert "read from blocks.dat" in panel.message.text()
+    assert topology.blocks[0].bc_type("i0") == "open"
+    assert mb.check(topology) == [] or not [i for i in mb.check(topology) if i.level == "error"]

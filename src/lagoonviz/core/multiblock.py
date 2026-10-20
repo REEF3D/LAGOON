@@ -536,11 +536,23 @@ class Topology:
 
     # ------------------------------------------------------------- edits
     def moved_vertex(self, name: str, x: float, y: float) -> Topology:
+        """A corner moved; the points of the edges from it go along, the more the
+        nearer they are to it (an edge keeps its shape, stretched), so the edge does
+        not kink where the corner left its points behind."""
         vertices = dict(self.vertices)
         if name not in vertices:
             raise ValueError(f"no vertex {name!r}")
+        shift = np.array([float(x), float(y)]) - np.asarray(vertices[name], float)
+        edges = dict(self.edges)
+        for key, e in self.edges.items():
+            if not len(e.points) or name not in (e.start, e.end):
+                continue
+            s = curvi.lengths(e.controls(self.vertices))
+            t = (s / s[-1] if s[-1] > 0 else np.linspace(0.0, 1.0, len(s)))[1:-1, None]
+            weight = (1.0 - t if e.start == name else 0.0) + (t if e.end == name else 0.0)
+            edges[key] = replace(e, points=e.points + weight * shift)
         vertices[name] = (float(x), float(y))
-        return replace(self, vertices=vertices, edges=dict(self.edges), blocks=list(self.blocks))
+        return replace(self, vertices=vertices, edges=edges, blocks=list(self.blocks))
 
     def moved_point(self, edge: str, index: int, x: float, y: float) -> Topology:
         """A point of an edge moved (an edge that followed the water is shaped by hand

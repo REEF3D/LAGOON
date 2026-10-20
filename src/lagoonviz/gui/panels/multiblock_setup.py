@@ -15,7 +15,14 @@ edge meet there, node for node.
   (wall, inflow with its discharge, outflow with its water level); *Block 0* makes
   it the grid of the run; *Remove* takes it out.
 - An edge: its cells (carried on to the opposite faces of the blocks), its curve
-  and its grading; *Finer* and *Coarser* double or halve every edge's cells.
+  (a circular arc too) and its grading, or its *spacing*: the cells at its ends (and
+  a largest one), the cells following from its length, across the blocks; *Finer*
+  and *Coarser* double or halve every edge's cells. *Pick edge* chooses it in the 2D
+  view.
+- *Along the water*: the edge laid on land a margin from the water below the level
+  (F 60), bending no tighter than a radius (needs geo.dat); moving its corners
+  lays it again.
+- *Import blocks.dat*: a grid made elsewhere (its faces' nodes kept) to go on with.
 - *Rules* lists what DIVEMesh and REEF3D would refuse (red) or warn about, the set-up
   marks them where they are, with the cells' quality; *Make grid* writes blocks.dat,
   R 20 1, the sides of block 0, G 50 1 and the G 54 lines of the open faces.
@@ -28,6 +35,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -48,11 +56,18 @@ from lagoonviz.core import multiblock as mb
 
 #: the purpose of an area drawn in the 2D view for this tab
 PURPOSE = "block"
-BC_LABELS = {"wall": "Wall", "inflow": "Inflow (discharge)", "outflow": "Outflow (water level)"}
+BC_LABELS = {
+    "wall": "Wall",
+    "inflow": "Inflow (discharge)",
+    "outflow": "Outflow (water level)",
+    "open": "Open (its own condition in ctrl.txt: a tide edge, B 520)",
+}
 CURVE_LABELS = {
     "straight": "Straight",
     "through": "Through the points (Catmull-Rom)",
     "bspline": "Smooth, pulled by the points (B-spline)",
+    "arc": "Circular arc through its point",
+    "nodes": "Through its nodes (imported)",
 }
 FACE_LABELS = {"i0": "Face -i", "i1": "Face +i", "j0": "Face -j", "j1": "Face +j"}
 ERROR_COLOR = "#e5484d"
@@ -102,7 +117,7 @@ class FaceRow(QWidget):
             widget.blockSignals(True)
         self.kind.setCurrentIndex(self.kind.findData(kind))
         self.value.setValue(value if value is not None else 0.0)
-        self.value.setEnabled(kind != "wall")
+        self.value.setEnabled(kind in ("inflow", "outflow"))
         self.value.setSuffix(" m3/s" if kind == "inflow" else " m")
         self.kind.setEnabled(len(shared) < len(chain))  # not on a face all interface
         for widget in (self.kind, self.value):
@@ -110,8 +125,9 @@ class FaceRow(QWidget):
 
     def _emit(self) -> None:
         kind = self.kind.currentData()
-        self.value.setEnabled(kind != "wall")
-        self.changed.emit(self.face, kind, None if kind == "wall" else self.value.value())
+        valued = kind in ("inflow", "outflow")
+        self.value.setEnabled(valued)
+        self.changed.emit(self.face, kind, self.value.value() if valued else None)
 
 
 class MultiblockTab(QWidget):
@@ -146,12 +162,20 @@ class MultiblockTab(QWidget):
         self.remove_button = QPushButton("Remove")
         self.remove_button.setToolTip("Remove the blocks (blocks.json)")
         self.remove_button.clicked.connect(self.remove)
+        self.import_button = QPushButton("Import blocks.dat")
+        self.import_button.setToolTip(
+            "The case's blocks.dat (made elsewhere) as its blocks: the faces keep their "
+            "nodes, the interfaces where faces share nodes, the boundaries from control.txt "
+            "and ctrl.txt; the nodes' bed as geo.dat when there is none"
+        )
+        self.import_button.clicked.connect(self.import_blocks)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         for button in (
             self.start_button,
             self.draw_button,
             self.corridor_button,
+            self.import_button,
             self.remove_button,
         ):
             row.addWidget(button)
@@ -161,17 +185,19 @@ class MultiblockTab(QWidget):
         self.drag_button = QPushButton("Drag points")
         self.cut_button = QPushButton("Cut edge")
         self.extend_button = QPushButton("Add block")
+        self.pick_button = QPushButton("Pick edge")
         tips = (
             "Drag the corners and the points of the edges in the 2D top view (Esc stops)",
             "Click an edge in the 2D top view to cut it in two at the node nearest the "
             "click: a block can then meet a part of a face",
             "Click an edge on the outline in the 2D top view: a block outside it, Depth "
             "deep with Cells cells",
+            "Click an edge in the 2D top view to choose it under Edge",
         )
         self._modes = {}
         for button, mode, tip in zip(
-            (self.drag_button, self.cut_button, self.extend_button),
-            ("drag", "cut", "extend"),
+            (self.drag_button, self.cut_button, self.extend_button, self.pick_button),
+            ("drag", "cut", "extend", "pick"),
             tips,
             strict=True,
         ):
@@ -252,6 +278,75 @@ class MultiblockTab(QWidget):
         self.cells.valueChanged.connect(lambda _v: self._commit_edge())
         self.ratio.valueChanged.connect(lambda _v: self._commit_edge())
         self.curve.activated.connect(lambda _i: self._commit_edge())
+        # spacing: the cells at the ends, the count from the length
+        self.spaced = QCheckBox("By the cells at its ends")
+        self.spaced.setToolTip(
+            "Space the nodes by the length of the cells at the edge's ends (growing evenly "
+            "from one to the other, or up to a largest cell); its cells follow from its "
+            "length and go on across the blocks"
+        )
+        self.space_start = _metres("The first cell's length, at the edge's start")
+        self.space_end = _metres("The last cell's length, at the edge's end")
+        self.space_max = _metres(
+            "The largest cell (none: growing evenly from the start to the end); the cells "
+            "grow by Growth from each end up to it"
+        )
+        self.space_max.setMinimum(0.0)
+        self.space_max.setSpecialValueText("none")
+        self.growth = QDoubleSpinBox()
+        self.growth.setRange(1.001, 2.0)
+        self.growth.setDecimals(3)
+        self.growth.setSingleStep(0.01)
+        self.growth.setValue(mb.GROWTH)
+        self.growth.setKeyboardTracking(False)
+        self.growth.setToolTip("How much a cell grows on its neighbour towards the largest")
+        self.space_across = QCheckBox("And the edges across the blocks")
+        self.space_across.setChecked(True)
+        self.space_across.setToolTip(
+            "The edges across the blocks from it (whose cells go with its) get the same "
+            "spacing, turned their way, unless they have one"
+        )
+        self.spaced.toggled.connect(lambda _on: self._commit_spacing())
+        for box in (self.space_start, self.space_end, self.space_max, self.growth):
+            box.valueChanged.connect(lambda _v: self._commit_spacing())
+        self.sizes = QLabel()
+        self.sizes.setWordWrap(True)
+        self.fit_button = QPushButton("Cells from spacing")
+        self.fit_button.setToolTip(
+            "Every edge with a spacing gets the cells it asks for over its length as it is "
+            "now (after corners were moved)"
+        )
+        self.fit_button.clicked.connect(self.fit_cells)
+        # along the water
+        self.level = QDoubleSpinBox()
+        self.level.setRange(-1e6, 1e6)
+        self.level.setDecimals(3)
+        self.level.setKeyboardTracking(False)
+        self.level.setToolTip("The water below this level (default F 60) is the water followed")
+        self.margin = _metres("How far onto the land from the water the edge keeps")
+        self.margin.setMinimum(0.0)
+        self.radius = _metres(
+            "The edge bends no tighter than this: land spits and inlets narrower than "
+            "twice it are passed over"
+        )
+        self.radius.setMinimum(0.0)
+        self.snap = QCheckBox("Its corners onto the shore")
+        self.snap.setChecked(True)
+        self.snap.setToolTip(
+            "Move the edge's two corners to the shore's line; off: they stay, the edge "
+            "joining the shore from them"
+        )
+        self.follow_button = QPushButton("Follow the water")
+        self.follow_button.setToolTip(
+            "Lay the edge along the water, between the points of the shore nearest its "
+            "corners, the way round nearer to where it is (needs geo.dat)"
+        )
+        self.follow_button.clicked.connect(self.follow_water)
+        self.unfollow_button = QPushButton("Stop following")
+        self.unfollow_button.setToolTip("Keep the edge as it is, shaped by its points")
+        self.unfollow_button.clicked.connect(self.stop_following)
+        self.water_info = QLabel()
+        self.water_info.setWordWrap(True)
         self.finer_button = QPushButton("Finer")
         self.finer_button.setToolTip("Twice the cells on every edge")
         self.finer_button.clicked.connect(lambda: self.scale(2.0))
@@ -264,11 +359,32 @@ class MultiblockTab(QWidget):
         edge_form.addRow("Cells", self.cells)
         edge_form.addRow("Curve", self.curve)
         edge_form.addRow("Grading", self.ratio)
+        edge_form.addRow("Spacing", self.spaced)
+        edge_form.addRow("At the start", self.space_start)
+        edge_form.addRow("At the end", self.space_end)
+        edge_form.addRow("Largest", self.space_max)
+        edge_form.addRow("Growth", self.growth)
+        edge_form.addRow("", self.space_across)
+        edge_form.addRow("", self.sizes)
         scale = QHBoxLayout()
         scale.addWidget(self.finer_button)
         scale.addWidget(self.coarser_button)
+        scale.addWidget(self.fit_button)
         scale.addStretch(1)
         edge_form.addRow("All edges", scale)
+        water_box = QGroupBox("Along the water")
+        water_form = QFormLayout(water_box)
+        water_form.addRow("Water below", self.level)
+        water_form.addRow("Margin", self.margin)
+        water_form.addRow("Bend radius", self.radius)
+        water_form.addRow("", self.snap)
+        follow = QHBoxLayout()
+        follow.addWidget(self.follow_button)
+        follow.addWidget(self.unfollow_button)
+        follow.addStretch(1)
+        water_form.addRow(follow)
+        water_form.addRow(self.water_info)
+        self.water_box = water_box
 
         # ---- the rules and the grid
         self.quality = QLabel()
@@ -291,7 +407,7 @@ class MultiblockTab(QWidget):
         body = QWidget()
         column = QVBoxLayout(body)
         column.setContentsMargins(0, 0, 0, 0)
-        for box in (edit_box, block_box, edge_box, grid_box):
+        for box in (edit_box, block_box, edge_box, water_box, grid_box):
             column.addWidget(box)
         column.addStretch(1)
         self.form = body
@@ -326,6 +442,7 @@ class MultiblockTab(QWidget):
             corridor = None
         self.corridor_button.setEnabled(corridor is not None)
         self.remove_button.setEnabled(topology is not None)
+        self.import_button.setEnabled(self._has_file(mb.GRID_FILE))
         self.form.setEnabled(topology is not None)
         if topology is None:
             for button in self._modes.values():
@@ -392,13 +509,63 @@ class MultiblockTab(QWidget):
         if topology is None or name not in topology.edges:
             return
         edge = topology.edges[name]
-        for widget in (self.cells, self.curve, self.ratio):
+        widgets = (
+            self.cells,
+            self.curve,
+            self.ratio,
+            self.spaced,
+            self.space_start,
+            self.space_end,
+            self.space_max,
+            self.growth,
+            self.margin,
+            self.radius,
+            self.level,
+            self.snap,
+        )
+        for widget in widgets:
             widget.blockSignals(True)
         self.cells.setValue(edge.cells)
         self.curve.setCurrentIndex(self.curve.findData(edge.curve))
         self.ratio.setValue(edge.ratio)
-        for widget in (self.cells, self.curve, self.ratio):
+        first, last = edge.end_sizes(topology.vertices)
+        length = edge.length(topology.vertices)
+        spacing = edge.spacing or {}
+        self.spaced.setChecked(bool(spacing))
+        self.space_start.setValue(spacing.get("start", mb.curvi.nice_step(first)))
+        self.space_end.setValue(spacing.get("end", mb.curvi.nice_step(last)))
+        self.space_max.setValue(spacing.get("max", 0.0))
+        self.growth.setValue(spacing.get("growth", mb.GROWTH))
+        for box in (self.space_start, self.space_end, self.space_max, self.growth):
+            box.setEnabled(bool(spacing))
+        self.ratio.setEnabled(not spacing)
+        self.cells.setEnabled(not spacing)
+        text = (
+            f"{length:,.0f} m long; cells now {first:.3g} m at the start, {last:.3g} m at the end"
+        )
+        wanted = edge.wanted_cells(topology.vertices)
+        if wanted is not None and wanted != edge.cells:
+            text += f" (its spacing asks for {wanted} cells: Cells from spacing)"
+        self.sizes.setText(text)
+        water = edge.water or {}
+        self.level.setValue(water.get("level", self._water_level()))
+        self.margin.setValue(water.get("margin", mb.curvi.nice_step(0.02 * length)))
+        self.radius.setValue(water.get("radius", mb.curvi.nice_step(0.05 * length)))
+        self.snap.setChecked(water.get("corners", True))
+        for widget in widgets:
             widget.blockSignals(False)
+        geo = self._has_file("geo.dat")
+        self.follow_button.setEnabled(geo)
+        self.unfollow_button.setEnabled(bool(water))
+        if water:
+            self.water_info.setText(
+                f"{name} follows the water: {water['margin']:g} m onto the land, bending no "
+                f"tighter than {water['radius']:g} m; moving its corners lays it again"
+            )
+        elif not geo:
+            self.water_info.setText("Following the water needs the bed: geo.dat (Map tab)")
+        else:
+            self.water_info.setText(f"{name} is shaped by its points")
 
     def _show_rules(self, topology) -> None:
         self.rules.clear()
@@ -514,7 +681,12 @@ class MultiblockTab(QWidget):
         """An edge clicked in the 2D view: cut it there, or add a block outside it."""
         if not case_id or case_id not in self.session.scene:
             return
-        if mode == "cut":
+        if mode == "pick":
+            index = self.edge.findText(edge)
+            if index >= 0:
+                self.edge.setCurrentIndex(index)
+            self.message.emit(f"Edge {edge}", False)
+        elif mode == "cut":
             self._run(
                 lambda: self.session.split_block_edge(edge, round(x, 4), round(y, 4), case=case_id),
                 f"Edge {edge} cut in two",
@@ -572,6 +744,89 @@ class MultiblockTab(QWidget):
         if changed:
             self._run(lambda: self.session.set_block_edge(name, case=self.case, **changed))
 
+    def _has_file(self, name: str) -> bool:
+        if not self.case:
+            return False
+        folder = self.session.data.case_folder(self.case)
+        return folder is not None and (folder / name).is_file()
+
+    def _water_level(self) -> float:
+        try:
+            return self.session.water_level(self.case) if self.case else 0.0
+        except ValueError:
+            return 0.0
+
+    def _commit_spacing(self) -> None:
+        topology = self.topology()
+        name = self.edge.currentText()
+        if topology is None or name not in topology.edges:
+            return
+        edge = topology.edges[name]
+        if not self.spaced.isChecked():
+            if edge.spacing:
+                self._run(lambda: self.session.set_block_spacing(name, None, case=self.case))
+            return
+        largest = self.space_max.value() or None
+        wanted = {"start": self.space_start.value(), "end": self.space_end.value()}
+        if largest:
+            wanted |= {"max": largest, "growth": round(self.growth.value(), 6)}
+        if edge.spacing == wanted:
+            return
+        self._run(
+            lambda: self.session.set_block_spacing(
+                name,
+                wanted["start"],
+                wanted["end"],
+                largest=largest,
+                growth=wanted.get("growth"),
+                across=self.space_across.isChecked(),
+                case=self.case,
+            )
+        )
+
+    def fit_cells(self) -> None:
+        self._run(
+            lambda: self.session.fit_block_cells(case=self.case),
+            "The edges with a spacing have the cells it asks for",
+        )
+
+    def follow_water(self) -> None:
+        name = self.edge.currentText()
+        if not name:
+            return
+        level = self.level.value()
+        given = None if abs(level - self._water_level()) < 1e-9 else level
+        self._run(
+            lambda: self.session.follow_water(
+                name,
+                margin=self.margin.value(),
+                radius=self.radius.value(),
+                level=given,
+                corners=self.snap.isChecked(),
+                case=self.case,
+            ),
+            f"{name} follows the water: drag its corners along the shore",
+        )
+
+    def stop_following(self) -> None:
+        name = self.edge.currentText()
+        if name:
+            self._run(lambda: self.session.set_block_edge(name, water=None, case=self.case))
+
+    def import_blocks(self) -> None:
+        count = 0
+
+        def read():
+            nonlocal count
+            count = self.session.import_blocks(case=self.case)
+
+        if self._run(read):
+            self.message.emit(
+                f"{mb.count(count, 'block')} read from blocks.dat: the faces keep their "
+                "nodes; change them here, then Make grid",
+                False,
+            )
+
     def scale(self, factor: float) -> None:
         self._run(
             lambda: self.session.scale_multiblock(factor, case=self.case),
@@ -602,3 +857,13 @@ class MultiblockTab(QWidget):
                 "R 20 1, G 50 1 and the open faces set: Save, then Run DIVEMesh",
                 False,
             )
+
+
+def _metres(tip: str) -> QDoubleSpinBox:
+    box = QDoubleSpinBox()
+    box.setRange(0.001, 1e7)
+    box.setDecimals(3)
+    box.setSuffix(" m")
+    box.setKeyboardTracking(False)
+    box.setToolTip(tip)
+    return box
