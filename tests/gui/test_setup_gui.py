@@ -903,3 +903,49 @@ def test_the_blocks_tab_attaches_a_river_and_cuts_blocks_for_the_processes(windo
     tab.balance()
     assert "4 processes" in tab.balance_info.text()
     assert "cut for 4 processes" in panel.message.text()
+
+
+def test_the_blocks_tab_writes_the_tide(window, tmp_path):
+    case = tmp_path / "coast"
+    case.mkdir()
+    (case / "control.txt").write_text("B 1 1.0\nB 10 0.0 1.0 0.0 1.0 0.0 5.0\nR 20 1\n")
+    (case / "ctrl.txt").write_text("A 10 5\nG 50 1\nF 60 650.0\n")
+    window.open_case(case)
+    panel = window.setup_panel
+    tab = panel.blocks_tab
+    s = window.session
+    s.start_multiblock([0, 1000, 0, 500], cells=(20, 10))
+    tab.refresh()
+    # from constituents, travelling along the coast
+    tab.tide_source.setCurrentIndex(tab.tide_source.findData("constants"))
+    assert tab.tide_form.isRowVisible(tab.constants)
+    assert not tab.tide_form.isRowVisible(tab.gauge_row)
+    tab.constants.setPlainText("M2 1.00 61\nS2 0.35 89")
+    tab.days.setValue(1.0)
+    tab.travels.setChecked(True)
+    assert tab.tide_form.isRowVisible(tab.ref_x)
+    tab.ref_x.setValue(400.0)
+    tab.ref_y.setValue(250.0)
+    tab.ref_depth.setValue(5800.0)
+    tab.direction.setValue(90.0)
+    tab.write_tide()
+    assert (case / "background-1.dat").is_file()
+    assert "constituents" in tab.tide_info.text()
+    ctrl = s.input_file("ctrl.txt")
+    assert ctrl.all("B 510")[0][:2] == [1, 2] and ctrl.all("B 515") == [[1, 400.0, 250.0, 5800.0]]
+    # block 0's open sea face takes it
+    row = tab.faces["i0"]
+    row.kind.setCurrentIndex(row.kind.findData("tide"))
+    row.kind.activated.emit(row.kind.currentIndex())
+    assert s.multiblock().blocks[0].bc_type("i0") == "tide" and not row.value.isEnabled()
+    tab.make_grid()
+    assert s.input_file("ctrl.txt").all("B 520") == [[1, 3, 0]]
+    # a file of levels
+    levels = tmp_path / "levels.txt"
+    levels.write_text("0 0.1\n3600 0.4\n90000 0.2\n")
+    tab.tide_source.setCurrentIndex(tab.tide_source.findData("levels"))
+    tab.levels_file.setText(str(levels))
+    tab.travels.setChecked(False)
+    tab.write_tide()
+    assert "levels of levels.txt" in tab.tide_info.text()
+    assert not s.input_file("ctrl.txt").all("B 515")

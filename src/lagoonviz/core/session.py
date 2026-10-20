@@ -1642,6 +1642,8 @@ class Session:
                 f.set("W 10", [found.inflow])
             if found.level is not None:
                 f.set("F 62", [found.level])
+            if found.tides:
+                _open_edges(f, found.tides)
 
         commands = [self._case_file(case_id, mb.GRID_FILE, mb.blocks_text(nodes), "", "blocks.dat")]
         for file, change in (("ctrl.txt", reef3d), ("control.txt", divemesh)):
@@ -1651,6 +1653,94 @@ class Session:
         script = "session.make_multiblock_grid(" + (f"case={case!r})" if case else ")")
         self.stack.execute(Batch(commands, script, "Make multi-block grid"))
         return mb.quality(topology)
+
+    def write_tide(
+        self,
+        start,
+        days: float = 3.0,
+        step: float = 300.0,
+        constants=None,
+        levels=None,
+        gauge=None,
+        predicted: bool = False,
+        harmonic: bool = False,
+        ramp: float = 10800.0,
+        direction: float = 0.0,
+        reference=None,
+        depth: float | None = None,
+        current: bool = False,
+        case: str | None = None,
+    ):
+        """The tide at the open sea for a run from ``start`` (UTC) over ``days``
+        (:mod:`lagoonviz.core.tide`): from tidal ``constants`` ("M2 1.00 61" a line:
+        amplitude m, Greenwich phase deg; or a file), a file of ``levels`` or a tide
+        ``gauge`` (:meth:`find_gauges`, or "IOC:casc"; ``predicted`` instead of
+        observed), as REEF3D's background 1: background-1.dat ("t eta 0 0", or "t
+        eta" with ``current``) and B 510 (mode 2, ``ramp`` s, travelling along
+        ``direction`` deg), or with ``harmonic`` the constituents as B 511; with a
+        ``reference`` (x, y) B 515 makes it travel from there at sqrt(g ``depth``).
+        Block 0's tide faces (Blocks tab) take it. One undo step; returns the
+        :class:`~lagoonviz.core.tide.Tide`."""
+        from lagoonviz.core import tide as tides
+
+        case_id = self._case_id(case)
+        station = self._station(gauge, case_id) if isinstance(gauge, str) else gauge
+        found = tides.make(
+            start,
+            days,
+            step,
+            constants=constants,
+            levels=levels,
+            gauge=station,
+            predicted=predicted,
+            harmonic_in_reef3d=harmonic,
+            ramp=ramp,
+            direction=direction,
+            reference=reference,
+            depth=depth,
+        )
+
+        def background(f):
+            for code in ("B 510", "B 511", "B 515"):  # background 1's lines
+                rows = f.all(code)
+                for k in reversed(range(len(rows))):
+                    if rows[k] and int(rows[k][0]) == tides.BACKGROUND:
+                        f.remove(code, k)
+            for code, values in found.lines:
+                f.add(code, values, kinds=tides.KINDS[code])
+
+        words = [repr(str(start))]
+        for key, value, default in (
+            ("days", days, 3.0),
+            ("step", step, 300.0),
+            ("constants", constants, None),
+            ("levels", str(levels) if levels is not None else None, None),
+            ("gauge", gauge if isinstance(gauge, str) else None, None),
+            ("predicted", predicted, False),
+            ("harmonic", harmonic, False),
+            ("ramp", ramp, 10800.0),
+            ("direction", direction, 0.0),
+            ("reference", list(reference) if reference is not None else None, None),
+            ("depth", depth, None),
+            ("current", current, False),
+        ):
+            if value != default:
+                words.append(f"{key}={value!r}")
+        script = "session.write_tide(" + ", ".join(words) + (f", case={case!r})" if case else ")")
+        commands = []
+        if len(found.levels):
+            folder = self.data.case_folder(case_id)
+            if folder is None:
+                raise ValueError(f"{case_id}: no case folder")
+            name = f"background-{tides.BACKGROUND}.dat"
+            text = tides.background_text(found.times, found.levels, current, found.source)
+            commands.append(WriteCaseFile(folder / name, case_id, text, "", name))
+        command = self._input_edit("ctrl.txt", case_id, background, "", "ctrl.txt")
+        if command is not None:
+            commands.append(command)
+        if commands:
+            self.stack.execute(Batch(commands, script, "Tide"))
+        return found
 
     def set_input_text(self, file: str, text: str, case: str | None = None) -> None:
         """Replace the whole text of an input file (the text editor)."""
@@ -3167,3 +3257,31 @@ class _StatisticsJob:
             case.datasets.pop("statistics_" + self.path.stem, None)  # read the new one
         self.session._statistics_ready(self.item_id)
         return self.path
+
+
+def _open_edges(f, tides) -> None:
+    """ctrl.txt's open edges for block 0's tide faces: the B 520 zones of method 3 - 6
+    (with their B 521 and B 523) made again, one a face, on background 1; B 90 1 (and
+    B 92 0 when there are no waves) for REEF3D's zones."""
+    zones = f.all("B 520")
+    gone = {int(z[0]) for z in zones if z and len(z) > 1 and 3 <= int(z[1]) <= 6}
+    for code in ("B 520", "B 521", "B 523"):
+        rows = f.all(code)
+        for k in reversed(range(len(rows))):
+            if rows[k] and int(rows[k][0]) in gone:
+                f.remove(code, k)
+    taken = {int(z[0]) for z in f.all("B 520") if z}
+    zone = 1
+    for edge, method in tides:
+        while zone in taken:
+            zone += 1
+        f.add("B 520", [zone, method, 0], kinds="int")
+        f.add(
+            "B 521", [zone, edge, 0.0, 0.0, 0.0], kinds=["int", "int", "double", "double", "double"]
+        )
+        f.add("B 523", [zone, 1], kinds="int")
+        taken.add(zone)
+    if "B 90" not in f:
+        f.set("B 90", [1], kinds="int")
+    if "B 92" not in f:
+        f.set("B 92", [0], kinds="int")

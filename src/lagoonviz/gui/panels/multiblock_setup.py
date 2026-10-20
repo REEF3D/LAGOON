@@ -25,6 +25,9 @@ edge meet there, node for node.
 - *Import blocks.dat*: a grid made elsewhere (its faces' nodes kept) to go on with.
 - *Attach river*: a river block on a part of the chosen edge, along the river drawn
   in the River tab, its discharge in at its upstream face.
+- *Tide*: block 0's open sea face as a Riemann edge (B 520) driven by the tide:
+  from tidal constituents, a tide gauge or a file of levels, as background-1.dat
+  (or B 511), *Write the tide*; *Make grid* writes the edge's zone.
 - *Pieces*: a block written as several blocks (each runs on one process);
   *Balance* cuts the blocks for M 10's processes, and the tab says how even the
   processes' shares are.
@@ -37,12 +40,14 @@ Every change is an undo step; blocks.json and blocks.dat are written at once.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QDateTime, Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDateTimeEdit,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -50,6 +55,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -65,7 +71,8 @@ BC_LABELS = {
     "wall": "Wall",
     "inflow": "Inflow (discharge)",
     "outflow": "Outflow (water level)",
-    "open": "Open (its own condition in ctrl.txt: a tide edge, B 520)",
+    "open": "Open (its own condition in ctrl.txt)",
+    "tide": "Tide (Riemann edge, B 520: the Tide box's background)",
 }
 CURVE_LABELS = {
     "straight": "Straight",
@@ -73,6 +80,12 @@ CURVE_LABELS = {
     "bspline": "Smooth, pulled by the points (B-spline)",
     "arc": "Circular arc through its point",
     "nodes": "Through its nodes (imported)",
+}
+TIDE_SOURCES = {
+    "constants": "Tidal constituents",
+    "observed": "A tide gauge, observed",
+    "predicted": "A tide gauge, predicted",
+    "levels": "A file of levels",
 }
 FACE_LABELS = {"i0": "Face -i", "i1": "Face +i", "j0": "Face -j", "j1": "Face +j"}
 ERROR_COLOR = "#e5484d"
@@ -391,6 +404,82 @@ class MultiblockTab(QWidget):
             "drawn in the River tab (Draw the river), else the corridor's line"
         )
         self.river_button.clicked.connect(self.attach_river)
+        # the tide at the open sea
+        self.tide_source = QComboBox()
+        for key, label in TIDE_SOURCES.items():
+            self.tide_source.addItem(label, key)
+        self.tide_source.currentIndexChanged.connect(lambda _i: self._tide_rows())
+        self.constants = QPlainTextEdit()
+        self.constants.setPlaceholderText(
+            "one constituent a line: name, amplitude (m), Greenwich phase (deg)\n"
+            "M2 1.00 61\nS2 0.35 89\nN2 0.21 44\nK1 0.07 52\nO1 0.06 310"
+        )
+        self.constants.setMaximumHeight(110)
+        self.gauge = QComboBox()
+        self.gauge.setEditable(True)
+        self.gauge.setToolTip('A tide gauge as "SOURCE:CODE" (e.g. "IOC:casc"), or Find')
+        self.find_button = QPushButton("Find")
+        self.find_button.setToolTip("The tide gauges nearest to the case (needs its georeference)")
+        self.find_button.clicked.connect(self.find_gauges)
+        self.levels_file = QLineEdit()
+        self.levels_file.setPlaceholderText("time level: seconds, or date and time (UTC)")
+        browse = QPushButton("…")
+        browse.setMaximumWidth(30)
+        browse.clicked.connect(self._choose_levels)
+        self.levels_browse = browse
+        self.start = QDateTimeEdit()
+        self.start.setTimeSpec(Qt.UTC)
+        self.start.setDisplayFormat("yyyy-MM-dd HH:mm 'UTC'")
+        self.start.setCalendarPopup(True)
+        self.start.setDateTime(QDateTime.currentDateTimeUtc().addDays(-30))
+        self.start.setToolTip("When the run starts (t = 0)")
+        self.days = QDoubleSpinBox()
+        self.days.setRange(0.01, 3650.0)
+        self.days.setValue(3.0)
+        self.days.setSuffix(" days")
+        self.tide_step = QDoubleSpinBox()
+        self.tide_step.setRange(1.0, 86400.0)
+        self.tide_step.setValue(300.0)
+        self.tide_step.setSuffix(" s")
+        self.tide_step.setToolTip("A level every so many seconds in background-1.dat")
+        self.ramp = QDoubleSpinBox()
+        self.ramp.setRange(0.0, 1e7)
+        self.ramp.setValue(10800.0)
+        self.ramp.setSuffix(" s")
+        self.ramp.setToolTip("The tide rises from nothing over this time at the start (B 510)")
+        self.harmonic = QCheckBox("As constituents in REEF3D (B 511)")
+        self.harmonic.setToolTip(
+            "REEF3D sums the constituents itself (the nodal corrections of the start "
+            "kept over the run), instead of reading background-1.dat"
+        )
+        self.current = QCheckBox("With the long-wave current")
+        self.current.setToolTip(
+            "Two columns (t eta): REEF3D adds the current eta sqrt(g/h) along the "
+            "direction; off: none (t eta 0 0), right for a standing coastal tide"
+        )
+        self.travels = QCheckBox("Travels along the coast (B 515)")
+        self.travels.setToolTip(
+            "The tide holds at the reference point and travels along the direction at "
+            "sqrt(g depth): a tide running along a coast past the open side"
+        )
+        self.direction = QDoubleSpinBox()
+        self.direction.setRange(-360.0, 360.0)
+        self.direction.setSuffix(" °")
+        self.direction.setToolTip("Where the tide travels, from the model's x axis (B 510)")
+        self.ref_x = _metres("Where the tide holds: x")
+        self.ref_y = _metres("Where the tide holds: y")
+        for box in (self.ref_x, self.ref_y):
+            box.setRange(-1e9, 1e9)
+        self.ref_depth = _metres("The depth whose long-wave speed the tide travels at")
+        self.ref_depth.setValue(100.0)
+        self.tide_button = QPushButton("Write the tide")
+        self.tide_button.setToolTip(
+            "background-1.dat and B 510 (B 511, B 515) in ctrl.txt: background 1, which "
+            "block 0's tide faces take"
+        )
+        self.tide_button.clicked.connect(self.write_tide)
+        self.tide_info = QLabel()
+        self.tide_info.setWordWrap(True)
         # the processes
         self.balance_button = QPushButton("Balance")
         self.balance_button.setToolTip(
@@ -446,6 +535,37 @@ class MultiblockTab(QWidget):
         river_form.addRow("Discharge", self.discharge)
         river_form.addRow("", self.river_button)
         self.river_width.setValue(200.0)
+        tide_box = QGroupBox("Tide")
+        tide_form = self.tide_form = QFormLayout(tide_box)
+        tide_form.addRow("From", self.tide_source)
+        tide_form.addRow("Constituents", self.constants)
+        gauge_row = QHBoxLayout()
+        gauge_row.addWidget(self.gauge, 1)
+        gauge_row.addWidget(self.find_button)
+        self.gauge_row = QWidget()
+        self.gauge_row.setLayout(gauge_row)
+        tide_form.addRow("Tide gauge", self.gauge_row)
+        file_row = QHBoxLayout()
+        file_row.addWidget(self.levels_file, 1)
+        file_row.addWidget(self.levels_browse)
+        self.file_row = QWidget()
+        self.file_row.setLayout(file_row)
+        tide_form.addRow("Levels", self.file_row)
+        tide_form.addRow("Start", self.start)
+        tide_form.addRow("Length", self.days)
+        tide_form.addRow("Every", self.tide_step)
+        tide_form.addRow("Ramp", self.ramp)
+        tide_form.addRow("", self.harmonic)
+        tide_form.addRow("", self.current)
+        tide_form.addRow("", self.travels)
+        tide_form.addRow("Direction", self.direction)
+        tide_form.addRow("Holds at x", self.ref_x)
+        tide_form.addRow("Holds at y", self.ref_y)
+        tide_form.addRow("At the speed of", self.ref_depth)
+        tide_form.addRow("", self.tide_button)
+        tide_form.addRow(self.tide_info)
+        self.travels.toggled.connect(lambda _on: self._tide_rows())
+        self._tide_rows()
 
         # ---- the rules and the grid
         self.quality = QLabel()
@@ -472,7 +592,7 @@ class MultiblockTab(QWidget):
         body = QWidget()
         column = QVBoxLayout(body)
         column.setContentsMargins(0, 0, 0, 0)
-        for box in (edit_box, block_box, edge_box, water_box, river_box, grid_box):
+        for box in (edit_box, block_box, edge_box, water_box, river_box, tide_box, grid_box):
             column.addWidget(box)
         column.addStretch(1)
         self.form = body
@@ -898,6 +1018,76 @@ class MultiblockTab(QWidget):
             ),
             f"A river block on edge {name}: drag its points, or change its cells",
         )
+
+    def _tide_rows(self) -> None:
+        source = self.tide_source.currentData()
+        layout = self.tide_form
+        layout.setRowVisible(self.constants, source == "constants")
+        layout.setRowVisible(self.gauge_row, source in ("observed", "predicted"))
+        layout.setRowVisible(self.file_row, source == "levels")
+        layout.setRowVisible(self.harmonic, source == "constants")
+        for widget in (self.ref_x, self.ref_y, self.ref_depth):
+            layout.setRowVisible(widget, self.travels.isChecked())
+
+    def _choose_levels(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Water levels", "", "Levels (*.txt *.dat *.csv);;All (*)"
+        )
+        if path:
+            self.levels_file.setText(path)
+
+    def find_gauges(self) -> None:
+        found = []
+
+        def find():
+            found.extend(self.session.find_gauges(self.case))
+
+        if self._run(find, ""):
+            self.gauge.clear()
+            for station in found:
+                self.gauge.addItem(
+                    f"{station.source}:{station.code} {station.describe()}",
+                    f"{station.source}:{station.code}",
+                )
+            self.message.emit(f"{len(found)} tide gauges near the case", False)
+
+    def write_tide(self) -> None:
+        source = self.tide_source.currentData()
+        start = self.start.dateTime().toUTC().toString(Qt.ISODate)
+        options = {
+            "days": self.days.value(),
+            "step": self.tide_step.value(),
+            "ramp": self.ramp.value(),
+            "direction": self.direction.value(),
+            "current": self.current.isChecked(),
+        }
+        if self.travels.isChecked():
+            options |= {
+                "reference": (self.ref_x.value(), self.ref_y.value()),
+                "depth": self.ref_depth.value(),
+            }
+        if source == "constants":
+            options |= {
+                "constants": self.constants.toPlainText(),
+                "harmonic": self.harmonic.isChecked(),
+            }
+        elif source == "levels":
+            options["levels"] = self.levels_file.text().strip()
+        else:
+            gauge = self.gauge.currentData() or self.gauge.currentText().split()[0]
+            options |= {"gauge": gauge, "predicted": source == "predicted"}
+        found = []
+
+        def write():
+            found.append(self.session.write_tide(start, case=self.case, **options))
+
+        if self._run(write) and found:
+            self.tide_info.setText(found[0].text())
+            self.message.emit(
+                "The tide is background 1: a tide face of block 0 (Face -i: Tide) takes it "
+                "at Make grid",
+                False,
+            )
 
     def fit_cells(self) -> None:
         self._run(

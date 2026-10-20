@@ -60,7 +60,9 @@ GRID_FILE = "blocks.dat"
 FACES = ("i0", "i1", "j0", "j1")
 FACE_NAMES = {"i0": "-i", "i1": "+i", "j0": "-j", "j1": "+j"}
 CURVES = ("straight", "through", "bspline", "arc", "nodes")
-BCS = ("wall", "inflow", "outflow", "open")
+BCS = ("wall", "inflow", "outflow", "open", "tide")
+#: block 0's faces as REEF3D's domain edges (B 521): x-, x+, y-, y+
+EDGE_OF = {"i0": 1, "i1": 2, "j0": 3, "j1": 4}
 #: an open face's DIVEMesh side code when none is given (ctrl.txt sets the condition)
 OPEN_CODE = 2
 #: the growth of the cells from a fine end when an edge's spacing has a largest cell
@@ -1647,14 +1649,14 @@ def check(topology: Topology) -> list[Issue]:
                         b,
                     )
                 )
-            if kind == "open":
+            if kind in ("open", "tide"):
                 if b != 0:
                     issues.append(
                         Issue(
                             "error",
-                            f"block {b}, face {FACE_NAMES[face]}: open faces (a condition of "
-                            "their own in ctrl.txt) only on block 0; the others take an inflow "
-                            "or an outflow (G 54)",
+                            f"block {b}, face {FACE_NAMES[face]}: {kind} faces only on block 0 "
+                            "(REEF3D's open edges, B 520); the others take an inflow or an "
+                            "outflow (G 54)",
                             where,
                             b,
                         )
@@ -1799,6 +1801,8 @@ class Settings:
     g54: list
     box: tuple[float, float, float, float]
     spacing: float
+    #: block 0's tide faces: (REEF3D edge 1 - 4, B 520 method)
+    tides: list = field(default_factory=list)
 
 
 def settings(topology: Topology) -> Settings:
@@ -1806,11 +1810,14 @@ def settings(topology: Topology) -> Settings:
     side_of = {"i0": "C 11", "i1": "C 14", "j0": "C 13", "j1": "C 12"}
     code = {"wall": 21, "inflow": 1, "outflow": 2}
     native = t.blocks[0]
-    sides = {}
+    sides, tides = {}, []
     for f in FACES:
         kind = native.bc_type(f)
         if kind == "open":  # its own condition in ctrl.txt (a tide edge): the code given
             sides[side_of[f]] = int(native.bc_value(f) or OPEN_CODE)
+        elif kind == "tide":  # a Riemann (or Flather, clamped) edge with the background
+            sides[side_of[f]] = OPEN_CODE
+            tides.append((EDGE_OF[f], int(native.bc_value(f) or 3)))
         else:
             sides[side_of[f]] = code[kind]
     inflow = next((native.bc_value(f) for f in FACES if native.bc_type(f) == "inflow"), None)
@@ -1833,7 +1840,7 @@ def settings(topology: Topology) -> Settings:
         ys += [float(y.min()), float(y.max())]
         steps.append(float(np.mean(np.hypot(np.diff(x, axis=1), np.diff(y, axis=1)))))
     box = (min(xs), max(xs), min(ys), max(ys)) if xs else (0.0, 1.0, 0.0, 1.0)
-    return Settings(sides, inflow, level, g54, box, float(np.mean(steps)) if steps else 1.0)
+    return Settings(sides, inflow, level, g54, box, float(np.mean(steps)) if steps else 1.0, tides)
 
 
 # ================================================================== start-ups
