@@ -357,3 +357,27 @@ def test_the_session_attaches_a_river_and_balances(estuary):
     assert "session.balance_blocks()" in s.to_script()
     s.make_multiblock_grid()
     assert int((estuary / "blocks.dat").read_text().split()[0]) == len(t.output())
+
+
+# ---------------------------------------------------------------- smoothing
+def test_smoothing_settles_fast_and_blocks_are_made_one_by_one(monkeypatch):
+    from lagoonviz.core import corridor as C
+
+    # a bent block: the fast smoothing ends where very many plain sweeps end
+    t = M.from_box((0, 1000, 0, 400), (60, 30)).with_edge("b0_n", curve="arc")
+    t = t.moved_point("b0_n", 0, 500.0, 900.0).with_block(0, slide=False, smoothing=3000)
+    s, n, w, e = (t.face_nodes(0, f) for f in ("j0", "j1", "i0", "i1"))
+    x0, y0 = M.tfi(s, n, w, e)
+    xr, yr = C.winslow(x0, y0, 30_000)
+    x, y = t.block_nodes(0)
+    cell = M._typical(x, y)
+    assert np.hypot(x - xr, y - yr).max() < 0.05 * cell
+    assert (C.cell_areas(x, y) > 0).all()
+    # a change to one block makes only that block again
+    two = M.from_box((0, 100, 0, 50), (20, 10)).extruded("b0_e", 60.0, 12)
+    two.grids()
+    made = []
+    real = M.Topology._make_block
+    monkeypatch.setattr(M.Topology, "_make_block", lambda self, b: made.append(b) or real(self, b))
+    two.with_block(1, smoothing=50).grids()
+    assert made == [1]

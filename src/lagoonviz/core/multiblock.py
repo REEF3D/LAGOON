@@ -73,6 +73,9 @@ RING = 8
 DEEP_MIN = 5
 #: Winslow sweeps between two slides of the wall nodes along their edges
 SLIDE_EVERY = 10
+#: the wall nodes slide during this many sweeps on each grid (they keep drifting
+#: slowly after that, without making the cells better)
+SLIDE_SWEEPS = 200
 #: the classes of the cells' quality (colours in the set-up), worst last
 CLASSES = ("good", "fair", "poor", "folded")
 
@@ -424,9 +427,25 @@ class Topology:
         return self.face_cells(block, "j0"), self.face_cells(block, "i0")
 
     # ------------------------------------------------------------- the nodes
+    def _block_key(self, block: int) -> str:
+        """What a block's nodes depend on: its faces' edges and their corners, whether
+        other blocks share them (sliding), its smoothing (not the other blocks)."""
+        uses = self.edge_uses()
+        b = self.blocks[block]
+        parts = [b.smoothing, b.slide]
+        for face in FACES:
+            for name, back in self.face_edges(block, face):
+                e = self.edges.get(name)
+                if e is None:
+                    parts.append([name, None])
+                    continue
+                corners = [self.vertices.get(e.start), self.vertices.get(e.end)]
+                parts.append([name, back, e.to_dict(), corners, len(uses.get(name, []))])
+        return json.dumps(parts, default=float)
+
     def block_nodes(self, block: int) -> tuple[np.ndarray, np.ndarray]:
         """The nodes (x, y) of a block, each (nj + 1, ni + 1) (i along a row)."""
-        key = (self.text(), block)
+        key = self._block_key(block)
         found = _GRIDS.get(key)
         if found is None:
             found = self._make_block(block)
@@ -446,22 +465,12 @@ class Topology:
         if not (smoothing and x.shape[0] > 2 and x.shape[1] > 2):
             return x, y
         slides = self._sliding(block) if self.blocks[block].slide else []
-        if not slides:
-            return curvi.winslow(x, y, smoothing)
-        done = 0
-        while done < smoothing:  # Winslow, the nodes of the walls sliding along them
-            step = min(SLIDE_EVERY, smoothing - done)
-            x, y = curvi.winslow(x, y, step)
-            for slide in slides:
-                slide(x, y)
-            done += step
-        return x, y
+        return smooth(x, y, smoothing, slides)
 
     def _sliding(self, block: int) -> list:
-        """For each edge of the block's outline that no other block shares (on a face
-        that is no interface anywhere): a function that moves its inner nodes along
-        the edge to where the grid line from the inside meets it (the nodes keep their
-        order, the edge's ends stay)."""
+        """The walls whose nodes slide: each edge of the block's outline that no other
+        block shares (on a face that is no interface anywhere), as (face, first node,
+        cells, line) for :func:`_slider`."""
         uses = self.edge_uses()
         out = []
         for face in FACES:
@@ -476,7 +485,7 @@ class Topology:
                     line = self.edges[name].line(self.vertices)
                     if back:
                         line = line[::-1]
-                    out.append(_slider(face, first, n, line))
+                    out.append((face, first, n, line))
                 first += n
         return out
 
@@ -1114,7 +1123,7 @@ class Topology:
         return json.dumps(self.to_dict(), indent=1) + "\n"
 
 
-#: grids made lately: (topology text, block) -> (x, y)
+#: grids made lately: what a block depends on (Topology._block_key) -> (x, y)
 _GRIDS: dict = {}
 
 
@@ -1191,6 +1200,143 @@ def read(folder: str | Path) -> Topology | None:
 
 
 # ===================================================================== meshing
+#: smoothing stops when no node moves more than this part of the block's typical
+#: cell in a sweep
+SETTLED = 1e-4
+#: over-relaxation of the red-black sweeps (more is faster but can fold bends)
+OMEGA = 1.2
+#: blocks are smoothed on a grid half as fine first while both sides keep this many
+#: cells
+COARSEST = 12
+
+
+def _sweeps(x, y, sweeps: int, tol: float, omega: float = OMEGA) -> tuple[int, float]:
+    """Red-black Gauss-Seidel sweeps of Winslow's equations, over-relaxed, the
+    boundary kept: in place, until no node moves more than ``tol`` (or ``sweeps``).
+    Returns the sweeps done and the last largest move."""
+    nj, ni = x.shape
+    jj, ii = np.mgrid[1 : nj - 1, 1 : ni - 1]
+    red = (jj + ii) % 2 == 0
+    move, n = 0.0, 0
+    while n < int(sweeps):
+        n += 1
+        move = 0.0
+        for colour in (red, ~red):
+            x_xi = 0.5 * (x[1:-1, 2:] - x[1:-1, :-2])
+            y_xi = 0.5 * (y[1:-1, 2:] - y[1:-1, :-2])
+            x_eta = 0.5 * (x[2:, 1:-1] - x[:-2, 1:-1])
+            y_eta = 0.5 * (y[2:, 1:-1] - y[:-2, 1:-1])
+            a = x_eta**2 + y_eta**2
+            b = x_xi * x_eta + y_xi * y_eta
+            c = x_xi**2 + y_xi**2
+            denominator = 2.0 * (a + c)
+            denominator[denominator == 0] = 1.0
+            for f in (x, y):
+                inner = f[1:-1, 1:-1]
+                step = np.where(
+                    colour, omega * (curvi._winslow_step(f, a, b, c, denominator) - inner), 0.0
+                )
+                inner += step
+                move = max(move, float(np.abs(step).max()))
+        if move < tol:
+            break
+    return n, move
+
+
+def _coarse_guess(x: np.ndarray, y: np.ndarray, sweeps: int, walls=()) -> None:
+    """The inside of a block from a grid half as fine (made the same way, its faces
+    sampled from these, its walls sliding too), interpolated: a start near the end,
+    so the fine sweeps only smooth out the small wiggles. In place."""
+    from scipy.interpolate import RegularGridInterpolator
+
+    nj, ni = x.shape[0] - 1, x.shape[1] - 1
+    if min(nj, ni) < 2 * COARSEST:
+        return
+    shape = (nj // 2 + 1, ni // 2 + 1)
+    fine = (np.arange(nj + 1), np.arange(ni + 1))
+    cj, ci = np.meshgrid(np.linspace(0, nj, shape[0]), np.linspace(0, ni, shape[1]), indexing="ij")
+    at = np.stack([cj, ci], -1)
+    xc = RegularGridInterpolator(fine, x)(at)
+    yc = RegularGridInterpolator(fine, y)(at)
+    xc, yc = tfi(
+        np.c_[xc[0], yc[0]],
+        np.c_[xc[-1], yc[-1]],
+        np.c_[xc[:, 0], yc[:, 0]],
+        np.c_[xc[:, -1], yc[:, -1]],
+    )
+    coarse_walls = []
+    for face, first, cells, line in walls:  # the walls on the coarse grid's nodes
+        along = ni if face in ("j0", "j1") else nj
+        scale = (shape[1] - 1 if face in ("j0", "j1") else shape[0] - 1) / along
+        a, b = int(round(first * scale)), int(round((first + cells) * scale))
+        if b - a > 1:
+            coarse_walls.append((face, a, b - a, line))
+    _smooth_in_place(xc, yc, sweeps, coarse_walls)
+    coarse = (np.arange(shape[0]), np.arange(shape[1]))
+    fj, fi = np.meshgrid(
+        np.linspace(0, shape[0] - 1, nj + 1), np.linspace(0, shape[1] - 1, ni + 1), indexing="ij"
+    )
+    at = np.stack([fj, fi], -1)
+    gx = RegularGridInterpolator(coarse, xc)(at)
+    gy = RegularGridInterpolator(coarse, yc)(at)
+    x[1:-1, 1:-1], y[1:-1, 1:-1] = gx[1:-1, 1:-1], gy[1:-1, 1:-1]
+    for face, first, cells, line in walls:  # the walls' nodes where the coarse ones slid
+        idx = np.arange(first + 1, first + cells)
+        if face in ("j0", "j1"):
+            row = 0 if face == "j0" else -1
+            x[row, idx], y[row, idx] = _onto(line, gx[row, idx], gy[row, idx])
+        else:
+            col = 0 if face == "i0" else -1
+            x[idx, col], y[idx, col] = _onto(line, gx[idx, col], gy[idx, col])
+
+
+def _onto(line: np.ndarray, px: np.ndarray, py: np.ndarray):
+    """Points put onto a polyline (its nearest points), their order kept."""
+    dense = curvi.resample(line, max(len(line), 8 * len(px) + 1))
+    s = curvi.lengths(dense)
+    d2 = (dense[None, :, 0] - px[:, None]) ** 2 + (dense[None, :, 1] - py[:, None]) ** 2
+    at = np.maximum.accumulate(s[np.argmin(d2, axis=1)])
+    return np.interp(at, s, dense[:, 0]), np.interp(at, s, dense[:, 1])
+
+
+def _typical(x: np.ndarray, y: np.ndarray) -> float:
+    return float(np.median(np.hypot(np.diff(x, axis=1), np.diff(y, axis=1)))) or 1.0
+
+
+def _smooth_in_place(x, y, sweeps: int, walls=()) -> None:
+    _coarse_guess(x, y, sweeps, walls)
+    tol = SETTLED * _typical(x, y)
+    slides = [_slider(*w) for w in walls]
+    if not slides:
+        _sweeps(x, y, int(sweeps), tol)
+        return
+    done = 0
+    sliding = min(int(sweeps), SLIDE_SWEEPS)
+    while done < sliding:  # the nodes of the walls slide along them now and then
+        before = (x.copy(), y.copy())
+        n, _move = _sweeps(x, y, min(SLIDE_EVERY, sliding - done), tol)
+        for slide in slides:
+            slide(x, y)
+        done += n
+        if np.hypot(x - before[0], y - before[1]).max() < SLIDE_EVERY * tol:
+            break
+    # then the walls stay and the inside settles (a while: what is left is slow drift)
+    _sweeps(x, y, min(int(sweeps) - done, SLIDE_SWEEPS), tol)
+
+
+def smooth(x, y, sweeps: int, walls=()) -> tuple[np.ndarray, np.ndarray]:
+    """A block's inside smoothed by Winslow's elliptic grid equations, its faces kept
+    (the nodes of the ``walls``, (face, first node, cells, line), sliding along
+    them during the first SLIDE_SWEEPS sweeps, then as many with them fixed): first
+    on coarser grids, then red-black over-relaxed sweeps until it settles (no node
+    moving more than SETTLED of a cell a sweep), ``sweeps`` at most on each grid."""
+    x, y = np.array(x, float), np.array(y, float)
+    if x.shape[0] < 3 or x.shape[1] < 3 or sweeps <= 0:
+        return x, y
+    _smooth_in_place(x, y, int(sweeps), walls)
+    return x, y
+
+
 def tfi(south, north, west, east) -> tuple[np.ndarray, np.ndarray]:
     """Transfinite (Coons) interpolation of four faces: ``south`` (j = 0) and
     ``north`` (j = nj) with ni + 1 nodes along i, ``west`` (i = 0) and ``east``
