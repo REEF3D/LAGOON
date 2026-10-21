@@ -3,6 +3,7 @@ panel's legends, and the figure editor's legend and colour bar settings."""
 
 import pytest
 from PySide6.QtCore import QSettings
+from reef3d_fixtures import show_plots
 
 from lagoonviz.core import Session
 from lagoonviz.gui.main_window import MainWindow
@@ -42,6 +43,7 @@ def test_the_legend_dialog(window, qtbot):
 
 def test_the_view_bars_follow_the_items(window, run, qtbot):
     window.open_case(run)
+    show_plots(window.session)  # (they open switched off)
     session = window.session
     item = next(i for i in session.scene if i.properties.get("variable", "none") != "none")
     strip = window.viewport.colorbars
@@ -59,6 +61,7 @@ def test_the_view_bars_follow_the_items(window, run, qtbot):
 
 def test_the_plots_legends(window, run):
     window.open_case(run)
+    show_plots(window.session)  # (they open switched off)
     session = window.session
     series = next(i for i in session.scene if i.kind == "series")
     plots = window.plots
@@ -75,6 +78,7 @@ def test_the_figure_editors_legend(window, run, qtbot):
     from lagoonviz.core.figure_template import Line
 
     window.open_case(run)
+    show_plots(window.session)  # (they open switched off)
     editor = window.open_figure_editor()
     qtbot.addWidget(editor)
     line = editor.sources.topLevelItem(0).child(0).data(0, 0x0100)

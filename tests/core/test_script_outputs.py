@@ -1,7 +1,7 @@
 """The recorded script makes the session's figures (and films, screenshots) again."""
 
 import pytest
-from reef3d_fixtures import make_run
+from reef3d_fixtures import make_run, show_plots
 
 pytest.importorskip("matplotlib")
 
@@ -32,6 +32,7 @@ def session(tmp_path):
     run = make_run(tmp_path / "run", frames=4, print_interval=0.5, series=True, profiles=True)
     s = Session()
     s.open_case(run)
+    show_plots(s)
     s.set_time(1.0)
     return s
 

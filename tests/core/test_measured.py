@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from reef3d_fixtures import GAUGES, gauge_eta, make_run
+from reef3d_fixtures import GAUGES, gauge_eta, make_run, show_plots
 
 from lagoonviz.core import Session
 from lagoonviz.core.analysis import compare, match_columns
@@ -12,6 +12,7 @@ def case_with_series(tmp_path):
     root = make_run(tmp_path / "flume", frames=3, print_interval=1.0, series=True)
     s = Session()
     s.open_case(root)
+    show_plots(s)
     gauges = next(
         i.id for i in s.scene if i.kind == "series" and "wsf" in str(i.properties["source"])
     )

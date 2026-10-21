@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QLineEdit
+from reef3d_fixtures import show_plots
 
 from lagoonviz.core import Session
 from lagoonviz.gui.main_window import MainWindow
@@ -479,6 +480,7 @@ def test_plots_show_series_and_follow_time(window, series_run, qtbot):
     from PySide6.QtCore import QPoint
 
     window.open_case(series_run)
+    show_plots(window.session)  # (they open switched off)
     plots = window.plots
     assert plots.row_ids == ["series-1", "series-2", "series-3"]
     assert plots.linked
@@ -516,6 +518,7 @@ def test_plots_draw_their_lines_once_while_playing(window, series_run):
     """Playing redrew every line of every plot at each frame (330 ms for a gauge file
     of a long run): now only the cursor and the legend values are drawn again."""
     window.open_case(series_run)
+    show_plots(window.session)  # (they open switched off)
     plots = window.plots
     plots.resize(600, 300)
     plots.grab()  # paints: lines into the cached picture
@@ -538,6 +541,7 @@ def test_probe_box(window, series_run, qtbot):
     from lagoonviz.gui.panels.probe_box import ProbeBox
 
     window.open_case(series_run)
+    show_plots(window.session)  # (they open switched off)
     session = window.session
     session.data.load("free_surface-1")
     probe = session.data.probe("free_surface-1", 5, (1.0, 0.0, 0.0))
@@ -564,6 +568,7 @@ def test_probe_box(window, series_run, qtbot):
 
 def test_hidden_series_leave_the_plot(window, series_run):
     window.open_case(series_run)
+    show_plots(window.session)  # (they open switched off)
     window.session.set_visible("series-2", False)
     assert window.plots.row_ids == ["series-1", "series-3"]
     window.session.set_property("series-1", "columns", "P2, P3")
@@ -572,6 +577,7 @@ def test_hidden_series_leave_the_plot(window, series_run):
 
 def test_series_properties_list_files(window, series_run):
     window.open_case(series_run)
+    show_plots(window.session)  # (they open switched off)
     window.scene_tree.select("series-2")
     combo = window.properties.editors["source"]
     labels = [combo.itemText(i) for i in range(combo.count())]
@@ -823,6 +829,7 @@ def test_profiles_panel_shows_wave_profiles(window, tmp_path):
         tmp_path / "fnpf", solver="FNPF", frames=6, volume=False, print_interval=0.5, profiles=True
     )
     window.open_case(run)
+    show_plots(window.session)  # (they open switched off)
     item = next(i for i in window.session.scene if i.kind == "profile")
     assert window.profiles.row_ids == [item.id]
     window.session.set_time(1.0)
@@ -1001,6 +1008,7 @@ def test_measured_data_on_the_plots(window, tmp_path):
         rows.append(" ".join(f"{v:.5g}" for v in (tk, *values)))
     (root / "measured.dat").write_text("t P1 P2 P3\n" + "\n".join(rows) + "\n")
     window.open_case(root)
+    show_plots(window.session)  # (they open switched off)
     gauges = next(i.id for i in window.session.scene if "wsf" in str(i.properties.get("source")))
     window.scene_tree.select(gauges)
     assert isinstance(window.properties.editors["measured"], QLineEdit)
@@ -1017,6 +1025,7 @@ def test_wave_analysis_window(window, tmp_path):
 
     root = make_run(tmp_path / "flume", frames=3, print_interval=1.0, series=True)
     window.open_case(root)
+    show_plots(window.session)  # (they open switched off)
     dialog = window.open_wave_analysis()
     assert dialog.checked()  # the gauges ticked
     dialog.compute()
@@ -1057,6 +1066,7 @@ def test_export_figure(window, tmp_path, qtbot):
 
     run = make_run(tmp_path / "run", frames=4, print_interval=0.5, series=True, profiles=True)
     window.open_case(run)
+    show_plots(window.session)  # (they open switched off)
     window.session.set_time(1.0)
     window.plots.refresh()
     keys = [key for key, _ in available_contents(window.session, bool(window.plots.shown_rows()))]
@@ -1132,6 +1142,7 @@ def test_figure_editor(window, tmp_path, qtbot):
 
     run = make_run(tmp_path / "run", frames=4, print_interval=0.5, series=True)
     window.open_case(run)
+    show_plots(window.session)  # (they open switched off)
     editor = window.open_figure_editor()
     qtbot.addWidget(editor)
     assert window.open_figure_editor() is editor  # one per window
@@ -1189,6 +1200,7 @@ def test_figure_editor_paper_figure(window, tmp_path, qtbot):
         tmp_path / "fnpf", solver="FNPF", frames=4, print_interval=0.5, series=True, profiles=True
     )
     window.open_case(run)
+    show_plots(window.session)  # (they open switched off)
     window.session.set_time(1.0)
     editor = window.open_figure_editor()
     qtbot.addWidget(editor)
@@ -1372,6 +1384,7 @@ def test_the_2d_plots(window, tmp_path, qtbot):
 
     run = make_run(tmp_path / "run", frames=4, print_interval=0.5, series=True)
     window.open_case(run)
+    show_plots(window.session)  # (they open switched off)
     window.docks["console"].hide()
     window.act_mode_plots.trigger()
     editor = window.plots_editor

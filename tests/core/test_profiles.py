@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from reef3d_fixtures import PROFILE_LINES, PROFILE_X, make_run, profile_eta
+from reef3d_fixtures import PROFILE_LINES, PROFILE_X, make_run, profile_eta, show_plots
 
 from lagoonviz.core import Session
 from lagoonviz.core.data.profiles import find_profiles, read_header, read_profile
@@ -45,7 +45,8 @@ def test_profile_items_plot_and_draw_in_3d(run):
     s = Session()
     s.open_case(run)
     item = next(i for i in s.scene if i.kind == "profile")
-    assert item.name == "Free surface lines"
+    assert item.name == "Free surface lines" and not item.visible  # there, switched off
+    show_plots(s)
     s.set_time(1.0)
     lines = s.data.profile_lines(item.id)
     assert [line.number for line in lines] == [1, 2]

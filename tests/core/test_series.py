@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from reef3d_fixtures import GAUGES, gauge_eta, make_run
+from reef3d_fixtures import GAUGES, gauge_eta, make_run, show_plots
 
 from lagoonviz.core import Session
 from lagoonviz.core.data.reef3d import open_case
@@ -139,6 +139,8 @@ def test_gauges_in_3d_follow_time_and_plot_colours(run):
     s = Session()
     s.open_case(run)
     gauges = next(i for i in s.scene if i.kind == "series" and i.name == "Wave gauges")
+    assert not gauges.visible  # there, switched off: a tick shows them
+    show_plots(s)
     surface = next(i for i in s.scene if i.kind == "free_surface")
     # the still water level comes from the free surface, once it was shown
     s.data.display(surface.id, s.data.load(surface.id))

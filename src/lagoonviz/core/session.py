@@ -123,9 +123,10 @@ class Session:
         return self.multiblock(case_id) is not None and not self._multiblock_items(case_id)
 
     def open_case(self, path: str | Path, name: str | None = None) -> str:
-        """Open a REEF3D case and show its free surface and bed (its volume is there,
-        switched off; a CFD run's free surface is the level set phi at 0, an
-        iso-surface of its volume), and its bodies. Returns the case id.
+        """Open a REEF3D case and show its free surface and bed (its volume, time
+        series and free surface lines are there, switched off; a CFD run's free
+        surface is the level set phi at 0, an iso-surface of its volume), and its
+        bodies. Returns the case id.
 
         ``path`` is a case folder, one of its ``REEF3D_*`` output folders, or a file.
         A case folder without output yet shows its set-up from the input files
@@ -189,10 +190,14 @@ class Session:
             # geo.dat's points, in the set-up (not when DIVEMesh leaves geo.dat out:
             # then it is another case's, left in the folder)
             children.append(AddItem("geodat", None, {}, visible=case.setup_only))
+        # gauges, forces, motions and free surface lines: there, switched off (a tick
+        # shows them in the 3D view and the Plots panel)
         for series in case.main_series():
-            children.append(AddItem("series", series.name, {"source": series.key}))
+            children.append(AddItem("series", series.name, {"source": series.key}, visible=False))
         for profiles in case.main_profiles():
-            children.append(AddItem("profile", profiles.name, {"source": profiles.key}))
+            children.append(
+                AddItem("profile", profiles.name, {"source": profiles.key}, visible=False)
+            )
         children += self._background_for(case)
         command = OpenCase(path, name, children)
         if name is None:

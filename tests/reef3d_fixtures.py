@@ -1072,3 +1072,10 @@ def write_seastate_amr(root: Path, frames: int = 2) -> Path:
             + "</vtkMultiBlockDataSet>\n</VTKFile>\n"
         )
     return root
+
+
+def show_plots(session) -> None:
+    """Tick the time series and free surface lines a case opens with (switched off)."""
+    for item in list(session.scene):
+        if item.kind in ("series", "profile") and not item.visible:
+            session.set_visible(item.id, True)

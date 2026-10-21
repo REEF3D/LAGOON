@@ -5,7 +5,8 @@
 Each **Time series** item is a row in the **Plots** panel under the 3D view, all
 rows on one time axis: wave gauges (`WSF`), probes, 6DOF motions and velocities,
 forces, run-up and bed gauges. A case opened with such files gets them as items by
-itself; *Add → Time series* adds more. They are named as REEF3D's User Guide names
+itself, switched off: tick them in the scene to show their rows and their gauges in
+3D. *Add → Time series* adds more. They are named as REEF3D's User Guide names
 the print-outs:
 
 | Name | Print-out | File |
@@ -71,8 +72,8 @@ from the plots draw the measured lines dashed too.
 **Free surface line** items show the surface elevation along REEF3D's free surface
 lines, at the current time: lines along x (P 52, `WSFLINE`), along y (P 56,
 `WSFLINE_Y`, *Free surface lines in y*) and NHFLOW's time-averaged lines (P 146,
-P 147: one item per line, at the end of its averaging window). They are drawn in
-the **Free surface lines** panel (a tab
+P 147: one item per line, at the end of its averaging window). A case opens with
+them switched off; ticked, they are drawn in the **Free surface lines** panel (a tab
 beside the plots), and as lines in the 3D view (*Lines in 3D*). *Lines* picks
 some of the lines (`1, 3`); with *Wave theory* on, the theory FNPF wrote is drawn
 dashed. The value axis stays fixed while playing, so the waves move through a

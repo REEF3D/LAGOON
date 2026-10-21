@@ -26,6 +26,8 @@
   gauge (observed or predicted) or a file of levels: `background-1.dat` and B 510,
   or the constituents as B 511; B 515 for a tide travelling along the coast.
   `session.write_tide`, `lagoonviz.core.tide`.
+- A case opens with its time series and free surface lines in the scene switched
+  off (gauges, forces, motions): a tick shows them in the Plots panel and in 3D.
 - **CERRA wind** in the Sea tab (*Source*: Open-Meteo, CERRA wind): the wind with
   the ERA5 waves from the Copernicus European Regional Reanalysis (5.5 km, Europe,
   1985 to mid 2021 on Open-Meteo), ERA5's where CERRA has none.
