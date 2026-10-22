@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -231,7 +232,13 @@ class MainWindow(QMainWindow):
     def _dock(self, key: str, title: str, widget: QWidget, area: Qt.DockWidgetArea) -> None:
         dock = QDockWidget(title, self)
         dock.setObjectName(f"dock_{key}")
-        dock.setWidget(widget)
+        if area in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea):
+            # a side panel narrows freely: below the width its content needs, it
+            # scrolls sideways instead of stopping the splitter (the panels tabbed
+            # together share the narrowest width the widest of them allows)
+            dock.setWidget(_free_width(widget))
+        else:
+            dock.setWidget(widget)
         self.addDockWidget(area, dock)
         self.docks[key] = dock
 
@@ -1789,3 +1796,18 @@ class MainWindow(QMainWindow):
             "Part of the REEF3D family. Licensed under the GNU GPL v3 or later; "
             "the LAGOON data format library is MIT-licensed.",
         )
+
+
+def _free_width(widget: QWidget) -> QScrollArea:
+    """``widget`` in a frameless scroll area that scrolls only sideways, when the
+    panel is narrower than the widget can be (its own scroll areas keep scrolling
+    up and down)."""
+    area = QScrollArea()
+    area.setObjectName(f"{widget.objectName() or 'panel'}_width")
+    area.setFrameShape(QScrollArea.Shape.NoFrame)
+    area.setWidgetResizable(True)
+    area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    area.setMinimumWidth(80)
+    area.setWidget(widget)
+    return area

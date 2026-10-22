@@ -464,6 +464,10 @@ class SetupPanel(QWidget):
         top.addWidget(self.check_button)
 
         self.tabs = QTabWidget()
+        # ten tabs: arrows when the panel is narrow (macOS would make it as wide as
+        # all of them)
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.tabBar().setExpanding(False)
         self.editors = {name: InputEditor(self, name) for name in FILES}
         for name, editor in self.editors.items():
             self.tabs.addTab(editor, TITLES[name])

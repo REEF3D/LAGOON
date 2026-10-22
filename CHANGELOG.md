@@ -26,6 +26,9 @@
   gauge (observed or predicted) or a file of levels: `background-1.dat` and B 510,
   or the constituents as B 511; B 515 for a tide travelling along the coast.
   `session.write_tide`, `lagoonviz.core.tide`.
+- The side panels (Scene, Properties, Set-up) narrow freely: below the width their
+  content needs they scroll sideways instead of stopping the splitter; the Set-up
+  panel's tabs get arrows when they do not fit.
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.

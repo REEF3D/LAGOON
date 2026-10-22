@@ -1494,3 +1494,13 @@ def test_full_screen_from_the_2d_plots(window):
     assert not window.plots_mode and window.full_screen
     window.toggle_full_screen(False)
     assert window.act_mode_results.isChecked()
+
+
+def test_the_side_panels_narrow_freely(window):
+    """Properties and the Set-up panel (tabbed together) can be made narrower than
+    their content needs: it scrolls sideways instead of stopping the splitter."""
+    for key in ("properties", "setup", "scene"):
+        dock = window.docks[key]
+        assert dock.minimumSizeHint().width() < 200, key
+    assert window.setup_panel.tabs.usesScrollButtons()
+    assert window.docks["properties"].widget().widget() is window.properties
