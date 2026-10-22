@@ -280,34 +280,247 @@ def _outline(nx: int, ny: int) -> np.ndarray:
     return np.stack([ring[:-1], ring[1:]], axis=1)
 
 
+#: ghost cells round a grid, from its neighbours: 2 layers (the nodes on its border
+#: and one ring of nodes beyond it, for the normals there)
+GHOST = 2
+
+
+def _neighbours(k: int, grids: list[AmrGrid], boxes: Boxes) -> list[int]:
+    """The grids round grid ``k`` that may hold its ghost cells: those of its level,
+    then the coarser ones, finest first (each overlapping its box widened by
+    ``GHOST`` cells)."""
+    g = grids[k]
+    dx = GHOST * max(float(g.x[1] - g.x[0]), float(g.x[-1] - g.x[-2]))
+    dy = GHOST * max(float(g.y[1] - g.y[0]), float(g.y[-1] - g.y[-2]))
+    b = boxes.box
+    hit = (b[:, 1] >= g.x[0] - dx) & (b[:, 0] <= g.x[-1] + dx)
+    hit &= (b[:, 3] >= g.y[0] - dy) & (b[:, 2] <= g.y[-1] + dy)
+    hit &= boxes.level <= g.level
+    hit[k] = False
+    found = np.flatnonzero(hit)
+    return sorted(found.tolist(), key=lambda n: -int(boxes.level[n]))
+
+
+def _widened(edges: np.ndarray) -> np.ndarray:
+    """Cell centres of a lattice and of ``GHOST`` cells beyond each end."""
+    e = np.asarray(edges, np.float64)
+    centres = 0.5 * (e[:-1] + e[1:])
+    first, last = e[1] - e[0], e[-1] - e[-2]
+    before = centres[0] - first * np.arange(GHOST, 0, -1)
+    after = centres[-1] + last * np.arange(1, GHOST + 1)
+    return np.concatenate([before, centres, after])
+
+
+def _ghosted(k: int, grids: list[AmrGrid], names, neighbours: list[int]):
+    """The cells of grid ``k`` with ``GHOST`` layers round them taken from the
+    neighbours' cells (the same level first, else the finest coarser grid there),
+    else its own border cells repeated: name -> (ny + 4, nx + 4[, c]); and where each
+    ghost cell came from (the grid's index, -1: its own)."""
+    g = grids[k]
+    xc, yc = _widened(g.x), _widened(g.y)
+    ny, nx = g.ny, g.nx
+    source = np.full((ny + 2 * GHOST, nx + 2 * GHOST), -1, np.int64)
+    inner = (slice(GHOST, GHOST + ny), slice(GHOST, GHOST + nx))
+    source[inner] = k
+    out = {}
+    for name in names:
+        cells = np.asarray(g.cell_data[name], np.float32)
+        ext = np.empty((ny + 2 * GHOST, nx + 2 * GHOST, *cells.shape[2:]), np.float32)
+        ext[inner] = cells
+        out[name] = ext
+    open_ = source < 0
+    for n in neighbours:
+        if not open_.any():
+            break
+        other = grids[n]
+        if any(name not in other.cell_data for name in names):
+            continue
+        ox, oy = np.asarray(other.x, np.float64), np.asarray(other.y, np.float64)
+        cols = (xc > ox[0]) & (xc < ox[-1])
+        rows = (yc > oy[0]) & (yc < oy[-1])
+        take = open_ & rows[:, None] & cols[None, :]
+        if not take.any():
+            continue
+        jj, ii = np.nonzero(take)
+        oi = np.clip(np.searchsorted(ox, xc[ii], "right") - 1, 0, other.nx - 1)
+        oj = np.clip(np.searchsorted(oy, yc[jj], "right") - 1, 0, other.ny - 1)
+        for name in names:
+            out[name][jj, ii] = np.asarray(other.cell_data[name])[oj, oi]
+        source[jj, ii] = n
+        open_[jj, ii] = False
+    if open_.any():
+        # the domain's border: the cells next to it again, across it (those of a
+        # neighbour too, so that two grids' corners on the border agree)
+        rows_c = np.clip(np.arange(ny + 2 * GHOST), GHOST, GHOST + ny - 1)
+        cols_c = np.clip(np.arange(nx + 2 * GHOST), GHOST, GHOST + nx - 1)
+        filled = ~open_
+        for across_rows in (True, False):
+            jj, ii = np.nonzero(open_)
+            fj = rows_c[jj] if across_rows else jj
+            fi = ii if across_rows else cols_c[ii]
+            ok = filled[fj, fi] & ((fj != jj) | (fi != ii))
+            jj, ii, fj, fi = jj[ok], ii[ok], fj[ok], fi[ok]
+            for name in names:
+                out[name][jj, ii] = out[name][fj, fi]
+            open_[jj, ii] = False
+            filled[jj, ii] = True
+        jj, ii = np.nonzero(open_)
+        for name in names:
+            out[name][jj, ii] = out[name][rows_c[jj], cols_c[ii]]
+    return out, source
+
+
+def _node_average(cells: np.ndarray) -> np.ndarray:
+    """Cells (m, n[, c]) averaged to the nodes between them (m - 1, n - 1[, c])."""
+    out = cells[:-1, :-1] + cells[1:, :-1]
+    out += cells[:-1, 1:]
+    out += cells[1:, 1:]
+    out *= 0.25
+    return out
+
+
+def _widened_edges(edges: np.ndarray) -> np.ndarray:
+    """Node coordinates with one more node beyond each end."""
+    e = np.asarray(edges, np.float64)
+    return np.concatenate([[2 * e[0] - e[1]], e, [2 * e[-1] - e[-2]]])
+
+
+def _bilinear(x: np.ndarray, y: np.ndarray, values: np.ndarray, px, py) -> np.ndarray:
+    """Values on a node lattice (len(y), len(x)[, c]) at points, bilinear."""
+    i = np.clip(np.searchsorted(x, px, "right") - 1, 0, len(x) - 2)
+    j = np.clip(np.searchsorted(y, py, "right") - 1, 0, len(y) - 2)
+    fx = np.clip((px - x[i]) / (x[i + 1] - x[i]), 0.0, 1.0)
+    fy = np.clip((py - y[j]) / (y[j + 1] - y[j]), 0.0, 1.0)
+    if values.ndim == 3:
+        fx, fy = fx[:, None], fy[:, None]
+    low = values[j, i] * (1 - fx) + values[j, i + 1] * fx
+    high = values[j + 1, i] * (1 - fx) + values[j + 1, i + 1] * fx
+    return (low * (1 - fy) + high * fy).astype(np.float32)
+
+
+def _border_nodes(ny: int, nx: int):
+    """The nodes on the border of a lattice of (ny, nx) cells, side by side: (j, i)
+    of each node, and the layer-1 ghost cells outside it (two per node, in the
+    ``GHOST``-widened cell indices)."""
+    j_all, i_all = np.arange(ny + 1), np.arange(nx + 1)
+    g = GHOST
+    sides = (
+        (
+            j_all,
+            np.zeros_like(j_all),
+            (j_all + g - 1, np.full_like(j_all, g - 1)),
+            (j_all + g, np.full_like(j_all, g - 1)),
+        ),
+        (
+            j_all,
+            np.full_like(j_all, nx),
+            (j_all + g - 1, np.full_like(j_all, nx + g)),
+            (j_all + g, np.full_like(j_all, nx + g)),
+        ),
+        (
+            np.zeros_like(i_all),
+            i_all,
+            (np.full_like(i_all, g - 1), i_all + g - 1),
+            (np.full_like(i_all, g - 1), i_all + g),
+        ),
+        (
+            np.full_like(i_all, ny),
+            i_all,
+            (np.full_like(i_all, ny + g), i_all + g - 1),
+            (np.full_like(i_all, ny + g), i_all + g),
+        ),
+    )
+    return sides
+
+
 def leaf_mesh(grids: list[AmrGrid], max_level: int | None = None) -> SurfaceMesh:
     """The surface of the leaf cells of all grids: each grid on its node lattice,
     without the cells a finer grid covers (grids finer than ``max_level`` left out:
     0 gives the base grid alone). The height is ``elevation`` (else
     ``eta``); point data are the cell data averaged to the nodes, the grid's
     ``level``, and the water ``depth`` from ``WL`` (to hide dry land). The
-    borders of the refined patches are the mesh's ``outlines``."""
+    borders of the refined patches are the mesh's ``outlines``.
+
+    The grids meet without a crack: a node on the border between two grids of a
+    level (two MPI ranks) averages the cells on both sides, so both grids give it
+    the same value, and its normal sees both sides; a node of a finer grid on the
+    border to a coarser one takes the coarser surface's value there (linear along
+    the coarse cell's edge, which the coarse triangles have too)."""
     names = (
         set.intersection(*(set(g.cell_data) | set(g.point_data) for g in grids)) if grids else set()
     )
     if max_level is not None:
         grids = [g for g in grids if g.level <= max_level]
+    grids = [g for g in grids if g.nx >= 1 and g.ny >= 1]
+    boxes = Boxes(grids)  # the finer grids over each found at once (thousands of patches)
+    nodes_of: dict[int, dict[str, np.ndarray]] = {}
+    normals_of: dict[int, np.ndarray] = {}
+    # coarse grids first: a finer grid's border takes the coarser grid's final nodes
+    for k in sorted(range(len(grids)), key=lambda n: grids[n].level):
+        grid = grids[k]
+        nx, ny = grid.nx, grid.ny
+        cell_names = sorted(n for n in names if n not in grid.point_data and n in grid.cell_data)
+        ext, source = _ghosted(k, grids, cell_names, _neighbours(k, grids, boxes))
+        wide = {name: _node_average(values) for name, values in ext.items()}  # ny + 3, nx + 3
+        nodes = {name: values[1:-1, 1:-1] for name, values in wide.items()}
+        for name in names:
+            if name in grid.point_data:
+                nodes[name] = grid.point_data[name].astype(np.float32, copy=False)
+        # a finer grid's border on a coarser grid: the coarser surface's values there
+        if grid.level > 0:
+            for jn, in_, (ja, ia), (jb, ib) in _border_nodes(ny, nx):
+                # the coarser grid outside the node (of its two cells outside)
+                coarse = np.full(jn.size, -1, np.int64)
+                for s in (source[jb, ib], source[ja, ia]):
+                    lower = (s >= 0) & (boxes.level[np.maximum(s, 0)] < grid.level)
+                    coarse = np.where(lower, s, coarse)
+                for c in np.unique(coarse[coarse >= 0]):
+                    at = coarse == c
+                    cx, cy = np.asarray(grids[c].x), np.asarray(grids[c].y)
+                    px, py = np.asarray(grid.x)[in_[at]], np.asarray(grid.y)[jn[at]]
+                    for name in cell_names:
+                        if name in nodes_of[c]:
+                            nodes[name][jn[at], in_[at]] = _bilinear(
+                                cx, cy, nodes_of[c][name], px, py
+                            )
+        if "elevation" in nodes:
+            z = nodes["elevation"]
+        elif "eta" in nodes:
+            z = nodes["eta"]
+        else:
+            z = np.full((ny + 1, nx + 1), grid.z, np.float32)
+        height = "elevation" if "elevation" in wide else "eta" if "eta" in wide else None
+        if height is not None:
+            # each grid a height field: normals from its slopes, one ring of nodes
+            # beyond its border from the cells round it (seamless across the grids;
+            # from all triangles at once they took seconds)
+            normals = grid_normals(wide[height], _widened_edges(grid.x), _widened_edges(grid.y))
+            normals = normals[1:-1, 1:-1]
+            # the domain's border (no grid beyond): one-sided slopes across it, as
+            # before (along it, the ring's nodes: two grids' corners agree)
+            w = wide[height]
+            x, y = np.asarray(grid.x), np.asarray(grid.y)
+            xw, yw = _widened_edges(x), _widened_edges(y)
+            if (source[:, GHOST - 1] < 0).all():
+                normals[:, 0] = grid_normals(w[:, 1:3], x[:2], yw)[1:-1, 0]
+            if (source[:, nx + GHOST] < 0).all():
+                normals[:, -1] = grid_normals(w[:, -3:-1], x[-2:], yw)[1:-1, -1]
+            if (source[GHOST - 1, :] < 0).all():
+                normals[0, :] = grid_normals(w[1:3], xw, y[:2])[0, 1:-1]
+            if (source[ny + GHOST, :] < 0).all():
+                normals[-1, :] = grid_normals(w[-3:-1], xw, y[-2:])[-1, 1:-1]
+        else:
+            normals = grid_normals(z, grid.x, grid.y)
+        nodes_of[k] = nodes
+        normals_of[k] = normals
     points, triangles, outlines, normals = [], [], [], []
     data: dict[str, list[np.ndarray]] = {name: [] for name in names}
     levels = []
     offset = 0
-    boxes = Boxes(grids)  # the finer grids over each found at once (thousands of patches)
-    for grid in grids:
+    for k, grid in enumerate(grids):
         nx, ny = grid.nx, grid.ny
-        if nx < 1 or ny < 1:
-            continue
         hidden = covered(grid, grids, boxes)
-        nodes = {}
-        for name in names:
-            if name in grid.point_data:
-                nodes[name] = grid.point_data[name].astype(np.float32, copy=False)
-            else:
-                nodes[name] = _nodes(grid.cell_data[name])
+        nodes = nodes_of[k]
         if "elevation" in nodes:
             z = nodes["elevation"]
         elif "eta" in nodes:
@@ -315,9 +528,7 @@ def leaf_mesh(grids: list[AmrGrid], max_level: int | None = None) -> SurfaceMesh
         else:
             z = np.full((ny + 1, nx + 1), grid.z, np.float32)
         points.append(grid_points(grid.x, grid.y, z))
-        # each grid a height field: normals from its slopes (from all triangles at
-        # once they took seconds)
-        normals.append(grid_normals(z, grid.x, grid.y).reshape(-1, 3))
+        normals.append(np.ascontiguousarray(normals_of[k]).reshape(-1, 3))
         width = nx + 1
         jj, ii = np.nonzero(~hidden)
         n00 = (jj * width + ii + offset).astype(np.uint32)

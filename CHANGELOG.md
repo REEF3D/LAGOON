@@ -26,6 +26,9 @@
   gauge (observed or predicted) or a file of levels: `background-1.dat` and B 510,
   or the constituents as B 511; B 515 for a tide travelling along the coast.
   `session.write_tide`, `lagoonviz.core.tide`.
+- AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
+  border average the cells of both (the same height and normal from either side),
+  and a refined patch's border lies on the coarser surface next to it.
 - A case opens with its time series and free surface lines in the scene switched
   off (gauges, forces, motions): a tick shows them in the Plots panel and in 3D.
 - **CERRA wind** in the Sea tab (*Source*: Open-Meteo, CERRA wind): the wind with

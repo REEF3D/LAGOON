@@ -377,3 +377,45 @@ def test_a_store_written_over_by_a_new_run_shows_that_run_only(tmp_path):
     # without the groups in the run log: as stored
     log(("run-b", "2026-10-15T21:13:17Z", []))
     assert "sflow_amr" in open_case(tmp_path).datasets
+
+
+def test_no_crack_where_the_grids_meet(tmp_path):
+    """Two ranks' level-0 grids side by side and a finer patch across their border:
+    the surface is watertight (a node on a rank border gets the same height and
+    normal from both grids; a finer grid's border lies on the coarse surface)."""
+    from lagoonviz.core.data.amr import AmrGrid
+
+    def surface(x, y):
+        return 0.3 * np.sin(1.3 * x) * np.cos(0.9 * y) + 0.1 * x
+
+    def grid(level, x0, x1, y0, y1, n):
+        x = np.linspace(x0, x1, int(round((x1 - x0) * n)) + 1)
+        y = np.linspace(y0, y1, int(round((y1 - y0) * n)) + 1)
+        xc, yc = np.meshgrid(0.5 * (x[:-1] + x[1:]), 0.5 * (y[:-1] + y[1:]))
+        return AmrGrid(level, x, y, cell_data={"eta": surface(xc, yc).astype(np.float32)})
+
+    ranks = [grid(0, 0.0, 4.0, 0.0, 3.0, 4), grid(0, 4.0, 8.0, 0.0, 3.0, 4)]
+    patch = grid(1, 3.0, 5.5, 1.0, 2.5, 8)  # over the ranks' border
+    mesh = leaf_mesh([*ranks, patch])
+    p = mesh.points.astype(np.float64)
+    # the same (x, y) has one height and one normal
+    used = np.unique(mesh.triangles)
+    _, first, inverse = np.unique(np.round(p[used, :2], 6), axis=0, return_index=True,
+                                  return_inverse=True)  # fmt: skip
+    inverse = inverse.ravel()
+    assert np.abs(p[used, 2] - p[used][first][inverse, 2]).max() < 1e-6
+    border = np.isclose(p[used, 0], 4.0) & (mesh.point_data["level"][used] == 0)
+    normals = mesh.normals[used]
+    assert np.abs(normals - normals[first][inverse])[border].max() < 1e-6
+    # the patch's border nodes on the coarse surface: linear along the coarse edges
+    on_border = (mesh.point_data["level"][used] == 1) & (
+        np.isclose(p[used, 1], 1.0) | np.isclose(p[used, 1], 2.5)
+    )
+    coarse = (mesh.point_data["level"][used] == 0) & np.isclose(p[used, 1], 1.0)
+    cx = p[used][coarse]
+    order = np.argsort(cx[:, 0])
+    fine = p[used][on_border & np.isclose(p[used, 1], 1.0)]
+    expected = np.interp(fine[:, 0], cx[order, 0], cx[order, 2])
+    assert np.abs(fine[:, 2] - expected).max() < 1e-5
+    # the surface covers the domain once still
+    assert _area(mesh) == pytest.approx(8.0 * 3.0)
