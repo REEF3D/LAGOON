@@ -18,10 +18,15 @@ command of the guides' reference chapters, e.g. ``\\item[P 51 *] {\\color{blue}
 How many values a command takes, and whether it may be repeated, comes from the
 programs' own readers (``src/read_control.cpp`` of REEF3D and DIVEMesh) when their
 source trees are given: they are what counts. Commands the readers know and the
-guides do not describe yet are added without a description.
+guides do not describe yet are added, described by the comment of their default in
+the program's ``src/ini.cpp`` (``Q68=1;  // int bedload layer: bed shear stress, ...``)
+where it has one.
 
 Run it again when the guides or the readers change; ``tests/core/test_controlfile.py``
-checks the files.
+checks the files. Without the guides (``--update``), the catalogue as it is takes the
+readers' new commands:
+
+    python tools/command_catalog.py --update --reef3d ~/Codelite/REEF3D
 """
 
 from __future__ import annotations
@@ -474,6 +479,54 @@ NEWER = {
 }
 
 
+def read_defaults(path: Path) -> dict[str, tuple[str, str, str]]:
+    """The defaults in a program's ``ini.cpp`` with their comments: code -> (type,
+    text, value), e.g. ``Q68=1;  // int bedload layer: ...`` -> ("int", "bedload
+    layer: ...", "1")."""
+    found: dict[str, tuple[str, str, str]] = {}
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for match in re.finditer(
+        r"^\s*([A-Z])(\d+)\s*=\s*([^;\n]*?)\s*;\s*//\s*(int|double)?\s*([^\n]*)", text, re.M
+    ):
+        letter, number, value, kind, comment = match.groups()
+        comment = comment.strip()
+        if comment:
+            found.setdefault(f"{letter} {int(number)}", (kind or "", comment, value))
+    return found
+
+
+def _title(comment: str) -> str:
+    """A short title from a default's comment: its first clause (before the list of
+    its values), capitalised."""
+    head = re.split(r",\s|;\s|\.\s|:\s*-?\d", comment, maxsplit=1)[0].strip()
+    if len(head) > 70:
+        head = head[:70].rsplit(" ", 1)[0] + " ..."
+    return head[:1].upper() + head[1:]
+
+
+def describe_from_defaults(commands: dict, defaults: dict[str, tuple[str, str]]) -> dict:
+    """Commands the guides do not describe, with no text of their own: the title and
+    text from the comment of their default (``read_defaults``)."""
+    for code, entry in commands.items():
+        if entry.get("documented", True) or entry.get("title") or code not in defaults:
+            continue
+        kind, comment, value = defaults[code]
+        text = comment[:1].upper() + comment[1:]
+        if not text.endswith("."):
+            text += "."
+        entry["title"] = _title(comment)
+        entry["text"] = text + " Not in the user guide yet."
+        if kind and entry.get("values") == 1 and not entry.get("params"):
+            entry["params"] = [{"name": "", "type": kind}]
+        if (
+            entry.get("values") == 1
+            and not entry.get("default")
+            and re.fullmatch(r"-?[\d.]+(e[-+]?\d+)?", value)
+        ):
+            entry["default"] = [value]
+    return commands
+
+
 def describe_from_reader(commands: dict, program: str = "reef3d") -> dict:
     """Titles, names and texts for commands the guides do not describe yet
     (FROM_READER, NEWER); the guide's own description, once there, wins."""
@@ -532,20 +585,34 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("guides", nargs="?", default="~/Codelite/UserGuides")
     parser.add_argument("--reef3d", default="~/Codelite/REEF3D", help="REEF3D source tree")
     parser.add_argument("--divemesh", default="~/Codelite/DIVEMesh", help="DIVEMesh source tree")
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="no guides: the catalogues as they are take the readers' new commands",
+    )
     args = parser.parse_args(argv)
     guides = Path(args.guides).expanduser()
     trees = {"reef3d": Path(args.reef3d).expanduser(), "divemesh": Path(args.divemesh).expanduser()}
     OUT.mkdir(parents=True, exist_ok=True)
     for name, (path, start, end, program, file) in GUIDES.items():
-        source = guides / path
-        catalog = parse(source.read_text(encoding="utf-8", errors="replace"), start, end)
-        catalog = {"program": program, "file": file, "source": path} | catalog
+        target = OUT / f"{name}.json"
         reader = trees[name] / "src" / "read_control.cpp"
+        if args.update:
+            if not reader.is_file():
+                print(f"{reader} not found: {target.name} kept")
+                continue
+            catalog = json.loads(target.read_text(encoding="utf-8"))
+        else:
+            source = guides / path
+            catalog = parse(source.read_text(encoding="utf-8", errors="replace"), start, end)
+            catalog = {"program": program, "file": file, "source": path} | catalog
         if reader.is_file():
             catalog = merge(catalog, read_source(reader), name)
+            defaults = trees[name] / "src" / "ini.cpp"
+            if defaults.is_file():
+                describe_from_defaults(catalog["commands"], read_defaults(defaults))
         else:
             print(f"{reader} not found: counts from the guide only")
-        target = OUT / f"{name}.json"
         target.write_text(
             json.dumps(catalog, indent=1, ensure_ascii=False) + "\n", encoding="utf-8"
         )

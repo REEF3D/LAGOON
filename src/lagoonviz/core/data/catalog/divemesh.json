@@ -81,13 +81,20 @@
    "text": ""
   },
   "B 5": {
-   "title": "",
+   "title": "Turn on true",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "1"
+   ],
+   "text": "Turn on true. Not in the user guide yet.",
    "documented": false
   },
   "B 6": {
@@ -1071,13 +1078,20 @@
    "default_text": "na"
   },
   "D 100": {
-   "title": "",
+   "title": "FNPF state file merge",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "FNPF state file merge. Not in the user guide yet.",
    "documented": false
   },
   "G 9": {
@@ -1208,13 +1222,20 @@
    "text": "Global inverse distance interpolation requires long computation times for large geodat sets. The recommended interpolation scheme for relatively homogeneously spaced geodat points is local inverse distance interpolation. Kriging is recommended for inhomogeneously spaced geodat points, e.g. geodat points from digitized map contour lines. Kriging becomes unstable when geodat points are spaced too close to each other, so for this option G 36 is turned on automatically with the default value of 1.0 (that value can be changed). Kriging becomes inefficient for geodat sets larger than 10,000 points, thus G 37 is recommended for kringing."
   },
   "G 16": {
-   "title": "",
+   "title": "Local kriging number of neighbour points",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "24"
+   ],
+   "text": "Local kriging number of neighbour points. Not in the user guide yet.",
    "documented": false
   },
   "G 17": {
@@ -1441,13 +1462,20 @@
    "text": ""
   },
   "G 34": {
-   "title": "",
+   "title": "Smoothing length IDW",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0.0"
+   ],
+   "text": "Smoothing length IDW. Not in the user guide yet.",
    "documented": false
   },
   "G 35": {
@@ -1879,14 +1907,31 @@
    ],
    "text": ""
   },
+  "M 21": {
+   "title": "M 20 5: weight of a cell that is not active (solid)",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": "M 20 5: weight of a cell that is not active (solid). Not in the user guide yet.",
+   "documented": false
+  },
   "M 30": {
-   "title": "",
+   "title": "Manual partition distribution",
    "repeat": false,
    "params": [],
    "values": 3,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Manual partition distribution. Not in the user guide yet.",
    "documented": false
   },
   "M 31": {
@@ -1906,43 +1951,271 @@
    "text": ""
   },
   "M 32": {
-   "title": "",
+   "title": "Manual partition y-dir",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "Manual partition y-dir. Not in the user guide yet.",
    "documented": false
   },
   "M 33": {
-   "title": "",
+   "title": "Manual partition z-dir",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
+   "default": [
+    "0"
+   ],
+   "text": "Manual partition z-dir. Not in the user guide yet.",
+   "documented": false
+  },
+  "M 34": {
+   "title": "M 20 5: number of weight boxes (M 34 xs xe ys ye zs ze factor)",
+   "repeat": false,
+   "params": [],
+   "values": 7,
+   "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "M 20 5: number of weight boxes (M 34 xs xe ys ye zs ze factor). Not in the user guide yet.",
+   "documented": false
+  },
+  "M 35": {
+   "title": "M 20 5",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0"
+   ],
+   "text": "M 20 5: 1 reads the load map of a REEF3D run (loadmap.dat, or REEF3D_<M>_AMR/REEF3D_<M>_AMR_loadmap.dat). Not in the user guide yet.",
    "documented": false
   },
   "M 41": {
+   "title": "Variance percentage parameter",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.1"
+   ],
+   "text": "Variance percentage parameter. Not in the user guide yet.",
+   "documented": false
+  },
+  "M 45": {
+   "title": "Xvar factor",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "5.0"
+   ],
+   "text": "Xvar factor. Not in the user guide yet.",
+   "documented": false
+  },
+  "M 50": {
+   "title": "Grid files",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0"
+   ],
+   "text": "Grid files: 0 one per rank (DIVEMesh_Grid/grid-%06i.dat), 1 one global file (DIVEMesh_Grid/grid-global.dat; REEF3D decomposes the grid itself for any number of ranks), 2 both. Not in the user guide yet.",
+   "documented": false
+  },
+  "R 1": {
+   "title": "River corridor grid",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0"
+   ],
+   "text": "River corridor grid: 0 off, 1 extra output, 2 one pass (the grid of the run). Not in the user guide yet.",
+   "documented": false
+  },
+  "R 2": {
+   "title": "Water level for the centreline",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": "Water level for the centreline. Not in the user guide yet.",
+   "documented": false
+  },
+  "R 3": {
+   "title": "Corridor level given",
+   "repeat": false,
+   "params": [],
+   "values": 2,
+   "options": {},
+   "default": [],
+   "text": "Corridor level given. Not in the user guide yet.",
+   "documented": false
+  },
+  "R 4": {
    "title": "",
    "repeat": false,
    "params": [],
-   "values": 1,
+   "values": 2,
    "options": {},
    "default": [],
    "text": "Not in the user guide yet.",
    "documented": false
   },
-  "M 45": {
-   "title": "",
+  "R 5": {
+   "title": "Side inlets narrower than 2 x R 5 are removed",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "12.0"
+   ],
+   "text": "Side inlets narrower than 2 x R 5 are removed. Not in the user guide yet.",
+   "documented": false
+  },
+  "R 6": {
+   "title": "Winslow smoothing iterations",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "2000"
+   ],
+   "text": "Winslow smoothing iterations. Not in the user guide yet.",
+   "documented": false
+  },
+  "R 7": {
+   "title": "1: centreline from corridor-centreline.dat",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0"
+   ],
+   "text": "1: centreline from corridor-centreline.dat. Not in the user guide yet.",
+   "documented": false
+  },
+  "R 8": {
+   "title": "Smoothing length of the centreline",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "20.0"
+   ],
+   "text": "Smoothing length of the centreline. Not in the user guide yet.",
+   "documented": false
+  },
+  "R 9": {
+   "title": "Working raster spacing (0: max(DXM,1 m))",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0.0"
+   ],
+   "text": "Working raster spacing (0: max(DXM,1 m)). Not in the user guide yet.",
+   "documented": false
+  },
+  "R 10": {
+   "title": "Corridor relative to the river",
+   "repeat": false,
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "values": 1,
+   "options": {},
+   "default": [
+    "0"
+   ],
+   "text": "Corridor relative to the river: 0 off (level R 3 wl), 1 bed below the river bed level + R10_H. Not in the user guide yet.",
    "documented": false
   },
   "R 20": {
@@ -2308,33 +2581,47 @@
    "text": ""
   },
   "S 18": {
-   "title": "",
+   "title": "Invert solid",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "1"
+   ],
+   "text": "Invert solid. Not in the user guide yet.",
    "documented": false
   },
   "S 19": {
-   "title": "",
+   "title": "Factor solid resolution",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0.1"
+   ],
+   "text": "Factor solid resolution. Not in the user guide yet.",
    "documented": false
   },
   "S 31": {
-   "title": "",
+   "title": "Jacket rotation",
    "repeat": false,
    "params": [],
    "values": 6,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Jacket rotation. Not in the user guide yet.",
    "documented": false
   },
   "S 32": {
@@ -2932,23 +3219,37 @@
    "text": ""
   },
   "S 90": {
-   "title": "",
+   "title": "Write STL to geodat",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "Write STL to geodat. Not in the user guide yet.",
    "documented": false
   },
   "S 91": {
-   "title": "",
+   "title": "Min or max z-values for geodat",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "1"
+   ],
+   "text": "Min or max z-values for geodat. Not in the user guide yet.",
    "documented": false
   },
   "S 121": {
@@ -3076,33 +3377,33 @@
    "text": ""
   },
   "S 201": {
-   "title": "",
+   "title": "X-plate",
    "repeat": false,
    "params": [],
    "values": 5,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "X-plate. Not in the user guide yet.",
    "documented": false
   },
   "S 202": {
-   "title": "",
+   "title": "Y-plate",
    "repeat": false,
    "params": [],
    "values": 5,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Y-plate. Not in the user guide yet.",
    "documented": false
   },
   "S 203": {
-   "title": "",
+   "title": "Z-plate",
    "repeat": false,
    "params": [],
    "values": 5,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Z-plate. Not in the user guide yet.",
    "documented": false
   },
   "S 301": {
@@ -3317,93 +3618,135 @@
    "text": ""
   },
   "T 1": {
-   "title": "",
+   "title": "Read STL file",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "Read STL file. Not in the user guide yet.",
    "documented": false
   },
   "T 2": {
-   "title": "",
+   "title": "Auto margins",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "Auto margins. Not in the user guide yet.",
    "documented": false
   },
   "T 3": {
-   "title": "",
+   "title": "Set auto margins",
    "repeat": false,
    "params": [],
    "values": 6,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Set auto margins. Not in the user guide yet.",
    "documented": false
   },
   "T 4": {
-   "title": "",
+   "title": "Scaling factor for stl model",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "1.0"
+   ],
+   "text": "Scaling factor for stl model. Not in the user guide yet.",
    "documented": false
   },
   "T 5": {
-   "title": "",
+   "title": "Solid rotation",
    "repeat": false,
    "params": [],
    "values": 6,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Solid rotation. Not in the user guide yet.",
    "documented": false
   },
   "T 6": {
-   "title": "",
+   "title": "Print transformed TTL",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "Print transformed TTL. Not in the user guide yet.",
    "documented": false
   },
   "T 7": {
-   "title": "",
+   "title": "Move origin of TTL:",
    "repeat": false,
    "params": [],
    "values": 3,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Move origin of TTL:. Not in the user guide yet.",
    "documented": false
   },
   "T 8": {
-   "title": "",
+   "title": "Turn angle in horizontal xy-plane",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0.0"
+   ],
+   "text": "Turn angle in horizontal xy-plane. Not in the user guide yet.",
    "documented": false
   },
   "T 9": {
-   "title": "",
+   "title": "Invert TTL model",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "1"
+   ],
+   "text": "Invert TTL model. Not in the user guide yet.",
    "documented": false
   },
   "T 10": {
@@ -3472,43 +3815,64 @@
    "text": ""
   },
   "T 15": {
-   "title": "",
+   "title": "Rotate solids with geodat",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "Rotate solids with geodat. Not in the user guide yet.",
    "documented": false
   },
   "T 18": {
-   "title": "",
+   "title": "Invert solid",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "1"
+   ],
+   "text": "Invert solid. Not in the user guide yet.",
    "documented": false
   },
   "T 19": {
-   "title": "",
+   "title": "Factor solid resolution",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0.1"
+   ],
+   "text": "Factor solid resolution. Not in the user guide yet.",
    "documented": false
   },
   "T 31": {
-   "title": "",
+   "title": "Jacket rotation",
    "repeat": false,
    "params": [],
    "values": 6,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Jacket rotation. Not in the user guide yet.",
    "documented": false
   },
   "T 32": {
@@ -4230,33 +4594,33 @@
    "text": ""
   },
   "T 201": {
-   "title": "",
+   "title": "X-plate",
    "repeat": false,
    "params": [],
    "values": 5,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "X-plate. Not in the user guide yet.",
    "documented": false
   },
   "T 202": {
-   "title": "",
+   "title": "Y-plate",
    "repeat": false,
    "params": [],
    "values": 5,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Y-plate. Not in the user guide yet.",
    "documented": false
   },
   "T 203": {
-   "title": "",
+   "title": "Z-plate",
    "repeat": false,
    "params": [],
    "values": 5,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Z-plate. Not in the user guide yet.",
    "documented": false
   },
   "T 301": {
@@ -4471,113 +4835,169 @@
    "text": ""
   },
   "V 4": {
-   "title": "",
+   "title": "Scaling factor for stl model",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "1.0"
+   ],
+   "text": "Scaling factor for stl model. Not in the user guide yet.",
    "documented": false
   },
   "V 5": {
-   "title": "",
+   "title": "Porous rotation",
    "repeat": false,
    "params": [],
    "values": 6,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Porous rotation. Not in the user guide yet.",
    "documented": false
   },
   "V 6": {
-   "title": "",
+   "title": "Print transformed STL",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "Print transformed STL. Not in the user guide yet.",
    "documented": false
   },
   "V 7": {
-   "title": "",
+   "title": "Move origin of STL:",
    "repeat": false,
    "params": [],
    "values": 3,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Move origin of STL:. Not in the user guide yet.",
    "documented": false
   },
   "V 8": {
-   "title": "",
+   "title": "Turn angle in horizontal xy-plane",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0.0"
+   ],
+   "text": "Turn angle in horizontal xy-plane. Not in the user guide yet.",
    "documented": false
   },
   "V 9": {
-   "title": "",
+   "title": "Invert STL model",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "1"
+   ],
+   "text": "Invert STL model. Not in the user guide yet.",
    "documented": false
   },
   "V 15": {
-   "title": "",
+   "title": "Rotate porouss with geodat",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "Rotate porouss with geodat. Not in the user guide yet.",
    "documented": false
   },
   "V 18": {
-   "title": "",
+   "title": "Invert porous",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "1"
+   ],
+   "text": "Invert porous. Not in the user guide yet.",
    "documented": false
   },
   "V 19": {
-   "title": "",
+   "title": "Factor porous resolution",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "double"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0.1"
+   ],
+   "text": "Factor porous resolution. Not in the user guide yet.",
    "documented": false
   },
   "V 31": {
-   "title": "",
+   "title": "Jacket rotation",
    "repeat": false,
    "params": [],
    "values": 6,
    "options": {},
    "default": [],
-   "text": "Not in the user guide yet.",
+   "text": "Jacket rotation. Not in the user guide yet.",
    "documented": false
   },
   "V 131": {
-   "title": "",
+   "title": "Half cone weir in y-dir",
    "repeat": false,
-   "params": [],
+   "params": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
    "values": 1,
    "options": {},
-   "default": [],
-   "text": "Not in the user guide yet.",
+   "default": [
+    "0"
+   ],
+   "text": "Half cone weir in y-dir. Not in the user guide yet.",
    "documented": false
   }
  }
