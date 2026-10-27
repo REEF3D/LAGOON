@@ -223,8 +223,12 @@ def store_size(path: Path) -> int:
     return sum(p.stat().st_size for p in Path(path).rglob("*") if p.is_file())
 
 
+#: roles the store has no place for: they stay in their files (the CPM bed's .dat)
+KEPT_IN_FILES = ("solid", "cpm_bed")
+
+
 def chosen_datasets(
-    case: Case, roles=tuple(r for r in ROLES if r != "solid")
+    case: Case, roles=tuple(r for r in ROLES if r not in KEPT_IN_FILES)
 ) -> dict[str, Dataset]:
     """The datasets to convert, one per role: those LAGOON shows for the case (of
     several runs in a folder, the latest, unless it is only a short start)."""
@@ -279,7 +283,7 @@ def convert(
     """Convert (or bring up to date) the LAGOON store of a REEF3D case."""
     began = _time.perf_counter()
     case = open_case(case_path, stores=False)
-    datasets = chosen_datasets(case, tuple(r for r in roles if r in ROLES))
+    datasets = chosen_datasets(case, tuple(r for r in roles if r in ROLES and r != "cpm_bed"))
     blocks = None  # CFD's refined blocks: the volume as written, the blocks of their own
     volume = datasets.get("volume")
     if volume is not None and hasattr(volume, "blocks") and hasattr(volume, "base"):

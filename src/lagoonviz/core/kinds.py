@@ -726,6 +726,22 @@ KINDS: dict[str, KindSpec] = {
             "point_size": PropertySpec(
                 4.0, "Point size [px]", minimum=1.0, maximum=40.0, tip="Size on screen"
             ),
+            "size_by": PropertySpec(
+                "screen",
+                "Size",
+                choices=("screen", "radius"),
+                tip="screen: every point Point size pixels; radius: each particle as large "
+                "as it is in the model (its radius times Radius scale; a CPM parcel that "
+                "carries several, Q 78, by the cube root of its weight), smaller further away",
+            ),
+            "radius_scale": PropertySpec(
+                1.0,
+                "Radius scale",
+                minimum=1e-3,
+                maximum=1e6,
+                tip="With Size radius: the particles drawn this many times their radius "
+                "(grains of a millimetre in a flume of metres: 10 or more)",
+            ),
             "trail_outputs": PropertySpec(
                 0,
                 "Trail [outputs]",

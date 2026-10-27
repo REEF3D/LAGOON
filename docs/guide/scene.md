@@ -33,7 +33,8 @@ script the session writes ([Scripting](../scripting.md)).
 | Time series | wave gauges, 6DOF motions or forces, plotted under the 3D view |
 | Free surface line | the surface along the lines of `WSFLINE`, with the wave theory (FNPF) |
 | Bodies, Mooring lines, Structures | floating bodies, their moorings (coloured by tension), fixed structures |
-| DEM elements, Ice floes, Rod trees, Particles | the objects of those modules, with trails for DEM and particles |
+| DEM elements, Ice floes, Rod trees, Particles | the objects of those modules, with trails for DEM and particles (CPM parcels need REEF3D's parcel numbers, `id`); particles of a fixed size on screen or, *Size* radius, as large as they are in the model (times *Radius scale*) |
+| CPM bed | the bed of CFD's CPM sediment model (Q 58, `REEF3D-CFD-CPM-Bed-*.dat` of the ranks as one surface): its level, the bed shear stress `tau` and its change since the first output, `bed_change` (the default colour) |
 
 ## Colours
 

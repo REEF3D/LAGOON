@@ -74,6 +74,7 @@ ROLES = {
     "topo": "bathymetry",  # DIVEMesh's bed (its topo objects, geo.dat), before a run
     "geodat": "geodat",  # the points of geo.dat, as DIVEMesh reads them
     "seastate": "seastate",  # SEASTATE's maps of the sea state (Hs, Tp, dir, ...)
+    "cpm_bed": "bathymetry",  # the bed of CFD's CPM sediment model (its bedload layer)
 }
 #: roles of the case, not of a run: DIVEMesh's solids and bed, geo.dat's points
 CASE_ROLES = ("solid", "topo", "geodat", "forcing")
@@ -101,6 +102,8 @@ _OBJECT_ROLES = {
 #: object folders written like the main output: per output a .pvtp and a file per
 #: MPI rank, or one serial file per output (not one file per object)
 _PARALLEL_OBJECTS = ("CPM_Particle", "Particles")
+#: objects shown with the run that wrote them
+OBJECT_SHOWN = ("body", "mooring", "structure", "dem", "ice", "rods", "particles", "cpm_bed")
 #: roles whose files are drawn as they are (no merging of MPI pieces)
 PLAIN_ROLES = ("body", "mooring", "structure", "dem", "ice", "rods", "particles")
 #: roles whose outputs have their own interval: their times come from the files
@@ -138,6 +141,7 @@ ROLE_LABELS = {
     "ice": "ice floes",
     "rods": "rod trees",
     "particles": "particles",
+    "cpm_bed": "CPM bed",
     "amr": "free surface AMR",
     "amr_blocks": "AMR blocks",
     "solid": "solids",
@@ -233,6 +237,7 @@ class Dataset:
             "bed": (),  # plain sand; elevation and sediment fields stay one click away
             "volume": ("velocity", "pressure", "elevation"),
             "particles": ("velocity", "age"),
+            "cpm_bed": ("bed_change",),
             "seastate": ("Hs",),
         }.get(self.role, ())
         if self.role in ("bed", "body", "structure", "dem", "ice", "rods"):
@@ -821,6 +826,15 @@ class Case:
                     matches = [d for d in pool if d.role == role]
                     if matches:
                         found[role] = matches[0]
+                # a run that wrote only its particles or objects (CPM parcels and
+                # their bed, DEM elements): those of the latest run
+                objects = [d for d in pool if d.role in OBJECT_SHOWN]
+                if objects:
+                    lead = preferred(objects)
+                    for role in OBJECT_SHOWN:
+                        options = [d for d in objects if d.role == role and d.same_run_as(lead)]
+                        if options:
+                            found[role] = max(options, key=len)
                 return found
             lead = max(volumes, key=lambda d: d.written_span()[1])
             chosen = {"volume": lead}
@@ -831,8 +845,7 @@ class Case:
             if forcing is not None:
                 chosen = {"forcing": forcing, **chosen}
             # objects of the same run (CFD's floating bodies, structures, AMR blocks)
-            objects = ("body", "mooring", "structure", "dem", "ice", "rods", "particles")
-            for role in (*objects, "amr_blocks"):
+            for role in (*OBJECT_SHOWN, "amr_blocks"):
                 options = [d for d in pool if d.role == role and d.same_run_as(lead)]
                 if options:
                     chosen[role] = max(options, key=len)
@@ -851,7 +864,7 @@ class Case:
             if options:
                 chosen[role] = max(options, key=len)
         # objects of the same run: bodies, mooring lines, structures
-        for role in ("body", "mooring", "structure", "dem", "ice", "rods", "particles"):
+        for role in OBJECT_SHOWN:
             options = [d for d in pool if d.role == role and d.same_run_as(lead)]
             if options:
                 chosen[role] = max(options, key=len)
@@ -868,6 +881,7 @@ class Case:
         # beds are drawn first, so a transparent free surface shows them
         order = (
             "bed",
+            "cpm_bed",
             "solid",
             "forcing",
             "structure",
@@ -1413,6 +1427,10 @@ def _dataset_from_folder(folder: Path) -> list[Dataset]:
         role = "seastate" if solver == "SEASTATE" and what == "VTP" else _role(what, tag, kind)
         key = f"{solver.lower()}_{role}"
         datasets += _datasets_by_run(key, solver, role, frames, folder, owners)
+    if objects and objects.group("what") == "CPM_Particle":  # the CPM bed (Q 58)
+        from lagoonviz.core.data.cpm import bed_datasets
+
+        datasets += bed_datasets(folder)
     return datasets
 
 

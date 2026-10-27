@@ -144,6 +144,7 @@ class Session:
                 "solid",
                 "topo",
                 "forcing",
+                "cpm_bed",
             ):
                 props["dataset"] = dataset.key  # (solids: a structure; DIVEMesh's bed: a bed)
             variable = dataset.default_variable()
@@ -169,7 +170,8 @@ class Session:
                     free["variable"] = "velocity"
                 children.append(AddItem("iso_surface", "Free surface", free))
                 continue
-            children.append(AddItem(kind, None, props))
+            label = "CPM bed" if role == "cpm_bed" else None  # beside the CFD's bed
+            children.append(AddItem(kind, label, props))
         volume = case.main_volume()
         if volume is not None:  # in the scene, switched off: a tick shows it
             props = {}

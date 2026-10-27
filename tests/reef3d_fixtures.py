@@ -704,10 +704,19 @@ def cpm_arrays(points: np.ndarray, t: float) -> list[tuple[str, np.ndarray]]:
     ]
 
 
-def write_cpm(root: Path, end: float, interval: float, ranks: int = 2) -> None:
+def cpm_bed(x: np.ndarray, y: np.ndarray, t: float) -> np.ndarray:
+    """The CPM bed level of the fixtures: a dune moving along x."""
+    return 0.1 + 0.02 * np.exp(-(((x - 0.5 - 0.1 * t) / 0.15) ** 2)) + 0.0 * y
+
+
+def write_cpm(
+    root: Path, end: float, interval: float, ranks: int = 2, bed: bool = False, ids: bool = False
+) -> None:
     """CFD's CPM particles (REEF3D_CFD_CPM_Particle): per output a .pvtp and a VTP per
     rank, at their own interval (Q 182), with TimeValue. The .pvtp names the vector
-    arrays with <DataArray> as REEF3D does."""
+    arrays with <DataArray> as REEF3D does. ``bed``: each rank's columns of the bed
+    (REEF3D-CFD-CPM-Bed-<output>-<rank>.dat, x in [rank, rank + 1) / ranks, 10 x 4
+    cells of 0.1 / ranks x 0.25); ``ids``: the parcels' numbers (id)."""
     folder = root / "REEF3D_CFD_CPM_Particle"
     folder.mkdir(exist_ok=True)
     (folder / "REEF3D-CFD-CPM-Log.dat").write_text("log\n")
@@ -716,8 +725,23 @@ def write_cpm(root: Path, end: float, interval: float, ranks: int = 2) -> None:
         for rank in range(ranks):
             points = particle_cloud(float(t), rank)
             name = f"REEF3D-Particle-{count:08d}-{rank + 1:06d}.vtp"
-            _particle_vtp(folder / name, float(t), cpm_arrays(points, float(t)), points, True)
+            arrays = cpm_arrays(points, float(t))
+            if ids:
+                arrays.append(("id", (1 + rank + ranks * np.arange(len(points))).astype(np.int32)))
+            _particle_vtp(folder / name, float(t), arrays, points, True)
             names.append(name)
+            if bed:
+                dx = 0.1 / ranks
+                xs = rank / ranks + dx * (np.arange(10) + 0.5)
+                ys = 0.25 * (np.arange(4) + 0.5)
+                lines = [f"# time {float(t)}", "# x y z_bed tau_x tau_y"]
+                for x in xs:  # x outermost, as REEF3D writes them
+                    for y in ys:
+                        z = float(cpm_bed(np.array(x), np.array(y), float(t)))
+                        lines.append(f"{x:.6g} {y:.6g} {z:.8g} {0.5 + x:.6g} {0.1 * y:.6g}")
+                (folder / f"REEF3D-CFD-CPM-Bed-{count:08d}-{rank + 1:06d}.dat").write_text(
+                    "\n".join(lines) + "\n"
+                )
         (folder / f"REEF3D-Particle-{count:08d}.pvtp").write_text(
             '<?xml version="1.0"?>\n<VTKFile type="PPolyData" version="1.0" '
             'byte_order="LittleEndian">\n<PPolyData GhostLevel="0">\n<PPointData>\n'

@@ -854,9 +854,10 @@ class _Collector:
             rgb = linear(colors(values, shown.colormap, shown.vmin, shown.vmax)[:, :3])
         if shown.point_size is not None:  # particles
             keep = np.isfinite(shown.positions).all(axis=1)
-            positions, triangles = spheres(
-                shown.positions[keep], 0.5 * shown.point_size * self.pixel
-            )
+            radius = 0.5 * shown.point_size * self.pixel
+            if shown.point_sizes is not None and len(shown.point_sizes) == len(keep):
+                radius = 0.5 * np.asarray(shown.point_sizes, float)[keep]  # their own size
+            positions, triangles = spheres(shown.positions[keep], radius)
             if rgb is not None:
                 rgb = np.repeat(rgb[keep], 12, axis=0)
             self.add(shown.item_id, positions, triangles, self.plain(shown.color, 0.6), rgb)

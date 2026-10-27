@@ -93,3 +93,101 @@ def test_dem_trails_follow_element_centres(tmp_path):
     assert trails is not None and trails.segments.shape == (2, 2, 3)  # two elements
     ends = trails.segments[:, 1]
     np.testing.assert_allclose(np.sort(ends[:, 0]), np.sort(dem_centres(0.5)[:, 0]), atol=1e-4)
+
+
+def test_the_cpm_bed(tmp_path):
+    """The CPM bed files of the ranks (Q 58) as one surface: the bed level, the bed
+    shear stress and the change since the first output, at their times."""
+    from reef3d_fixtures import cpm_bed
+
+    run = make_run(tmp_path / "cpm", solver="CFD", frames=4, print_interval=0.5)
+    write_cpm(run, end=1.5, interval=0.25, bed=True)
+    bed = open_case(run).datasets["cfd_cpm_bed"]
+    assert bed.role == "cpm_bed" and bed.label == "CFD CPM bed" and len(bed) == 7
+    np.testing.assert_allclose(bed.times, 0.25 * np.arange(7))
+    assert bed.default_variable() == "bed_change"
+    mesh = bed.read(4)
+    assert mesh.points.shape == (20 * 4, 3)  # both ranks' columns, one grid
+    assert mesh.n_triangles == 2 * 19 * 3
+    x, y = mesh.points[:, 0].astype(float), mesh.points[:, 1].astype(float)
+    np.testing.assert_allclose(mesh.points[:, 2], cpm_bed(x, y, 1.0), atol=1e-6)
+    change = mesh.point_data["bed_change"]
+    np.testing.assert_allclose(change, cpm_bed(x, y, 1.0) - cpm_bed(x, y, 0.0), atol=1e-6)
+    np.testing.assert_allclose(mesh.point_data["tau"][:, 0], 0.5 + x, rtol=1e-5)
+    assert np.abs(bed.read(0).point_data["bed_change"]).max() == 0.0
+    # in the scene beside the particles, coloured by its change
+    s = Session()
+    s.open_case(run)
+    item = next(i for i in s.scene if i.name == "CPM bed")
+    assert item.kind == "bathymetry" and item.properties["variable"] == "bed_change"
+    assert s.data.dataset(item.id).key == "cfd_cpm_bed"
+
+
+def test_cpm_parcels_with_ids_have_paths(tmp_path):
+    run = make_run(tmp_path / "cpm", solver="CFD", frames=4, print_interval=0.5)
+    write_cpm(run, end=1.5, interval=0.25, ids=True)
+    s = Session()
+    s.open_case(run)
+    item = next(i for i in s.scene if i.kind == "particles")
+    s.set_time(1.0)
+    s.set_property(item.id, "trail_outputs", 2)
+    mesh = s.data.load(item.id)
+    trails = s.data.particle_trails(item.id, mesh)
+    assert trails is not None and len(trails.segments) > 0
+
+
+def test_particles_sized_by_their_radius(tmp_path):
+    run = make_run(tmp_path / "cpm", solver="CFD", frames=4, print_interval=0.5)
+    write_cpm(run, end=1.5, interval=0.25)
+    s = Session()
+    s.open_case(run)
+    item = next(i for i in s.scene if i.kind == "particles")
+    s.set_time(1.0)
+    assert s.data.display(item.id, s.data.load(item.id)).point_sizes is None  # on screen
+    s.set_property(item.id, "size_by", "radius")
+    s.set_property(item.id, "radius_scale", 20.0)
+    shown = s.data.display(item.id, s.data.load(item.id))
+    assert len(shown.point_sizes) == len(shown.positions)
+    np.testing.assert_allclose(shown.point_sizes, 2 * 0.0005 * 20.0)  # the fixtures' radius
+
+
+def test_the_cpm_bed_stays_in_its_files_when_converted(tmp_path):
+    from lagoonviz.core.convert import convert
+
+    run = make_run(tmp_path / "cpm", solver="CFD", frames=4, print_interval=0.5)
+    write_cpm(run, end=1.5, interval=0.25, bed=True, ids=True)
+    report = convert(run)
+    assert "cpm_bed" not in report.outputs and report.outputs["particles"] == 7
+    case = open_case(run)
+    assert case.datasets["cfd_cpm_bed"].read(2).points.shape == (80, 3)
+    stored = case.datasets["cfd_particles"]
+    assert stored.source == "lagoon" and "id" in stored.read(1, None).point_data
+
+
+def test_a_run_of_only_cpm_parcels_shows_them(tmp_path):
+    """A CPM run without volume or surface output (P 10 0): its parcels and its bed
+    are shown."""
+    run = tmp_path / "cpm2d"
+    run.mkdir()
+    write_cpm(run, end=0.5, interval=0.25, bed=True, ids=True)
+    s = Session()
+    s.open_case(run)
+    names = [(i.kind, i.name) for i in s.scene]
+    assert names[0] == ("case", "cpm2d")
+    assert ("particles", "Particles") in names and ("bathymetry", "CPM bed") in names
+
+
+def test_the_cpm_bed_of_a_2d_run_is_a_strip(tmp_path):
+    from lagoonviz.core.data.cpm import bed_datasets
+
+    folder = tmp_path / "REEF3D_CFD_CPM_Particle"
+    folder.mkdir()
+    for count, t in enumerate((0.0, 0.5)):
+        lines = [f"# time {t}", "# x y z_bed tau_x tau_y"]
+        lines += [f"{0.05 + 0.1 * i:.2f} 0.005 {0.1 + 0.01 * i * t:.4f} 1 0" for i in range(5)]
+        (folder / f"REEF3D-CFD-CPM-Bed-{count:08d}-000001.dat").write_text("\n".join(lines))
+    (bed,) = bed_datasets(folder)
+    mesh = bed.read(1)
+    assert mesh.points.shape == (10, 3) and mesh.n_triangles == 8
+    np.testing.assert_allclose(sorted(set(mesh.points[:, 1].round(4))), [-0.045, 0.055])
+    np.testing.assert_allclose(mesh.point_data["bed_change"][:5], 0.005 * np.arange(5), atol=1e-6)

@@ -26,6 +26,15 @@
   gauge (observed or predicted) or a file of levels: `background-1.dat` and B 510,
   or the constituents as B 511; B 515 for a tide travelling along the coast.
   `session.write_tide`, `lagoonviz.core.tide`.
+- **CPM**: the CPM bed (`REEF3D-CFD-CPM-Bed-*.dat`, Q 58) as a *CPM bed* item:
+  the ranks' columns as one surface with the bed level, the bed shear stress and
+  the bed's change since the first output; particles drawn as large as they are
+  (*Size* radius, *Radius scale*; a parcel carrying several by the cube root of its
+  weight); parcel paths (*Trail*) with REEF3D's parcel numbers (`id`); the parcels in
+  REEF3D's own store (P 18) read as LAGOON's converter writes them.
+- The command catalogue is up to REEF3D's hans_dev: Q 68 - 79 and 176 more new
+  commands, the undocumented ones described from the comments of their defaults
+  (`tools/command_catalog.py --update`).
 - The side panels (Scene, Properties, Set-up) narrow freely: below the width their
   content needs they scroll sideways instead of stopping the splitter; the Set-up
   panel's tabs get arrows when they do not fit.

@@ -766,12 +766,18 @@ class SceneRenderer:
             rgba = np.tile(np.array(_rgba(shown.color), np.float32), (len(positions), 1))
         rgba = np.ascontiguousarray(rgba, dtype=np.float32)
         rgba[:, 3] = shown.opacity
+        sizes = shown.point_sizes
+        if sizes is not None and len(sizes) != len(positions):
+            sizes = None
         current = self._shown.get(shown.item_id)
         if current is not None and isinstance(current.mesh, gfx.Points):
             geometry = current.mesh.geometry
-            if not (
-                _update_buffer(geometry, "positions", positions)
-                and _update_buffer(geometry, "colors", rgba)
+            by_radius = getattr(current.mesh.material, "size_mode", "uniform") == "vertex"
+            if (
+                by_radius != (sizes is not None)
+                or not _update_buffer(geometry, "positions", positions)
+                or not _update_buffer(geometry, "colors", rgba)
+                or (sizes is not None and not _update_buffer(geometry, "sizes", sizes))
             ):
                 self.content.remove(current.mesh)
                 current = None
@@ -779,18 +785,26 @@ class SceneRenderer:
             self.content.remove(current.mesh)
             current = None
         if current is None:
-            material = gfx.PointsMaterial(size=shown.point_size, color_mode="vertex")
+            if sizes is not None:  # each particle its size in the model
+                material = gfx.PointsMaterial(
+                    color_mode="vertex", size_mode="vertex", size_space="world"
+                )
+                geometry = gfx.Geometry(
+                    positions=np.array(positions), colors=np.array(rgba), sizes=np.array(sizes)
+                )
+            else:
+                material = gfx.PointsMaterial(size=shown.point_size, color_mode="vertex")
+                geometry = gfx.Geometry(positions=np.array(positions), colors=np.array(rgba))
             try:
                 material.pick_write = True
             except AttributeError:
                 pass
-            points = gfx.Points(
-                gfx.Geometry(positions=np.array(positions), colors=np.array(rgba)), material
-            )
+            points = gfx.Points(geometry, material)
             self.content.add(points)
             current = _Shown(points, kind, shown.colormap, None, shown.values is not None)
             self._shown[shown.item_id] = current
-        current.mesh.material.size = shown.point_size
+        if sizes is None:
+            current.mesh.material.size = shown.point_size
         current.low, current.high = _corners(positions)
         current.mesh.visible = shown.visible
 

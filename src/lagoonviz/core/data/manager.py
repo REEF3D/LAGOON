@@ -49,7 +49,9 @@ from lagoonviz.core.vectors import arrow_segments, split_vectors, spread_points,
 
 #: item kinds that show a dataset, and the dataset role they use by default
 DATA_KINDS = {
-    kind: role for role, kind in ROLES.items() if role not in ("solid", "topo", "forcing")
+    kind: role
+    for role, kind in ROLES.items()
+    if role not in ("solid", "topo", "forcing", "cpm_bed")  # theirs: by their dataset key
 } | {
     "slice": "volume",
     "iso_surface": "volume",
@@ -111,6 +113,8 @@ class DisplaySurface:
     line_width: float = 3.0
     #: point items (particles): drawn as points of this size [px], not triangles
     point_size: float | None = None
+    #: point items sized by their radius: each point's diameter in the model [m]
+    point_sizes: np.ndarray | None = None
     #: the item's material (bodies, structures, DEM elements), for the cinematic looks
     material: str = ""
 
@@ -889,6 +893,8 @@ class DataManager:
             arrays.add("depth")  # still water depth: the level for vertical exaggeration
         if int(item.properties.get("trail_outputs", 0) or 0) > 0:
             arrays.add("id")  # trails follow each particle by its id
+        if item.properties.get("size_by") == "radius":
+            arrays.update(("radius", "weight"))  # each particle its own size
         return tuple(sorted(arrays))
 
     def frame_key(self, item_id: str, time: float | None = None) -> FrameKey | None:
@@ -1467,6 +1473,7 @@ class DataManager:
             segments=mesh.segments,
             line_width=float(props.get("line_width", 3.0)),
             point_size=float(props.get("point_size", 4.0)) if item.kind in POINT_KINDS else None,
+            point_sizes=_point_sizes(mesh, props) if item.kind in POINT_KINDS else None,
             material=str(props.get("material", "") or ""),
         )
 
@@ -2547,3 +2554,17 @@ class BackgroundLoader:
 
     def shutdown(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _point_sizes(mesh, props: dict) -> np.ndarray | None:
+    """The diameters [m] of particles drawn by their radius (Size: radius): twice the
+    radius times the scale, a parcel that carries ``weight`` seeds (CPM, Q 78) by the
+    cube root of it. None: every point of the same size on screen."""
+    if props.get("size_by") != "radius" or "radius" not in mesh.point_data:
+        return None
+    radius = np.asarray(mesh.point_data["radius"], np.float32).reshape(-1)
+    sizes = 2.0 * radius * np.float32(props.get("radius_scale", 1.0))
+    weight = mesh.point_data.get("weight")
+    if weight is not None and len(weight) == len(sizes):
+        sizes = sizes * np.cbrt(np.maximum(np.asarray(weight, np.float32).reshape(-1), 0.0))
+    return np.ascontiguousarray(sizes, dtype=np.float32)
