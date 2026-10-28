@@ -101,7 +101,7 @@ def test_velocity_arrows_on_the_bed(reef3d_run):
     s.open_case(reef3d_run)
     bed = "bathymetry-1"
     props = s.scene.get(bed).properties
-    assert props["vectors_of"] == "none" and props["vector_count"] == 400
+    assert props["vectors_of"] == "none" and props["vector_count"] == 1000
     s.set_property(bed, "vectors_of", "velocity (grey)")
     s.set_property(bed, "vector_count", 12)
     mesh = s.data.load(bed)

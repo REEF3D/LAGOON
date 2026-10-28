@@ -1090,7 +1090,7 @@ class DataManager:
             ~((triangles[:, 0] == triangles[:, 1]) & (triangles[:, 1] == triangles[:, 2]))
         ]
         used = np.unique(shown_triangles)  # not on hidden dry land
-        count = int(props.get("vector_count", 400))
+        count = int(props.get("vector_count", 1000))
         # spaced for the area shown (the water, not the whole domain's box)
         picked, spacing = spread_points(mesh.points, used, shown_triangles, count)
         if not picked.size:

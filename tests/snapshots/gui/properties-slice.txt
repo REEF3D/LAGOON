@@ -22,7 +22,7 @@ QWidget
   Contour lines of: choice 'none' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
   Contour lines: number 10 in [2, 100] decimals 0
   Vectors of: choice 'none' of ['none', 'velocity']
-  Arrows: number 400 in [10, 20000] decimals 0
+  Arrows: number 1000 in [10, 20000] decimals 0
   Arrow length: _LogSlider
       slider in [0, 1000]
       number 1 in [0.1, 10] decimals 3

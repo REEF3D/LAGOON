@@ -98,7 +98,7 @@ def _vectors() -> dict[str, PropertySpec]:
             "(none: no arrows)",
         ),
         "vector_count": PropertySpec(
-            400, "Arrows", minimum=10, maximum=20000, tip="About how many arrows, evenly spread"
+            1000, "Arrows", minimum=10, maximum=20000, tip="About how many arrows, evenly spread"
         ),
         "vector_scale": PropertySpec(
             1.0,
