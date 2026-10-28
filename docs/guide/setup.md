@@ -66,7 +66,7 @@ A case folder without output opens as its set-up:
 The vertical scale of the case applies to the set-up as to any other item
 ([Vertical scale](scene.md#vertical-scale)), and the 2D button draws it flat from
 above. A long, flat domain such as a flume is easiest to read from the side
-(the 2D view's *front* side) with a vertical scale.
+(the 2D view's *side*, ++3++) with a vertical scale.
 
 ## The Case set-up item
 

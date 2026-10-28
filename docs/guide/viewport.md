@@ -13,7 +13,7 @@ the mouse over the view):
 
 | Key | View |
 | --- | --- |
-| ++1++, ++3++, ++7++ | front, right side, top (with ++ctrl++: back, left, bottom) |
+| ++1++, ++3++, ++7++ | front (looking along the x axis), side (across it), top (with ++ctrl++: back, other side, bottom) |
 | ++5++ | perspective or orthographic |
 | ++n++ | north up |
 | ++p++ | Probe: a click lists every value at a point (++escape++ ends it) |

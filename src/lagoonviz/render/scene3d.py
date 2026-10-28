@@ -100,11 +100,13 @@ def _fov_distance(fov: float) -> float:
 
 
 #: named views: (view direction, up). z is up, as in REEF3D.
+#: The front looks at the end of a flume (along -x, y to the right), the side along
+#: it (along +y, x to the right): the waves travel across the side view.
 VIEWS = {
-    "front": ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),  # looking along +y
-    "back": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
-    "right": ((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),  # looking along -x
-    "left": ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    "front": ((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),  # looking along -x
+    "back": ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    "right": ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),  # the side: looking along +y
+    "left": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
     "top": ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
     "bottom": ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0)),
     "perspective": ((-1.0, 1.2, -0.7), (0.0, 0.0, 1.0)),
