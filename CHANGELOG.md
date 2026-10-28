@@ -41,6 +41,10 @@
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.
+- The volume has the free surface's options: its own *Vertical scale* (with *Sync*
+  off), contour lines and arrows on its outside; slices, iso-surfaces and
+  iso-volumes have their own vertical scale too. Also for a store's volume
+  (NHFLOW).
 - Front and side views exchanged: *Front* (++1++) now looks along the x axis, at
   the end of a flume, and *Side* (++3++) across it, the waves travelling across
   the view. The 2D view's sides follow.

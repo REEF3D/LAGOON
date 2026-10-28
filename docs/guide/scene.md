@@ -108,8 +108,10 @@ start=60.0)`.
 
 Waves are small next to the length of a domain. The case's *Vertical scale*
 stretches the heights of all its items about the still water level (surface, bed,
-bodies, slices, gauges alike). With *Sync* off on an item, that item gets its own
-scale. The free surface can leave out dry land (*Hide dry land*, on by default),
+bodies, the volume, slices, iso-surfaces, gauges alike). With *Sync* off on an
+item, that item gets its own scale: the free surface, the bed, the volume and what
+is cut from it each have the slider. The volume's outside has contour lines and
+arrows like the free surface (*Contour lines of*, *Vectors of*). The free surface can leave out dry land (*Hide dry land*, on by default),
 so only the wet free surface shows: FNPF's surface where it has no water depth,
 NHFLOW's and SFLOW's over their dry cells (`wetdry`), the AMR surface likewise.
 The bed can leave out what is under still water (*Hide wet land*).

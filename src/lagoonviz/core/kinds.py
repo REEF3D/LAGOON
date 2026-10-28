@@ -340,6 +340,9 @@ KINDS: dict[str, KindSpec] = {
             **_data_source("volume"),
             **_colouring("velocity", "ocean"),
             **_grid_lines("on the volume's outside"),
+            **_contours(),
+            **_vectors(),
+            **_exaggeration("Scales heights about the still water level"),
         },
     ),
     "series": KindSpec(
@@ -402,6 +405,7 @@ KINDS: dict[str, KindSpec] = {
             **_grid_lines("the slice cuts"),
             **_contours(),
             **_vectors(),
+            **_exaggeration("Scales heights about the still water level"),
         },
     ),
     "iso_surface": KindSpec(
@@ -418,6 +422,7 @@ KINDS: dict[str, KindSpec] = {
             "iso_value": PropertySpec(0.0, "Value", tip="Where the surface lies"),
             **_colouring("none", "ocean"),
             **_grid_lines("the surface crosses (with AMR: of every level)"),
+            **_exaggeration("Scales heights about the still water level"),
         },
     ),
     "iso_volume": KindSpec(
@@ -434,6 +439,7 @@ KINDS: dict[str, KindSpec] = {
             "iso_min": PropertySpec(0.0, "From", tip="The part of the volume from this value"),
             "iso_max": PropertySpec(1.0, "To", tip="… up to this value"),
             **_colouring("none", "ocean"),
+            **_exaggeration("Scales heights about the still water level"),
         },
     ),
     "streamlines": KindSpec(
