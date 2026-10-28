@@ -33,7 +33,10 @@ With **adaptive mesh refinement**, CFD writes the refined blocks of every output
 `REEF3D_CFD_AMR`: an index per output (`REEF3D-CFD-AMR-<output>.vtm`) and its blocks,
 3D grids of half, a quarter, ... of the volume's cell size. LAGOON joins them to the
 volume (its label says *with AMR*): the volume's cells under a block are left out,
-and so are a block's cells under a finer block. The free surface, slices,
+and so are a block's cells under a finer block. A block's faces take the values of
+the cells next to them (the coarser cells' there, or the mean with the next rank's
+block), so the free surface has no crack along a block and contour lines go on
+across it. The free surface, slices,
 iso-surfaces and iso-volumes are then as fine as the refinement, e.g. around a
 floating body; *Colour by* `level` shows where (0: the volume's own cells), and the
 free surface's *Grid lines* (dark or white) draw where it crosses the cells' faces,

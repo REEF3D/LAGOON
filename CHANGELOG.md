@@ -41,6 +41,12 @@
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.
+- CFD's refined blocks without cracks: a block's faces take the values of the
+  cells next to them (the next rank's block at its level: the mean of both; a
+  coarser block or the volume: the values their cut has there), so the free
+  surface has no crack along the blocks and contour lines on a slice go on across
+  them. Each rank's level 0 round the blocks (in the store with the blocks) is
+  left out: it is the volume's own cells, overlapping, drawn twice before.
 - A case opens with its time series and free surface lines in the scene switched
   off (gauges, forces, motions): a tick shows them in the Plots panel and in 3D.
 - **CERRA wind** in the Sea tab (*Source*: Open-Meteo, CERRA wind): the wind with

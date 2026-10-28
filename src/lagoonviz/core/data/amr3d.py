@@ -156,10 +156,16 @@ def _hexahedra(nz: int, ny: int, nx: int) -> np.ndarray:
     )
 
 
-def block_piece(block: Block, names: list[str], with_cells: bool = True) -> Piece:
+def block_piece(
+    block: Block,
+    names: list[str],
+    with_cells: bool = True,
+    nodes_of: dict[str, np.ndarray] | None = None,
+) -> Piece:
     """A block as the piece of a volume: its nodes, the arrays ``names`` at them
-    (cell values averaged to the nodes; ``elevation`` their height; one the block
-    lacks: NaN) and, ``with_cells``, its cells no finer block covers."""
+    (cell values averaged to the nodes, or those of ``nodes_of``: see
+    :func:`seamless_nodes`; ``elevation`` their height; one the block lacks: NaN)
+    and, ``with_cells``, its cells no finer block covers."""
     nz, ny, nx = len(block.z) - 1, len(block.y) - 1, len(block.x) - 1
     z, y, x = np.meshgrid(block.z, block.y, block.x, indexing="ij")
     points = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=1).astype(np.float32)
@@ -167,7 +173,8 @@ def block_piece(block: Block, names: list[str], with_cells: bool = True) -> Piec
     for name in names:
         values = block.cells.get(name)
         if values is not None:
-            nodes = _nodes(values)
+            given = nodes_of.get(name) if nodes_of else None
+            nodes = given if given is not None else _nodes(values)
             data[name] = nodes.reshape(len(points), -1) if nodes.ndim == 4 else nodes.ravel()
         elif name == "elevation":
             data[name] = points[:, 2].copy()
@@ -186,6 +193,187 @@ def block_piece(block: Block, names: list[str], with_cells: bool = True) -> Piec
     offsets = (np.arange(1, len(cells) + 1) * 8).astype(np.int64)
     types = np.full(len(cells), 12, np.uint8)  # VTK_HEXAHEDRON
     return Piece("UnstructuredGrid", points, connectivity, offsets, types, data)
+
+
+# ======================================================================== seams
+#: the eight cells round a node, as offsets (dz, dy, dx)
+_EIGHT = [(dz, dy, dx) for dz in (0, 1) for dy in (0, 1) for dx in (0, 1)]
+
+
+def _simplex(x, y, z, values: np.ndarray, px, py, pz) -> np.ndarray:
+    """Values on a node lattice (len(z), len(y), len(x)[, c]) at points, linear in
+    each of the six tetrahedra a cell is cut into (as :func:`plan_level` cuts a
+    hexahedron: round its diagonal from the lowest to the highest corner). A finer
+    block's face takes so exactly the values the coarser cells' cut has there, and
+    the two meet without a crack."""
+    index, fraction = [], []
+    for axis, p in zip((x, y, z), (px, py, pz), strict=True):
+        axis = np.asarray(axis, np.float64)
+        i = np.clip(np.searchsorted(axis, p, "right") - 1, 0, len(axis) - 2)
+        f = np.clip((p - axis[i]) / (axis[i + 1] - axis[i]), 0.0, 1.0)
+        index.append(i)
+        fraction.append(f)
+    f = np.stack(fraction, axis=1)
+    order = np.argsort(-f, axis=1, kind="stable")  # the axes from the largest step
+    fs = np.take_along_axis(f, order, axis=1)
+    weights = (1.0 - fs[:, 0], fs[:, 0] - fs[:, 1], fs[:, 1] - fs[:, 2], fs[:, 2])
+    corner = np.zeros((len(f), 3), np.int64)
+    rows = np.arange(len(f))
+    out = None
+    for step, w in enumerate(weights):
+        if step:
+            corner[rows, order[:, step - 1]] = 1
+        v = values[index[2] + corner[:, 2], index[1] + corner[:, 1], index[0] + corner[:, 0]]
+        part = (w[:, None] if v.ndim == 2 else w) * v.astype(np.float64)
+        out = part if out is None else out + part
+    return out.astype(np.float32)
+
+
+def volume_lattice(pieces: list[Piece], names: list[str]):
+    """The volume's nodes as a lattice: (x, y, z, {name: (nz, ny, nx[, c])}), NaN
+    where no piece has a node; None if its points are no lattice."""
+    pieces = [p for p in pieces if len(p.points)]
+    if not pieces:
+        return None
+    points = np.concatenate([p.points for p in pieces]).astype(np.float64)
+    axes = [np.unique(np.round(points[:, d], 5)) for d in range(3)]
+    if (
+        np.prod([a.size for a in axes], dtype=np.float64) > 8.0 * len(points)
+        or min(a.size for a in axes) < 2
+    ):
+        return None
+    i, j, k = (np.searchsorted(axes[d], np.round(points[:, d], 5)) for d in range(3))
+    arrays = {}
+    for name in names:
+        parts = [p.point_data.get(name) for p in pieces]
+        if any(v is None for v in parts):
+            continue
+        values = np.concatenate([np.asarray(v, np.float32) for v in parts])
+        shape = (axes[2].size, axes[1].size, axes[0].size, *values.shape[1:])
+        lattice = np.full(shape, np.nan, np.float32)
+        lattice[k, j, i] = values
+        arrays[name] = lattice
+    return axes[0], axes[1], axes[2], arrays
+
+
+def _touch(a: tuple, b: tuple, reach: tuple) -> bool:
+    """Whether box ``b`` reaches into box ``a`` widened by ``reach`` (dx, dy, dz)."""
+    return all(
+        b[2 * d + 1] >= a[2 * d] - reach[d] and b[2 * d] <= a[2 * d + 1] + reach[d]
+        for d in range(3)
+    )
+
+
+def _centres(edges: np.ndarray) -> np.ndarray:
+    """Cell centres of a lattice and of one cell beyond each end."""
+    e = np.asarray(edges, np.float64)
+    c = 0.5 * (e[:-1] + e[1:])
+    return np.concatenate([[c[0] - (e[1] - e[0])], c, [c[-1] + (e[-1] - e[-2])]])
+
+
+def _padded(cells: np.ndarray) -> np.ndarray:
+    """Cells (nz, ny, nx[, c]) with a layer beyond each face, carried on linearly."""
+    padded = np.asarray(cells, np.float32)
+    for axis in range(3):
+        n = padded.shape[axis]
+        first = np.take(padded, [0], axis=axis)
+        last = np.take(padded, [n - 1], axis=axis)
+        if n > 1:
+            before = 2.0 * first - np.take(padded, [1], axis=axis)
+            after = 2.0 * last - np.take(padded, [n - 2], axis=axis)
+        else:
+            before, after = first, last
+        padded = np.concatenate([before, padded, after], axis=axis)
+    return padded
+
+
+def seamless_nodes(blocks: list[Block], names: list[str], lattice=None) -> dict[Path, dict]:
+    """The blocks' cell values at their nodes, the same on both sides of every face:
+
+    - a node between blocks of one level (two MPI ranks) the mean of the eight
+      cells round it, of both blocks;
+    - a node on a face to something coarser (a coarser block, else the volume,
+      ``lattice``: :func:`volume_lattice`) the coarser values there, as the coarser
+      cells' cut has them (:func:`_simplex`);
+    - inside, the mean of the eight cells round it.
+
+    Each block's faces were carried on from its own cells before: a block and its
+    neighbours disagreed at their faces, and the free surface had a crack there
+    and contour lines a gap. Coarse blocks first: a finer block takes their final
+    values. Returns block path -> {name: (nz + 1, ny + 1, nx + 1[, c])}."""
+    order = sorted(range(len(blocks)), key=lambda n: blocks[n].level)
+    boxes = [b.box for b in blocks]
+    done: dict[int, dict[str, np.ndarray]] = {}
+    for n in order:
+        block = blocks[n]
+        level = block.level
+        reach = tuple(float(max(a[1] - a[0], a[-1] - a[-2])) for a in (block.x, block.y, block.z))
+        near = [m for m in range(len(blocks)) if m != n and _touch(boxes[n], boxes[m], reach)]
+        same = [m for m in near if blocks[m].level == level]
+        coarser = sorted(
+            (m for m in near if blocks[m].level < level), key=lambda m: -blocks[m].level
+        )
+        own = [name for name in names if name in block.cells]
+        nz, ny, nx = (len(a) - 1 for a in (block.z, block.y, block.x))
+        xc, yc, zc = _centres(block.x), _centres(block.y), _centres(block.z)
+        alone = np.ones((nz + 2, ny + 2, nx + 2), bool)  # no cell of this level there
+        alone[1:-1, 1:-1, 1:-1] = False
+        padded = {name: _padded(block.cells[name]) for name in own}
+        for m in same:
+            other = blocks[m]
+            ox, oy, oz = (np.asarray(a, np.float64) for a in (other.x, other.y, other.z))
+            cols = (xc > ox[0]) & (xc < ox[-1])
+            rows = (yc > oy[0]) & (yc < oy[-1])
+            layers = (zc > oz[0]) & (zc < oz[-1])
+            take = alone & layers[:, None, None] & rows[None, :, None] & cols[None, None, :]
+            if not take.any():
+                continue
+            kk, jj, ii = np.nonzero(take)
+            oi = np.clip(np.searchsorted(ox, xc[ii], "right") - 1, 0, len(ox) - 2)
+            oj = np.clip(np.searchsorted(oy, yc[jj], "right") - 1, 0, len(oy) - 2)
+            ok = np.clip(np.searchsorted(oz, zc[kk], "right") - 1, 0, len(oz) - 2)
+            for name in own:
+                if name in other.cells:
+                    padded[name][kk, jj, ii] = np.asarray(other.cells[name])[ok, oj, oi]
+            alone[kk, jj, ii] = False
+        nodes = {}
+        for name, values in padded.items():
+            total = np.zeros((nz + 1, ny + 1, nx + 1, *values.shape[3:]), np.float32)
+            for dz, dy, dx in _EIGHT:
+                total += values[dz : dz + nz + 1, dy : dy + ny + 1, dx : dx + nx + 1]
+            nodes[name] = total / 8.0
+        border = np.zeros((nz + 1, ny + 1, nx + 1), bool)
+        for dz, dy, dx in _EIGHT:
+            border |= alone[dz : dz + nz + 1, dy : dy + ny + 1, dx : dx + nx + 1]
+        if own and border.any():
+            kk, jj, ii = np.nonzero(border)
+            px, py, pz = block.x[ii], block.y[jj], block.z[kk]
+            open_ = np.ones(len(kk), bool)
+            for m in coarser:  # the finest coarser block round each node
+                x0, x1, y0, y1, z0, z1 = boxes[m]
+                eps = 1e-6 * max(1.0, abs(x1), abs(y1), abs(z1))
+                at = open_ & (px >= x0 - eps) & (px <= x1 + eps) & (py >= y0 - eps)
+                at &= (py <= y1 + eps) & (pz >= z0 - eps) & (pz <= z1 + eps)
+                if not at.any():
+                    continue
+                other = blocks[m]
+                for name in own:
+                    if name in done[m]:
+                        nodes[name][kk[at], jj[at], ii[at]] = _simplex(
+                            other.x, other.y, other.z, done[m][name], px[at], py[at], pz[at]
+                        )
+                open_ &= ~at
+            if lattice is not None and open_.any():
+                lx, ly, lz, arrays = lattice
+                for name in own:
+                    if name not in arrays:
+                        continue
+                    found = _simplex(lx, ly, lz, arrays[name], px[open_], py[open_], pz[open_])
+                    good = np.isfinite(found).reshape(len(found), -1).all(axis=1)
+                    sel = np.flatnonzero(open_)[good]
+                    nodes[name][kk[sel], jj[sel], ii[sel]] = found[good]
+        done[n] = nodes
+    return {blocks[n].path: done[n] for n in range(len(blocks))}
 
 
 # ======================================================================== outputs
@@ -343,15 +531,22 @@ class RefinedVolume(Dataset):
         self.blocks = blocks
         self._frame_of: dict[Path, int] = {}
         self._block_keys: set[Path] = set()
+        self._block_frame: dict[Path, int] = {}
+        self._frame_blocks: list[list[Path]] = []
         self._plans: dict[tuple, VolumePlan] = {}
         self._own_cells: dict[tuple, tuple] = {}
+        self._seams: dict[tuple, dict] = {}
         self._amr_lock = threading.Lock()
         frames = []
         for index, frame in enumerate(base.frames):
             for path in frame.pieces:
                 self._frame_of[path] = index
-            keys = blocks.keys(frame.step)
+            # REEF3D also writes each rank's level 0 round its blocks: the volume's
+            # own cells (overlapping one another), drawn by the volume already
+            keys = [k for k in blocks.keys(frame.step) if blocks.level(k) > 0]
             self._block_keys.update(keys)
+            self._block_frame.update(dict.fromkeys(keys, index))
+            self._frame_blocks.append(keys)
             frames.append(Frame(frame.step, frame.path, [*frame.pieces, *keys]))
         super().__init__(base.key, base.solver, base.role, frames, base.folder)
         self.run_id = base.run_id
@@ -372,14 +567,42 @@ class RefinedVolume(Dataset):
         return self.base.written_span()
 
     def amr_blocks(self, index: int) -> list[Path]:
-        """The blocks of a frame."""
-        return self.blocks.keys(self.frames[index].step)
+        """The refined blocks of a frame."""
+        return self._frame_blocks[index]
+
+    def _seamless(self, index: int, names: list[str]) -> dict[Path, dict]:
+        """The node values of a frame's blocks, alike on both sides of their faces
+        (:func:`seamless_nodes`), kept for the frames being looked at."""
+        names = sorted(n for n in names if n not in ("level", "elevation"))
+        key = (index, tuple(names))
+        with self._amr_lock:
+            found = self._seams.get(key)
+        if found is not None:
+            return found
+        found = {}
+        if names:
+            keys = self.amr_blocks(index)
+            blocks = [self.blocks.block(k) for k in keys]
+            wanted = [n for n in names if n in self.base.components]
+            pieces = [
+                self.base._piece(p, point_arrays=wanted, with_cells=False)
+                for p in self.base.frames[index].pieces
+            ]
+            found = seamless_nodes(blocks, names, volume_lattice(pieces, wanted))
+        with self._amr_lock:
+            for old in [k for k in self._seams if k[0] < index - 2 or k[0] > index + 2]:
+                del self._seams[old]
+            if len(self._seams) > 16:
+                self._seams.clear()
+            self._seams[key] = found
+        return found
 
     # ------------------------------------------------------------- pieces
     def _piece(self, path: Path, point_arrays: list[str] | None = None, with_cells: bool = True):
         names = list(self.components) if point_arrays is None else list(point_arrays)
         if path in self._block_keys:
-            return block_piece(self.blocks.block(path), names, with_cells)
+            seams = self._seamless(self._block_frame[path], names)
+            return block_piece(self.blocks.block(path), names, with_cells, seams.get(path))
         level = "level" in names
         own = [n for n in names if n != "level"]
         piece = self.base._piece(path, point_arrays=own, with_cells=with_cells)

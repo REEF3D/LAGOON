@@ -58,7 +58,14 @@ def write_block(path: Path, level, xr, yr, zr, cells, frame, finer=None):
     )
 
 
-def cfd_amr_case(tmp_path, frames=3, refined=(0, 1, 2)):
+def _union(ranges):
+    """The box round several boxes ((x0, x1), (y0, y1), (z0, z1)); None for none."""
+    if not ranges:
+        return None
+    return tuple((min(r[d][0] for r in ranges), max(r[d][1] for r in ranges)) for d in range(3))
+
+
+def cfd_amr_case(tmp_path, frames=3, refined=(0, 1, 2), blocks=BLOCKS):
     root = make_run(tmp_path / "cfd", solver="CFD", frames=frames, print_interval=0.5)
     for name in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):
         shutil.rmtree(root / name)
@@ -66,9 +73,9 @@ def cfd_amr_case(tmp_path, frames=3, refined=(0, 1, 2)):
     amr.mkdir()
     for frame in refined:
         names = []
-        for number, (level, xr, yr, zr, cells) in enumerate(BLOCKS):
+        for number, (level, xr, yr, zr, cells) in enumerate(blocks):
             name = f"REEF3D-CFD-AMR-{frame:08d}-{number:05d}.vtr"
-            finer = BLOCKS[1][1:4] if level == 1 else None
+            finer = _union([b[1:4] for b in blocks if b[0] == level + 1])
             write_block(amr / name, level, xr, yr, zr, cells, frame, finer)
             names.append(name)
         (amr / f"REEF3D-CFD-AMR-{frame:08d}.vtm").write_text(
@@ -205,3 +212,89 @@ def test_the_blocks_in_a_lagoon_store(tmp_path):
     np.testing.assert_allclose(own.times, blocks.times)
     stored = zip(blocks.steps.tolist(), blocks.times.tolist(), strict=True)
     assert volume.blocks.times == dict(stored)
+
+
+#: the level 1 block of two ranks, side by side at x = 3, and each rank's level 0
+#: round them, as REEF3D writes them (G 40): the volume's own cells, overlapping
+SPLIT = [
+    (0, (1.0, 3.0), (0.0, 4.0), (0.0, 3.0), (2, 4, 2)),
+    (0, (2.0, 5.0), (0.0, 4.0), (0.0, 3.0), (3, 4, 2)),
+    (1, (2.0, 3.0), (1.0, 3.0), (1.5, 3.0), (2, 4, 2)),
+    (1, (3.0, 4.0), (1.0, 3.0), (1.5, 3.0), (2, 4, 2)),
+    (2, (2.5, 3.5), (1.5, 2.5), (1.5, 2.25), (4, 4, 2)),
+]
+
+
+def _open_edges(mesh) -> np.ndarray:
+    """The edges of a surface that only one triangle has: (n, 2, 3)."""
+    points = np.round(mesh.points.astype(np.float64), 5)
+    _, ids = np.unique(points, axis=0, return_inverse=True)
+    ids = ids.ravel()
+    t = mesh.triangles.astype(np.int64)
+    edges = np.sort(ids[np.concatenate([t[:, [0, 1]], t[:, [1, 2]], t[:, [2, 0]]])], axis=1)
+    unique, count = np.unique(edges, axis=0, return_counts=True)
+    first = np.zeros(ids.max() + 1, np.int64)
+    first[ids] = np.arange(len(ids))
+    return mesh.points[first[unique[count == 1]]].astype(np.float64)
+
+
+def _widest_crack(edges: np.ndarray, inside) -> float:
+    """How far the middle of an open edge inside lies from every other open edge: 0
+    where the other side of a seam lies on it (a T-junction of a finer block)."""
+    middles = edges.mean(axis=1)
+    worst = 0.0
+    for e in np.flatnonzero(inside(middles)):
+        a, b = np.delete(edges[:, 0], e, axis=0), np.delete(edges[:, 1], e, axis=0)
+        ab = b - a
+        t = np.clip(((middles[e] - a) * ab).sum(1) / np.maximum((ab * ab).sum(1), 1e-30), 0, 1)
+        worst = max(worst, float(np.linalg.norm(a + t[:, None] * ab - middles[e], axis=1).min()))
+    return worst
+
+
+def _loose_ends(segments: np.ndarray, inside) -> float:
+    """How far each end of a contour line inside lies from the next line's end: 0
+    where the lines go on across the faces of the blocks."""
+    ends = segments.reshape(-1, 3).astype(np.float64)
+    worst = 0.0
+    for n in np.flatnonzero(inside(ends)):
+        d = np.linalg.norm(ends - ends[n], axis=1)
+        d[n] = np.inf
+        d[n ^ 1] = np.inf  # the other end of its own segment
+        worst = max(worst, float(d.min()))
+    return worst
+
+
+def _in_plan(p):
+    return (p[:, 0] > 0.01) & (p[:, 0] < 7.99) & (p[:, 1] > 0.01) & (p[:, 1] < 3.99)
+
+
+def _in_cut(p):
+    return (p[:, 0] > 0.01) & (p[:, 0] < 7.99) & (p[:, 2] > 0.01) & (p[:, 2] < 2.99)
+
+
+def test_the_blocks_meet_without_a_crack(tmp_path):
+    """Bug: each block carried its cells on to its faces, so it and the cells next
+    to it (the volume, a coarser block, the block of the next rank) disagreed
+    there: the free surface had a crack along the faces of the blocks and contour
+    lines on a slice a gap. Now a face takes the values of the coarser cells as
+    their cut has them, and a face between two ranks the mean of both. Each rank's
+    level 0 round the blocks is the volume's own: left out."""
+    from lagoonviz.core.contours import contour_segments
+
+    root = cfd_amr_case(tmp_path, blocks=SPLIT)
+    s = Session()
+    volume = s.data.case(s.open_case(root)).datasets["cfd_volume"]
+    assert len(volume.frames[0].pieces) == 2 + 3  # the volume's two ranks, levels 1 and 2
+    for index in (0, 1):
+        surface = volume.read_iso(index, "phi", 0.0, ["level"])
+        assert set(np.unique(surface.point_data["level"])) == {0.0, 1.0, 2.0}
+        assert _widest_crack(_open_edges(surface), _in_plan) < 1e-5
+        for y in (1.9, 2.6):
+            cut = volume.read_slice(index, 1, y, ["phi", "velocity"])
+            # (a component: linear across the cells; the length of a vector is not,
+            # its lines meet the finer cells' extra nodes only nearly)
+            for name in ("phi", "velocity.x", "velocity.z"):
+                values = cut.scalar(name)
+                levels = list(np.linspace(values.min(), values.max(), 12)[1:-1])
+                lines = contour_segments(cut.points, cut.triangles, values, levels)
+                assert len(lines) and _loose_ends(lines, _in_cut) < 1e-5, (index, y, name)
