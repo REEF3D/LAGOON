@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Run monitor
+
+- A warning when a run ends before its first output after t = 0 (e.g. N 45 100
+  with P 30 1800): only the initial state is written, so there is nothing more to
+  show. The end comes from the run's end record, else from N 41 and N 45 at the
+  usual time step (FNPF has no main log: that of the case's earlier runs). Outputs
+  with print windows (P 35, P 184, P 185) are not checked.
+
 ### Blocks for coasts and estuaries
 
 - Edges spaced by the cells at their ends (*Spacing*: 60 m at a mouth to 1.5 km

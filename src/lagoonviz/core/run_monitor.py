@@ -161,17 +161,23 @@ def ctrl_changes(current: str, started: str) -> list[str]:
 
 
 # ----------------------------------------------------------------- the status
-def _latest_run(case_dir: Path, solver: str = ""):
+def _runs(case_dir: Path, solver: str = "") -> list:
+    """The runs of the case's run log (of ``solver``, if given, and if it has any)."""
     from lagoon_format.run import read_case
 
     try:
         history = read_case(case_dir)
     except (OSError, ValueError):
-        return None
+        return []
     if history is None or not history.runs:
-        return None
+        return []
     runs = [r for r in history.runs if not solver or r.solver.upper() == solver.upper()]
-    return max(runs or history.runs, key=lambda r: r.started)
+    return runs or list(history.runs)
+
+
+def _latest_run(case_dir: Path, solver: str = ""):
+    runs = _runs(case_dir, solver)
+    return max(runs, key=lambda r: r.started) if runs else None
 
 
 def _when(text: str) -> datetime | None:
@@ -186,7 +192,8 @@ def run_status(case_dir: str | Path, solver: str = "", now: float | None = None)
     case_dir = Path(case_dir)
     now = clock.time() if now is None else now
     status = RunStatus(case_dir)
-    run = _latest_run(case_dir, solver)
+    runs = _runs(case_dir, solver)
+    run = max(runs, key=lambda r: r.started) if runs else None
     started_ctrl = ""
     if run is not None:
         status.run_id, status.solver = run.id, run.solver.upper()
@@ -247,6 +254,10 @@ def run_status(case_dir: str | Path, solver: str = "", now: float | None = None)
     status.state, status.ended = _state(run, status)
     if status.state != "running":
         status.eta = None
+    if run is not None and ctrl_text:
+        warning = _output_warning(status, run, runs, ctrl_text)
+        if warning:
+            status.warnings.append(warning)
     if status.ctrl_changes:
         status.warnings.append(
             "ctrl.txt was changed after the run started: the run goes on with the copy in "
@@ -272,6 +283,131 @@ def _state(run, status: RunStatus) -> tuple[str, str]:
         )
         return "not responding", ""
     return "running", ""
+
+
+# ----------------------------------------------------------------- outputs before the end
+#: the stream roles of the field outputs LAGOON shows (not gauges, profiles, the bed of the start)
+FIELD_ROLES = {"volume", "free_surface"}
+
+
+def output_schedules(ctrl: str, solver: str) -> list[tuple[str, str, float]] | None:
+    """The field outputs a control file asks for, as (key, "time" or "iteration",
+    interval): the volume (P 30, else P 20) and the free surface (P 180 1 with P 182,
+    else P 181; SFLOW's output is its free surface). None if there are print windows
+    (P 35, P 184, P 185), which this does not follow."""
+
+    def value(key: str) -> float | None:
+        return read_ctrl_value(ctrl, key)
+
+    if any(value(key) not in (None, 0.0) for key in ("P 35", "P 184", "P 185")):
+        return None
+    schedules = []
+    solver = solver.upper()
+    if solver != "SFLOW":
+        p30, p20 = value("P 30"), value("P 20")
+        if p30 is not None and p30 > 0:
+            schedules.append(("P 30", "time", p30))
+        elif p20 is not None and p20 > 0:
+            schedules.append(("P 20", "iteration", p20))
+    if solver == "SFLOW" or value("P 180") == 1:
+        p182, p181 = value("P 182"), value("P 181")
+        if p182 is not None and p182 > 0:
+            schedules.append(("P 182", "time", p182))
+        elif p181 is not None and p181 > 0:
+            schedules.append(("P 181", "iteration", p181))
+    return schedules
+
+
+def _field_outputs_after_start(run) -> int:
+    """How many outputs of the run after t = 0 have a field output (volume, free
+    surface); all outputs after t = 0 if the run log does not say the streams' roles."""
+    fields = {
+        name
+        for name, stream in run.streams.items()
+        if isinstance(stream, dict) and stream.get("role") in FIELD_ROLES
+    }
+    roles_known = any(isinstance(s, dict) and "role" in s for s in run.streams.values())
+    return len(
+        {
+            o.step
+            for o in run.outputs
+            if o.time > 0 and (fields.intersection(o.streams) if roles_known else True)
+        }
+    )
+
+
+def _usual_time_step(status: RunStatus, run, runs) -> float | None:
+    """The time step of the run: from its main log, else from the earlier runs of the
+    case that ended (simulated time per iteration; FNPF writes no main log)."""
+    if status.dt is not None and status.dt > 0 and math.isfinite(status.dt):
+        return status.dt
+    for earlier in sorted(runs, key=lambda r: r.started, reverse=True):
+        if earlier is run or not earlier.end:
+            continue
+        try:
+            t, n = float(earlier.end.get("time", 0)), int(earlier.end.get("iteration", 0))
+        except (TypeError, ValueError):
+            continue
+        if t > 0 and n > 0:
+            return t / n
+    return None
+
+
+def _output_warning(status: RunStatus, run, runs, ctrl: str) -> str:
+    """A warning if the run ends before its first field output after t = 0: LAGOON
+    then has only the initial state to show (the case of 2026-10-29: N 45 100 with
+    P 30 1800, the run ended at t = 24.7 s)."""
+    if _field_outputs_after_start(run) > 0:
+        return ""
+    schedules = output_schedules(ctrl, status.solver)
+    if not schedules:
+        return ""
+    # where the run ends: its end record, else N 41 and N 45 (at the usual time step)
+    end_time = end_iteration = None
+    why = ""
+    if run.end:
+        try:
+            end_time = float(run.end.get("time"))
+            end_iteration = int(run.end.get("iteration"))
+        except (TypeError, ValueError):
+            return ""
+        why = "ended"
+    else:
+        dt = _usual_time_step(status, run, runs)
+        if _set(status.max_iterations):
+            end_iteration = status.max_iterations
+            if dt is not None:
+                done_time = status.time or 0.0
+                done_iterations = status.iteration or 0
+                end_time = done_time + max(0, end_iteration - done_iterations) * dt
+                why = f"N 45 {end_iteration}"
+        if _set(status.end_time) and (end_time is None or status.end_time <= end_time):
+            end_time = status.end_time
+            why = f"N 41 {status.end_time:g}"
+            if dt is not None and end_iteration is None:
+                end_iteration = int(end_time / dt)
+    if end_time is None and end_iteration is None:
+        return ""
+    for key, kind, interval in schedules:
+        if kind == "time" and (end_time is None or end_time > interval):
+            return ""
+        if kind == "iteration" and (end_iteration is None or end_iteration >= interval):
+            return ""
+    outputs = ", ".join(
+        f"{key} {interval:g} s" if kind == "time" else f"{key} {interval:g} iterations"
+        for key, kind, interval in schedules
+    )
+    if why == "ended":
+        where = f"the run ended at t = {end_time:.3g} s (iteration {end_iteration})"
+    elif end_time is not None:
+        where = f"the run ends at about t = {end_time:.3g} s ({why})"
+    else:
+        where = f"the run ends at iteration {end_iteration} (N 45)"
+    return (
+        f"{where}, before its first output after t = 0 ({outputs}): only the initial "
+        "state is written, so there is nothing more to show. Lower the output interval or "
+        "raise N 45 / N 41"
+    )
 
 
 def _time_step_warnings(status: RunStatus, dt: np.ndarray, simtime: np.ndarray) -> None:

@@ -10,6 +10,7 @@ import pytest
 from lagoonviz.core.run_monitor import (
     ctrl_changes,
     duration,
+    output_schedules,
     read_tail,
     run_status,
 )
@@ -128,3 +129,78 @@ def test_the_tail_of_a_long_log(tmp_path):
 def test_durations():
     assert duration(42) == "42 s" and duration(600) == "10 min"
     assert duration(3 * 3600 + 1200) == "3 h 20 min" and duration(3 * 86400) == "3 d 0 h"
+
+
+# ---------------------------------------------------------- a run ending before its first output
+FNPF_CTRL = "A 10 3\nN 41 14400.0\nN 45 100\nP 10 1\nP 18 1\nP 30 1800.0\n"
+
+
+def write_fnpf_case(root, ctrl=FNPF_CTRL, end=None, last=None):
+    """The case of 2026-10-29: FNPF (no main log), N 45 100 with P 30 1800; an earlier
+    run of the case ended at t = 24.68 s after 100 iterations. ``end``: the run's end
+    (time); ``last``: an output of the volume at that time (REEF3D's end-of-run output)."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "ctrl.txt").write_text(ctrl)
+    case = root / "REEF3D_Case"
+    case.mkdir(exist_ok=True)
+    streams = {
+        "lagoon_volume": {"type": "stream", "name": "lagoon_volume",
+                          "stream": {"role": "volume", "folder": "REEF3D_FNPF.lagoon", "group": "volume"}},
+        "wsfline": {"type": "stream", "name": "wsfline",
+                    "stream": {"role": "profiles", "folder": "REEF3D_FNPF_WSFLINE"}},
+    }  # fmt: skip
+    records = []
+    for run, started, ended in (("20261029T090828Z-d00c", "2026-10-29T09:08:28Z", 24.68),
+                                (RUN, "2026-10-29T16:14:41Z", end)):  # fmt: skip
+        (case / f"ctrl-{run}.txt").write_text(ctrl)
+        records.append({"type": "run", "format": "reef3d-run", "version": 1, "run": run,
+                        "solver": "FNPF", "started": started, "streams": {},
+                        "ctrl": {"file": "ctrl.txt", "copy": f"REEF3D_Case/ctrl-{run}.txt"}})  # fmt: skip
+        for name, stream in streams.items():
+            records.append({**stream, "run": run})
+            records.append({"type": "output", "run": run, "step": 0, "time": 0.0, "iteration": 0,
+                            "streams": [name]})  # fmt: skip
+        if run == RUN and last is not None:
+            records.append({"type": "output", "run": run, "step": 1, "time": last,
+                            "iteration": 100, "streams": ["lagoon_volume"]})  # fmt: skip
+        if ended is not None:
+            records.append({"type": "end", "run": run, "time": ended, "iteration": 100,
+                            "status": "finished"})  # fmt: skip
+    (case / "REEF3D_FNPF_run.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+    return root
+
+
+def test_a_run_ending_before_its_first_output(tmp_path):
+    """Going on: the end from N 45 at the time step of the earlier run (FNPF has no main log)."""
+    status = run_status(write_fnpf_case(tmp_path / "case"))
+    assert status.state == "running"
+    warning = [w for w in status.warnings if "first output" in w]
+    assert len(warning) == 1
+    assert "t = 24.7 s (N 45 100)" in warning[0] and "P 30 1800 s" in warning[0]
+
+
+def test_a_run_that_ended_before_its_first_output(tmp_path):
+    status = run_status(write_fnpf_case(tmp_path / "case", end=24.68))
+    assert status.state == "finished"
+    assert any("ended at t = 24.7 s (iteration 100)" in w for w in status.warnings)
+
+
+def test_the_output_at_the_end_of_a_run(tmp_path):
+    """REEF3D writes the state at the end (2026-10-29): something to show, no warning."""
+    status = run_status(write_fnpf_case(tmp_path / "case", end=24.68, last=24.68))
+    assert not any("first output" in w for w in status.warnings)
+
+
+def test_outputs_often_enough(tmp_path):
+    ctrl = FNPF_CTRL + "P 180 1\nP 182 1.0\n"
+    assert not any("first output" in w for w in run_status(write_fnpf_case(tmp_path / "a", ctrl)).warnings)
+    ctrl = FNPF_CTRL.replace("N 45 100", "N 45 100000")  # ends at N 41 14400 s
+    assert not any("first output" in w for w in run_status(write_fnpf_case(tmp_path / "b", ctrl)).warnings)
+
+
+def test_output_schedules():
+    assert output_schedules("P 30 0.1\nP 180 1\nP 181 10\n", "CFD") == [
+        ("P 30", "time", 0.1), ("P 181", "iteration", 10.0)]  # fmt: skip
+    assert output_schedules("P 20 50\nP 182 2.0\n", "SFLOW") == [("P 182", "time", 2.0)]
+    assert output_schedules("P 20 -10\nP 30 -1\n", "NHFLOW") == []
+    assert output_schedules("P 30 1.0\nP 35 1\n", "CFD") is None  # print windows: not followed
