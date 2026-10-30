@@ -1456,6 +1456,16 @@ class DataManager:
         elif item.kind == "bathymetry" and props.get("hide_wet", False):
             level = self.still_water_level(item_id, mesh)
             triangles = self._kept(item_id, mesh, _dry_triangles(mesh, level))
+        point_kind = item.kind in POINT_KINDS
+        if item.kind == "particles" and props.get("shape") == "spheres":
+            # round balls in the model, not dots on the screen: a mesh like any
+            # surface (lit, shadows), the spheres not stretched by the vertical scale
+            from lagoonviz.core.data.spheres import sphere_mesh
+
+            sizes = _point_sizes(mesh, props)
+            radii = 0.5 * sizes if sizes is not None else float(props.get("sphere_radius", 0.005))
+            positions, triangles, normals, values = sphere_mesh(positions, radii, values)
+            point_kind = False
         return DisplaySurface(
             item_id=item_id,
             positions=np.ascontiguousarray(positions, dtype=np.float32),
@@ -1472,8 +1482,8 @@ class DataManager:
             color=self._plain_color(item),
             segments=mesh.segments,
             line_width=float(props.get("line_width", 3.0)),
-            point_size=float(props.get("point_size", 4.0)) if item.kind in POINT_KINDS else None,
-            point_sizes=_point_sizes(mesh, props) if item.kind in POINT_KINDS else None,
+            point_size=float(props.get("point_size", 4.0)) if point_kind else None,
+            point_sizes=_point_sizes(mesh, props) if point_kind else None,
             material=str(props.get("material", "") or ""),
         )
 

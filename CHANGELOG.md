@@ -49,6 +49,12 @@
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.
+- Particles as spheres (*Draw as*: spheres): a round, lit ball at each particle
+  (CPM parcels, DEM, NHFLOW's particles), coloured by its value, with shadows; as
+  large as *Sphere radius* (a box and a slider) or, with *Size* radius, each its
+  own radius times *Radius scale*. The vertical scale moves them, it does not
+  stretch them. As fine as their number allows (162 corners each for a few
+  thousand, 12 for hundreds of thousands).
 - Arrows: 1000 by default (was 400).
 - The volume has the free surface's options: its own *Vertical scale* (with *Sync*
   off), contour lines and arrows on its outside; slices, iso-surfaces and

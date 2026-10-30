@@ -191,3 +191,57 @@ def test_the_cpm_bed_of_a_2d_run_is_a_strip(tmp_path):
     assert mesh.points.shape == (10, 3) and mesh.n_triangles == 8
     np.testing.assert_allclose(sorted(set(mesh.points[:, 1].round(4))), [-0.045, 0.055])
     np.testing.assert_allclose(mesh.point_data["bed_change"][:5], 0.005 * np.arange(5), atol=1e-6)
+
+
+def test_particles_drawn_as_spheres(tmp_path):
+    """Draw as spheres: a round, lit ball at each particle, as large as Sphere radius
+    (or, with Size radius, each its own radius times Radius scale), coloured by the
+    particle's value; the vertical scale moves the balls, it does not stretch them."""
+    from lagoonviz.core.data.spheres import icosphere, sphere_mesh, subdivisions_for
+
+    run = make_run(tmp_path / "cpm", solver="CFD", frames=4, print_interval=0.5)
+    write_cpm(run, end=1.5, interval=0.25)
+    s = Session()
+    s.open_case(run)
+    item = next(i for i in s.scene if i.kind == "particles")
+    s.set_time(1.0)
+    mesh = s.data.load(item.id)
+    centres = mesh.points.astype(np.float64)
+    n = len(centres)
+    s.set_property(item.id, "shape", "spheres")
+    s.set_property(item.id, "sphere_radius", 0.02)
+    shown = s.data.display(item.id, s.data.load(item.id))
+    corners = len(icosphere(subdivisions_for(n))[0])
+    assert shown.point_size is None and shown.point_sizes is None  # a mesh, not points
+    assert shown.positions.shape == (n * corners, 3) and shown.triangles.size
+    assert shown.triangles.max() < len(shown.positions)
+    balls = shown.positions.reshape(n, corners, 3).astype(np.float64)
+    np.testing.assert_allclose(np.linalg.norm(balls - centres[:, None], axis=2), 0.02, rtol=1e-4)
+    np.testing.assert_allclose(np.linalg.norm(shown.normals, axis=1), 1.0, rtol=1e-5)
+    values = mesh.scalar("velocity")
+    np.testing.assert_allclose(shown.values.reshape(n, corners), values[:, None].repeat(corners, 1))
+    # each its own size
+    s.set_property(item.id, "size_by", "radius")
+    s.set_property(item.id, "radius_scale", 20.0)
+    shown = s.data.display(item.id, s.data.load(item.id))
+    balls = shown.positions.reshape(n, corners, 3).astype(np.float64)
+    np.testing.assert_allclose(np.linalg.norm(balls - centres[:, None], axis=2), 0.01, rtol=1e-4)
+    # the vertical scale moves the centres, the balls stay round
+    s.set_exaggeration(item.id, 3.0)
+    shown = s.data.display(item.id, s.data.load(item.id))
+    balls = shown.positions.reshape(n, corners, 3).astype(np.float64)
+    middle = balls.mean(axis=1)
+    level = s.data.case_water_level(item.id)
+    np.testing.assert_allclose(middle[:, 2], level + 3 * (centres[:, 2] - level), atol=1e-5)
+    np.testing.assert_allclose(np.linalg.norm(balls - middle[:, None], axis=2), 0.01, rtol=1e-3)
+    # back to points
+    s.set_property(item.id, "shape", "points")
+    assert s.data.display(item.id, s.data.load(item.id)).point_size == 4.0
+    # many particles: coarser balls, all of them
+    assert subdivisions_for(1_000) == 2 and subdivisions_for(50_000) == 1
+    assert subdivisions_for(1_000_000) == 0
+    positions, triangles, normals, _ = sphere_mesh(np.zeros((3, 3)), [1.0, 2.0, 3.0], None, 0)
+    assert positions.shape == (36, 3) and triangles.shape == (60, 3) and normals.shape == (36, 3)
+    # facing out: every triangle's normal away from its ball's centre
+    a, b, c = (positions[triangles[:, k]] for k in range(3))
+    assert (np.einsum("ij,ij->i", np.cross(b - a, c - a), a + b + c) > 0).all()

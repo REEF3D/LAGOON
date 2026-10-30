@@ -729,16 +729,33 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("particle"),
             **_colouring("velocity", "viridis"),
+            "shape": PropertySpec(
+                "points",
+                "Draw as",
+                choices=("points", "spheres"),
+                tip="points: flat dots facing the view; spheres: round, lit and shaded "
+                "balls in the model (Sphere radius, or with Size radius each its own)",
+            ),
             "point_size": PropertySpec(
                 4.0, "Point size [px]", minimum=1.0, maximum=40.0, tip="Size on screen"
+            ),
+            "sphere_radius": PropertySpec(
+                0.005,
+                "Sphere radius [m]",
+                minimum=1e-5,
+                maximum=100.0,
+                slider="log",
+                tip="With Draw as spheres: the radius of every sphere in the model "
+                "(with Size radius: each particle's own radius times Radius scale instead)",
             ),
             "size_by": PropertySpec(
                 "screen",
                 "Size",
                 choices=("screen", "radius"),
-                tip="screen: every point Point size pixels; radius: each particle as large "
-                "as it is in the model (its radius times Radius scale; a CPM parcel that "
-                "carries several, Q 78, by the cube root of its weight), smaller further away",
+                tip="screen: every point Point size pixels (spheres: Sphere radius); "
+                "radius: each particle as large as it is in the model (its radius times "
+                "Radius scale; a CPM parcel that carries several, Q 78, by the cube root "
+                "of its weight), smaller further away",
             ),
             "radius_scale": PropertySpec(
                 1.0,
