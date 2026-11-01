@@ -217,6 +217,55 @@ class CorridorTab(QWidget):
         auto_row.addWidget(self.fit_button)
         auto_row.addStretch(1)
         auto_form.addRow(auto_row)
+        # ---- the channel carved into geo.dat (the terrain model sees only the water)
+        self.discharge = QDoubleSpinBox()
+        self.discharge.setRange(0.01, 1e6)
+        self.discharge.setDecimals(1)
+        self.discharge.setValue(100.0)
+        self.discharge.setSuffix(" m³/s")
+        self.discharge.setToolTip(
+            "The discharge the channel carries at the water level of the terrain model "
+            "(e.g. GloFAS's mean discharge of the river)"
+        )
+        self.manning = QDoubleSpinBox()
+        self.manning.setRange(0.01, 0.2)
+        self.manning.setDecimals(3)
+        self.manning.setSingleStep(0.005)
+        self.manning.setValue(0.035)
+        self.manning.setToolTip(
+            "Manning's n of the river bed: 0.025 smooth and sandy, 0.035 a natural "
+            "river, 0.05 rough, stony or weedy"
+        )
+        self.shape = QComboBox()
+        self.shape.addItem("Parabolic", "parabolic")
+        self.shape.addItem("Trapezoid", "trapezoid")
+        self.shape.setToolTip(
+            "Parabolic: deepest in the middle (1.5 times the mean depth). Trapezoid: a "
+            "flat bottom, banks over a fifth of the width each side"
+        )
+        self.carve_button = QPushButton("Carve channel")
+        self.carve_button.setToolTip(
+            "Cut the river's channel into geo.dat under the water of the terrain model "
+            "(which sees the water, not the bed): the mean depth Manning's formula gives "
+            "for the discharge over the water's width at each cross-section along the "
+            "corridor. Only the water is lowered; carving again starts from the "
+            "geo.dat before"
+        )
+        self.carve_button.clicked.connect(self.carve)
+        self.uncarve_button = QPushButton("Undo carving")
+        self.uncarve_button.setToolTip("geo.dat as it was before the channel was carved")
+        self.uncarve_button.clicked.connect(self.uncarve)
+        self.carve_box = QGroupBox("Carve the channel into geo.dat")
+        carve_form = QFormLayout(self.carve_box)
+        carve_form.addRow("Discharge", self.discharge)
+        carve_form.addRow("Manning's n", self.manning)
+        carve_form.addRow("Shape", self.shape)
+        carve_row = QHBoxLayout()
+        carve_row.setContentsMargins(0, 0, 0, 0)
+        carve_row.addWidget(self.carve_button)
+        carve_row.addWidget(self.uncarve_button)
+        carve_row.addStretch(1)
+        carve_form.addRow(carve_row)
         self.square_button = QPushButton("Tidy the grid")
         self.square_button.setToolTip(
             "Make the grid nice again: cross-sections across the river (square to the "
@@ -335,6 +384,7 @@ class CorridorTab(QWidget):
         layout.addLayout(row)
         layout.addWidget(self.trace_box)
         layout.addWidget(self.auto_box)
+        layout.addWidget(self.carve_box)
         layout.addWidget(self.square_button)
         layout.addWidget(scroll, 1)
 
@@ -368,6 +418,10 @@ class CorridorTab(QWidget):
         self.auto_box.setEnabled(has_bed)
         self.auto_box.setToolTip("" if has_bed else "Needs geo.dat (Map tab: Make geo.dat)")
         self.fit_button.setEnabled(has_bed and corridor is not None)
+        self.carve_box.setEnabled(has_bed and corridor is not None)
+        self.carve_box.setToolTip(
+            "" if has_bed and corridor is not None else "Needs geo.dat and the river corridor"
+        )
         for widget in (
             self.edit_button,
             self.reset_button,
@@ -619,6 +673,35 @@ class CorridorTab(QWidget):
                 False,
             )
             self.edit_button.setChecked(True)
+
+    def carve(self) -> None:
+        """The river's channel carved into geo.dat."""
+        found = None
+
+        def carve():
+            nonlocal found
+            found = self.session.carve_river(
+                self.discharge.value(),
+                manning=round(self.manning.value(), 4),
+                shape=self.shape.currentData(),
+                case=self.panel.case_id,
+            )
+
+        if self._run(carve) and found is not None:
+            self.message.emit("Channel carved: " + found.text(), False)
+
+    def uncarve(self) -> None:
+        done = False
+
+        def uncarve():
+            nonlocal done
+            done = self.session.uncarve_river(case=self.panel.case_id)
+
+        if self._run(uncarve):
+            self.message.emit(
+                "geo.dat as it was before the carving" if done else "geo.dat is not carved",
+                not done,
+            )
 
     def start(self) -> None:
         self._run(

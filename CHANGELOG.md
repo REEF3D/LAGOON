@@ -49,6 +49,13 @@
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.
+- **Carve the river's channel** (River tab, with geo.dat and the corridor): where
+  the terrain model sees only the water (Copernicus, most land models), the
+  channel is cut into geo.dat with Manning's mean depth for a discharge over the
+  water's width at each cross-section (parabolic or trapezoid, Manning's n, the
+  slope from the water surface); only the water is lowered. Carving again starts
+  from the geo.dat before; *Undo carving* puts it back. `session.carve_river`,
+  `session.uncarve_river`, `lagoonviz.core.channel`.
 - **Colour bands** (filled contours): an item's colours in steps between round
   levels of the variable it is coloured by, at its contour lines' levels, sharp in
   the 3D view, on films and when path traced; its colour bar in steps too. A

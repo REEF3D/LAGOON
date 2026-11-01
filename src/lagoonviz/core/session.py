@@ -1071,6 +1071,103 @@ class Session:
         )
         return thalweg
 
+    def carve_river(
+        self,
+        discharge: float,
+        manning: float = 0.035,
+        slope: float | None = None,
+        shape: str = "parabolic",
+        wet: float = 1.0,
+        case: str | None = None,
+    ):
+        """The river's channel cut into geo.dat along the corridor, where the terrain
+        model has only the water's surface (:mod:`lagoonviz.core.channel`): the mean
+        depth Manning's formula gives for ``discharge`` [m³/s] (e.g. GloFAS's mean)
+        over the water's width at each cross-section, with Manning's n ``manning``
+        and the water surface's ``slope`` (default: from geo.dat along the river),
+        ``shape`` "parabolic" or "trapezoid". Only the water (within ``wet`` m of its
+        level) is lowered. Carving again starts from the geo.dat before the first
+        carving (kept as ``LAGOON_geo-uncarved.dat``); :meth:`uncarve_river` puts it
+        back. Returns the :class:`~lagoonviz.core.channel.Channel`."""
+        import shutil
+
+        from lagoonviz.core import channel as channels
+        from lagoonviz.core.data.setup import read_geo
+        from lagoonviz.core.geo import recipe as recipes
+
+        case_id = self._case_id(case)
+        current = self._corridor_of(case_id)
+        setup, folder = self._plain_geo(case_id)
+        made = recipes.read(folder) or {}
+        kept = folder / CARVE_BEFORE
+        if not (made.get("carved") and kept.is_file()):
+            shutil.copy2(folder / "geo.dat", kept)  # geo.dat as it was, before any carving
+        points = read_geo(kept, setup.control)
+        carved, found = channels.carve(points, current, discharge, manning, slope, shape, wet)
+        _write_points(folder / "geo.dat", carved)
+        words = [f"{float(discharge)!r}"]
+        for key, value, default in (
+            ("manning", float(manning), 0.035),
+            ("slope", slope, None),
+            ("shape", shape, "parabolic"),
+            ("wet", float(wet), 1.0),
+            ("case", case, None),
+        ):
+            if value != default:
+                words.append(f"{key}={value!r}")
+        made = {k: v for k, v in made.items() if k != "file"}
+        made["carved"] = {
+            "discharge": float(discharge),
+            "manning": float(manning),
+            "slope": found.slope,
+            "shape": shape,
+            "wet": float(wet),
+            "text": found.text(),
+        }
+        recipes.write(folder, made)
+        self._geo_rewritten(case_id, "session.carve_river(" + ", ".join(words) + ")")
+        return found
+
+    def uncarve_river(self, case: str | None = None) -> bool:
+        """geo.dat as it was before :meth:`carve_river` (False if it was not carved)."""
+        from lagoonviz.core.geo import recipe as recipes
+
+        case_id = self._case_id(case)
+        _setup, folder = self._plain_geo(case_id)
+        made = recipes.read(folder) or {}
+        kept = folder / CARVE_BEFORE
+        if not (made.get("carved") and kept.is_file()):
+            return False
+        kept.replace(folder / "geo.dat")
+        made = {k: v for k, v in made.items() if k not in ("file", "carved")}
+        recipes.write(folder, made)
+        self._geo_rewritten(
+            case_id, "session.uncarve_river(" + (f"case={case!r}" if case else "") + ")"
+        )
+        return True
+
+    def _plain_geo(self, case_id: str):
+        """The set-up and folder of a case whose geo.dat LAGOON may write again: x y z
+        per line as it is (no G 19 letters, G 12 scaling or G 23 sign)."""
+        setup = self.data.case_setup(case_id, create=True)
+        folder = self.data.case_folder(case_id)
+        if setup is None or folder is None or not (folder / "geo.dat").is_file():
+            raise ValueError("carving the river needs the bed: geo.dat (Map tab: Make geo.dat)")
+        control = setup.control
+        if control.int("G 19", 0) > 0 or control.int("G 23", 0) > 0 or control.values("G 12"):
+            raise ValueError("geo.dat is read with G 19, G 12 or G 23: LAGOON leaves it as it is")
+        return setup, Path(folder)
+
+    def _geo_rewritten(self, case_id: str, code: str) -> None:
+        """geo.dat was written again: the set-up and the case read it anew."""
+        self.data.reload(case_id)
+        setup = self.data.case_setup(case_id, create=True)
+        if setup is not None:
+            setup.geo_changed()
+        self.record_output(code)
+        self.scene.inputs_changed(case_id)
+        self.scene.data_changed()
+
     def move_corridor_point(
         self, side: str, index: int, x: float, y: float, case: str | None = None
     ) -> None:
@@ -3293,6 +3390,24 @@ class GeoDatJob:
         session.scene.inputs_changed(self.case_id)
         session.scene.data_changed()
         return self.count
+
+
+#: geo.dat as it was before the river was carved into it (Session.carve_river)
+CARVE_BEFORE = "LAGOON_geo-uncarved.dat"
+
+
+def _write_points(path: Path, points) -> None:
+    """geo.dat from points (n, 3): x y z per line, written whole or not at all."""
+    import numpy as np
+
+    points = np.asarray(points, float)
+    points = points[np.isfinite(points).all(axis=1)]
+    temporary = path.with_suffix(path.suffix + ".part")
+    with temporary.open("w", encoding="ascii") as file:
+        for start in range(0, len(points), 100_000):
+            part = points[start : start + 100_000]
+            file.write(("%.4f %.4f %.4f\n" * len(part)) % tuple(part.ravel()))
+    temporary.replace(path)
 
 
 def drafts_folder() -> Path:

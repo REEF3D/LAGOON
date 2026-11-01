@@ -226,6 +226,18 @@ width from the thalweg (a marsh or a harbour basin does not widen it),
   downstream end, the banks where the water reaches (*Water level*) plus the
   *Margin*, at most half as far again as the corridor was wide. Its points per bank,
   curve and grid's cells stay; the bed of its grid comes from geo.dat.
+- **Carve channel** (with geo.dat and the corridor): terrain models made from above
+  (Copernicus GLO-30, the land of most national models) see a river's water, not
+  its bed, so in geo.dat the river is a flat strip at the water level. Carving cuts
+  the channel under it: at each cross-section along the corridor the mean depth
+  Manning's formula gives for the *Discharge* over the water's width,
+  h = (n Q / (W S^1/2))^3/5, with *Manning's n* (0.025 smooth and sandy, 0.035 a
+  natural river, 0.05 rough) and the water surface's slope along the river;
+  *Parabolic* (1.5 h in the middle) or *Trapezoid*. Only the water (within 1 m of
+  its level) is lowered, never the land of the margin. Carving again starts from
+  the geo.dat before (kept as `LAGOON_geo-uncarved.dat`); **Undo carving** puts it
+  back. A survey of the bed, where there is one, is better: an overlay in the Map
+  tab. In a script `session.carve_river(discharge, manning=..., shape=...)`.
 - **Drag points** (on after Start, Draw, Fit to the bed and Follow thalweg): press on a point of a bank in the 2D
   top view and drag it; the bank follows at once, drawn over everything while you
   drag. Pressing anywhere else pans the view as always; Esc stops. Each point moved
