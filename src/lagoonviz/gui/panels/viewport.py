@@ -962,6 +962,8 @@ class Viewport3D(QWidget):
                     bar.vmax,
                     bar.ticks,
                     bar.table(256) if bar.bands and bar.levels else None,
+                    bar.marks(),
+                    bar.extend,
                 )
                 for bar in colour_bars(self.session, loaded)
             ]

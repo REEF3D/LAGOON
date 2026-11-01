@@ -293,3 +293,59 @@ def test_the_printed_contour_legend(session):
     colourbar = printed()
     assert not isinstance(colourbar.norm, BoundaryNorm)
     assert colourbar.lines and len(colourbar.lines[0].get_segments()) == len(bar.levels)
+
+
+def test_the_contour_legend_on_films_and_under_the_view(session):
+    """The 3D view's colour bars (under the view, on films and saved images) as the
+    printed one: round numbers between the ends, a line at each contour level on a
+    smooth bar, steps with colour bands, a point at an end beyond the range."""
+    from lagoonviz.core.legend import place, round_ticks
+    from lagoonviz.render.legend_overlay import MARK, LegendOverlay
+
+    # Fig. 2's depth: 0 20 40 60 numbered, the end at 65 not (60 is close)
+    assert round_ticks(0.0, 65.0) == [
+        (0.0, "0"),
+        (20.0, "20"),
+        (40.0, "40"),
+        (60.0, "60"),
+        (65.0, ""),
+    ]
+    ticks = round_ticks(-0.06, 0.14)
+    assert [t for _, t in ticks] == ["", "-0.05", "0", "0.05", "0.1", "0.14"] or ticks[-1][
+        1
+    ] == "0.14"
+    assert ticks[0] == (-0.06, "")  # -0.05 is close to the end
+    item = _coloured(session)
+    variable = item.properties["variable"]
+    session.set_property(item.id, "contour_by", variable)
+    bar = colour_bars(session)[0]
+    assert bar.marks() and all(0 < m < 1 for m in bar.marks())
+    assert len(bar.ticks) > 2  # round numbers between the ends
+    np.testing.assert_allclose(
+        [v for v, _ in bar.ticks], [v for v, _ in round_ticks(bar.vmin, bar.vmax)]
+    )
+    image = np.full((360, 640, 4), 200, np.uint8)
+    spots = place(640, 360, 1, session.legend_layout())
+    strip = spots.bars[0]
+    row = int(strip.y + strip.h / 2)
+    drawn = LegendOverlay(session)(image, 1.0)
+    # the contour lines' levels: dark lines across the bar
+    for where in bar.marks():
+        x = int(round(strip.x + where * strip.w))
+        near = drawn[row, max(x - 1, 0) : x + 2, :3].astype(int)
+        assert (np.abs(near - np.array(MARK[:3])).sum(axis=1) < 60).any()
+    # beyond the range at both ends: the bar ends in points of its end colours
+    values = session.data.load(item.id).scalar(variable)
+    low, high = np.percentile(values, [30, 70])
+    session.set_properties(item.id, auto_range=False, vmin=float(low), vmax=float(high))
+    bar = colour_bars(session)[0]
+    assert bar.extend == "both"
+    drawn = LegendOverlay(session)(image, 1.0)
+    table = (np.asarray(bar.table(1024))[:, :3] * 255).round().astype(int)
+    left = drawn[row, int(strip.x - strip.h / 3), :3].astype(int)
+    right = drawn[row, int(strip.right + strip.h / 3), :3].astype(int)
+    assert np.abs(left - table[0]).sum() < 12 and np.abs(right - table[-1]).sum() < 12
+    # colour bands: no lines, the bar in steps
+    session.set_property(item.id, "colour_bands", True)
+    bar = colour_bars(session)[0]
+    assert bar.marks() == [] and bar.bands

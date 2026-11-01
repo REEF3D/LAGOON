@@ -49,6 +49,10 @@
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.
+- The colour bars under the 3D view, on films and saved images drawn as the
+  printed contour legend: with contour lines of the variable a dark line at each
+  level, in steps with colour bands, a point at an end where the frame goes beyond
+  the range, numbered at round values (an end's number left out next to one).
 - **Carve the river's channel** (River tab, with geo.dat and the corridor): where
   the terrain model sees only the water (Copernicus, most land models), the
   channel is cut into geo.dat with Manning's mean depth for a discharge over the

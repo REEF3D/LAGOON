@@ -111,6 +111,28 @@ def bar_ticks(vmin: float, vmax: float, count: int = 0, how: str = "auto"):
     return [(v, format_number(v, how, step if how == "auto" else None)) for v in values]
 
 
+def round_ticks(vmin: float, vmax: float, how: str = "auto", target: int = 5):
+    """The ticks of a contour legend, as a printed map numbers it: about ``target``
+    round values, and the bar's two ends, an end's number left empty where a round
+    value lies close to it (they would run into each other; a printed bar numbers
+    the round value)."""
+    from lagoonviz.core.plotting import nice_step, nice_ticks
+
+    if not (math.isfinite(vmin) and math.isfinite(vmax)) or vmax <= vmin:
+        return bar_ticks(vmin, vmax, 0, how)
+    span = vmax - vmin
+    step = nice_step(span, target)
+    tiny = 1e-9 * span
+    inner = [v for v in nice_ticks(vmin, vmax, target) if vmin + tiny < v < vmax - tiny]
+
+    def text(value: float) -> str:
+        return format_number(value, how, step if how == "auto" else None)
+
+    low = "" if inner and inner[0] - vmin < span / 8 else text(vmin)
+    high = "" if inner and vmax - inner[-1] < span / 8 else text(vmax)
+    return [(vmin, low), *((v, text(v)) for v in inner), (vmax, high)]
+
+
 # ======================================================================== bars
 @dataclass
 class ColourBar:
@@ -136,7 +158,20 @@ class ColourBar:
 
     def __post_init__(self) -> None:
         if not self.ticks:
-            self.ticks = bar_ticks(self.vmin, self.vmax, self.count, self.number_format)
+            if self.count <= 0 and (self.levels or self.bands):
+                # a contour legend, as printed: its ends and round values between
+                self.ticks = round_ticks(self.vmin, self.vmax, self.number_format)
+            else:
+                self.ticks = bar_ticks(self.vmin, self.vmax, self.count, self.number_format)
+
+    def marks(self) -> list[float]:
+        """Where a line crosses the bar (fractions of it from its low end): the levels
+        of the item's contour lines on a smooth bar; none on a bar in steps (its steps
+        show the levels)."""
+        span = self.vmax - self.vmin
+        if self.bands or not span:
+            return []
+        return [(v - self.vmin) / span for v in self.levels if self.vmin < v < self.vmax]
 
     def table(self, n: int = 256):
         """The bar's colours from its low to its high end: ``(n, 4)`` RGBA, in steps

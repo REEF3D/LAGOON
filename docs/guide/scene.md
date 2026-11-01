@@ -70,9 +70,9 @@ Surfaces, slices and objects share these properties:
   thin line across it.
 - **Colour bands**: the colours in steps between round levels of the variable it
   is coloured by (filled contours, as a printed map), at the levels its contour
-  lines of that variable have. Its colour bar is in steps too: under the view, on
-  films and in figures, where it is numbered at round values and ends in a point
-  where the frame's values go beyond the colour range. A fixed colour range keeps
+  lines of that variable have. Its colour bar is in steps too, under the view, on
+  films and in figures: numbered at round values, ending in a point where the
+  frame's values go beyond the colour range. A fixed colour range keeps
   the bands' colours from frame to frame.
 - **Vectors of** a vector field and the arrows' colour: `velocity (white)`,
   `velocity (black)` or `velocity (grey)`; then how many arrows, and their length. They are spread over the area the surface covers, so a river in a

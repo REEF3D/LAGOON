@@ -19,6 +19,8 @@ from lagoonviz.core.legend import colour_bars, place, plain
 
 INK = (30, 40, 51, 255)
 BOX = (255, 255, 255, 170)
+#: the lines on a colour bar at the levels of an item's contour lines
+MARK = (28, 35, 48, 230)
 
 
 @lru_cache(maxsize=16)
@@ -95,6 +97,25 @@ class LegendOverlay:
                 outline=(255, 255, 255, 120),
                 width=max(int(spots.unit), 1),
             )
+            line = max(int(spots.unit), 1)
+            for where in bar.marks():  # the item's contour lines: their levels
+                x = strip.x + where * columns
+                draw.line((x, strip.y, x, strip.y + rows), fill=MARK, width=line)
+            # values beyond the range: the bar ends in a point there, in the end colour
+            middle = strip.y + rows / 2
+            if bar.extend in ("min", "both"):
+                draw.polygon(
+                    [(strip.x - rows, middle), (strip.x, strip.y), (strip.x, strip.y + rows)],
+                    fill=tuple(int(c) for c in table[0]),
+                    outline=(255, 255, 255, 120),
+                )
+            if bar.extend in ("max", "both"):
+                end = strip.x + columns
+                draw.polygon(
+                    [(end + rows, middle), (end, strip.y), (end, strip.y + rows)],
+                    fill=tuple(int(c) for c in table[-1]),
+                    outline=(255, 255, 255, 120),
+                )
             span = bar.vmax - bar.vmin
             for k, (value, text) in enumerate(bar.ticks):
                 where = 0.0 if span == 0 else (value - bar.vmin) / span

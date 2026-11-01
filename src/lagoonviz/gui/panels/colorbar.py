@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen
+from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from lagoonviz.core.colormaps import lut
@@ -30,6 +30,10 @@ class ColorBarEntry:
     #: the bar's colours, (n, 4) RGBA from low to high (colour bands: in steps);
     #: None: the colour map, smooth
     table: object = None
+    #: lines across the bar: the item's contour lines' levels, as fractions of it
+    marks: list = field(default_factory=list)
+    #: values beyond the range: "min", "max", "both" (the bar ends in a point) or not
+    extend: str = "neither"
 
 
 def _number(value: float) -> str:
@@ -88,6 +92,10 @@ class ColorBarStrip(QWidget):
                 max(20, self.width() - label_width - 2 * number_width - 16),
                 ROW - 10,
             )
+            point = bar.height()  # the points at the ends: values beyond the range
+            low_point = entry.extend in ("min", "both")
+            high_point = entry.extend in ("max", "both")
+            bar = bar.adjusted(point if low_point else 0, 0, -point if high_point else 0, 0)
             if entry.table is not None:  # in steps: a colour per stretch of the bar
                 table = entry.table
                 n = len(table)
@@ -103,6 +111,28 @@ class ColorBarStrip(QWidget):
                 painter.fillRect(bar, gradient)
             painter.setPen(QPen(QColor(255, 255, 255, 90)))
             painter.drawRect(bar)
+            ends = entry.table if entry.table is not None else lut(entry.colormap, 32)
+            for on, tip, base, colour in (
+                (low_point, bar.left() - point, bar.left(), ends[0]),
+                (high_point, bar.right() + point, bar.right(), ends[-1]),
+            ):
+                if on:
+                    r, g, b = (float(c) for c in colour[:3])
+                    painter.setBrush(QColor.fromRgbF(r, g, b))
+                    painter.drawPolygon(
+                        QPolygonF(
+                            [
+                                QPointF(tip, bar.center().y()),
+                                QPointF(base, bar.top()),
+                                QPointF(base, bar.bottom()),
+                            ]
+                        )
+                    )
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(QColor(28, 35, 48, 230), 1.0))
+            for where in entry.marks:  # the item's contour lines: their levels
+                x = bar.left() + where * bar.width()
+                painter.drawLine(QPointF(x, bar.top()), QPointF(x, bar.bottom()))
             painter.setPen(QColor(COLORS["text"]))
             low = entry.ticks[0][1] if entry.ticks else _number(entry.vmin)
             high = entry.ticks[-1][1] if entry.ticks else _number(entry.vmax)
