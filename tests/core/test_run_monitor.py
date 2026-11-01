@@ -145,7 +145,8 @@ def write_fnpf_case(root, ctrl=FNPF_CTRL, end=None, last=None):
     case.mkdir(exist_ok=True)
     streams = {
         "lagoon_volume": {"type": "stream", "name": "lagoon_volume",
-                          "stream": {"role": "volume", "folder": "REEF3D_FNPF.lagoon", "group": "volume"}},
+                          "stream": {"role": "volume", "folder": "REEF3D_FNPF.lagoon",
+                                     "group": "volume"}},
         "wsfline": {"type": "stream", "name": "wsfline",
                     "stream": {"role": "profiles", "folder": "REEF3D_FNPF_WSFLINE"}},
     }  # fmt: skip
@@ -155,7 +156,8 @@ def write_fnpf_case(root, ctrl=FNPF_CTRL, end=None, last=None):
         (case / f"ctrl-{run}.txt").write_text(ctrl)
         records.append({"type": "run", "format": "reef3d-run", "version": 1, "run": run,
                         "solver": "FNPF", "started": started, "streams": {},
-                        "ctrl": {"file": "ctrl.txt", "copy": f"REEF3D_Case/ctrl-{run}.txt"}})  # fmt: skip
+                        "ctrl": {"file": "ctrl.txt",
+                                 "copy": f"REEF3D_Case/ctrl-{run}.txt"}})  # fmt: skip
         for name, stream in streams.items():
             records.append({**stream, "run": run})
             records.append({"type": "output", "run": run, "step": 0, "time": 0.0, "iteration": 0,
@@ -193,9 +195,11 @@ def test_the_output_at_the_end_of_a_run(tmp_path):
 
 def test_outputs_often_enough(tmp_path):
     ctrl = FNPF_CTRL + "P 180 1\nP 182 1.0\n"
-    assert not any("first output" in w for w in run_status(write_fnpf_case(tmp_path / "a", ctrl)).warnings)
+    warnings = run_status(write_fnpf_case(tmp_path / "a", ctrl)).warnings
+    assert not any("first output" in w for w in warnings)
     ctrl = FNPF_CTRL.replace("N 45 100", "N 45 100000")  # ends at N 41 14400 s
-    assert not any("first output" in w for w in run_status(write_fnpf_case(tmp_path / "b", ctrl)).warnings)
+    warnings = run_status(write_fnpf_case(tmp_path / "b", ctrl)).warnings
+    assert not any("first output" in w for w in warnings)
 
 
 def test_output_schedules():

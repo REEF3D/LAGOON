@@ -388,7 +388,7 @@ def _output_warning(status: RunStatus, run, runs, ctrl: str) -> str:
                 end_iteration = int(end_time / dt)
     if end_time is None and end_iteration is None:
         return ""
-    for key, kind, interval in schedules:
+    for _key, kind, interval in schedules:
         if kind == "time" and (end_time is None or end_time > interval):
             return ""
         if kind == "iteration" and (end_iteration is None or end_iteration >= interval):
