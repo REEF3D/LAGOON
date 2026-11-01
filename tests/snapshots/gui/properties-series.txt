@@ -9,4 +9,9 @@ QWidget
   Line names: text ''
   Legend: choice 'above the plot' of ['above the plot', 'in the plot', 'off']
   Values at the cursor: checkbox '' on
+  Measured file: QWidget
+      text ''
+      button '…' tip='Choose the measured file'
+  Measured columns: text ''
+  Measured time shift [s]: number 0 in [-1e+09, 1e+09] decimals 3
   label 'No time series: open a case with gauge, 6DOF or force output' (disabled)

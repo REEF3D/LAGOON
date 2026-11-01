@@ -4,6 +4,7 @@ Reload case
 ----
 [ ] Set-up
 [x] Results
+[ ] 2D plots
 Run DIVEMesh
 ----
 Open session...
@@ -26,10 +27,11 @@ PANELS
 scene: 'Scene' in LeftDockWidgetArea
 properties: 'Properties' in RightDockWidgetArea tabbed with dock_setup
 setup: 'Set-up' in RightDockWidgetArea tabbed with dock_properties
-plots: 'Plots' in BottomDockWidgetArea tabbed with dock_profiles
+plots: 'Plots' in BottomDockWidgetArea tabbed with dock_profiles, dock_run
 timeline: 'Timeline' in BottomDockWidgetArea
 console: 'Python console' in BottomDockWidgetArea
-profiles: 'Free surface lines' in BottomDockWidgetArea tabbed with dock_plots
+profiles: 'Free surface lines' in BottomDockWidgetArea tabbed with dock_plots, dock_run
+run: 'Run monitor' in BottomDockWidgetArea tabbed with dock_plots, dock_profiles
 
 PLAYER
 button '' tip='Start of the play range' (disabled)

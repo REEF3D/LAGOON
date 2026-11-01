@@ -17,5 +17,7 @@ QWidget
   Regions: checkbox '' on
   Solids: checkbox '' off
   Bed: checkbox '' on
+  Curvilinear grid: checkbox '' on
+  River drawn: checkbox '' on
   Labels: checkbox '' on
   label 'files: domain from the results / domain: x 0 .. 8, y 0 .. 4, z 0 .. 2.17894 m (from the results) / sides: x min wall, x max wall, y min wall, y max wall, bottom wall, top wall' (disabled)

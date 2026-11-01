@@ -1,0 +1,9 @@
+QWidget
+  Name: text 'River corridor'
+  Kind: label 'River corridor'
+  Visible: checkbox '' on
+  Case: choice 'run [case-1]' of ['first case', 'run [case-1]']
+  Points: checkbox '' on
+  Grid: checkbox '' on
+  button 'Reset' tip='Lay the corridor out again as it was made (along the domain, over the area drawn, along the thalweg): the dragged points are dropped'
+  label '12 points on each bank, laid along the domain / 50 x 20 = 1,000 cells; along 0.16 – 0.16 m, across 0.16 – 0.16 m; smallest angle 90° / Drag its points in Set-up → River (Drag points)' (disabled)

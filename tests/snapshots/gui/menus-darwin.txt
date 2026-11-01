@@ -15,6 +15,7 @@ File
   Save session as...  [Ctrl+Shift+S]
   ----
   Convert to LAGOON format...
+  Clean up case folder...
   ----
   Export script...
   Export figure...  [Ctrl+Shift+P]
@@ -32,32 +33,37 @@ Edit
   Remove  [Del]
 Add
   Case
-  Free surface
+  Free surface >
   Free Surface AMR
-  Bed
+  Bed >
   Volume
   Time series
-  Slice
-  Iso-surface
-  Iso-volume
-  Streamlines
+  Slice >
+  Iso-surface >
+  Iso-volume >
+  Streamlines >
   Free surface line
   Gauge
   Bodies
+  AMR blocks
   Mooring lines
   Structures
   DEM elements
   Ice floes
   Rod trees
   Case set-up
+  River corridor
+  Multi-block grid
   DIVEMesh grid
   Background map
   geo.dat points
   Sea state
+  Statistics >
   Particles
 View
   [ ] Set-up  [Ctrl+Shift+U]
   [x] Results  [Ctrl+Shift+R]
+  [ ] 2D plots  [Ctrl+Shift+D]
   ----
   [x] Scene
   [x] Properties
@@ -66,6 +72,8 @@ View
   [x] Timeline
   [x] Python console
   [x] Free surface lines
+  [x] Run monitor
+  Wave analysis...
   Theme >
     [x] Light
     [ ] Dark
@@ -94,6 +102,9 @@ View
   [ ] Compare side by side  [Ctrl+Shift+2]
   [ ] Full screen viewer  [Ctrl+Shift+F]
   Play / pause  [Space]
+  Previous frame  [Ctrl+Left]
+  Next frame  [Ctrl+Right]
+  Fit range to this frame  [Ctrl+F]
   Camera path >
     Add camera keyframe  [Ctrl+K]
     Remove camera keyframe (disabled)
