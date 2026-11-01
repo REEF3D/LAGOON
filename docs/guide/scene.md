@@ -65,7 +65,15 @@ Surfaces, slices and objects share these properties:
   numbers* (auto, integer, 1 to 3 decimals, scientific) and *Bar ticks* (0: the
   ends under the view and on films, round numbers in figures; 1: the ends and the
   middle; 2 to 11: that many, evenly spaced) are the bar's in all of them.
-- **Contour lines of** a variable, and how many.
+- **Contour lines of** a variable, and how many. With contour lines of the
+  variable it is coloured by, a figure's colour bar marks each line's level with a
+  thin line across it.
+- **Colour bands**: the colours in steps between round levels of the variable it
+  is coloured by (filled contours, as a printed map), at the levels its contour
+  lines of that variable have. Its colour bar is in steps too: under the view, on
+  films and in figures, where it is numbered at round values and ends in a point
+  where the frame's values go beyond the colour range. A fixed colour range keeps
+  the bands' colours from frame to frame.
 - **Vectors of** a vector field and the arrows' colour: `velocity (white)`,
   `velocity (black)` or `velocity (grey)`; then how many arrows, and their length. They are spread over the area the surface covers, so a river in a
   wide domain gets them all on its water; the longest reach about the next arrow.

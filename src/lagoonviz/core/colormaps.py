@@ -146,9 +146,32 @@ def normalize(values: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
     return np.clip((values - vmin) / span, 0.0, 1.0).astype(np.float32)
 
 
-def colors(values: np.ndarray, name: str, vmin: float, vmax: float) -> np.ndarray:
-    """RGBA colours for values (used by software paths and tests)."""
-    table = lut(name)
+def band_edges(levels, vmin: float, vmax: float) -> tuple[float, ...]:
+    """The levels between colour bands inside a colour range, as fractions of it
+    (strictly between 0 and 1, rising)."""
+    span = vmax - vmin
+    if not span or not np.isfinite(span):
+        return ()
+    inside = sorted({(float(v) - vmin) / span for v in levels})
+    return tuple(u for u in inside if 0.0 < u < 1.0)
+
+
+def banded_lut(name: str, edges, n: int = 1024) -> np.ndarray:
+    """A colour map in steps (filled contours): ``(n, 4)`` RGBA, between successive
+    ``edges`` (fractions of the range, :func:`band_edges`; the range's ends added)
+    the colour of the step's middle. Entry i stands for the fraction i / (n - 1)."""
+    e = np.concatenate([[0.0], np.asarray(sorted(edges), np.float64), [1.0]])
+    u = np.arange(n) / max(n - 1, 1)
+    step = np.clip(np.searchsorted(e, u, side="right") - 1, 0, len(e) - 2)
+    middle = 0.5 * (e[step] + e[step + 1])
+    fine = lut(name, 4096)
+    return fine[np.round(middle * 4095).astype(int)]
+
+
+def colors(values: np.ndarray, name: str, vmin: float, vmax: float, bands=None) -> np.ndarray:
+    """RGBA colours for values (used by software paths and tests); ``bands``: the
+    edges of colour bands (:func:`band_edges`), the colours in steps between them."""
+    table = banded_lut(name, bands) if bands else lut(name)
     index = np.nan_to_num(normalize(values, vmin, vmax) * (len(table) - 1)).astype(int)
     return table[index]
 

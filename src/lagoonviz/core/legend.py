@@ -125,10 +125,40 @@ class ColourBar:
     #: the item's tick count (0: the ends; figures then place their own)
     count: int = 0
     number_format: str = "auto"
+    #: levels marked inside the range: the edges of the colour bands, or the levels
+    #: of the item's contour lines of this variable (a line across the bar each)
+    levels: list[float] = field(default_factory=list)
+    #: colours in steps between the levels (the item's *Colour bands*)
+    bands: bool = False
+    #: values beyond the range in the frame: "min", "max", "both" or "neither" (a
+    #: printed bar ends there in a point, as matplotlib's extend)
+    extend: str = "neither"
 
     def __post_init__(self) -> None:
         if not self.ticks:
             self.ticks = bar_ticks(self.vmin, self.vmax, self.count, self.number_format)
+
+    def table(self, n: int = 256):
+        """The bar's colours from its low to its high end: ``(n, 4)`` RGBA, in steps
+        between the levels with colour bands."""
+        from lagoonviz.core.colormaps import band_edges, banded_lut, lut
+
+        edges = band_edges(self.levels, self.vmin, self.vmax) if self.bands else ()
+        return banded_lut(self.colormap, edges, n) if edges else lut(self.colormap, n)
+
+
+def beyond(values, vmin: float, vmax: float) -> str:
+    """Whether values reach below or above a colour range: "min", "max", "both" or
+    "neither" (a margin of a thousandth of the range)."""
+    import numpy as np
+
+    v = np.asarray(values, np.float64).ravel()
+    v = v[np.isfinite(v)]
+    if not v.size or not math.isfinite(vmin) or not math.isfinite(vmax):
+        return "neither"
+    margin = 1e-3 * abs(vmax - vmin)
+    low, high = bool(v.min() < vmin - margin), bool(v.max() > vmax + margin)
+    return "both" if low and high else "min" if low else "max" if high else "neither"
 
 
 def bar_title(item) -> str:
@@ -158,6 +188,7 @@ def colour_bars(session, loaded: dict | None = None) -> list[ColourBar]:
             continue
         try:
             vmin, vmax = data.value_range(item_id, mesh)
+            values = mesh.scalar(variable)
         except KeyError:
             continue  # a variable the frame does not have (still loading)
         bars.append(
@@ -169,6 +200,9 @@ def colour_bars(session, loaded: dict | None = None) -> list[ColourBar]:
                 item_id=item_id,
                 count=int(props.get("legend_ticks", 0) or 0),
                 number_format=str(props.get("legend_format", "auto") or "auto"),
+                levels=[float(v) for v in data.colour_levels(item_id, mesh)],
+                bands=bool(props.get("colour_bands", False)),
+                extend=beyond(values, vmin, vmax) if values is not None else "neither",
             )
         )
     return bars

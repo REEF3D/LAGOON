@@ -117,6 +117,9 @@ class DisplaySurface:
     point_sizes: np.ndarray | None = None
     #: the item's material (bodies, structures, DEM elements), for the cinematic looks
     material: str = ""
+    #: colour bands (filled contours): the edges between them as fractions of the
+    #: colour range (lagoonviz.core.colormaps.band_edges); empty: smooth colours
+    bands: tuple[float, ...] = ()
 
 
 @dataclass
@@ -1223,14 +1226,38 @@ class DataManager:
             return None
         if values is None or values.shape[0] != shown.positions.shape[0]:
             return None
-        low, high = self._range_of(item_id, variable, mesh)
-        levels = contour_levels(low, high, int(item.properties.get("contour_levels", 10)))
+        levels = self.contour_values(item_id, variable, mesh)
         segments = contour_segments(shown.positions, shown.triangles, values, levels)
         if segments.size:
             span = np.ptp(shown.positions, axis=0)
             lift = 0.05 if self.scene.flat else 2e-3 * float(max(span.max(), 1e-9))
             segments[..., 2] += lift
         return ContourLines(item_id, segments, levels, shown.visible)
+
+    def contour_values(self, item_id: str, variable: str, mesh: SurfaceMesh) -> list[float]:
+        """The levels of an item's contour lines of a variable: about "contour_levels"
+        round values over the variable's automatic range (kept from frame to frame)."""
+        item = self.scene.get(item_id)
+        low, high = self._range_of(item_id, variable, mesh)
+        return contour_levels(low, high, int(item.properties.get("contour_levels", 10)))
+
+    def colour_levels(self, item_id: str, mesh: SurfaceMesh) -> list[float]:
+        """The levels an item's colour bar marks inside its colour range: with *Colour
+        bands* the edges of the bands, else, with contour lines of the variable it is
+        coloured by, those lines' levels; [] for none."""
+        item = self.scene.get(item_id)
+        props = item.properties
+        variable = str(props.get("variable", "none"))
+        if variable == "none" or variable.partition(".")[0] not in mesh.point_data:
+            return []
+        if not props.get("colour_bands", False) and props.get("contour_by", "none") != variable:
+            return []
+        try:
+            levels = self.contour_values(item_id, variable, mesh)
+            vmin, vmax = self.value_range(item_id, mesh)
+        except KeyError:
+            return []
+        return [v for v in levels if vmin < v < vmax]
 
     def _sampled_values(self, dataset, variable: str, samples: int = 5) -> list[np.ndarray]:
         """A variable's values in a few frames spread over a run (surfaces: cheap),
@@ -1456,6 +1483,11 @@ class DataManager:
         elif item.kind == "bathymetry" and props.get("hide_wet", False):
             level = self.still_water_level(item_id, mesh)
             triangles = self._kept(item_id, mesh, _dry_triangles(mesh, level))
+        bands: tuple[float, ...] = ()
+        if values is not None and props.get("colour_bands", False):
+            from lagoonviz.core.colormaps import band_edges
+
+            bands = band_edges(self.colour_levels(item_id, mesh), vmin, vmax)
         point_kind = item.kind in POINT_KINDS
         if item.kind == "particles" and props.get("shape") == "spheres":
             # round balls in the model, not dots on the screen: a mesh like any
@@ -1485,6 +1517,7 @@ class DataManager:
             point_size=float(props.get("point_size", 4.0)) if point_kind else None,
             point_sizes=_point_sizes(mesh, props) if point_kind else None,
             material=str(props.get("material", "") or ""),
+            bands=bands,
         )
 
     def _plan_layer(self, item_id: str) -> float:

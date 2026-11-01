@@ -955,7 +955,14 @@ class Viewport3D(QWidget):
         entries = []
         if self.session.legend_layout()["view"] != "off":
             entries = [
-                ColorBarEntry(plain(bar.label), bar.colormap, bar.vmin, bar.vmax, bar.ticks)
+                ColorBarEntry(
+                    plain(bar.label),
+                    bar.colormap,
+                    bar.vmin,
+                    bar.vmax,
+                    bar.ticks,
+                    bar.table(256) if bar.bands and bar.levels else None,
+                )
                 for bar in colour_bars(self.session, loaded)
             ]
         self.colorbars.set_entries(entries)

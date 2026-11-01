@@ -27,6 +27,9 @@ class ColorBarEntry:
     vmax: float
     #: (value, text) of the numbers along the bar; empty: the ends, as _number writes them
     ticks: list = field(default_factory=list)
+    #: the bar's colours, (n, 4) RGBA from low to high (colour bands: in steps);
+    #: None: the colour map, smooth
+    table: object = None
 
 
 def _number(value: float) -> str:
@@ -85,11 +88,19 @@ class ColorBarStrip(QWidget):
                 max(20, self.width() - label_width - 2 * number_width - 16),
                 ROW - 10,
             )
-            gradient = QLinearGradient(bar.left(), 0, bar.right(), 0)
-            table = lut(entry.colormap, 32)
-            for i, (r, g, b, _a) in enumerate(table):
-                gradient.setColorAt(i / (len(table) - 1), QColor.fromRgbF(r, g, b))
-            painter.fillRect(bar, gradient)
+            if entry.table is not None:  # in steps: a colour per stretch of the bar
+                table = entry.table
+                n = len(table)
+                for i, (r, g, b, _a) in enumerate(table):
+                    x0 = bar.left() + bar.width() * i / n
+                    stretch = QRectF(x0, bar.top(), bar.width() / n + 0.5, bar.height())
+                    painter.fillRect(stretch, QColor.fromRgbF(float(r), float(g), float(b)))
+            else:
+                gradient = QLinearGradient(bar.left(), 0, bar.right(), 0)
+                table = lut(entry.colormap, 32)
+                for i, (r, g, b, _a) in enumerate(table):
+                    gradient.setColorAt(i / (len(table) - 1), QColor.fromRgbF(r, g, b))
+                painter.fillRect(bar, gradient)
             painter.setPen(QPen(QColor(255, 255, 255, 90)))
             painter.drawRect(bar)
             painter.setPen(QColor(COLORS["text"]))

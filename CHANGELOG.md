@@ -49,6 +49,12 @@
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.
+- **Colour bands** (filled contours): an item's colours in steps between round
+  levels of the variable it is coloured by, at its contour lines' levels, sharp in
+  the 3D view, on films and when path traced; its colour bar in steps too. A
+  figure's colour bar is drawn as a printed map has it: in steps with colour bands,
+  numbered at round values; with contour lines of its variable, a thin line at each
+  level; a point at an end where the frame goes beyond the range.
 - Particles as spheres (*Draw as*: spheres): a round, lit ball at each particle
   (CPM parcels, DEM, NHFLOW's particles), coloured by its value, with shadows; as
   large as *Sphere radius* (a box and a slider) or, with *Size* radius, each its

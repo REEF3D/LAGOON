@@ -85,6 +85,13 @@ def _contours(variable: str = "none") -> dict[str, PropertySpec]:
         "contour_levels": PropertySpec(
             10, "Contour lines", minimum=2, maximum=100, tip="About how many lines (round levels)"
         ),
+        "colour_bands": PropertySpec(
+            False,
+            "Colour bands",
+            tip="Colours in steps between round levels of the variable it is coloured by "
+            "(filled contours, as a printed map), at the levels its contour lines of that "
+            "variable have (about Contour lines many); the colour bar in steps too",
+        ),
     }
 
 

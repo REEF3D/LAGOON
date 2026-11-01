@@ -199,3 +199,97 @@ def test_view_panel_colour_bars(session, where):
     texts = [t.get_text() for t in axis.get_ticklabels()]
     assert len(texts) == 3 and all(len(t.split(".")[-1]) == 1 for t in texts)
     assert figure.missing == []
+
+
+def test_colour_bands_and_the_contour_legend(session):
+    """Colour bands: the colours in steps between round levels of the variable an
+    item is coloured by (filled contours), the bar in steps too, numbered at round
+    values, ending in a point where the frame goes beyond the range; contour lines of
+    that variable mark their levels on a smooth bar."""
+    from lagoonviz.core.colormaps import band_edges, banded_lut, colors, lut
+
+    item = _coloured(session)
+    variable = item.properties["variable"]
+    mesh = session.data.load(item.id)
+    assert session.data.colour_levels(item.id, mesh) == []  # neither bands nor lines
+    plain = colour_bars(session)[0]
+    assert plain.levels == [] and not plain.bands
+    np.testing.assert_allclose(plain.table(64), lut(plain.colormap, 64))
+    # contour lines of the variable it is coloured by: their levels on the bar
+    session.set_property(item.id, "contour_by", variable)
+    bar = colour_bars(session)[0]
+    lines = session.data.contour_values(item.id, variable, mesh)
+    assert bar.levels == [v for v in lines if bar.vmin < v < bar.vmax] and bar.levels
+    assert not bar.bands
+    assert session.data.display(item.id, mesh).bands == ()  # smooth colours
+    # colour bands: the same levels, the surface's colours in steps
+    session.set_property(item.id, "colour_bands", True)
+    bar = colour_bars(session)[0]
+    assert bar.bands and bar.levels
+    shown = session.data.display(item.id, mesh)
+    assert shown.bands == band_edges(bar.levels, bar.vmin, bar.vmax)
+    assert all(0 < u < 1 for u in shown.bands) and list(shown.bands) == sorted(shown.bands)
+    table = bar.table(1024)
+    steps = len(np.unique(table[:, :3].round(6), axis=0))
+    assert steps == len(bar.levels) + 1
+    # each point's colour is its band's: equal within a band
+    rgba = colors(shown.values, shown.colormap, shown.vmin, shown.vmax, shown.bands)
+    band = np.searchsorted(
+        [bar.vmin + u * (bar.vmax - bar.vmin) for u in shown.bands], shown.values
+    )
+    for b in np.unique(band):
+        assert len(np.unique(rgba[band == b].round(6), axis=0)) == 1
+    # the steps' colours: the colour map at each band's middle
+    edges = (0.0, 0.25, 0.75, 1.0)
+    stepped = banded_lut("viridis", (0.25, 0.75), 401)
+    for k, (a, b) in enumerate(zip(edges, edges[1:], strict=False)):
+        middle = lut("viridis", 4096)[round(0.5 * (a + b) * 4095)]
+        inside = (np.arange(401) / 400 > a + 1e-9) & (np.arange(401) / 400 < b - 1e-9)
+        np.testing.assert_allclose(stepped[inside], np.repeat(middle[None], inside.sum(), 0)), k
+    # beyond the range: the bar's ends
+    low, high = np.percentile(shown.values, [30, 70])
+    session.set_properties(item.id, auto_range=False, vmin=float(low), vmax=float(high))
+    assert colour_bars(session)[0].extend == "both"
+    session.set_properties(item.id, vmin=-1e9, vmax=1e9)
+    assert colour_bars(session)[0].extend == "neither"
+
+
+def test_the_printed_contour_legend(session):
+    """A figure's colour bar as a printed map has it (Fig. 2 of an abstract): in
+    steps with colour bands, ticks at round values, points at the ends beyond the
+    range; with contour lines a line at each level on a smooth bar."""
+    pytest.importorskip("matplotlib")
+    from matplotlib.colors import BoundaryNorm, ListedColormap
+
+    from lagoonviz.render.figure import template_figure
+
+    item = _coloured(session)
+    variable = item.properties["variable"]
+    image = np.full((90, 160, 4), 200, np.uint8)
+
+    def printed():
+        panel = Panel(kind="view", bar_place="right", bar_length=1.0)
+        figure = template_figure(session, FigureTemplate(panels=[panel]), images={0: image})
+        every = [*figure.get_axes(), *(c for ax in figure.get_axes() for c in ax.child_axes)]
+        return next(ax._colorbar for ax in every if getattr(ax, "_colorbar", None) is not None)
+
+    session.set_properties(item.id, contour_by=variable, colour_bands=True)
+    bar = colour_bars(session)[0]
+    top = bar.vmax - 0.3 * (bar.vmax - bar.vmin)
+    session.set_properties(item.id, auto_range=False, vmin=bar.vmin, vmax=top)
+    bar = colour_bars(session)[0]
+    assert bar.extend in ("max", "both")
+    colourbar = printed()
+    assert isinstance(colourbar.norm, BoundaryNorm) and isinstance(colourbar.cmap, ListedColormap)
+    assert colourbar.cmap.N == len(bar.levels) + 1
+    assert colourbar.extend == bar.extend
+    ticks = colourbar.get_ticks()
+    from lagoonviz.core.plotting import nice_ticks
+
+    assert 2 <= len(ticks) <= 7  # round values, not every band's edge
+    np.testing.assert_allclose(ticks, nice_ticks(bar.vmin, bar.vmax, 5))
+    # no bands: smooth, the contour lines marked
+    session.set_property(item.id, "colour_bands", False)
+    colourbar = printed()
+    assert not isinstance(colourbar.norm, BoundaryNorm)
+    assert colourbar.lines and len(colourbar.lines[0].get_segments()) == len(bar.levels)

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import numpy as np
 import pygfx as gfx
 
-from lagoonviz.core.colormaps import colors, lut, normalize
+from lagoonviz.core.colormaps import banded_lut, colors, lut, normalize
 from lagoonviz.core.data.manager import (
     ContourLines,
     DisplaySurface,
@@ -208,9 +208,14 @@ def _corners(positions: np.ndarray) -> tuple[np.ndarray | None, np.ndarray | Non
     return low.astype(float), high.astype(float)
 
 
-def _texel_coords(unit: np.ndarray, colormap: str) -> np.ndarray:
-    """[0, 1] values to texture coordinates between the first and last texel centre."""
-    n = len(lut(colormap))
+#: texels of a colour map in steps (colour bands): their edges within a thousandth
+BAND_TEXELS = 1024
+
+
+def _texel_coords(unit: np.ndarray, colormap: str, n: int | None = None) -> np.ndarray:
+    """[0, 1] values to texture coordinates between the first and last texel centre
+    (of a texture of ``n`` texels; default the colour map's)."""
+    n = n or len(lut(colormap))
     coords = (0.5 + np.nan_to_num(unit) * (n - 1)) / n
     return np.ascontiguousarray(coords, dtype=np.float32)
 
@@ -298,7 +303,7 @@ class SceneRenderer:
         self.content = gfx.Group()
         self.scene.add(self.content)
         self._shown: dict[str, _Shown] = {}
-        self._textures: dict[str, object] = {}
+        self._textures: dict[tuple, object] = {}
         self._framed = False
         self._marker: gfx.Points | None = None
         # gauges sit outside ``content`` so they do not change the framed bounds
@@ -327,20 +332,30 @@ class SceneRenderer:
         self._north_known = False
 
     # ------------------------------------------------------------- items
-    def _texture(self, colormap: str):
-        """The colour map as a 1D texture, clamped at both ends.
+    def _texture(self, colormap: str, bands: tuple[float, ...] = ()):
+        """The colour map as a 1D texture, clamped at both ends; with ``bands`` in
+        steps between them (filled contours: sharp edges, not blended).
 
         With pygfx's default (repeat), values at the top of the range wrapped round
         to the bottom colour and showed as dark spots on the crests.
         """
-        if colormap not in self._textures:
-            texture = gfx.Texture(lut(colormap), dim=1)
+        key = (colormap, tuple(round(b, 6) for b in bands))
+        if key not in self._textures:
+            if bands:
+                if len(self._textures) > 64:  # bands move with an automatic range
+                    self._textures = {k: v for k, v in self._textures.items() if not k[1]}
+                table = banded_lut(colormap, bands, BAND_TEXELS)
+            else:
+                table = lut(colormap)
+            texture = gfx.Texture(np.ascontiguousarray(table), dim=1)
             try:
-                texture = gfx.TextureMap(texture, filter="linear", wrap="clamp")
+                texture = gfx.TextureMap(
+                    texture, filter="nearest" if bands else "linear", wrap="clamp"
+                )
             except (AttributeError, TypeError):  # older pygfx: texel centres still help
                 pass
-            self._textures[colormap] = texture
-        return self._textures[colormap]
+            self._textures[key] = texture
+        return self._textures[key]
 
     @property
     def preset(self):
@@ -398,7 +413,7 @@ class SceneRenderer:
     def _style(self, material: gfx.Material, kind: str, shown: DisplaySurface) -> None:
         if shown.values is not None:
             material.color_mode = "vertex_map"
-            material.map = self._texture(shown.colormap)
+            material.map = self._texture(shown.colormap, shown.bands)
             material.color = "#ffffff"
         else:
             material.color_mode = "uniform"
@@ -432,7 +447,11 @@ class SceneRenderer:
             return
         normals = shown.normals
         texcoords = (
-            _texel_coords(normalize(shown.values, shown.vmin, shown.vmax), shown.colormap)
+            _texel_coords(
+                normalize(shown.values, shown.vmin, shown.vmax),
+                shown.colormap,
+                BAND_TEXELS if shown.bands else None,
+            )
             if shown.values is not None
             else np.zeros(shown.positions.shape[0], np.float32)
         )
@@ -729,7 +748,7 @@ class SceneRenderer:
         order = shown.segments.astype(np.int64).ravel()
         positions = np.ascontiguousarray(shown.positions[order], dtype=np.float32)
         if shown.values is not None:
-            rgba = colors(shown.values[order], shown.colormap, shown.vmin, shown.vmax)
+            rgba = colors(shown.values[order], shown.colormap, shown.vmin, shown.vmax, shown.bands)
         else:
             rgba = np.tile(np.array(_rgba(shown.color), np.float32), (order.size, 1))
         rgba = np.ascontiguousarray(rgba, dtype=np.float32)
@@ -763,7 +782,7 @@ class SceneRenderer:
             self.remove(shown.item_id)  # no particles at this time
             return
         if shown.values is not None:
-            rgba = colors(shown.values, shown.colormap, shown.vmin, shown.vmax)
+            rgba = colors(shown.values, shown.colormap, shown.vmin, shown.vmax, shown.bands)
         else:
             rgba = np.tile(np.array(_rgba(shown.color), np.float32), (len(positions), 1))
         rgba = np.ascontiguousarray(rgba, dtype=np.float32)

@@ -17,6 +17,7 @@ with x and y axes in metres.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -386,19 +387,48 @@ def colour_bars(session: Session) -> list[ColourBar]:
 
 def draw_bar(figure, cax, bar: ColourBar, orientation: str = "horizontal") -> None:
     """A colour bar in its axes: the item's colour map and range, its title, and its
-    numbers as the item asks (ticks, format)."""
+    numbers as the item asks (ticks, format). As a printed map has it: with colour
+    bands, the colours in steps between the levels, numbered at round values; with
+    contour lines of its variable, a thin line across the bar at each level; and a
+    point at an end where the frame's values go beyond the range (``extend``)."""
     from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import Normalize
+    from matplotlib.colors import BoundaryNorm, ListedColormap, Normalize
     from matplotlib.ticker import FuncFormatter
 
-    mappable = ScalarMappable(Normalize(bar.vmin, bar.vmax), colormap(bar.colormap))
-    colourbar = figure.colorbar(mappable, cax=cax, orientation=orientation)
+    from lagoonviz.core.plotting import nice_ticks
+
+    full = colormap(bar.colormap)
+    extend = bar.extend if bar.extend in ("min", "max", "both") else "neither"
+    levels = [float(v) for v in bar.levels if bar.vmin < v < bar.vmax]
+    stepped = bool(bar.bands and levels and bar.vmax > bar.vmin)
+    if stepped:
+        bounds = [bar.vmin, *levels, bar.vmax]
+        span = bar.vmax - bar.vmin
+        middles = [(0.5 * (a + b) - bar.vmin) / span for a, b in pairwise(bounds)]
+        cmap = ListedColormap(full(middles))
+        cmap.set_under(full(0.0))
+        cmap.set_over(full(1.0))
+        mappable = ScalarMappable(BoundaryNorm(bounds, cmap.N), cmap)
+        colourbar = figure.colorbar(
+            mappable, cax=cax, orientation=orientation, extend=extend, spacing="proportional"
+        )
+    else:
+        mappable = ScalarMappable(Normalize(bar.vmin, bar.vmax), full)
+        colourbar = figure.colorbar(mappable, cax=cax, orientation=orientation, extend=extend)
+        if levels:  # the item's contour lines: where each lies on the scale
+            colourbar.add_lines(
+                levels, colors=["#1c2330"] * len(levels), linewidths=[0.4] * len(levels)
+            )
     colourbar.set_label(bar.label)
     colourbar.outline.set_linewidth(0.5)
     if bar.count > 0:
         colourbar.set_ticks([value for value, _ in bar.ticks])
         colourbar.set_ticklabels([text for _, text in bar.ticks])
-    elif bar.number_format != "auto":
+        return
+    if stepped:  # numbered at round values, not at every band
+        colourbar.set_ticks(nice_ticks(bar.vmin, bar.vmax, 5))
+        colourbar.minorticks_off()
+    if bar.number_format != "auto":
         how = bar.number_format
         colourbar.formatter = FuncFormatter(lambda value, _pos: format_number(value, how))
         colourbar.update_ticks()

@@ -851,7 +851,11 @@ class _Collector:
         values = shown.values
         rgb = None
         if values is not None:
-            rgb = linear(colors(values, shown.colormap, shown.vmin, shown.vmax)[:, :3])
+            rgb = linear(
+                colors(values, shown.colormap, shown.vmin, shown.vmax, getattr(shown, "bands", ()))[
+                    :, :3
+                ]
+            )
         if shown.point_size is not None:  # particles
             keep = np.isfinite(shown.positions).all(axis=1)
             radius = 0.5 * shown.point_size * self.pixel

@@ -15,7 +15,6 @@ from functools import lru_cache
 import numpy as np
 
 from lagoonviz.core import Session
-from lagoonviz.core.colormaps import lut
 from lagoonviz.core.legend import colour_bars, place, plain
 
 INK = (30, 40, 51, 255)
@@ -85,7 +84,7 @@ class LegendOverlay:
             bars, spots.titles, spots.bars, spots.labels, strict=True
         ):
             draw.text((title.x, title.y), plain(bar.label), font=font, fill=INK)
-            table = (np.asarray(lut(bar.colormap, 256))[:, :3] * 255).round().astype(np.uint8)
+            table = (np.asarray(bar.table(1024))[:, :3] * 255).round().astype(np.uint8)
             columns = max(int(round(strip.w)), 1)
             rows = max(int(round(strip.h)), 1)
             ramp = table[np.linspace(0, len(table) - 1, columns).round().astype(int)]
