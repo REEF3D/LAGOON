@@ -1355,22 +1355,30 @@ class SceneRenderer:
         )
         centre = np.asarray(centre, dtype=float)
         forward = direction / max(float(np.linalg.norm(direction)), 1e-12)
-        inverse = np.asarray(self.camera.world.inverse_matrix, dtype=float)
-        flat = np.abs(corners @ inverse[:3, :3].T + inverse[:3, 3])[:, :2].max(axis=0)
-        if (
-            2 * FRAME_MARGIN * flat[0] <= self.camera.width
-            and 2 * FRAME_MARGIN * flat[1] <= self.camera.height
-        ):
-            return  # the box fits as pygfx framed it: flat scenes keep their view
         perspective = float(self.camera.fov) > 0
-        for _ in range(6):  # moving back changes the perspective a little: repeat
+
+        def half_seen() -> np.ndarray:
+            """Half the width and height the box's corners take on the screen, at the
+            distance of the centre (the near side larger in perspective)."""
             inverse = np.asarray(self.camera.world.inverse_matrix, dtype=float)
             seen = corners @ inverse[:3, :3].T + inverse[:3, 3]
             if perspective:
                 to_centre = float(np.linalg.norm(np.asarray(self.camera.world.position) - centre))
                 depth = np.maximum(-seen[:, 2], 1e-3 * max(to_centre, 1e-9))
                 seen = seen[:, :2] * (to_centre / depth)[:, None]
-            half = np.abs(seen[:, :2]).max(axis=0)
+            return np.abs(seen[:, :2]).max(axis=0)
+
+        # the box fits as pygfx framed it: the view stays. Seen in perspective: a view
+        # along a long domain (the front, since it looks along x) has its near end
+        # larger, and was cut off when only the box's outline was checked
+        first = half_seen()
+        if (
+            2 * FRAME_MARGIN * first[0] <= self.camera.width
+            and 2 * FRAME_MARGIN * first[1] <= self.camera.height
+        ):
+            return
+        for _ in range(6):  # moving back changes the perspective a little: repeat
+            half = half_seen()
             width = max(float(self.camera.width), 2 * FRAME_MARGIN * float(half[0]))
             height = max(float(self.camera.height), 2 * FRAME_MARGIN * float(half[1]))
             if width <= self.camera.width * 1.0001 and height <= self.camera.height * 1.0001:

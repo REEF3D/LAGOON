@@ -49,6 +49,9 @@
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.
+- Frame all fits a long domain seen from the front (along x since the views were
+  exchanged): in perspective its near end is larger, and with a vertical scale its
+  top was cut off.
 - The view from the top shows the model's axes (x to the right, y up the screen),
   also for a model turned on the map; it was north up, the model drawn turned.
   *North up* (N) turns it to north; *Top* again to the model's axes. Films and
