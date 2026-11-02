@@ -34,9 +34,10 @@ waves and the bed's relief stay shaded; from the front or side it is an elevatio
 of the shapes.
 ++2++ again goes back to 3D. The buttons in the corner of the view do the same.
 
-*North up* in the view's bar (++n++) turns the view so that north points up the
-screen, in 2D and in 3D (the tilt kept): north of the case's georeference
-([Maps](maps.md)), else the model's y. A *Background map* under the case follows the 2D view, fetched
+From the top the view shows the model's axes (x to the right, y up), also for a
+model turned on the map. *North up* in the view's bar (++n++) turns the view so
+that north points up the screen, in 2D and in 3D (the tilt kept): north of the
+case's georeference ([Maps](maps.md)), else the model's y. A *Background map* under the case follows the 2D view, fetched
 again in finer detail when you zoom in and for the new area when you pan; a bar
 above the view counts its tiles while they come.
 

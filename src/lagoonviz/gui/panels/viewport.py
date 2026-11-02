@@ -2058,8 +2058,8 @@ class Viewport3D(QWidget):
         return None
 
     def _apply_north(self) -> None:
-        """From the top, north up (the map as on a map, a turned model turned), when
-        the case is georeferenced and "North up" is on."""
+        """Tell the view where north is (the case's georeference): *North up* turns
+        to it; from the top the view shows the model's axes until then."""
         try:
             north = self._north()
         except Exception:  # noqa: BLE001 (a bad georef.json must not stop the drawing)

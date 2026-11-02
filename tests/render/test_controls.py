@@ -150,6 +150,50 @@ def test_north_turns_the_3d_view_about_the_model(reef3d_run):
     assert np.asarray(view.camera.local.position, float) == pytest.approx(after)
 
 
+def test_the_top_view_shows_the_models_axes(reef3d_run):
+    """A model turned on the map (georeferenced): from the top the view shows the
+    model's x to the right and its y up the screen (asked for, 2026-11-02), not north
+    up; turning the model on the map then turns the camera with it (the map stays
+    where it was); North up turns it to north."""
+    import math
+
+    from lagoonviz.core import Session
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        if mesh is not None:
+            view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+
+    def heading():
+        up = np.asarray(view.camera.world.up, float)[:2]
+        return math.atan2(up[1], up[0])
+
+    angle = math.radians(40.0)
+    view.set_north((math.sin(angle), math.cos(angle)))  # the case opened: north known
+    view.frame("top")
+    assert heading() == pytest.approx(math.pi / 2, abs=1e-6)  # the model's y up
+    right = np.asarray(view.camera.world.right, float)
+    assert right[:2] == pytest.approx((1.0, 0.0), abs=1e-6)  # its x to the right
+    # turned 10° more on the map: the camera turns with north
+    turned = math.radians(50.0)
+    view.set_north((math.sin(turned), math.cos(turned)))
+    change = math.atan2(math.cos(turned), math.sin(turned)) - math.atan2(
+        math.cos(angle), math.sin(angle)
+    )
+    assert math.remainder(heading() - math.pi / 2 - change, 2 * math.pi) == pytest.approx(
+        0.0, abs=1e-6
+    )
+    # North up: north up the screen; Top again: the model's axes
+    view.point_north()
+    assert heading() == pytest.approx(math.atan2(math.cos(turned), math.sin(turned)), abs=1e-6)
+    view.frame("top")
+    assert heading() == pytest.approx(math.pi / 2, abs=1e-6)
+
+
 def test_north_up_turns_any_view_so_north_points_up(reef3d_run):
     import math
 

@@ -1320,10 +1320,9 @@ class SceneRenderer:
 
     def frame(self, view: str = "perspective") -> None:
         """Point the camera at everything visible from a named direction (from the
-        top: north up, when :meth:`set_north` gave north)."""
+        top: the model's x to the right, its y up the screen, also for a model turned
+        on the map; :meth:`point_north` turns it north up)."""
         direction, up = VIEWS[view]
-        if view == "top" and self.north is not None:
-            up = (self.north[0], self.north[1], 0.0)
         corners = self.bounds() or self.bounds(visible_only=False)
         if corners is None:
             return  # nothing to frame
@@ -1443,9 +1442,12 @@ class SceneRenderer:
 
     def set_north(self, north) -> bool:
         """Which way north is in model coordinates (a unit (x, y) vector; None: the
-        model's y), so the view from the top shows the map north up and a turned
-        model turned. Turns a camera that looks straight down at once. True if it
-        changed."""
+        model's y), for :meth:`point_north`. The view keeps the model's axes when
+        north becomes known (a case opened: from the top x to the right, y up); when
+        north changes after that (the model turned on the map) the camera turns with
+        it, so the map stays where it was on the screen and the model turns: in 3D
+        about the vertical through the middle of the model, from the top about the
+        middle of the view. True if it changed."""
         north = None if north is None else (float(north[0]), float(north[1]))
         if north is not None and abs(north[0]) < 1e-9 and north[1] > 0:
             north = None  # the model's y is north: as without
@@ -1454,14 +1456,10 @@ class SceneRenderer:
             return False
         before = _north_angle(self.north)
         self.north = north
-        forward = np.asarray(self.camera.world.forward, dtype=float)
-        if abs(abs(forward[2]) - 1.0) < 1e-6:  # looking straight down: turn about z
-            angle = _north_angle(north)
-            self.camera.local.rotation = (0.0, 0.0, math.sin(angle / 2), math.cos(angle / 2))
-        elif self._north_known:
-            # in 3D the camera turns with north about the vertical through the middle of
-            # the model: the map stays where it was, a turned model turns
-            self._turn_camera(_north_angle(north) - before)
+        if self._north_known:
+            forward = np.asarray(self.camera.world.forward, dtype=float)
+            down = abs(abs(forward[2]) - 1.0) < 1e-6
+            self._turn_camera(_north_angle(north) - before, self._view_centre() if down else None)
         self._north_known = True
         return True
 

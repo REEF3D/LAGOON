@@ -96,8 +96,8 @@ GeoTIFF and only the part of a large one that is needed).
   drag it (what is in the middle of the screen stays there on the map): the map and north turn with it at once (the map made before, turned: nothing
   is fetched or written while you drag), and it is written when you let go (the
   arrow keys: 1° at a time, page up and down: 15°). **North up** turns the 3D view
-  so north points up the screen (as *North up* over the view, or N); from the top
-  the view keeps north up while you drag, so the map stays and the model turns.
+  so north points up the screen (as *North up* over the view, or N); while you
+  drag, the view turns with north, so the map stays and the model turns.
 - **Domain**: *Draw on the map* turns the view to 2D from the top; drag the
   domain's rectangle there (B 10, snapped to the cell size B 1), or drag an **edge**
   of the domain there is (the cursor shows it over one) to move that side, or a
@@ -232,11 +232,12 @@ sketch. Its properties:
 | Placed | below the model (a floor under the bed), or at the still water level round the domain; in 2D from the top it lies under everything |
 | Opacity, Resolution | how strongly, and with how many pixels along the longer side |
 
-The 2D view from the top shows north up: the map lies as on a map, and a turned
-model is drawn turned. Turning the model (*Turn*, Shift + drag) turns the domain
-and its grid, never the map, in 2D and in 3D. *North up* in the view's bar (or
-++n++) turns any view, 2D or 3D, back so that north points up the screen (in 3D:
-away from you, the tilt kept), after you have turned it about. North is true north
+The view from the top (*Top*, ++7++, and the 2D view) shows the model's axes: its
+x to the right, its y up the screen, the map under a turned model turned. *North
+up* in the view's bar (or ++n++) turns any view, 2D or 3D, so that north points up
+the screen (in 3D: away from you, the tilt kept): the map as on a map, the model
+turned; *Top* again shows the model's axes. Turning the model (*Turn*, Shift +
+drag) turns the domain and its grid, never the map, in 2D and in 3D. North is true north
 at the middle of the domain: a CRS's grid north is true north only on its central
 meridian (in a UTM zone up to a few degrees off at its edges), so a model lined up
 with the CRS's grid lies a little turned in the north-up view, as on the map.
