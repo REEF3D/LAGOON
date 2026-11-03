@@ -56,6 +56,9 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- The Free Surface AMR's **velocity**: NHFLOW's top layer (`u_top`, `v_top`) joined
+  into `velocity`, as SFLOW's u, v, w: colouring by its magnitude or a component, a
+  point's time series, and arrows (*Vectors of*, now on the Free Surface AMR too).
 - Number boxes show as many decimals as their smallest value needs: a sphere's radius
   of 0.25 mm (0.00025) could not be typed with three.
 - Frame all fits a long domain seen from the front (along x since the views were

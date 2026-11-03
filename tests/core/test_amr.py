@@ -1,5 +1,7 @@
 """AMR output of REEF3D (FNPF, NHFLOW, SFLOW with A 270): the leaf surface."""
 
+import shutil
+
 import numpy as np
 import pytest
 from reef3d_fixtures import AMR_DEPTH, AMR_FIELDS, amr_eta, make_amr, make_run
@@ -243,10 +245,42 @@ def test_sflow_amr_velocity_from_u_v_w(tmp_path):
     session.set_property(item.id, "variable", "velocity")
     shown = session.data.display(item.id, session.data.load(item.id))
     assert shown.values is not None and shown.variable == "velocity"
-    # NHFLOW writes no u, v: no velocity made up
-    other = tmp_path / "nh"
-    make_amr(other, "NHFLOW", frames=1)
-    assert "velocity" not in open_case(other).datasets["nhflow_amr"].components
+
+
+@pytest.mark.parametrize("stored", [False, True])
+def test_nhflow_amr_velocity_of_the_top_layer(tmp_path, stored):
+    """NHFLOW writes the top layer's u_top, v_top: the free surface's ``velocity``
+    (its magnitude, components, a point's time series and arrows), from the .vtm
+    files and from the LAGOON store."""
+    make_amr(tmp_path, "NHFLOW", frames=3)
+    if stored:
+        from lagoonviz.core.convert import convert
+
+        convert(tmp_path)
+        shutil.rmtree(tmp_path / "REEF3D_NHFLOW_AMR")
+    dataset = open_case(tmp_path).datasets["nhflow_amr"]
+    assert dataset.components["velocity"] == 3
+    assert {"velocity", "velocity.x", "velocity.y"} <= set(dataset.variables())
+    mesh = dataset.read(1, ["velocity"])
+    u, v = mesh.point_data["u_top"], mesh.point_data["v_top"]
+    assert np.allclose(mesh.scalar("velocity"), np.hypot(u, v), atol=1e-6)
+    assert np.allclose(mesh.scalar("velocity.x"), u) and np.allclose(mesh.scalar("velocity.z"), 0)
+    _, speed = dataset.point_series("velocity", 2.0, 1.5)
+    _, along = dataset.point_series("velocity.x", 2.0, 1.5)
+    assert np.all(np.isfinite(speed)) and np.all(speed >= np.abs(along) - 1e-9)
+    assert speed.max() > 0
+    session = Session()
+    session.open_case(tmp_path)
+    item = next(i for i in session.scene if i.kind == "amr")
+    assert "velocity (white)" in session.data.choices(item.id, "vectors")
+    session.set_property(item.id, "variable", "velocity")
+    session.set_property(item.id, "vectors_of", "velocity (white)")
+    session.set_property(item.id, "vector_count", 200)
+    mesh = session.data.load(item.id)
+    shown = session.data.display(item.id, mesh)
+    assert shown.values is not None and shown.variable == "velocity"
+    arrows = session.data.vector_arrows(item.id, mesh, shown)
+    assert arrows is not None and len(arrows.segments) > 100
 
 
 def test_sflow_amr_dry_land_by_wetdry():

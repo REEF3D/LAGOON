@@ -303,6 +303,7 @@ KINDS: dict[str, KindSpec] = {
             **_data_source("free surface AMR"),
             **_colouring("eta", "reef3d"),
             **_contours(),
+            **_vectors(),
             **_exaggeration("Scales the surface elevation about the still water level"),
             "patches": PropertySpec(
                 True,

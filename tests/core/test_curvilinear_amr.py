@@ -206,3 +206,24 @@ def test_from_the_vts_files_and_converted(tmp_path):
     stored = Store(case / "REEF3D_NHFLOW.lagoon").amr["nhflow_amr"]
     assert stored.curvilinear and len(stored) == 2
     assert [g.x.shape for g in stored.grids(1)] == [g.x.shape for g in output()]
+
+
+def test_the_velocity_of_the_top_layer():
+    """NHFLOW's u_top, v_top (Cartesian, also on a curvilinear grid): the surface's
+    velocity, its magnitude at the leaf nodes and at a point."""
+    grids = output()
+    for g in grids:
+        cx = 0.25 * (g.x[:-1, :-1] + g.x[1:, :-1] + g.x[:-1, 1:] + g.x[1:, 1:])
+        cy = 0.25 * (g.y[:-1, :-1] + g.y[1:, :-1] + g.y[:-1, 1:] + g.y[1:, 1:])
+        g.cell_data["u_top"] = -0.1 * cy  # round the ring
+        g.cell_data["v_top"] = 0.1 * cx
+    mesh = leaf_mesh(grids)
+    velocity = mesh.point_data["velocity"]
+    assert velocity.shape == (mesh.n_points, 3) and np.all(velocity[:, 2] == 0)
+    speed = mesh.scalar("velocity")
+    r = np.hypot(mesh.points[:, 0], mesh.points[:, 1])
+    assert np.allclose(speed, 0.1 * r, rtol=0.03)
+    x, y = ring(6, 7, 3, 4)
+    value, level = value_at(grids, "velocity", x.mean(), y.mean())
+    # the nearest cell of the patch: a quarter of a coarse cell off
+    assert level == 1 and value == pytest.approx(0.1 * np.hypot(x.mean(), y.mean()), rel=0.02)

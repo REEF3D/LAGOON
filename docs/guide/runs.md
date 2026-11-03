@@ -33,6 +33,11 @@ shows (`covered`: a finer patch over them, or the ring of block 0, whose cells t
 blocks hold) are left out, and the grids of two ranks or two blocks share the
 points on their border, without a crack.
 
+The *Free Surface AMR* has the **velocity** of the free surface: NHFLOW's top
+layer (`u_top`, `v_top`), SFLOW's `u`, `v`, `w`, joined into one vector, to colour
+by its magnitude (or a component, `velocity.x`) and to draw as arrows (*Vectors
+of*).
+
 A **CFD** run has no free surface file: it opens with its free surface as an
 iso-surface of the volume, *Free surface*, where the level set `phi` is 0 (coloured
 by the velocity), the volume itself switched off, and its floating bodies.

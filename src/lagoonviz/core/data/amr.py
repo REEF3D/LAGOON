@@ -49,36 +49,59 @@ AMR_INDEX = re.compile(r"^REEF3D-(?P<solver>[A-Z0-9]+)-AMR-(?P<step>\d+)\.vtm$")
 #: (``covered``: which cells another grid shows, of a curvilinear grid, G 50)
 SURFACE_ARRAYS = ("elevation", "eta", "WL", "covered")
 
-#: the velocity components an AMR output writes as scalars (SFLOW: u, v, w); LAGOON
-#: joins them into the vector ``velocity`` (its magnitude, components and arrows)
-VELOCITY_PARTS = ("u", "v", "w")
+#: the velocity components an AMR output writes as scalars: SFLOW u, v, w; NHFLOW
+#: the top layer's u_top, v_top (the velocity at the free surface). LAGOON joins them
+#: into the vector ``velocity`` (its magnitude, components and arrows)
+VELOCITY_SETS = (("u", "v", "w"), ("u_top", "v_top", "w_top"))
+VELOCITY_PARTS = VELOCITY_SETS[0]
+
+
+def velocity_parts(present) -> tuple[str, str, str] | None:
+    """The scalars x, y, z of ``velocity`` among the arrays ``present`` (z need not
+    be written), or None without x and y."""
+    for parts in VELOCITY_SETS:
+        if parts[0] in present and parts[1] in present:
+            return parts
+    return None
 
 
 def with_velocity(components: dict[str, int]) -> dict[str, int]:
     """The variables of an AMR output with ``velocity`` (3 components) added when it
-    writes u and v (and w) as scalars but no velocity vector."""
-    if "velocity" not in components and all(components.get(n) == 1 for n in ("u", "v")):
+    writes u and v (and w), or u_top and v_top, as scalars but no velocity vector."""
+    parts = velocity_parts(components)
+    if "velocity" not in components and parts and all(components[n] == 1 for n in parts[:2]):
         components = {**components, "velocity": 3}
     return components
 
 
 def wanted_arrays(names: set[str], present) -> list[str]:
-    """The arrays to read for these variables: ``velocity`` made of u, v, w when the
-    output has no velocity array of its own."""
+    """The arrays to read for these variables: ``velocity`` made of u, v, w (or
+    u_top, v_top) when the output has no velocity array of its own."""
     names = set(names)
     if "velocity" in names and "velocity" not in present:
         names.discard("velocity")
-        names.update(n for n in VELOCITY_PARTS if n in present)
+        names.update(n for n in velocity_parts(present) or () if n in present)
     return sorted(n for n in names if n in present and n != "level")
 
 
 def series_name(variable: str, present) -> str:
-    """The array a point series of a variable reads: ``velocity.x`` is u when the
-    output writes u, v, w; else the variable's array."""
+    """The array a point series of a variable reads: ``velocity.x`` is u (u_top)
+    when the output writes the components as scalars; else the variable's array."""
     name, _, component = variable.partition(".")
-    if name == "velocity" and "velocity" not in present and component in ("x", "y", "z"):
-        return VELOCITY_PARTS["xyz".index(component)]
+    parts = velocity_parts(present)
+    if name == "velocity" and "velocity" not in present and parts and component in ("x", "y", "z"):
+        return parts["xyz".index(component)]
     return name
+
+
+def _join_velocity(data: dict[str, np.ndarray]) -> None:
+    """``velocity`` (n, 3) of the scalar components in ``data``, if it has none."""
+    parts = velocity_parts(data)
+    if "velocity" in data or parts is None:
+        return
+    u = data[parts[0]]
+    w = data.get(parts[2], np.zeros_like(u))
+    data["velocity"] = np.ascontiguousarray(np.stack([u, data[parts[1]], w], axis=-1))
 
 
 @dataclass
@@ -524,10 +547,7 @@ def _curvilinear_leaf_mesh(grids: list[AmrGrid], max_level: int | None) -> Surfa
     height = point_data.get("elevation", point_data.get("eta"))
     z = height if height is not None else np.zeros(count, np.float32)
     points = np.column_stack([xy[first], z]).astype(np.float32)
-    if "velocity" not in point_data and "u" in point_data and "v" in point_data:
-        u = point_data["u"]
-        w = point_data.get("w", np.zeros_like(u))
-        point_data["velocity"] = np.ascontiguousarray(np.stack([u, point_data["v"], w], axis=1))
+    _join_velocity(point_data)
     if "WL" in point_data and "depth" not in point_data and "wetdry" not in point_data:
         point_data["depth"] = point_data["WL"]
     return SurfaceMesh(
@@ -655,10 +675,7 @@ def leaf_mesh(grids: list[AmrGrid], max_level: int | None = None) -> SurfaceMesh
         for name, parts in data.items()
     }
     point_data["level"] = np.concatenate(levels)
-    if "velocity" not in point_data and "u" in point_data and "v" in point_data:
-        u = point_data["u"]
-        w = point_data.get("w", np.zeros_like(u))
-        point_data["velocity"] = np.ascontiguousarray(np.stack([u, point_data["v"], w], axis=1))
+    _join_velocity(point_data)
     if "WL" in point_data and "depth" not in point_data and "wetdry" not in point_data:
         # the water depth hides dry land (NHFLOW); SFLOW says which cells are wet
         # (wetdry), its WL is no depth to go by on dry land
@@ -676,15 +693,15 @@ def _cell_values(grid: AmrGrid, name: str) -> np.ndarray:
     """A grid's cell values of a variable; ``velocity`` made of u, v, w if need be."""
     if name in grid.cell_data:
         return grid.cell_data[name]
-    u = grid.cell_data["u"]
-    w = grid.cell_data.get("w", np.zeros_like(u))
-    return np.stack([u, grid.cell_data["v"], w], axis=-1)
+    x, y, z = velocity_parts(grid.cell_data)
+    u = grid.cell_data[x]
+    return np.stack([u, grid.cell_data[y], grid.cell_data.get(z, np.zeros_like(u))], axis=-1)
 
 
 def _has(grid: AmrGrid, name: str) -> bool:
     if name in grid.cell_data:
         return True
-    return name == "velocity" and "u" in grid.cell_data and "v" in grid.cell_data
+    return name == "velocity" and velocity_parts(grid.cell_data) is not None
 
 
 def value_at(grids: list[AmrGrid], name: str, x: float, y: float) -> tuple[float, int] | None:
