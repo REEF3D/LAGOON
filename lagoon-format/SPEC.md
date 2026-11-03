@@ -603,6 +603,18 @@ the set `cfd_amr` with `P 18`: `phi`, `pressure`, the velocity at the cell centr
 as `u`, `v`, `w`, the grid's `level` and `covered` (1 where a finer block lies over
 the cell) as int32, and the heat (`T`) or concentration (`C`) if computed.
 
+**Grids of a curvilinear grid** (`"horizontal": "curvilinear"` in the set's
+attributes, REEF3D's `G 50`, also the blocks of a multi-block grid, `G 50 1`):
+`x` and `y` hold the x and the y of every node of a grid, `(nx + 1) · (ny + 1)`
+values each per grid, x fastest; `grids/x_end` and `grids/y_end` count them. A
+cell is the quadrilateral of its four nodes. Since which cells overlap cannot be
+found from boxes there, the set has the int32 cell field `covered`: 1 where a
+finer patch lies over the cell, 2 in the ring of block 0 of a multi-block grid
+(whose cells the blocks 1 … have: never drawn), 0 at the leaf cells.
+REEF3D's NHFLOW writes such a set with `P 18` on a curvilinear grid. A reader
+before 0.5 reads the node coordinates as grid lines and draws nonsense; the
+version stays 0.5 (it is the version of curvilinear grids).
+
 A grid's cells are the rectangles between its nodes; cell `(i, j)` lies between
 `x[i]`, `x[i+1]` and `y[j]`, `y[j+1]`. An output lists level 0 first, then the
 patches, as REEF3D writes them. Where grids of different levels overlap, the

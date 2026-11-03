@@ -799,6 +799,8 @@ def _convert_amr(case, dataset, writer, pool, progress, limit) -> tuple[int, int
                 "fields": fields,
                 "source": dataset.folder.name,
                 "attributes": {"dataset": key, "role": "amr", "refinement": 2},
+                # the structured grids of a curvilinear grid (G 50): every node's place
+                "curvilinear": bool(first[0].curvilinear),
             },
         )
         done = set()

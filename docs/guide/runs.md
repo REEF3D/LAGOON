@@ -25,6 +25,14 @@ particles, and the text files of wave gauges (`WSF`), free surface lines (`WSFLI
 6DOF motions and forces. Each MPI rank's piece is read and joined; the parallel
 files (`.pvtu`, `.pvtp`) say which pieces belong together.
 
+On a **curvilinear grid** (`G 50`) NHFLOW's mesh refinement writes its grids as
+structured grids (`.vts`, every node's place), or into the LAGOON store with `P 18`;
+the blocks 1 … of a multi-block grid (`G 50 1`) are among them, level-0 grids next
+to block 0. The *Free Surface AMR* draws each place once: the cells another grid
+shows (`covered`: a finer patch over them, or the ring of block 0, whose cells the
+blocks hold) are left out, and the grids of two ranks or two blocks share the
+points on their border, without a crack.
+
 A **CFD** run has no free surface file: it opens with its free surface as an
 iso-surface of the volume, *Free surface*, where the level set `phi` is 0 (coloured
 by the velocity), the volume itself switched off, and its floating bodies.

@@ -60,7 +60,9 @@ class AmrGrid:
     """One grid of an output: ``x`` (nx + 1) and ``y`` (ny + 1) node coordinates, cell
     fields of shape (ny, nx[, components]) with x fastest, its refinement level and the
     MPI rank that wrote it (-1: not known). A 3D grid (a block of CFD's volume) has
-    ``z`` (nz + 1) node coordinates too, its fields of shape (nz, ny, nx[, c])."""
+    ``z`` (nz + 1) node coordinates too, its fields of shape (nz, ny, nx[, c]). A grid
+    of a curvilinear grid (REEF3D's G 50, a set with ``horizontal`` "curvilinear") has
+    the x and the y of every node: ``x`` and ``y`` of shape (ny + 1, nx + 1)."""
 
     level: int
     x: np.ndarray
@@ -79,15 +81,25 @@ class AmrGrid:
         return self.nx * self.ny * max(self.nz, 1)
 
     @property
+    def curvilinear(self) -> bool:
+        """Whether the grid has the x and y of every node (a curvilinear grid)."""
+        return np.ndim(self.x) == 2
+
+    @property
     def nx(self) -> int:
-        return int(np.asarray(self.x).size) - 1
+        x = np.asarray(self.x)
+        return int(x.shape[1] if x.ndim == 2 else x.size) - 1
 
     @property
     def ny(self) -> int:
-        return int(np.asarray(self.y).size) - 1
+        y = np.asarray(self.y)
+        return int(y.shape[0] if y.ndim == 2 else y.size) - 1
 
     @property
     def box(self) -> tuple[float, float, float, float]:
+        if self.curvilinear:
+            x, y = np.asarray(self.x), np.asarray(self.y)
+            return float(x.min()), float(x.max()), float(y.min()), float(y.max())
         return float(self.x[0]), float(self.x[-1]), float(self.y[0]), float(self.y[-1])
 
 
@@ -96,7 +108,15 @@ def covered(grid, grids, boxes: Boxes | None = None) -> np.ndarray:
     level among ``grids`` (anything with ``level``, ``x`` and ``y``): the cells that
     are not leaf cells. ``boxes``: :class:`Boxes` of ``grids``, made once when
     asking for all of them (thousands of patches: only the finer grids that
-    overlap are looked at, found for all at once)."""
+    overlap are looked at, found for all at once). A curvilinear grid says itself
+    which of its cells another grid shows: its cell field ``covered`` (1: a finer
+    patch, 2: the ring of block 0 of a multi-block grid)."""
+    if getattr(grid, "curvilinear", False):
+        cells = getattr(grid, "fields", None) or getattr(grid, "cell_data", None) or {}
+        flag = cells.get("covered")
+        if flag is None:
+            return np.zeros((grid.ny, grid.nx), bool)
+        return np.asarray(flag).reshape(grid.ny, grid.nx) > 0.5
     x = np.asarray(grid.x, np.float64)
     y = np.asarray(grid.y, np.float64)
     mask = np.zeros((y.size - 1, x.size - 1), bool)
@@ -119,10 +139,7 @@ class Boxes:
 
     def __init__(self, grids) -> None:
         self.level = np.array([int(g.level) for g in grids], np.int64)
-        self.box = np.array(
-            [(float(g.x[0]), float(g.x[-1]), float(g.y[0]), float(g.y[-1])) for g in grids],
-            np.float64,
-        ).reshape(-1, 4)
+        self.box = np.array([_extent(g) for g in grids], np.float64).reshape(-1, 4)
 
     def finer_over(self, level: int, x0: float, x1: float, y0: float, y1: float) -> np.ndarray:
         """Indices of the grids of a higher level whose box overlaps (x0..x1, y0..y1)."""
@@ -130,6 +147,15 @@ class Boxes:
         hit = (self.level > level) & (b[:, 1] >= x0) & (b[:, 0] <= x1)
         hit &= (b[:, 3] >= y0) & (b[:, 2] <= y1)
         return np.flatnonzero(hit)
+
+
+def _extent(grid) -> tuple[float, float, float, float]:
+    """x0, x1, y0, y1 of a grid: its first and last grid lines, or for a curvilinear
+    grid the box round its nodes."""
+    x, y = np.asarray(grid.x, np.float64), np.asarray(grid.y, np.float64)
+    if x.ndim == 2:
+        return float(x.min()), float(x.max()), float(y.min()), float(y.max())
+    return float(x[0]), float(x[-1]), float(y[0]), float(y[-1])
 
 
 # ======================================================================== reading
@@ -161,6 +187,12 @@ class AmrSet:
     def dims(self) -> int:
         """2: grids of a surface; 3: blocks of a volume."""
         return int(self.info.get("dims", 2))
+
+    @property
+    def curvilinear(self) -> bool:
+        """2D grids of a curvilinear grid: the x and y of every node (``horizontal``
+        "curvilinear", REEF3D's G 50)."""
+        return self.info.get("horizontal") == "curvilinear"
 
     def __len__(self) -> int:
         return self.group.array("time").shape[0]  # time is extended last
@@ -253,11 +285,14 @@ class AmrSet:
                 part = values[name][cs]
                 grid_fields[name] = part.reshape((*shape, *part.shape[1:]))
             zs = slice(int(rows["z_start"][g]) - z0, int(rows["z_end"][g]) - z0) if volume else None
+            gx, gy = np.asarray(x[xs], np.float64), np.asarray(y[ys], np.float64)
+            if self.curvilinear:  # the x and y of every node
+                gx, gy = gx.reshape(ny + 1, nx + 1), gy.reshape(ny + 1, nx + 1)
             grids.append(
                 AmrGrid(
                     level=int(rows["level"][g]),
-                    x=np.asarray(x[xs], np.float64),
-                    y=np.asarray(y[ys], np.float64),
+                    x=gx,
+                    y=gy,
                     fields=grid_fields,
                     rank=int(rows["rank"][g]),
                     z=np.asarray(z[zs], np.float64) if volume else None,
@@ -309,14 +344,18 @@ class AmrWriter:
         source: str = "",
         attributes: dict[str, Any] | None = None,
         dims: int = 2,
+        curvilinear: bool = False,
     ) -> AmrWriter:
         """A new AMR set. ``fields``: name -> (components, data type) of the cell fields;
-        ``dims`` 3: the blocks of a volume (3D grids)."""
+        ``dims`` 3: the blocks of a volume (3D grids); ``curvilinear``: 2D grids with the
+        x and y of every node."""
         info: dict[str, Any] = {"kind": "amr", "fields": _fields_json(fields)}
         if source:
             info["source"] = source
         if int(dims) == 3:
             info["dims"] = 3
+        elif curvilinear:
+            info["horizontal"] = "curvilinear"
         info.update(attributes or {})
         arrays = _arrays(info["fields"])
         group = Group.create(parent.path / key, {"lagoon": info})
@@ -342,6 +381,14 @@ class AmrWriter:
                 raise ValueError(f"output {step}: a grid of {nx} x {ny} x {nz} cells")
             if not volume and nz:
                 raise ValueError(f"output {step}: a 3D grid in a set of 2D grids")
+            if grid.curvilinear != self.stored.curvilinear:
+                how = "curvilinear" if self.stored.curvilinear else "rectilinear"
+                raise ValueError(f"output {step}: a grid that is not {how} in a {how} set")
+            nodes = (nx + 1) * (ny + 1)
+            if grid.curvilinear and (
+                np.shape(grid.x) != np.shape(grid.y) or np.size(grid.x) != nodes
+            ):
+                raise ValueError(f"output {step}: a curvilinear grid without x and y of its nodes")
             n = grid.cells
             for name, (components, dtype) in self.fields.items():
                 if name not in grid.fields:
@@ -356,8 +403,8 @@ class AmrWriter:
                 self._rows[f"cell_data/{self._field_arrays[name]}"].append(values.reshape(shape))
             self._rows["x"].append(np.asarray(grid.x, np.float64).ravel())
             self._rows["y"].append(np.asarray(grid.y, np.float64).ravel())
-            self._x_end += nx + 1
-            self._y_end += ny + 1
+            self._x_end += nodes if grid.curvilinear else nx + 1
+            self._y_end += nodes if grid.curvilinear else ny + 1
             self._cell_end += n
             self._grid_rows["level"].append(int(grid.level))
             self._grid_rows["rank"].append(int(grid.rank))

@@ -46,7 +46,8 @@ AMR_FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_AMR$")
 #: ``REEF3D-NHFLOW-AMR-00000012.vtm``
 AMR_INDEX = re.compile(r"^REEF3D-(?P<solver>[A-Z0-9]+)-AMR-(?P<step>\d+)\.vtm$")
 #: arrays read with every frame: the height of the surface, its water level, the depth
-SURFACE_ARRAYS = ("elevation", "eta", "WL")
+#: (``covered``: which cells another grid shows, of a curvilinear grid, G 50)
+SURFACE_ARRAYS = ("elevation", "eta", "WL", "covered")
 
 #: the velocity components an AMR output writes as scalars (SFLOW: u, v, w); LAGOON
 #: joins them into the vector ``velocity`` (its magnitude, components and arrows)
@@ -85,7 +86,7 @@ class AmrGrid:
     """One grid of an AMR output: level 0 of an MPI rank, or a refined patch."""
 
     level: int
-    x: np.ndarray  # (nx + 1,) node coordinates
+    x: np.ndarray  # (nx + 1,) node coordinates; curvilinear: (ny + 1, nx + 1), every node's
     y: np.ndarray  # (ny + 1,)
     z: float = 0.0
     cell_data: dict[str, np.ndarray] = field(default_factory=dict)  # (ny, nx), x fastest
@@ -94,15 +95,27 @@ class AmrGrid:
     name: str = ""
 
     @property
+    def curvilinear(self) -> bool:
+        """A grid of a curvilinear grid (REEF3D's G 50): x and y of every node."""
+        return np.ndim(self.x) == 2
+
+    @property
     def nx(self) -> int:
-        return int(self.x.size) - 1
+        return int(self.x.shape[1] if self.curvilinear else self.x.size) - 1
 
     @property
     def ny(self) -> int:
-        return int(self.y.size) - 1
+        return int(self.y.shape[0] if self.curvilinear else self.y.size) - 1
 
     @property
     def box(self) -> tuple[float, float, float, float]:
+        if self.curvilinear:
+            return (
+                float(self.x.min()),
+                float(self.x.max()),
+                float(self.y.min()),
+                float(self.y.max()),
+            )
         return float(self.x[0]), float(self.x[-1]), float(self.y[0]), float(self.y[-1])
 
     def contains(self, x: float, y: float) -> bool:
@@ -141,11 +154,15 @@ def _grid_header(path: Path, volume: bool = False) -> _GridHeader:
         root = ET.fromstring(text)
     except ET.ParseError as error:
         raise VTKFormatError(f"{path}: not a VTK XML file ({error})") from None
-    if root.tag != "VTKFile" or root.get("type") != "RectilinearGrid":
-        raise VTKFormatError(f"{path}: not a VTK rectilinear grid")
+    kind = root.get("type")
+    # a structured grid: a grid of a curvilinear grid (REEF3D's G 50), every node's place
+    if root.tag != "VTKFile" or kind not in ("RectilinearGrid", "StructuredGrid"):
+        raise VTKFormatError(f"{path}: not a VTK rectilinear or structured grid")
+    if kind == "StructuredGrid" and volume:
+        raise VTKFormatError(f"{path}: a structured grid, not a block of a volume")
     byte_order = "<" if root.get("byte_order", "LittleEndian") == "LittleEndian" else ">"
     header_type = root.get("header_type", "UInt32")
-    piece = root.find("RectilinearGrid/Piece")
+    piece = root.find(f"{kind}/Piece")
     if piece is None:
         raise VTKFormatError(f"{path}: no Piece")
     extent = tuple(int(v) for v in piece.get("Extent", "0 0 0 0 0 0").split())
@@ -159,7 +176,7 @@ def _grid_header(path: Path, volume: bool = False) -> _GridHeader:
     layers = nz + 1 if volume else 1
     header = PieceHeader(
         path=path,
-        kind="RectilinearGrid",
+        kind=kind,
         n_points=(nx + 1) * (ny + 1) * layers,
         n_cells=nx * ny * max(nz, 1),
         points=None,
@@ -180,11 +197,14 @@ def _grid_header(path: Path, volume: bool = False) -> _GridHeader:
     coordinates = {}
     for axis, element in zip("xyz", piece.findall("Coordinates/DataArray"), strict=False):
         coordinates[axis] = _array_info(element, byte_order)
+    points = piece.find("Points/DataArray")
+    if points is not None:
+        coordinates["points"] = _array_info(points, byte_order)
     level, time = 0, None
     # (SEASTATE writes its FieldData in the Piece, with the time as TIME)
     for element in [
-        *root.findall("RectilinearGrid/FieldData/DataArray"),
-        *root.findall("RectilinearGrid/Piece/FieldData/DataArray"),
+        *root.findall(f"{kind}/FieldData/DataArray"),
+        *root.findall(f"{kind}/Piece/FieldData/DataArray"),
     ]:
         values = (element.text or "").split()
         if not values:
@@ -214,7 +234,15 @@ def read_grid(path: str | Path, arrays: list[str] | None = None) -> AmrGrid:
     ny = grid.extent[3] - grid.extent[2]
     sizes = {"x": nx + 1, "y": ny + 1, "z": 1}
     axes = {}
-    for axis in "xyz":
+    if "points" in grid.coordinates:  # a structured grid: every node's place
+        nodes = read_array(head, grid.coordinates["points"], (nx + 1) * (ny + 1))
+        nodes = np.asarray(nodes, np.float64).reshape(ny + 1, nx + 1, -1)
+        axes = {
+            "x": nodes[..., 0].copy(),
+            "y": nodes[..., 1].copy(),
+            "z": nodes[:1, :1, -1].ravel(),
+        }
+    for axis in "xyz" if not axes else ():
         info = grid.coordinates.get(axis)
         if info is None:
             raise VTKFormatError(f"{path}: no {axis} coordinates")
@@ -433,6 +461,83 @@ def _border_nodes(ny: int, nx: int):
     return sides
 
 
+def _curvilinear_leaf_mesh(grids: list[AmrGrid], max_level: int | None) -> SurfaceMesh:
+    """The surface of the leaf cells of the grids of a curvilinear grid (REEF3D's G 50,
+    also the blocks of a multi-block grid, G 50 1): each grid's cells are the
+    quadrilaterals of its nodes; which cells another grid shows says the cell field
+    ``covered`` (1: a finer patch over it, 2: the ring of block 0, whose cells the
+    blocks 1 .. have). A node's values are the mean of the cells round it, of every
+    grid that has the node (two ranks, two blocks: the same place, one point), so
+    the grids meet without a crack and shade as one."""
+    names = set.intersection(*(set(g.cell_data) for g in grids)) - {"covered"}
+    names = sorted(names)
+    if max_level is not None:
+        grids = [g for g in grids if g.level <= max_level]
+    grids = [g for g in grids if g.nx >= 1 and g.ny >= 1]
+    if not grids:
+        return SurfaceMesh(np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32))
+    xy = np.concatenate([np.column_stack([np.ravel(g.x), np.ravel(g.y)]) for g in grids]).astype(
+        np.float64
+    )
+    span = float(np.ptp(xy, axis=0).max()) or 1.0
+    key = np.round(xy / (1e-7 * span)).astype(np.int64)
+    unique, first, inverse = np.unique(key, axis=0, return_index=True, return_inverse=True)
+    inverse = inverse.ravel()
+    count = len(unique)
+    sums = {name: None for name in names}
+    weight = np.zeros(count)
+    levels = np.full(count, -1.0)
+    triangles, outlines = [], []
+    offset = 0
+    for g in grids:
+        nx, ny = g.nx, g.ny
+        ids = inverse[offset : offset + (nx + 1) * (ny + 1)].reshape(ny + 1, nx + 1)
+        corners = (ids[:-1, :-1], ids[:-1, 1:], ids[1:, 1:], ids[1:, :-1])
+        for c in corners:
+            np.add.at(weight, c.ravel(), 1.0)
+        for name in names:
+            cells = np.asarray(g.cell_data[name], np.float64).reshape(ny, nx, -1)
+            if sums[name] is None:
+                sums[name] = np.zeros((count, cells.shape[-1]))
+            for c in corners:
+                np.add.at(sums[name], c.ravel(), cells.reshape(-1, cells.shape[-1]))
+        np.maximum.at(levels, ids.ravel(), float(g.level))
+        flag = g.cell_data.get("covered")
+        hidden = np.zeros((ny, nx), bool)
+        if flag is not None:
+            flag = np.asarray(flag).reshape(ny, nx)
+            hidden = flag > 1.5  # the ring: always another grid's
+            if max_level is None or g.level < max_level:
+                hidden |= flag > 0.5  # a finer patch over it, shown
+        a, b, c, d = (k[~hidden] for k in corners)
+        triangles.append(np.concatenate([np.column_stack([a, b, c]), np.column_stack([a, c, d])]))
+        if g.level > 0:
+            ring = np.concatenate([ids[0, :], ids[1:, -1], ids[-1, -2::-1], ids[-2::-1, 0]])
+            outlines.append(np.column_stack([ring[:-1], ring[1:]]))
+        offset += (nx + 1) * (ny + 1)
+    weight = np.maximum(weight, 1.0)[:, None]
+    point_data = {}
+    for name in names:
+        values = (sums[name] / weight).astype(np.float32)
+        point_data[name] = np.ascontiguousarray(values[:, 0] if values.shape[1] == 1 else values)
+    point_data["level"] = levels.astype(np.float32)
+    height = point_data.get("elevation", point_data.get("eta"))
+    z = height if height is not None else np.zeros(count, np.float32)
+    points = np.column_stack([xy[first], z]).astype(np.float32)
+    if "velocity" not in point_data and "u" in point_data and "v" in point_data:
+        u = point_data["u"]
+        w = point_data.get("w", np.zeros_like(u))
+        point_data["velocity"] = np.ascontiguousarray(np.stack([u, point_data["v"], w], axis=1))
+    if "WL" in point_data and "depth" not in point_data and "wetdry" not in point_data:
+        point_data["depth"] = point_data["WL"]
+    return SurfaceMesh(
+        points=points,
+        triangles=np.ascontiguousarray(np.concatenate(triangles), dtype=np.uint32),
+        point_data=point_data,
+        outlines=np.concatenate(outlines).astype(np.uint32) if outlines else None,
+    )
+
+
 def leaf_mesh(grids: list[AmrGrid], max_level: int | None = None) -> SurfaceMesh:
     """The surface of the leaf cells of all grids: each grid on its node lattice,
     without the cells a finer grid covers (grids finer than ``max_level`` left out:
@@ -446,6 +551,8 @@ def leaf_mesh(grids: list[AmrGrid], max_level: int | None = None) -> SurfaceMesh
     the same value, and its normal sees both sides; a node of a finer grid on the
     border to a coarser one takes the coarser surface's value there (linear along
     the coarse cell's edge, which the coarse triangles have too)."""
+    if any(g.curvilinear for g in grids):
+        return _curvilinear_leaf_mesh(grids, max_level)
     names = (
         set.intersection(*(set(g.cell_data) | set(g.point_data) for g in grids)) if grids else set()
     )
@@ -591,11 +698,39 @@ def value_at(grids: list[AmrGrid], name: str, x: float, y: float) -> tuple[float
         best = grid
     if best is None:
         return None
+    if best.curvilinear:  # the cell whose centre is nearest, of those it shows
+        return _curvilinear_value(grids, name, x, y)
     i = int(np.clip(np.searchsorted(best.x, x, "right") - 1, 0, best.nx - 1))
     j = int(np.clip(np.searchsorted(best.y, y, "right") - 1, 0, best.ny - 1))
     values = _cell_values(best, name)
     value = values[j, i]
     return float(np.linalg.norm(value) if np.ndim(value) else value), best.level
+
+
+def _curvilinear_value(grids: list[AmrGrid], name: str, x: float, y: float):
+    """A cell value at (x, y) of the grids of a curvilinear grid: the leaf cell
+    whose centre is nearest (value, level), or None."""
+    best = None
+    for grid in grids:
+        if not grid.contains(x, y) or not _has(grid, name):
+            continue
+        gx, gy = np.asarray(grid.x, np.float64), np.asarray(grid.y, np.float64)
+        cx = 0.25 * (gx[:-1, :-1] + gx[:-1, 1:] + gx[1:, :-1] + gx[1:, 1:])
+        cy = 0.25 * (gy[:-1, :-1] + gy[:-1, 1:] + gy[1:, :-1] + gy[1:, 1:])
+        distance = (cx - x) ** 2 + (cy - y) ** 2
+        flag = grid.cell_data.get("covered")
+        if flag is not None:
+            distance = np.where(np.asarray(flag).reshape(distance.shape) > 0.5, np.inf, distance)
+        j, i = np.unravel_index(int(np.argmin(distance)), distance.shape)
+        if not np.isfinite(distance[j, i]):
+            continue
+        if best is None or distance[j, i] < best[0]:
+            value = _cell_values(grid, name)[j, i]
+            best = (float(distance[j, i]), value, grid.level)
+    if best is None:
+        return None
+    value = best[1]
+    return float(np.linalg.norm(value) if np.ndim(value) else value), best[2]
 
 
 # ======================================================================== datasets

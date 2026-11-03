@@ -49,6 +49,13 @@
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.
+- **NHFLOW on a curvilinear grid with mesh refinement or blocks** (`G 50`, `G 50 1`):
+  the Free Surface AMR from the structured grids REEF3D writes (`.vts`) or from the
+  LAGOON store (`P 18`, needs REEF3D's patch for it): every grid's nodes, each place
+  drawn once (the cells another grid shows, `covered`, left out: a finer patch or the
+  ring of block 0), the ranks and blocks joined without a crack. The format: AMR
+  sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
+  `lagoon-convert` keeps them so.
 - Number boxes show as many decimals as their smallest value needs: a sphere's radius
   of 0.25 mm (0.00025) could not be typed with three.
 - Frame all fits a long domain seen from the front (along x since the views were

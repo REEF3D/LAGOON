@@ -211,3 +211,52 @@ def test_an_amr_set_of_3d_blocks(tmp_path):
     flat = AmrGrid(1, np.arange(3.0), np.arange(2.0), {n: np.zeros(2) for n in fields})
     with pytest.raises(ValueError, match="cells"):
         amr.append(0.5, 5, [flat])
+
+
+def _curved(level, rank, i0, i1, j0, j1, n=1, covered=None):
+    """A grid of a curvilinear grid: cells i0..i1 (of 20 around a quarter ring from
+    r 10 to 14 m) and j0..j1 (of 8 across it), n times finer; the x and y of every
+    node."""
+    a = np.linspace(i0, i1, (i1 - i0) * n + 1) * (0.5 * np.pi / 20)
+    r = 10.0 + np.linspace(j0, j1, (j1 - j0) * n + 1) * 0.5
+    x, y = r[:, None] * np.cos(a)[None, :], r[:, None] * np.sin(a)[None, :]
+    ny, nx = x.shape[0] - 1, x.shape[1] - 1
+    xc = 0.25 * (x[:-1, :-1] + x[1:, :-1] + x[:-1, 1:] + x[1:, 1:])
+    fields = {
+        "eta": (0.01 * xc).astype(np.float32),
+        "covered": np.zeros((ny, nx), np.int32) if covered is None else covered,
+    }
+    return AmrGrid(level, x, y, fields, rank)
+
+
+def test_a_curvilinear_amr_set(tmp_path):
+    """Grids of a curvilinear grid (REEF3D's G 50, NHFLOW with P 18): the x and y of
+    every node kept, ``horizontal`` "curvilinear"; rectilinear grids refused there
+    and the other way round."""
+    path = tmp_path / "REEF3D_NHFLOW.lagoon"
+    writer = StoreWriter.create(path, "NHFLOW")
+    fields = {"eta": (1, "float32"), "covered": (1, "int32")}
+    amr = writer.amr_writer("nhflow_amr", {"fields": fields, "curvilinear": True})
+    grids = [_curved(0, 0, 0, 10, 0, 8), _curved(0, 1, 10, 20, 0, 8), _curved(1, 0, 4, 8, 2, 6, 2)]
+    amr.append(0.0, 0, grids)
+    amr.append(1.0, 1, grids[:2])
+    with pytest.raises(ValueError, match="curvilinear"):
+        amr.append(2.0, 2, _grids(0))
+    writer.close()
+    stored = Store(path).amr["nhflow_amr"]
+    assert stored.curvilinear and stored.info["horizontal"] == "curvilinear"
+    got = stored.grids(0)
+    assert [g.x.shape for g in got] == [(9, 11), (9, 11), (9, 9)]
+    for a, b in zip(got, grids, strict=True):
+        assert a.curvilinear and (a.nx, a.ny) == (b.nx, b.ny)
+        assert np.array_equal(a.x, b.x) and np.array_equal(a.y, b.y)
+        assert np.array_equal(a.fields["eta"], b.fields["eta"])
+    assert stored.count(1) == 2 and stored.grids(1)[1].box == pytest.approx(grids[1].box)
+    # a covered field says which cells another grid shows
+    flag = np.zeros((8, 10), np.int32)
+    flag[2:6, 4:8] = 1
+    assert np.array_equal(module.covered(_curved(0, 0, 0, 10, 0, 8, covered=flag), grids), flag > 0)
+    # rectilinear sets refuse curvilinear grids
+    flat = writer.amr_writer("fnpf_amr", {"fields": {"eta": (1, "float32")}})
+    with pytest.raises(ValueError, match="rectilinear"):
+        flat.append(0.0, 0, [_curved(0, 0, 0, 10, 0, 8)])
