@@ -49,6 +49,8 @@
 - AMR surfaces without cracks: where two MPI ranks' grids meet, the nodes on the
   border average the cells of both (the same height and normal from either side),
   and a refined patch's border lies on the coarser surface next to it.
+- Number boxes show as many decimals as their smallest value needs: a sphere's radius
+  of 0.25 mm (0.00025) could not be typed with three.
 - Frame all fits a long domain seen from the front (along x since the views were
   exchanged): in perspective its near end is larger, and with a vertical scale its
   top was cut off.

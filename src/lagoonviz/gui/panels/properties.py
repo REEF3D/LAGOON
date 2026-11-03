@@ -643,7 +643,11 @@ def _number_box(prop: PropertySpec) -> _SpinBox:
     number_locale = QLocale.c()
     number_locale.setNumberOptions(QLocale.OmitGroupSeparator)
     spin.setLocale(number_locale)
-    spin.setDecimals(0 if isinstance(prop.default, int) else 3)
+    if isinstance(prop.default, int):
+        spin.setDecimals(0)
+    else:  # as many decimals as the smallest value needs (a sphere's 0.25 mm: 0.00025)
+        small = prop.minimum if prop.minimum and 0 < prop.minimum < 1 else 1.0
+        spin.setDecimals(max(3, min(8, math.ceil(-math.log10(small)) + 1)))
     spin.setRange(
         prop.minimum if prop.minimum is not None else -1e9,
         prop.maximum if prop.maximum is not None else 1e9,
