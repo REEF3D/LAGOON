@@ -1680,6 +1680,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     store; REEF3D_Case (the run log and control files) opens its case.
     ``stores=False`` leaves LAGOON stores in the case folder out (the converter reads
     the VTK output)."""
+    from lagoon_format.store import is_store
+
     from lagoonviz.core.data.amr import AMR_FOLDER, amr_datasets
     from lagoonviz.core.data.amr3d import FolderBlocks, amr_outputs, is_volume_amr
     from lagoonviz.core.data.lagoon import find_stores, store_blocks, store_datasets, stored_series
@@ -1703,7 +1705,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     refined: list[tuple] = []  # CFD's refined blocks of its volume: (solver, blocks, folder)
     store_paths: list[Path] = []
     alone = ""  # a store opened on its own: its solver
-    if path.is_dir() and path in find_stores(path.parent):  # a LAGOON store
+    if path.is_dir() and (path in find_stores(path.parent) or is_store(path)):
+        # a LAGOON store, also one kept from an earlier run (``*.lagoon-earlier``)
         case_dir = path.parent
         stored = store_datasets(path)
         store_paths = [path]

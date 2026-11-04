@@ -1,5 +1,7 @@
 """VTU/VTP to LAGOON store, and LAGOON stores opened as cases (phase 3)."""
 
+import shutil
+
 import numpy as np
 import pytest
 from lagoon_format.store import Store
@@ -107,6 +109,23 @@ def test_a_store_alone_opens_as_a_case(converted):
     assert case.path == run
     assert {d.role for d in case.datasets.values()} == {"volume", "free_surface", "bed"}
     assert all(isinstance(d, StoreDataset) for d in case.datasets.values())
+
+
+def test_an_earlier_store_opens_as_a_case(converted):
+    """The store of the run before, kept by REEF3D as ``*.lagoon-earlier`` when a new
+    run starts: opened on its own, its free surface and bed show, read from it."""
+    run, report = converted
+    earlier = run / "REEF3D_NHFLOW-20261104T074838Z-838c.lagoon-earlier"
+    shutil.copytree(report.store, earlier)
+    case = open_case(earlier)
+    assert {d.role for d in case.datasets.values()} == {"volume", "free_surface", "bed"}
+    assert all(isinstance(d, StoreDataset) for d in case.datasets.values())
+    session = Session()
+    session.open_case(earlier)
+    for kind in ("free_surface", "bathymetry"):
+        item = next(i for i in session.scene if i.kind == kind)
+        assert session.data.frame_key(item.id).case == str(earlier.resolve())
+        assert session.data.load(item.id).points.shape[0] > 0
 
 
 def test_a_store_alone_reads_from_the_store(converted):
@@ -540,3 +559,4 @@ def test_a_store_opened_on_its_own_is_its_solvers_run(tmp_path):
     )
     with pytest.raises(ValueError, match="no outputs yet"):
         open_case(empty)
+

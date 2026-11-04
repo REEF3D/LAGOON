@@ -56,6 +56,9 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- A store kept from the run before (`REEF3D_<SOLVER>-<run>.lagoon-earlier`, made when a
+  new run starts) opens with its free surface and bed: opened on its own it showed
+  nothing, as it was not taken for a store.
 - The Free Surface AMR's **velocity**: NHFLOW's top layer (`u_top`, `v_top`) joined
   into `velocity`, as SFLOW's u, v, w: colouring by its magnitude or a component, a
   point's time series, and arrows (*Vectors of*, now on the Free Surface AMR too).
