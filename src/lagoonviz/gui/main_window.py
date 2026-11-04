@@ -1647,13 +1647,19 @@ class MainWindow(QMainWindow):
         before = timeline.n_frames
         paths = self.session.reload()
         self._signatures = self._case_signatures()
-        timeline.update_range()
-        if at_end and timeline.n_frames > before:
-            timeline.go_to_frame(timeline.n_frames - 1)
-        added = timeline.n_frames - before
+        added = self._new_frames(before, at_end)
         news = f", {added} new output{'s' if added != 1 else ''}" if added > 0 else ""
         self.statusBar().showMessage(f"Reloaded {len(paths)} case(s){news}", 6000)
         return paths
+
+    def _new_frames(self, before: int, at_end: bool) -> int:
+        """The timeline after new outputs: at the end before, at the new end. Returns
+        how many frames were added."""
+        timeline = self.timeline
+        timeline.update_range()
+        if at_end and timeline.n_frames > before:
+            timeline.go_to_frame(timeline.n_frames - 1)
+        return timeline.n_frames - before
 
     def _case_signatures(self) -> dict[str, tuple]:
         return {
@@ -1677,11 +1683,27 @@ class MainWindow(QMainWindow):
             self._follow_timer.stop()
 
     def _check_for_new_output(self) -> None:
-        if self.timeline.play_button.isChecked():
-            return  # not in the middle of playing
+        timeline = self.timeline
+        if timeline.play_button.isChecked() or timeline.slider.isSliderDown():
+            return  # not in the middle of playing, nor while the timeline is dragged
         current = self._case_signatures()
-        if current != getattr(self, "_signatures", None):
-            self.reload_cases()
+        before = getattr(self, "_signatures", None)
+        if current == before:
+            return
+        # a run writing into its store: only the new outputs' times are read; the
+        # case and the frames read so far stay (reading the case folder again took
+        # seconds on a large one, and every frame had to be read again)
+        at_end = timeline.has_frames and timeline.frame_of(self.session.scene.time) >= (
+            timeline.n_frames - 1
+        )
+        frames = timeline.n_frames
+        if before is not None and self.session.grow(before, current):
+            self._signatures = current
+            added = self._new_frames(frames, at_end)
+            if added > 0:
+                self.statusBar().showMessage(f"{added} new output{'s' if added != 1 else ''}", 4000)
+            return
+        self.reload_cases()
 
     def save_screenshot_dialog(self) -> None:
         path, _ = QFileDialog.getSaveFileName(

@@ -56,6 +56,11 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- Following a run that writes into its store (P 18) no longer stalls the view: every
+  few seconds only the new outputs' times are read, and the frames read so far stay.
+  The case folder was read again each time (seconds on a large one) and every frame
+  read anew, so moving the timeline far lagged. Nothing is looked for while the
+  timeline is dragged.
 - A store kept from the run before (`REEF3D_<SOLVER>-<run>.lagoon-earlier`, made when a
   new run starts) opens with its free surface and bed: opened on its own it showed
   nothing, as it was not taken for a store.

@@ -10,6 +10,7 @@ dependency, the GUI only forwards its callbacks to the main thread.
 
 from __future__ import annotations
 
+import os
 import threading
 import weakref
 from collections import OrderedDict
@@ -487,16 +488,57 @@ class DataManager:
                 if folder.is_dir() and folder.name.startswith("REEF3D_"):
                     stamps.append((folder.name, folder.stat().st_mtime))
                     if folder.name == "REEF3D_Case":
-                        stamps += [(f.name, f.stat().st_size) for f in folder.glob("*.jsonl")]
+                        stamps += [
+                            (f"{folder.name}/{f.name}", f.stat().st_size)
+                            for f in sorted(folder.glob("*.jsonl"))
+                        ]
                     if folder.suffix == ".lagoon":  # a store grows its outputs' time arrays
                         stamps += [
-                            (f.parent.parent.name, f.stat().st_mtime)
+                            (f.parent.parent.relative_to(root).as_posix(), f.stat().st_mtime)
                             for f in sorted(folder.glob("*/time/zarr.json"))
                             + sorted(folder.glob("*/*/time/zarr.json"))  # bodies, profiles
                         ]
         except OSError:
             return ()
         return tuple(stamps)
+
+    def grow(self, case_item_id: str, before: tuple, after: tuple) -> bool:
+        """New outputs of a run still writing into its LAGOON stores, picked up without
+        reading the case folder again, when from ``before`` to ``after`` (two
+        signatures) only the run log and the time arrays of stored outputs grew that
+        read their new times themselves (free surface, bed, volume). The case and the
+        frames read so far stay (a store only appends), so following a run does not
+        stall the view nor read again what was shown. False when anything else changed
+        (a new run, a new store, VTK output, other stored outputs): then the case has
+        to be read again (:meth:`reload`)."""
+        if not before or not after or [n for n, _ in before] != [n for n, _ in after]:
+            return False
+        case = self.case(case_item_id)
+        if case is None:
+            return False
+        groups: dict[str, list] = {}
+        for dataset in case.datasets.values():
+            output = getattr(dataset, "output", None)
+            if output is not None and hasattr(dataset, "refresh"):
+                groups.setdefault(os.path.normcase(str(output.group.path.resolve())), []).append(
+                    dataset
+                )
+        root = Path(case.path)
+        grown = []
+        for (name, old), (_name, new) in zip(before, after, strict=True):
+            if old == new:
+                continue
+            if name.startswith("REEF3D_Case/"):
+                continue  # the run log: what it says about the run is read when needed
+            if ".lagoon/" not in name:
+                return False  # an output folder (VTK files), a store made or replaced
+            found = groups.get(os.path.normcase(str((root / name).resolve())))
+            if not found:
+                return False  # stored output without its own refresh (AMR, bodies, ...)
+            grown += found
+        for dataset in grown:
+            dataset.refresh()
+        return True
 
     def open(self, path: str | Path) -> Case:
         """Open (or return the already open) case at ``path``."""

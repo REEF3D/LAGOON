@@ -2981,6 +2981,20 @@ class Session:
         self.scene.data_changed()
         return paths
 
+    def grow(self, before: dict[str, tuple], after: dict[str, tuple]) -> bool:
+        """New outputs of runs still writing into their LAGOON stores, without reading
+        the cases again (:meth:`DataManager.grow`): ``before`` and ``after`` are the
+        cases' signatures by case item. True if that was all that changed; False: the
+        cases must be read again (:meth:`reload`). Not an undo step."""
+        if set(before) != set(after):
+            return False
+        changed = [c for c in after if before[c] != after[c]]
+        if not all(self.data.grow(c, before[c], after[c]) for c in changed):
+            return False
+        if changed:
+            self.scene.data_changed()
+        return True
+
     def set_time(self, time: float) -> None:
         """Move the current time. View state: not an undo step."""
         self.scene.set_time(time)

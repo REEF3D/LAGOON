@@ -560,3 +560,47 @@ def test_a_store_opened_on_its_own_is_its_solvers_run(tmp_path):
     with pytest.raises(ValueError, match="no outputs yet"):
         open_case(empty)
 
+
+def test_a_store_written_on_grows_without_reading_the_case_again(tmp_path):
+    """Following a run that writes into its store: the new outputs' times are read,
+    the case and the frames read so far stay (reading the case folder again took
+    seconds on a large one, and every frame had to be read again)."""
+    import os
+
+    full = make_run(tmp_path / "full", frames=5, volume=False)
+    live = tmp_path / "live"
+    shutil.copytree(full, live)
+    folders = [live / "REEF3D_NHFLOW_VTP_FSF", live / "REEF3D_NHFLOW_VTP_BED"]
+    for folder in folders:
+        for path in folder.glob("*0000000[34]*"):
+            path.unlink()
+    convert(live)
+    session = Session()
+    session.open_case(live)
+    surface = next(i for i in session.scene if i.kind == "free_surface")
+    case = session.data.case(surface.id)
+    assert session.data.n_frames() == 3
+    session.data.load(surface.id)
+    cached = len(session.data.cache)
+    before = {"case-1": session.data.signature("case-1")}
+    stamps = {f: os.stat(f).st_mtime for f in folders}
+    for folder in folders:  # the run goes on: two more outputs into the store
+        for path in (full / folder.name).glob("*0000000[34]*"):
+            shutil.copy(path, folder)
+    convert(live)
+    for folder, stamp in stamps.items():  # (only the store changed, as with P 18 1)
+        os.utime(folder, (stamp, stamp))
+    after = {"case-1": session.data.signature("case-1")}
+    assert after != before
+    events = []
+    session.scene.subscribe(lambda event, item: events.append(event))
+    assert session.grow(before, after)
+    assert session.data.case(surface.id) is case  # not read again
+    assert session.data.n_frames() == 5 and len(session.data.cache) == cached
+    assert events == ["reset"]  # the views look again (what they show stays read)
+    session.set_time(4)
+    assert session.data.frame_key(surface.id).index == 4
+    assert session.data.load(surface.id).points.shape[0] > 0
+    # a new output folder (VTK files): the case is read again
+    (live / "REEF3D_NHFLOW_VTU").mkdir()
+    assert not session.grow(after, {"case-1": session.data.signature("case-1")})
