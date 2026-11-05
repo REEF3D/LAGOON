@@ -352,7 +352,8 @@ KINDS: dict[str, KindSpec] = {
                 "off",
                 "Outline",
                 choices=("off", "dark", "white"),
-                tip="The edges of the volume's box, as ParaView's outline",
+                tip="The edges of the volume's box, as ParaView's outline; shown also with "
+                "the volume switched off (then its first output's box, nothing read)",
             ),
             "surface": PropertySpec(
                 True,

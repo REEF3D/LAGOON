@@ -1295,6 +1295,10 @@ def _frame_objects(
                 continue
             color = (getattr(lines, own, None) if own else None) or preset.contours
             out.lines(f"{item_id}#{label}", lines.segments, width, color)
+    for item_id in data.data_items():  # the outlines of volumes switched off
+        box = data.outline_alone(item_id)
+        if box is not None:
+            out.lines(f"{item_id}#box", box.segments, OUTLINE_WIDTH, box.color)
     out.sea()
     profiles = set(data.profile_items())
     for item_id in data.series_items() + sorted(profiles):

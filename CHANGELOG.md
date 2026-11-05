@@ -63,7 +63,8 @@
 - CFD: the **bed** is shown (CFD writes none): the floor of its volume, or the zero
   level of its bed level set `topo` when it writes one; not stored by lagoon-convert.
 - Volumes: an **Outline** (off, dark, white), the edges of the volume's box as
-  ParaView's; with *Outside* off, the outline alone.
+  ParaView's, also while the volume is switched off (as a CFD run opens: the box of
+  its first output, nothing else read); with *Outside* off, the outline alone.
 - Playing a CFD run is about a third faster: the free surface (the iso-surface of the
   level set phi) makes its grid lines only when they are shown.
 - 2D: grid lines (and contour lines) no longer vanish under their surface after the

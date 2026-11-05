@@ -156,6 +156,16 @@ def test_the_bed_and_the_outline_of_a_cfd_run(tmp_path):
     np.testing.assert_allclose(np.ptp(corners, axis=0), size, rtol=0.01)
     lengths = np.linalg.norm(box.segments[:, 1] - box.segments[:, 0], axis=1)
     assert sorted(np.round(lengths / lengths.max(), 3))[-4:] == [1.0] * 4  # 4 of each
+    # the volume switched off (as a CFD run opens): its outline stays, from the box
+    # of its first output
+    assert not volume.visible
+    alone = s.data.outline_alone(volume.id)
+    np.testing.assert_allclose(alone.segments, box.segments, atol=1e-5)
+    s.set_property(volume.id, "outline", "off")
+    assert s.data.outline_alone(volume.id) is None
+    s.set_property(volume.id, "outline", "dark")
+    s.set_visible(volume.id, True)
+    assert s.data.outline_alone(volume.id) is None  # drawn with the volume then
     # the outline alone: nothing of the outside drawn
     s.set_property(volume.id, "surface", False)
     shown = s.data.display(volume.id, outside)

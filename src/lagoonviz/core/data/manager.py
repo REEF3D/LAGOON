@@ -10,6 +10,7 @@ dependency, the GUI only forwards its callbacks to the main thread.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import weakref
@@ -47,6 +48,8 @@ from lagoonviz.core.data.setup import (
 from lagoonviz.core.kinds import kind_spec
 from lagoonviz.core.scene import MODE_KINDS, SETUP_KINDS, Scene, SceneItem
 from lagoonviz.core.vectors import arrow_segments, split_vectors, spread_points, vector_choices
+
+log = logging.getLogger(__name__)
 
 #: item kinds that show a dataset, and the dataset role they use by default
 DATA_KINDS = {
@@ -466,6 +469,7 @@ class DataManager:
         self._still_water.clear()
         self._wet.clear()
         self._logged = None
+        self.__dict__.pop("_volume_boxes", None)  # (a new run: another domain)
         with self._samples_lock:
             self._samples.clear()  # the run may have grown: sampled again
         for key in [k for k in self._setups if not self._setups[k].control.modified]:
@@ -1186,17 +1190,55 @@ class DataManager:
         the volume as shown (with the vertical scale; in 2D its rectangle), a little
         outside it so its own faces do not hide them; None for other items or off."""
         item = self.scene.get(item_id)
-        if item.kind != "volume":
+        if item.kind != "volume" or str(item.properties.get("outline", "off")) == "off":
             return None
-        colour = str(item.properties.get("outline", "off"))
         positions = np.asarray(shown.positions, np.float64)
-        if colour == "off" or not len(positions):
-            return None
-        finite = positions[np.isfinite(positions).all(axis=1)]
+        finite = positions[np.isfinite(positions).all(axis=1)] if len(positions) else positions
         if not len(finite):
             return None
-        low, high = finite.min(axis=0), finite.max(axis=0)
-        margin = 1e-3 * float(max(np.ptp(finite, axis=0).max(), 1e-9))
+        return self._box_lines(item_id, finite.min(axis=0), finite.max(axis=0), shown.visible)
+
+    def outline_alone(self, item_id: str) -> Trails | None:
+        """A volume's outline while the volume itself is switched off (its outline
+        set, its case shown): the box of its first output (read once, kept), with the
+        vertical scale; None otherwise. Its frames are not read meanwhile."""
+        item = self.scene.get(item_id)
+        if item.kind != "volume" or item.visible or not self.drawn(item_id):
+            return None
+        if str(item.properties.get("outline", "off")) == "off":
+            return None
+        case_item = self.case_item(item_id)
+        if case_item is not None and not case_item.visible:
+            return None
+        dataset = self.dataset(item_id)
+        if dataset is None:
+            return None
+        boxes = self.__dict__.setdefault("_volume_boxes", {})
+        key = (str(dataset.folder), dataset.key)
+        box = boxes.get(key)
+        if box is None:
+            try:
+                points = np.asarray(dataset.read(0, []).points, np.float64)
+            except (OSError, ValueError, KeyError, IndexError) as error:
+                log.warning("%s: no outline: %s", dataset.label, error)
+                return None
+            points = points[np.isfinite(points).all(axis=1)]
+            if not len(points):
+                return None
+            box = boxes[key] = (points.min(axis=0), points.max(axis=0))
+        low, high = np.array(box[0]), np.array(box[1])
+        exaggeration = self.exaggeration(item_id)
+        if exaggeration != 1.0:
+            level = self.case_water_level(item_id)
+            low[2], high[2] = (level + exaggeration * (z - level) for z in (low[2], high[2]))
+        return self._box_lines(item_id, low, high, True)
+
+    def _box_lines(self, item_id: str, low, high, visible: bool) -> Trails:
+        """The twelve edges of a box (as shown), a little outside it, in the colour of
+        the item's "outline"."""
+        colour = str(self.scene.get(item_id).properties.get("outline", "off"))
+        low, high = np.asarray(low, np.float64).copy(), np.asarray(high, np.float64).copy()
+        margin = 1e-3 * float(max((high - low).max(), 1e-9))
         low, high = low - margin, high + margin
         if self.scene.flat:
             low[2] = high[2] = float(PLAN_LAYERS.get("volume", 0.5)) + 0.06
@@ -1211,7 +1253,7 @@ class DataManager:
         return Trails(
             item_id,
             corners[edges].astype(np.float32),
-            shown.visible,
+            visible,
             "#ffffff" if colour == "white" else "#1e2833",
         )
 

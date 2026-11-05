@@ -114,6 +114,7 @@ class OffscreenView:
             item = session.scene.get(item_id)
             if not session.data.shown(item_id):  # switched off, or results in the set-up
                 self.scene.remove(item_id)  # (and its frames not read)
+                self.scene.update_box(item_id, session.data.outline_alone(item_id))
                 continue
             mesh = session.data.load(item_id)
             if mesh is None:

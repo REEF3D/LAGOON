@@ -650,9 +650,11 @@ class Viewport3D(QWidget):
             # a frame asked for before and not started is dropped (dragging the slider)
             owner = (id(self), item_id)
             if not data.shown(item_id):
-                # switched off: its frames are not read (a large volume costs nothing)
+                # switched off: its frames are not read (a large volume costs nothing);
+                # a volume's outline can stay
                 self.loader.want(owner, None)
                 self.view.remove(item_id)
+                self.view.update_box(item_id, data.outline_alone(item_id))
                 self._wanted.pop(item_id, None)
                 self._shown_keys.pop(item_id, None)
                 continue
