@@ -633,6 +633,29 @@ as the set `<solver>_amr`, the fields as float32 (integer fields such as SFLOW's
 with `P 18` (rank 0 gathers the patches of all ranks, `lagoon_amr`); `P 18 1`
 leaves out the `.vtm` and `.vtr` files.
 
-## 12. To be specified
+## 12. Solids
+
+The solids of the case the run was made for: DIVEMesh's structures and the blocks
+that shape the bed (its `S` commands and its STL geometry, `S 1 1`), as triangles,
+written once. A store that holds them shows its structures wherever it is copied
+to, without the case's input files or `DIVEMesh_Paraview`.
+
+```json
+{"lagoon": {"role": "solid", "source": "DIVEMesh_Paraview/REEF3D_Solid.vtp"}}
+```
+
+| array       | shape    | dtype   | content |
+|-------------|----------|---------|---------|
+| `points`    | (np, 3)  | float64 | corners [m], in model coordinates (float32 is read too) |
+| `triangles` | (nt, 3)  | int32   | the three corners of each triangle (point numbers) |
+
+The group is `solids`, its arrays one chunk each (codec `bytes`, little endian,
+optionally followed by `gzip`); it has no time. REEF3D writes it with `P 18` when
+it begins a store, from DIVEMesh's `REEF3D_Solid.vtp` when that is the case's
+(DIVEMesh writes it only for a case with solids: a file older than DIVEMesh's
+`DIVEMesh_Partition.vtp` by more than an hour is left over from another case and
+not taken); `lagoon-convert` writes the solids LAGOON shows for the case.
+
+## 13. To be specified
 
 - Particle tracks by particle id (from `id` fields) for path lines.

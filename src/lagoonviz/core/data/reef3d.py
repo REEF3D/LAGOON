@@ -942,12 +942,14 @@ class Case:
 
 class SolidDataset(Dataset):
     """DIVEMesh's solids of a case (:mod:`lagoonviz.core.data.divemesh`): one frame,
-    shown at any time, read from DIVEMesh_Paraview/REEF3D_Solid.vtp or built from
-    control.txt. The faces that lie in the bed (``bed_source``'s first frame) are
-    left out."""
+    shown at any time, read from a LAGOON store (SPEC 12), from
+    DIVEMesh_Paraview/REEF3D_Solid.vtp or built from control.txt. The faces that lie
+    in the bed (``bed_source``'s first frame) are left out."""
 
     def __init__(self, source: Path, case_dir: Path) -> None:
         self.source = source
+        #: read from a store (``source`` is the store's folder)
+        self.stored = Path(source).is_dir()
         #: the bed whose faces the solids leave out (set when the case is opened)
         self.bed_source: Dataset | None = None
         self._mesh: SurfaceMesh | None = None
@@ -972,13 +974,11 @@ class SolidDataset(Dataset):
         """Lower and upper corner of the solids seen from above (x, y); None if
         there are none or they cannot be read."""
         if self._plan is None:
-            from lagoonviz.core.data.divemesh import solids_from_control
-
             try:
                 if self.source.suffix == ".vtp":
                     points = read_piece(self.source, point_arrays=[], with_cells=False).points
                 else:
-                    points = solids_from_control(self.source)[0]
+                    points = self.triangles()[0]
             except (OSError, ValueError, KeyError, IndexError):
                 return None
             points = np.asarray(points, np.float64).reshape(-1, 3)[:, :2]
@@ -998,14 +998,27 @@ class SolidDataset(Dataset):
         pad = margin * float(np.max(high - low))
         return bool((extent[0] <= high + pad).all() and (extent[1] >= low - pad).all())
 
-    def _build(self) -> SurfaceMesh:
-        from lagoonviz.core.data.divemesh import bed_faces, solids_from_control
+    def triangles(self) -> tuple[np.ndarray, np.ndarray]:
+        """The solids as they are (the faces in the bed too): points, triangles."""
+        from lagoonviz.core.data.divemesh import solids_from_control
 
+        if self.stored:
+            from lagoon_format.store import Store
+
+            found = Store(self.source).solids()
+            if found is None:
+                raise ValueError(f"{self.source.name} holds no solids")
+            return found[0], found[1]
         if self.source.suffix == ".vtp":
             mesh = self._read_plain(self.frames[0], [], False)
-            points, triangles = mesh.points, mesh.triangles
-        else:
-            points, triangles, _ = solids_from_control(self.source)
+            return mesh.points, mesh.triangles
+        points, triangles, _ = solids_from_control(self.source)
+        return points, triangles
+
+    def _build(self) -> SurfaceMesh:
+        from lagoonviz.core.data.divemesh import bed_faces
+
+        points, triangles = self.triangles()
         if self.bed_source is not None and len(triangles):
             try:
                 bed = self.bed_source.read(0, []).points
@@ -1188,16 +1201,18 @@ class GeoDatDataset(Dataset):
         return written, written
 
 
-def solid_datasets(case_dir: Path) -> list[Dataset]:
+def solid_datasets(case_dir: Path, stores: list[Path] | None = None) -> list[Dataset]:
     """DIVEMesh's solids and bed of a case folder, and its geo.dat, when it has any:
-    only the case's own (:func:`~lagoonviz.core.data.divemesh.find_solids`), not what
-    another case's DIVEMesh run left in the folder."""
+    the solids a store of the run holds (SPEC 12: the run's own, wherever the store is
+    copied to; of ctrl.txt's solver first), else the case folder's own
+    (:func:`~lagoonviz.core.data.divemesh.find_solids`), not what another case's
+    DIVEMesh run left in the folder."""
     from lagoonviz.core.data.divemesh import find_solids, left_over
     from lagoonviz.core.data.divemesh_grid import TOPO
     from lagoonviz.core.data.forcing import find_forcing
 
     found: list[Dataset] = []
-    source = find_solids(case_dir)
+    source = _stored_solids(stores or [], read_ctrl_solver(case_dir)) or find_solids(case_dir)
     if source is not None:
         found.append(SolidDataset(source, case_dir))
     forcing = find_forcing(case_dir)
@@ -1209,6 +1224,20 @@ def solid_datasets(case_dir: Path) -> list[Dataset]:
     if (case_dir / "geo.dat").is_file():
         found.append(GeoDatDataset(case_dir / "geo.dat", case_dir))
     return found
+
+
+def _stored_solids(stores: list[Path], solver: str | None) -> Path | None:
+    """The store that holds solids (SPEC 12), of ``solver`` first; None if none does."""
+    from lagoon_format.store import Store, StoreError
+
+    ordered = sorted(stores, key=lambda s: _store_solver(s) != (solver or "").upper())
+    for store in ordered:
+        try:
+            if Store(store).solids() is not None:
+                return store
+        except (OSError, ValueError, KeyError, StoreError):
+            continue
+    return None
 
 
 def run_domains(case_dir: Path, run_ids) -> dict[str, tuple[np.ndarray, np.ndarray]]:
@@ -1784,7 +1813,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     datasets += amr_beds(datasets)
     datasets += volume_beds(datasets)  # CFD writes no bed: its volume's
     if path == case_dir or store_paths:  # the case itself: its solids too
-        datasets += solid_datasets(case_dir)
+        datasets += solid_datasets(case_dir, store_paths)
     series = find_series(case_dir)
     profiles = find_profiles(case_dir)
     if store_paths:  # tables and profiles of LAGOON stores replace the text files

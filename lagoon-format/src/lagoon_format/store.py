@@ -503,6 +503,20 @@ class Store:
                 if key in amr:
                     self.amr[key] = AmrSet.open(amr.group(key))
 
+    def solids(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]] | None:
+        """The case's solids (SPEC 12): points (np, 3) float64, triangles (nt, 3)
+        int32 and the group's attributes; None without them."""
+        if "solids" not in self.root:
+            return None
+        group = self.root.group("solids")
+        if "points" not in group or "triangles" not in group:
+            return None
+        points = np.asarray(group.array("points")[:], np.float64).reshape(-1, 3)
+        triangles = np.asarray(group.array("triangles")[:], np.int32).reshape(-1, 3)
+        if len(triangles) and (triangles.min() < 0 or triangles.max() >= len(points)):
+            raise StoreError(f"{self.path}: solids: a triangle names a point that is not there")
+        return points, triangles, dict(group.attrs.get("lagoon", {}))
+
     @property
     def run_id(self) -> str | None:
         return self.run.get("run") if isinstance(self.run, dict) else None
@@ -686,6 +700,32 @@ class StoreWriter:
             attributes[GEOREF_KEY] = georef.to_dict()
         Group.create(path, attributes)
         return cls(path)
+
+    def set_solids(self, points, triangles, source: str = "") -> None:
+        """Write the case's solids (SPEC 12): corners (np, 3) and triangles (nt, 3) as
+        point numbers; replaces any written before."""
+        points = np.ascontiguousarray(np.asarray(points, np.float64).reshape(-1, 3))
+        triangles = np.ascontiguousarray(np.asarray(triangles, np.int32).reshape(-1, 3))
+        if len(triangles) and (triangles.min() < 0 or triangles.max() >= len(points)):
+            raise StoreError("solids: a triangle names a point that is not there")
+        info: dict[str, Any] = {"role": "solid"}
+        if source:
+            info["source"] = source
+        group = Group.create(self.path / "solids", {"lagoon": info})
+        for name, values, dims in (
+            ("points", points, ["point", "xyz"]),
+            ("triangles", triangles, ["triangle", "corner"]),
+        ):
+            array = Array.create(
+                group.path / name,
+                values.shape,
+                values.dtype,
+                [max(n, 1) for n in values.shape],
+                codecs=codecs_for("gzip", 1, None),
+                dimension_names=dims,
+            )
+            if values.size:
+                array[:] = values
 
     def set_georef(self, georef: Georef | None) -> None:
         """Give the store a georeference (SPEC 1.2), or with None take it away."""

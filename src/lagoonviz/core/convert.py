@@ -45,8 +45,9 @@ ROLES = {"volume": "sigma", "free_surface": "surface", "bed": "surface"}
 #: change in number from output to output, with cells for objects
 OBJECT_ROLES = ("particles", "dem", "ice", "rods", "mooring")
 #: what else is converted (format 0.2): floating bodies (mesh once, a rigid motion
-#: per output), particles and objects, time series tables and free surface lines
-EXTRAS = ("bodies", *OBJECT_ROLES, "amr", "series", "profiles")
+#: per output), particles and objects, time series tables and free surface lines,
+#: the case's solids (SPEC 12)
+EXTRAS = ("bodies", *OBJECT_ROLES, "amr", "series", "profiles", "solids")
 SIGMA_SOLVERS = ("FNPF", "NHFLOW")
 #: solvers whose volume is converted: σ-grids, and CFD's Cartesian grid
 VOLUME_SOLVERS = (*SIGMA_SOLVERS, "CFD")
@@ -223,7 +224,8 @@ def store_size(path: Path) -> int:
     return sum(p.stat().st_size for p in Path(path).rglob("*") if p.is_file())
 
 
-#: roles the store has no place for: they stay in their files (the CPM bed's .dat)
+#: roles that are not outputs over time: the CPM bed's .dat stays in its file, the
+#: solids are written once (SPEC 12, _convert_solids)
 KEPT_IN_FILES = ("solid", "cpm_bed")
 
 
@@ -379,8 +381,34 @@ def convert(
         added["series"] = _convert_series(series, writer)
     if profiles:
         added["profiles"] = _convert_profiles(profiles, writer, progress)
+    if "solids" in roles:
+        solids = _convert_solids(case, writer)
+        if solids:
+            added["solids"] = solids
     writer.close()
     return Report(path, added, vtk_bytes, _time.perf_counter() - began, skipped)
+
+
+def _convert_solids(case: Case, writer: StoreWriter) -> int:
+    """The case's solids (DIVEMesh's file, else built from control.txt and its STL)
+    into the store once (SPEC 12), as they are (the faces in the bed too); the
+    triangles written, 0 when the store has them or the case none."""
+    solid = case.by_role("solid")
+    if solid is None or not hasattr(solid, "triangles") or Store(writer.path).solids() is not None:
+        return 0
+    try:
+        points, triangles = solid.triangles()
+    except (OSError, ValueError, KeyError, IndexError):
+        return 0
+    if not len(triangles):
+        return 0
+    source = Path(solid.source)
+    try:
+        source = source.relative_to(case.path)
+    except ValueError:
+        pass
+    writer.set_solids(points, triangles, source.as_posix())
+    return int(len(triangles))
 
 
 def _series_solver(case: Case) -> str:

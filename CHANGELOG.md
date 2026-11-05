@@ -56,6 +56,12 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- **Solids in the store** (format: SPEC 12, group `solids`): `lagoon-convert` writes the
+  case's solids (DIVEMesh's file, or built from control.txt and its STL) into the
+  store once, REEF3D with `P 18` when it begins a store (REEF3D patch LAGOON/0025);
+  LAGOON shows a store's solids
+  first (the run's own), so a store copied to another computer shows its structures
+  without control.txt, solid.stl or `DIVEMesh_Paraview`.
 - DIVEMesh's STL geometry (`S 1 1`, `solid.stl`, ASCII or binary) is built from
   control.txt too, placed as DIVEMesh places it (S 4 scale, S 7 move, S 8 turn): a
   case without DIVEMesh's own solid file (`DIVEMesh_Paraview`, e.g. synced to another

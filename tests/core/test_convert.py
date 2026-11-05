@@ -605,3 +605,36 @@ def test_a_store_written_on_grows_without_reading_the_case_again(tmp_path):
     # a new output folder (VTK files): the case is read again
     (live / "REEF3D_NHFLOW_VTU").mkdir()
     assert not session.grow(after, {"case-1": session.data.signature("case-1")})
+
+
+def test_the_solids_go_into_the_store(tmp_path):
+    """lagoon-convert writes the case's solids into the store once (SPEC 12): the store
+    copied on its own, without control.txt or DIVEMesh_Paraview, shows them."""
+    from lagoonviz.core.data.reef3d import SolidDataset
+
+    run = make_run(tmp_path / "case", frames=2)
+    (run / "control.txt").write_text(
+        "B 10 0.0 8.0 0.0 4.0 0.0 1.0\nS 10 1.0 2.0 1.0 2.0 0.0 3.0   // a pier\n"
+    )
+    report = convert(run)
+    assert report.outputs["solids"] == 12
+    points, triangles, info = Store(report.store).solids()
+    assert info["source"] == "control.txt" and len(triangles) == 12
+    np.testing.assert_allclose(points.min(axis=0), [1.0, 1.0, 0.0])
+    np.testing.assert_allclose(points.max(axis=0), [2.0, 2.0, 3.0])
+    assert "solids" not in convert(run).outputs  # written once
+    alone = tmp_path / "elsewhere" / report.store.name
+    shutil.copytree(report.store, alone)
+    session = Session()
+    session.open_case(alone)
+    solid = next(i for i in session.scene if i.kind == "structure")
+    dataset = session.data.dataset(solid.id)
+    assert isinstance(dataset, SolidDataset) and dataset.stored
+    mesh = session.data.load(solid.id)
+    np.testing.assert_allclose(mesh.points.max(axis=0), [2.0, 2.0, 3.0])
+    # next to the case: the store's solids, the run's (control.txt changed since)
+    (run / "control.txt").write_text("B 10 0.0 8.0 0.0 4.0 0.0 1.0\nS 10 5 6 1 2 0 1\n")
+    session = Session()
+    session.open_case(run)
+    solid = next(i for i in session.scene if i.kind == "structure")
+    assert session.data.dataset(solid.id).stored
