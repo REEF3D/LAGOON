@@ -474,11 +474,39 @@ class StoreBlocks:
         self.times = dict(zip(self._steps, times, strict=False)) if times else {}
         self._index = {step: t for t, step in enumerate(self._steps)}
         self._grids: dict[int, list] = {}
+        #: each output's block levels (its grid table) and boxes (its coordinates):
+        #: what opening a run and the volume's cells need, without the blocks' fields
+        self._levels: dict[int, np.ndarray] = {}
+        self._boxes: dict[int, list[tuple]] = {}
         self._lock = threading.Lock()
 
     @property
     def steps(self) -> list[int]:
         return list(self._steps)
+
+    def _levels_of(self, t: int) -> np.ndarray:
+        with self._lock:
+            found = self._levels.get(t)
+        if found is None:
+            found = np.asarray(self.amr.table(t)["level"], np.int64)
+            with self._lock:
+                self._levels[t] = found
+        return found
+
+    def _boxes_of(self, t: int) -> list[tuple]:
+        with self._lock:
+            found = self._boxes.get(t)
+        if found is None:
+            found = [
+                (float(g.x[0]), float(g.x[-1]), float(g.y[0]), float(g.y[-1]),
+                 float(g.z[0]), float(g.z[-1]))
+                for g in self.amr.grids(t, [])
+            ]  # fmt: skip
+            with self._lock:
+                if len(self._boxes) > 4096:
+                    self._boxes.clear()
+                self._boxes[t] = found
+        return found
 
     def _of(self, t: int) -> list[Block]:
         with self._lock:
@@ -501,21 +529,27 @@ class StoreBlocks:
         return found
 
     def keys(self, step: int) -> list[Path]:
+        """The blocks of an output, from its grid table alone (opening a run read
+        every block of every output, its fields too: 40 s for a CFD run of 140
+        outputs)."""
         t = self._index.get(step)
-        return [] if t is None else [b.path for b in self._of(t)]
+        if t is None:
+            return []
+        path = self.amr.group.path / f"t{t}"
+        return [path / f"g{g}.block" for g in range(len(self._levels_of(t)))]
 
     def _find(self, key: Path) -> Block:
         t = int(key.parent.name[1:])
         return self._of(t)[int(key.stem[1:])]
 
     def box(self, key: Path) -> tuple:
-        return self._find(key).box
+        return self._boxes_of(int(key.parent.name[1:]))[int(key.stem[1:])]
 
     def block(self, key: Path) -> Block:
         return self._find(key)
 
     def level(self, key: Path) -> int:
-        return self._find(key).level
+        return int(self._levels_of(int(key.parent.name[1:]))[int(key.stem[1:])])
 
     def stamp(self, step: int) -> Path:
         return self.amr.group.path / "time" / "zarr.json"

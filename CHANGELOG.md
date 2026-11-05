@@ -56,6 +56,10 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- Opening or reloading a CFD run with refined blocks in its store is many times
+  faster (the weir case: 43 s to 2.6 s in a VM): the blocks of every output are found
+  from the set's grid table, their fields read only when shown (all of every output
+  were read); the run log is read once per change, not several times.
 - **Solids in the store** (format: SPEC 12, group `solids`): `lagoon-convert` writes the
   case's solids (DIVEMesh's file, or built from control.txt and its STL) into the
   store once, REEF3D with `P 18` when it begins a store (REEF3D patch LAGOON/0025);

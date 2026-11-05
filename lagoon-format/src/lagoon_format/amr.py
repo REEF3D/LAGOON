@@ -209,15 +209,18 @@ class AmrSet:
             array = self._arrays[name] = self.group.array(name)
         return array
 
-    def _per_output(self, name: str) -> np.ndarray:
-        self._fresh()
+    def _per_output(self, name: str, fresh: bool = True) -> np.ndarray:
+        if fresh:
+            self._fresh()
         if name not in self._per:
             self._per[name] = self._array(name)[: self._count]
         return self._per[name]
 
-    def _rows(self, name: str, low: int, high: int) -> np.ndarray:
-        """Rows low:high of a growing array; a small array is read whole once."""
-        self._fresh()
+    def _rows(self, name: str, low: int, high: int, fresh: bool = True) -> np.ndarray:
+        """Rows low:high of a growing array; a small array is read whole once. (With
+        ``fresh`` False the caller has just looked whether the set grew.)"""
+        if fresh:
+            self._fresh()
         whole = self._whole.get(name)
         if whole is not None and high <= len(whole):
             return whole[low:high].copy()
@@ -235,18 +238,19 @@ class AmrSet:
     def steps(self) -> np.ndarray:
         return self._per_output("step")
 
-    def _grid_span(self, t: int) -> tuple[int, int]:
-        end = self._per_output("grid_end")
+    def _grid_span(self, t: int, fresh: bool = True) -> tuple[int, int]:
+        end = self._per_output("grid_end", fresh)
         return (int(end[t - 1]) if t > 0 else 0), int(end[t])
 
     def table(self, t: int) -> dict[str, np.ndarray]:
         """The grids of output t: ``level``, ``rank``, ``size`` (nx, ny cells), and
         the start and end of each grid's ``x``, ``y`` and cells."""
-        g0, g1 = self._grid_span(t)
-        rows = {name: self._rows(f"grids/{name}", g0, g1) for name in grid_table(self.dims)}
+        self._fresh()  # once (it reads the length of the time array)
+        g0, g1 = self._grid_span(t, False)
+        rows = {name: self._rows(f"grids/{name}", g0, g1, False) for name in grid_table(self.dims)}
         axes = ("x", "y", "z") if self.dims == 3 else ("x", "y")
         for name in (*axes, "cell"):
-            before = self._rows(f"grids/{name}_end", g0 - 1, g0) if g0 > 0 else np.zeros(1)
+            before = self._rows(f"grids/{name}_end", g0 - 1, g0, False) if g0 > 0 else np.zeros(1)
             ends = rows[f"{name}_end"].astype(np.int64)
             rows[f"{name}_start"] = np.concatenate([before.astype(np.int64), ends[:-1]])
         return rows
@@ -263,14 +267,14 @@ class AmrSet:
             return []
         names = list(self.fields) if fields is None else [f for f in fields if f in self.fields]
         arrays = _arrays(self.info.get("fields", {}))
-        x = self._rows("x", int(rows["x_start"][0]), int(rows["x_end"][-1]))
-        y = self._rows("y", int(rows["y_start"][0]), int(rows["y_end"][-1]))
+        x = self._rows("x", int(rows["x_start"][0]), int(rows["x_end"][-1]), False)
+        y = self._rows("y", int(rows["y_start"][0]), int(rows["y_end"][-1]), False)
         c0, c1 = int(rows["cell_start"][0]), int(rows["cell_end"][-1])
-        values = {name: self._rows(f"cell_data/{arrays[name]}", c0, c1) for name in names}
+        values = {name: self._rows(f"cell_data/{arrays[name]}", c0, c1, False) for name in names}
         x0, y0 = int(rows["x_start"][0]), int(rows["y_start"][0])
         volume = self.dims == 3
         if volume:
-            z = self._rows("z", int(rows["z_start"][0]), int(rows["z_end"][-1]))
+            z = self._rows("z", int(rows["z_start"][0]), int(rows["z_end"][-1]), False)
             z0 = int(rows["z_start"][0])
         grids = []
         for g in range(len(rows["level"])):

@@ -1346,21 +1346,36 @@ def _width(path: Path) -> int:
 
 
 _OWNERS: dict[Path, tuple[tuple, dict]] = {}
+#: the run logs read, by case folder: (their files' names, sizes and times, the log)
+_LOGS: dict[Path, tuple[tuple, RunLog | None]] = {}
+
+
+def _log_stamp(case_dir: Path) -> tuple:
+    """The run log files of a case folder with their sizes and times: a new run or a
+    longer log changes it."""
+    logs = sorted((case_dir / "REEF3D_Case").glob("REEF3D_*_run.jsonl")) + sorted(
+        case_dir.glob("REEF3D_*_run.jsonl")
+    )
+    stamps = []
+    for p in logs:
+        try:
+            info = p.stat()
+        except OSError:
+            continue
+        stamps.append((p.name, info.st_mtime, info.st_size))
+    return tuple(stamps)
 
 
 def _owners(case_dir: Path) -> dict[Path, tuple[Run, Output]]:
     """Which run wrote each file, and at which time, from the case's run log
     (REEF3D_Case/REEF3D_*_run.jsonl); empty without one. Read once per change."""
     case_dir = case_dir.resolve()
-    logs = sorted((case_dir / "REEF3D_Case").glob("REEF3D_*_run.jsonl")) + sorted(
-        case_dir.glob("REEF3D_*_run.jsonl")
-    )
-    stamp = tuple((p.name, p.stat().st_mtime, p.stat().st_size) for p in logs)
+    stamp = _log_stamp(case_dir)
     cached = _OWNERS.get(case_dir)
     if cached is not None and cached[0] == stamp:
         return cached[1]
     found: dict[Path, tuple[Run, Output]] = {}
-    log = read_case(case_dir) if logs else None
+    log = run_log(case_dir) if stamp else None
     if log is not None:
         for path, (run, output, _stream) in log.owners().items():
             found[(case_dir / path).resolve()] = (run, output)
@@ -1369,8 +1384,19 @@ def _owners(case_dir: Path) -> dict[Path, tuple[Run, Output]]:
 
 
 def run_log(case_dir: Path) -> RunLog | None:
-    """The run log of a case folder, if REEF3D wrote one."""
-    return read_case(case_dir.resolve())
+    """The run log of a case folder, if REEF3D wrote one: read once per change of its
+    files (a long run's log is megabytes, and opening a case asked for it several
+    times). Not to be changed by the caller."""
+    case_dir = case_dir.resolve()
+    stamp = _log_stamp(case_dir)
+    cached = _LOGS.get(case_dir)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    log = read_case(case_dir)
+    if len(_LOGS) > 32:
+        _LOGS.clear()
+    _LOGS[case_dir] = (stamp, log)
+    return log
 
 
 def _split(frames: list[Frame], owners: dict) -> list[tuple[list[Frame], Run | None, list]]:
