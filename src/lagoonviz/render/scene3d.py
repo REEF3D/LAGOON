@@ -1490,6 +1490,24 @@ class SceneRenderer:
         angle = math.atan2(ny, nx) - math.atan2(heading[1], heading[0])
         self._turn_camera(math.remainder(angle, 2 * math.pi), self._view_centre())
 
+    def heading(self) -> float:
+        """The view's turn about the vertical, in degrees from 0 to 360: where it
+        looks on the ground (from the top: where the screen's up points), from the
+        model's y towards its x (clockwise seen from above). 0 from the top: the
+        model's y up the screen; 90: its x up."""
+        forward = np.asarray(self.camera.world.forward, dtype=float)
+        up = np.asarray(self.camera.world.up, dtype=float)
+        ahead = up[:2] if np.hypot(*up[:2]) > 1e-3 else forward[:2]
+        if np.hypot(*ahead) < 1e-9:
+            return 0.0
+        return math.degrees(math.atan2(ahead[0], ahead[1])) % 360.0
+
+    def set_heading(self, degrees: float) -> None:
+        """Turn the view about the vertical through the middle of the view to a
+        :meth:`heading`, the tilt and the distance kept."""
+        change = math.remainder(float(degrees) - self.heading(), 360.0)
+        self._turn_camera(-math.radians(change), self._view_centre())
+
     def _view_centre(self) -> np.ndarray:
         """Where the middle of the view meets the level of the middle of the model."""
         corners = self.bounds() or self.bounds(visible_only=False)

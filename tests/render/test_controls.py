@@ -224,3 +224,51 @@ def test_north_up_turns_any_view_so_north_points_up(reef3d_run):
     view.point_north()
     up = np.asarray(view.camera.world.up, float)
     assert (up[:2] / np.linalg.norm(up[:2])) == pytest.approx((0.0, 1.0), abs=1e-6)
+
+
+def test_the_view_turns_to_a_heading(reef3d_run):
+    """The view's turn about the vertical (the slider and box by Probe): from the top
+    the model's y up is 0°, its x up 90°; in 3D where it looks; turning keeps the
+    tilt, the distance from the middle of the view and the point there."""
+    import math
+
+    from lagoonviz.core import Session
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        if mesh is not None:
+            view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+    view.frame("top")
+    assert math.remainder(view.heading(), 360.0) == pytest.approx(0.0, abs=1e-6)
+    centre = view._view_centre()
+    view.set_heading(90.0)
+    assert view.heading() == pytest.approx(90.0, abs=1e-6)
+    up = np.asarray(view.camera.world.up, float)
+    assert up[:2] == pytest.approx((1.0, 0.0), abs=1e-6)  # the model's x up the screen
+    assert view._view_centre()[:2] == pytest.approx(centre[:2], abs=1e-6)
+    view.set_heading(-45.0)  # the same as 315°
+    assert view.heading() == pytest.approx(315.0, abs=1e-6)
+    view.frame("perspective")
+    forward = np.asarray(view.camera.world.forward, float)
+    position = np.asarray(view.camera.local.position, float)
+    centre = view._view_centre()
+    start = view.heading()
+    expected = math.degrees(math.atan2(forward[0], forward[1])) % 360.0
+    assert math.remainder(start - expected, 360.0) == pytest.approx(0.0, abs=1e-6)
+    for step in range(1, 13):  # gradually all the way round
+        view.set_heading(start + 30.0 * step)
+        assert math.remainder(view.heading() - start - 30.0 * step, 360.0) == pytest.approx(
+            0.0, abs=1e-6
+        )
+        turned = np.asarray(view.camera.world.forward, float)
+        assert turned[2] == pytest.approx(forward[2], abs=1e-9)  # the tilt kept
+        moved = np.asarray(view.camera.local.position, float)
+        assert moved[2] == pytest.approx(position[2])
+        assert np.linalg.norm((moved - centre)[:2]) == pytest.approx(
+            np.linalg.norm((position - centre)[:2])
+        )
+    assert np.asarray(view.camera.local.position, float) == pytest.approx(position, abs=1e-6)

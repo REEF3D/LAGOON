@@ -56,6 +56,9 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- Turn the view gradually: a slider and a degree box next to *Probe* turn it about
+  the vertical through the middle of the view (0° from the top: the model's y up),
+  in 2D and 3D, the tilt and the zoom kept; they follow the mouse.
 - Following a run that writes into its store (P 18) no longer stalls the view: every
   few seconds only the new outputs' times are read, and the frames read so far stay.
   The case folder was read again each time (seconds on a large one) and every frame

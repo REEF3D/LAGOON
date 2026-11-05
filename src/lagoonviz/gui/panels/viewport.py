@@ -33,9 +33,11 @@ from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QProgressBar,
+    QSlider,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -454,6 +456,31 @@ class Viewport3D(QWidget):
         )
         self.probe_button.toggled.connect(self.set_probing)
         bar.addWidget(self.probe_button)
+        # the view's turn about the vertical, in degrees (heading): dragged gradually
+        # or typed
+        turn_tip = (
+            "Turn the view about the vertical through the middle of the view, in "
+            "degrees: where it looks, from the model's y towards its x (from the top: "
+            "0° the model's y up the screen, 90° its x up); the tilt and the zoom stay"
+        )
+        bar.addSpacing(6)
+        self.turn_slider = QSlider(Qt.Horizontal)
+        self.turn_slider.setRange(0, 360)
+        self.turn_slider.setPageStep(15)
+        self.turn_slider.setFixedWidth(120)
+        self.turn_slider.setToolTip(turn_tip)
+        self.turn_slider.valueChanged.connect(lambda value: self.turn_view(float(value)))
+        bar.addWidget(self.turn_slider)
+        self.turn_box = QDoubleSpinBox()
+        self.turn_box.setRange(0.0, 360.0)
+        self.turn_box.setDecimals(1)
+        self.turn_box.setSingleStep(5.0)
+        self.turn_box.setWrapping(True)  # past 360° on to 0°
+        self.turn_box.setSuffix("°")
+        self.turn_box.setKeyboardTracking(False)  # turns when the number is entered
+        self.turn_box.setToolTip(turn_tip)
+        self.turn_box.valueChanged.connect(self.turn_view)
+        bar.addWidget(self.turn_box)
         self.case_box = QComboBox()
         self.case_box.setToolTip("The case this view shows")
         self.case_box.setSizeAdjustPolicy(QComboBox.AdjustToContents)
@@ -2044,7 +2071,34 @@ class Viewport3D(QWidget):
             self.session.set_camera(self.view.camera_state())
         except Exception:  # noqa: BLE001
             log.warning("could not store the camera:\n%s", traceback.format_exc())
+        self._show_heading()
         self._view_moved()
+
+    def turn_view(self, degrees: float) -> None:
+        """Turn the view about the vertical through the middle of the view to
+        ``degrees`` (the slider and the box next to Probe; see
+        :meth:`SceneRenderer.heading`), the tilt and the zoom kept."""
+        self.view.set_heading(degrees)
+        self._show_heading(degrees)
+        self.redraw()
+        self._save_camera.start()
+
+    def _show_heading(self, degrees: float | None = None) -> None:
+        """The slider and the box show the view's turn (after the mouse turned it,
+        Frame all, North up, ...); not moved while the slider is held."""
+        if degrees is None:
+            try:
+                degrees = self.view.heading()
+            except Exception:  # noqa: BLE001 (no camera yet)
+                return
+        for widget in (self.turn_slider, self.turn_box):
+            widget.blockSignals(True)
+        if not self.turn_slider.isSliderDown():
+            self.turn_slider.setValue(round(degrees) % 361)
+        if not self.turn_box.hasFocus():  # (not while a number is typed)
+            self.turn_box.setValue(degrees)
+        for widget in (self.turn_slider, self.turn_box):
+            widget.blockSignals(False)
 
     def _north(self):
         """North in model coordinates for the case shown (its georeference), or None."""
