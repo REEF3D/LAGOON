@@ -498,13 +498,19 @@ class Dataset:
         return where, np.linalg.norm(values, axis=1)
 
     def read_iso(
-        self, index: int, variable: str, value: float, variables: list[str] | None = None
+        self,
+        index: int,
+        variable: str,
+        value: float,
+        variables: list[str] | None = None,
+        grid_lines: bool = True,
     ) -> SurfaceMesh:
         """The iso-surface of a volume frame where ``variable`` equals ``value``.
 
         Planned anew for every frame (the field moves), with the cells of each piece
         read once and kept, like slices; neighbouring cut points are merged so the
-        surface shades smoothly.
+        surface shades smoothly. With ``grid_lines`` its grid lines too (the mesh's
+        ``outlines``: where it crosses the cells' faces), a third of the time.
         """
         if self.kind != "UnstructuredGrid":  # a surface: its line at the value
             from lagoonviz.core.data.mesh import iso_lines
@@ -526,7 +532,8 @@ class Dataset:
             distance = field.astype(np.float64) - value
             plan = plan_level(distance, connectivity, offsets, types, True)
             plan = orient_by_field(plan, piece.points, field)
-            plan = with_grid_lines(plan, distance, connectivity, offsets, types)
+            if grid_lines:
+                plan = with_grid_lines(plan, distance, connectivity, offsets, types)
             parts.append(plan.apply(piece.points, piece.point_data))
         return _joined(parts)
 

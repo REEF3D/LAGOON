@@ -154,8 +154,12 @@ def test_the_free_surface_shows_its_grid_lines(tmp_path):
     s.open_case(root)
     free = next(i for i in s.scene if i.kind == "iso_surface")
     assert free.properties["grid_lines"] == "off"
+    # off: not made (a third of the time of each frame of a large iso-surface)
+    plain = s.data.load(free.id)
+    assert plain.outlines is None and plain.n_triangles
     s.set_property(free.id, "grid_lines", "dark")
     mesh = s.data.load(free.id)
+    assert mesh.n_triangles == plain.n_triangles  # the same surface, now with its lines
     pairs = mesh.outlines.astype(np.int64)
     assert len(pairs) and pairs.max() < mesh.n_points  # on the surface's own points
     ends = mesh.points[pairs]

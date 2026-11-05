@@ -56,6 +56,8 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- Playing a CFD run is about a third faster: the free surface (the iso-surface of the
+  level set phi) makes its grid lines only when they are shown.
 - 2D: grid lines (and contour lines) no longer vanish under their surface after the
   view is zoomed or moved: the camera's depth range now spans the flat layers alone,
   not 100 times the view's size to both sides (kilometres for a large model, too

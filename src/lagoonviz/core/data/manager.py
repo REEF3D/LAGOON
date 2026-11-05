@@ -960,7 +960,10 @@ class DataManager:
             variable = str(item.properties.get("iso_by", "none"))
             if variable == "none":
                 return None  # nothing chosen yet
-            extra = ("iso", variable, float(item.properties.get("iso_value", 0.0)))
+            # its grid lines are made with it only when they are shown (a third of
+            # the time of a large iso-surface, e.g. CFD's free surface)
+            lines = str(item.properties.get("grid_lines", "off")) != "off"
+            extra = ("iso", variable, float(item.properties.get("iso_value", 0.0)), lines)
         elif item.kind == "iso_volume":
             variable = str(item.properties.get("iso_by", "none"))
             if variable == "none":
@@ -1023,7 +1026,10 @@ class DataManager:
         if key.extra and key.extra[0] == "slice":
             mesh = dataset.read_slice(key.index, key.extra[1], key.extra[2], list(key.arrays))
         elif key.extra and key.extra[0] == "iso":
-            mesh = dataset.read_iso(key.index, key.extra[1], key.extra[2], list(key.arrays))
+            lines = bool(key.extra[3]) if len(key.extra) > 3 else True
+            mesh = dataset.read_iso(
+                key.index, key.extra[1], key.extra[2], list(key.arrays), grid_lines=lines
+            )
         elif key.extra and key.extra[0] == "isovol":
             _, variable, low, high = key.extra
             mesh = dataset.read_iso_volume(key.index, variable, low, high, list(key.arrays))
