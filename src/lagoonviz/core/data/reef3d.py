@@ -821,10 +821,17 @@ class Case:
         place of its free surface (its level 0 is that surface).
         """
         pool = self._pool()
-        surfaces = [d for d in pool if d.role in ("free_surface", "bed")]
+        # (not the beds LAGOON makes of other outputs: they join what they belong to)
+        surfaces = [
+            d
+            for d in pool
+            if d.role in ("free_surface", "bed") and not getattr(d, "derived", False)
+        ]
         refined = [d for d in pool if d.role == "amr"]
         if not surfaces and refined:
-            return {"amr": preferred(refined)}
+            amr = preferred(refined)
+            beds = [d for d in pool if getattr(d, "amr", None) is amr]
+            return {"bed": beds[0], "amr": amr} if beds else {"amr": amr}
         if not surfaces:
             volumes = [d for d in pool if d.role == "volume"]
             if not volumes:  # not run yet: DIVEMesh's bed and solids, if any
@@ -845,6 +852,9 @@ class Case:
                 return found
             lead = max(volumes, key=lambda d: d.written_span()[1])
             chosen = {"volume": lead}
+            beds = [d for d in pool if getattr(d, "volume", None) is lead]
+            if beds:  # the bed of a CFD run (it writes none), drawn first
+                chosen = {"bed": beds[0], **chosen}
             solid = self._solids_of(lead)
             if solid is not None:
                 chosen = {"solid": solid, **chosen}
@@ -1772,6 +1782,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
         datasets = _with_refinement(datasets, solver, blocks, folder)
     # on a curvilinear grid with blocks, the bed of the blocks is only in the AMR grids
     datasets += amr_beds(datasets)
+    datasets += volume_beds(datasets)  # CFD writes no bed: its volume's
     if path == case_dir or store_paths:  # the case itself: its solids too
         datasets += solid_datasets(case_dir)
     series = find_series(case_dir)
@@ -1846,3 +1857,74 @@ def _run_print_interval(case: Case) -> tuple[float | None] | None:
     if not copy or not (case.path / copy).is_file():
         return None
     return (read_print_interval(case.path, case.path / copy),)
+
+
+# ======================================================================== the bed
+class VolumeBedDataset(Dataset):
+    """The bed of a CFD run, which writes no bed output: the zero level of its bed
+    level set ``topo`` (with sediment or a bathymetry: every output, it may move),
+    else the floor of its volume (the bottom of the domain, the first output; the
+    solids on it are DIVEMesh's, shown as structures)."""
+
+    #: made from another output, not written by the run: not converted into a store
+    derived = True
+
+    def __init__(self, volume: Dataset):
+        self.volume = volume
+        self.level_set = "topo" in volume.components
+        frames = list(volume.frames) if self.level_set else list(volume.frames[:1])
+        super().__init__(f"{volume.key}_bed", volume.solver, "bed", frames, volume.folder)
+        if volume.times is not None:
+            self.times = np.asarray(volume.times[: len(frames)], np.float64)
+        self.run_id = volume.run_id
+        self.run_started = volume.run_started
+        self.earlier_run = volume.earlier_run
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        return "PolyData", {"elevation": 1}
+
+    @property
+    def label(self) -> str:
+        how = "topo" if getattr(self, "level_set", False) else "floor of the volume"
+        return f"{self.solver} bed ({how})"
+
+    def written_span(self) -> tuple[float, float]:
+        return self.volume.written_span()
+
+    def read(self, index: int, variables: list[str] | None = None, **_options) -> SurfaceMesh:
+        if self.level_set:
+            mesh = self.volume.read_iso(index, "topo", 0.0, [], grid_lines=False)
+            points, triangles = mesh.points, mesh.triangles
+        else:
+            points, triangles = _floor(self.volume.read(index, []))
+        points = np.asarray(points, np.float32)
+        data = {"elevation": np.ascontiguousarray(points[:, 2])}
+        return SurfaceMesh(points, np.asarray(triangles, np.uint32), data).with_normals()
+
+
+def _floor(outside: SurfaceMesh) -> tuple[np.ndarray, np.ndarray]:
+    """The bottom of a volume's outer surface: its triangles at the lowest height (to
+    a millionth of its size), with only their points."""
+    points = np.asarray(outside.points, np.float64)
+    triangles = np.asarray(outside.triangles, np.int64)
+    if not len(points) or not len(triangles):
+        return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32)
+    low = float(np.nanmin(points[:, 2]))
+    tolerance = 1e-6 * float(max(np.ptp(points, axis=0).max(), 1e-9))
+    on = points[:, 2] <= low + tolerance
+    kept = triangles[on[triangles].all(axis=1)]
+    used, inverse = np.unique(kept, return_inverse=True)
+    return points[used].astype(np.float32), inverse.reshape(-1, 3).astype(np.uint32)
+
+
+def volume_beds(datasets: list[Dataset]) -> list[Dataset]:
+    """The beds of CFD runs that write none (:class:`VolumeBedDataset`), one per
+    volume of such a run."""
+    beds = []
+    for dataset in datasets:
+        if dataset.role != "volume" or dataset.solver != "CFD":
+            continue
+        if any(d.role == "bed" and d.solver == dataset.solver for d in datasets):
+            continue
+        beds.append(VolumeBedDataset(dataset))
+    return beds

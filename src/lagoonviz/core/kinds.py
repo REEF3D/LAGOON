@@ -348,6 +348,17 @@ KINDS: dict[str, KindSpec] = {
             **_data_source("volume"),
             **_colouring("velocity", "ocean"),
             **_grid_lines("on the volume's outside"),
+            "outline": PropertySpec(
+                "off",
+                "Outline",
+                choices=("off", "dark", "white"),
+                tip="The edges of the volume's box, as ParaView's outline",
+            ),
+            "surface": PropertySpec(
+                True,
+                "Outside",
+                tip="Draw the volume's outside; off with an outline: the outline alone",
+            ),
             **_contours(),
             **_vectors(),
             **_exaggeration("Scales heights about the still water level"),

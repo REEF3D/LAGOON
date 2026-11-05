@@ -1288,6 +1288,7 @@ def _frame_objects(
             ("trails", data.particle_trails(item_id, mesh), TRAIL_WIDTH, "color"),
             ("grid", data.amr_grid_lines(item_id, mesh, shown), OUTLINE_WIDTH * 0.6, "color"),
             ("outlines", data.patch_outlines(item_id, mesh, shown), OUTLINE_WIDTH, "color"),
+            ("box", data.volume_outline(item_id, mesh, shown), OUTLINE_WIDTH, "color"),
         )
         for label, lines, width, own in overlays:
             if lines is None or not lines.visible or not lines.segments.size:

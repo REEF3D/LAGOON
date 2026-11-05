@@ -82,7 +82,8 @@ def test_the_solver_of_ctrl_txt_is_shown_next_to_older_runs(tmp_path):
     s.open_case(root)
     assert s.data.case("case-1").ctrl_solver == "CFD"
     shown = {i.kind: s.data.dataset(i.id) for i in s.scene if s.data.dataset(i.id) is not None}
-    assert "free_surface" not in shown and "bathymetry" not in shown
+    assert "free_surface" not in shown
+    assert shown["bathymetry"].solver == "CFD"  # its bed, the floor of its volume
     assert shown["iso_surface"].solver == "CFD" and shown["volume"].solver == "CFD"
     assert "nhflow_volume" in s.data.choices("volume-1", "datasets")  # still there
     # ctrl.txt set up for NHFLOW: the NHFLOW run
@@ -122,3 +123,42 @@ def test_the_store_of_the_run_going_on_beats_the_files_of_the_run_before():
     # converted from these files and complete: the store replaces them
     older = dataset("cfd_body", "run-now", 3)
     assert _prefer_stores([older], [store]) == [store]
+
+
+def test_the_bed_and_the_outline_of_a_cfd_run(tmp_path):
+    """CFD writes no bed: the floor of its volume is shown as the bed (not stored by
+    lagoon-convert). The volume can show its outline (the box's 12 edges), also
+    alone, without its outside."""
+    from lagoonviz.core.data.reef3d import VolumeBedDataset
+
+    root = cfd_case(tmp_path)
+    s = Session()
+    s.open_case(root)
+    bed = next(i for i in s.scene if i.kind == "bathymetry")
+    dataset = s.data.dataset(bed.id)
+    assert isinstance(dataset, VolumeBedDataset) and len(dataset) == 1
+    floor = s.data.load(bed.id)
+    volume = next(i for i in s.scene if i.kind == "volume")
+    outside = s.data.load(volume.id)
+    low = float(outside.points[:, 2].min())
+    assert floor.n_triangles and np.allclose(floor.points[:, 2], low)
+    np.testing.assert_allclose(floor.points[:, :2].min(axis=0), outside.points[:, :2].min(axis=0))
+    np.testing.assert_allclose(floor.points[:, :2].max(axis=0), outside.points[:, :2].max(axis=0))
+    assert floor.normals is not None and s.data.display(bed.id, floor).triangles.size
+    # the outline: off by default
+    shown = s.data.display(volume.id, outside)
+    assert s.data.volume_outline(volume.id, outside, shown) is None
+    s.set_property(volume.id, "outline", "dark")
+    box = s.data.volume_outline(volume.id, outside, shown)
+    assert box.segments.shape == (12, 2, 3)
+    corners = box.segments.reshape(-1, 3)
+    size = np.ptp(outside.points, axis=0)
+    np.testing.assert_allclose(np.ptp(corners, axis=0), size, rtol=0.01)
+    lengths = np.linalg.norm(box.segments[:, 1] - box.segments[:, 0], axis=1)
+    assert sorted(np.round(lengths / lengths.max(), 3))[-4:] == [1.0] * 4  # 4 of each
+    # the outline alone: nothing of the outside drawn
+    s.set_property(volume.id, "surface", False)
+    shown = s.data.display(volume.id, outside)
+    assert (shown.triangles == 0).all()
+    assert s.data.volume_outline(volume.id, outside, shown) is not None
+    assert s.data.contour_lines(volume.id, outside, shown) is None

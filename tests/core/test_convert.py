@@ -169,19 +169,20 @@ def test_the_volume_is_there_switched_off(converted):
 
 def test_a_volume_only_run_shows_divemeshs_solids(tmp_path):
     """A CFD run that wrote only its volume (no free surface or bed): DIVEMesh's
-    solids are shown with it."""
+    solids are shown with it, and the floor of its volume as its bed."""
     run = make_run(tmp_path / "cfd", solver="CFD", frames=2)
     for folder in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):
         for f in (run / folder).iterdir():
             f.unlink()
         (run / folder).rmdir()
     report = convert(run)
+    assert "bed" not in Store(report.store).outputs  # (the floor LAGOON shows is not stored)
     (run / "control.txt").write_text("B 10 0.0 8.0 0.0 4.0 0.0 1.0\nS 10 1.0 2.0 1.0 2.0 0.0 1.0\n")
     for path in (run, report.store):
         session = Session()
         session.open_case(path)
         kinds = [i.kind for i in session.scene if i.kind != "case"]
-        assert kinds[:2] == ["structure", "volume"], path
+        assert kinds[:3] == ["structure", "bathymetry", "volume"], path
         solid = next(i for i in session.scene if i.kind == "structure")
         assert session.data.load(solid.id).points.shape[0] > 0
 

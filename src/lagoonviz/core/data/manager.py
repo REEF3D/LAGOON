@@ -1179,6 +1179,42 @@ class DataManager:
             outlines = self._grid_lines(item_id, mesh)  # made when first asked for
         return self._lines_on(item_id, outlines, shown, colour)
 
+    def volume_outline(
+        self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
+    ) -> Trails | None:
+        """A volume's outline (its "outline" setting): the twelve edges of the box of
+        the volume as shown (with the vertical scale; in 2D its rectangle), a little
+        outside it so its own faces do not hide them; None for other items or off."""
+        item = self.scene.get(item_id)
+        if item.kind != "volume":
+            return None
+        colour = str(item.properties.get("outline", "off"))
+        positions = np.asarray(shown.positions, np.float64)
+        if colour == "off" or not len(positions):
+            return None
+        finite = positions[np.isfinite(positions).all(axis=1)]
+        if not len(finite):
+            return None
+        low, high = finite.min(axis=0), finite.max(axis=0)
+        margin = 1e-3 * float(max(np.ptp(finite, axis=0).max(), 1e-9))
+        low, high = low - margin, high + margin
+        if self.scene.flat:
+            low[2] = high[2] = float(PLAN_LAYERS.get("volume", 0.5)) + 0.06
+        corners = np.array(
+            [[(low, high)[i][0], (low, high)[j][1], (low, high)[k][2]]
+             for k in (0, 1) for j in (0, 1) for i in (0, 1)]
+        )  # fmt: skip
+        edges = np.array(
+            [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7],
+             [0, 4], [1, 5], [2, 6], [3, 7]]
+        )  # fmt: skip
+        return Trails(
+            item_id,
+            corners[edges].astype(np.float32),
+            shown.visible,
+            "#ffffff" if colour == "white" else "#1e2833",
+        )
+
     def amr_grid_lines(
         self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface
     ) -> Trails | None:
@@ -1531,6 +1567,9 @@ class DataManager:
         elif item.kind == "bathymetry" and props.get("hide_wet", False):
             level = self.still_water_level(item_id, mesh)
             triangles = self._kept(item_id, mesh, _dry_triangles(mesh, level))
+        elif item.kind == "volume" and not props.get("surface", True):
+            # the outline alone: one degenerate triangle (nothing drawn, nor its lines)
+            triangles = _NO_TRIANGLES
         bands: tuple[float, ...] = ()
         if values is not None and props.get("colour_bands", False):
             from lagoonviz.core.colormaps import band_edges
@@ -2419,6 +2458,11 @@ def shows(kind: str, dataset) -> bool:
         "statistics": ("free_surface", "bed", "seastate"),
     }
     return dataset.role in roles.get(kind, ())
+
+
+#: no triangle drawn: one degenerate one, so a renderer always has a list
+_NO_TRIANGLES = np.zeros((1, 3), np.uint32)
+_NO_TRIANGLES.setflags(write=False)
 
 
 def _wet_triangles(mesh: SurfaceMesh) -> np.ndarray:

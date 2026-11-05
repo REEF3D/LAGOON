@@ -22,9 +22,9 @@ script the session writes ([Scripting](../scripting.md)).
 | Background map | a map or satellite image round a georeferenced case, under the set-up and the results ([Maps](maps.md#background-maps)) |
 | Free surface | the water surface, coloured by a variable or plain |
 | Free Surface AMR | the free surface of an adaptive-mesh run, finer patches over coarser ones, with the patch outlines; *AMR patches* off shows the base grid (level 0) alone, *Grid lines* draws the cells of every level |
-| Bed | the bathymetry (sand coloured by default) |
+| Bed | the bathymetry (sand coloured by default); of a CFD run, which writes none, the floor of its volume (or the zero level of `topo`) |
 | Statistics | a map of an output over a time window: max, min, mean, time of the maximum, Hs, arrival and duration of the water, maximum inundation ([Statistics over time](#statistics-over-time)) |
-| Volume | the outside of the volume output |
+| Volume | the outside of the volume output; *Outline* draws the edges of its box (dark or white), with *Outside* off the outline alone |
 | Slice | the volume cut by an x, y or z plane |
 | Iso-surface | where a variable of the volume has a given value (*Grid lines*: where it crosses the cells); on the free surface or the bed, the line where it has it |
 | Sea state | SEASTATE's map of the sea state: Hs, periods, direction, with arrows where the waves go ([Opening runs](runs.md)) |
