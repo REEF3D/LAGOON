@@ -227,3 +227,64 @@ def test_the_velocity_of_the_top_layer():
     value, level = value_at(grids, "velocity", x.mean(), y.mean())
     # the nearest cell of the patch: a quarter of a coarse cell off
     assert level == 1 and value == pytest.approx(0.1 * np.hypot(x.mean(), y.mean()), rel=0.02)
+
+
+def with_bed(grids, dry_from=13.0):
+    """The grids with NHFLOW's ``bed``: 0.5 m under the surface, but a film of 1 mm
+    (its wetting and drying depth) where the ring is wider than ``dry_from``."""
+    for g in grids:
+        cx = 0.25 * (g.x[:-1, :-1] + g.x[1:, :-1] + g.x[:-1, 1:] + g.x[1:, 1:])
+        cy = 0.25 * (g.y[:-1, :-1] + g.y[1:, :-1] + g.y[:-1, 1:] + g.y[1:, 1:])
+        dry = np.hypot(cx, cy) > dry_from
+        g.cell_data["bed"] = g.cell_data["elevation"] - np.where(dry, 0.001, 0.5)
+    return grids
+
+
+def test_dry_land_from_the_elevation_above_the_bed():
+    """NHFLOW on a curvilinear grid writes neither WL nor wet: dry land is where the
+    elevation is above the bed by its film only, and is hidden there."""
+    from lagoonviz.core.data.manager import _wet_triangles
+
+    mesh = leaf_mesh(with_bed(output()))
+    assert "wetdry" in mesh.point_data
+    triangles = _wet_triangles(mesh)
+    gone = np.all(triangles == 0, axis=1) & np.any(mesh.triangles != 0, axis=1)
+    assert gone.any() and not gone.all()
+    centre = mesh.points[mesh.triangles].mean(axis=1)
+    r = np.hypot(centre[:, 0], centre[:, 1])
+    assert r[gone].min() > 13.0 - 0.5  # the dry band (and the shore cells half wet)
+    assert r[~gone].max() < 13.5 + 1e-6
+
+
+def test_the_bed_of_all_blocks_and_patches(tmp_path):
+    """On a curvilinear grid with blocks the bed output holds block 0 alone: the bed
+    shown is the AMR grids' (all blocks, the patches' finer one), not converted."""
+    from lagoon_format.store import Store
+
+    from lagoonviz.core import Session
+    from lagoonviz.core.convert import convert
+    from lagoonviz.core.data.amr import AmrBedDataset
+
+    case = tmp_path / "river"
+    folder = case / "REEF3D_NHFLOW_AMR"
+    folder.mkdir(parents=True)
+    for step in range(2):
+        write_vts(folder, step, with_bed(output()), 0.5 * step)
+    s = Session()
+    s.open_case(case)
+    item = next(i for i in s.scene if i.kind == "bathymetry")
+    assert isinstance(s.data.dataset(item.id), AmrBedDataset)
+    assert len(s.data.dataset(item.id)) == 1  # a fixed bed: its first output
+    bed = s.data.load(item.id)
+    surface = leaf_mesh(with_bed(output()))
+    assert bed.n_points == surface.n_points and area(bed) == pytest.approx(area(surface))
+    np.testing.assert_allclose(bed.points[:, 2], surface.point_data["bed"], atol=1e-5)
+    assert bed.normals is not None and s.data.display(item.id, bed).triangles.size
+    amr = next(i for i in s.scene if i.kind == "amr")
+    s.set_property(amr.id, "hide_dry", True)
+    mesh = s.data.load(amr.id)
+    shown = s.data.display(amr.id, mesh)
+    assert (np.all(shown.triangles == 0, axis=1)).any()  # the dry band hidden
+    convert(case)
+    store = Store(case / "REEF3D_NHFLOW.lagoon")
+    assert "bed" not in store.outputs and len(store.amr["nhflow_amr"]) == 2

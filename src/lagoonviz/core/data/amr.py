@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -45,9 +45,14 @@ log = logging.getLogger(__name__)
 AMR_FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_AMR$")
 #: ``REEF3D-NHFLOW-AMR-00000012.vtm``
 AMR_INDEX = re.compile(r"^REEF3D-(?P<solver>[A-Z0-9]+)-AMR-(?P<step>\d+)\.vtm$")
-#: arrays read with every frame: the height of the surface, its water level, the depth
+#: arrays read with every frame: the height of the surface and where it is wet (to
+#: hide dry land: SFLOW's ``wetdry``; ``wet``, ``WL``, else ``elevation`` above ``bed``)
 #: (``covered``: which cells another grid shows, of a curvilinear grid, G 50)
-SURFACE_ARRAYS = ("elevation", "eta", "WL", "covered")
+SURFACE_ARRAYS = ("elevation", "eta", "WL", "wet", "wetdry", "bed", "covered")
+
+#: water shallower than this [m] is dry land: REEF3D keeps a film of about a millimetre
+#: (its wetting and drying depth) on the dry cells
+DRY_DEPTH = 0.005
 
 #: the velocity components an AMR output writes as scalars: SFLOW u, v, w; NHFLOW
 #: the top layer's u_top, v_top (the velocity at the free surface). LAGOON joins them
@@ -558,19 +563,48 @@ def _curvilinear_leaf_mesh(grids: list[AmrGrid], max_level: int | None) -> Surfa
     )
 
 
+def _with_wetdry(grids: list[AmrGrid]) -> list[AmrGrid]:
+    """The grids with the cell field ``wetdry`` (1 wet, 0 dry; averaged to the nodes,
+    the share of the cells around that are wet, as SFLOW writes it), which hides dry
+    land, when they say where it is wet in another way: NHFLOW's ``wet`` (G 30), its
+    water depth ``WL``, or the ``elevation`` above the ``bed`` (NHFLOW on a
+    curvilinear grid writes neither), wet deeper than :data:`DRY_DEPTH`. As they are
+    when they have ``wetdry`` or none of these."""
+    if not grids or any("wetdry" in g.cell_data or "wetdry" in g.point_data for g in grids):
+        return grids
+
+    def wet(cells: dict[str, np.ndarray]) -> np.ndarray | None:
+        if "wet" in cells:
+            return np.asarray(cells["wet"]) > 0.5
+        if "WL" in cells:
+            return np.asarray(cells["WL"]) > DRY_DEPTH
+        if "elevation" in cells and "bed" in cells:
+            return np.asarray(cells["elevation"]) - np.asarray(cells["bed"]) > DRY_DEPTH
+        return None
+
+    flags = [wet(g.cell_data) for g in grids]
+    if any(f is None for f in flags):
+        return grids
+    return [
+        replace(g, cell_data={**g.cell_data, "wetdry": f.astype(np.float32)})
+        for g, f in zip(grids, flags, strict=True)
+    ]
+
+
 def leaf_mesh(grids: list[AmrGrid], max_level: int | None = None) -> SurfaceMesh:
     """The surface of the leaf cells of all grids: each grid on its node lattice,
     without the cells a finer grid covers (grids finer than ``max_level`` left out:
     0 gives the base grid alone). The height is ``elevation`` (else
     ``eta``); point data are the cell data averaged to the nodes, the grid's
-    ``level``, and the water ``depth`` from ``WL`` (to hide dry land). The
-    borders of the refined patches are the mesh's ``outlines``.
+    ``level``, and where it is wet, ``wetdry`` (:func:`_with_wetdry`, to hide dry
+    land). The borders of the refined patches are the mesh's ``outlines``.
 
     The grids meet without a crack: a node on the border between two grids of a
     level (two MPI ranks) averages the cells on both sides, so both grids give it
     the same value, and its normal sees both sides; a node of a finer grid on the
     border to a coarser one takes the coarser surface's value there (linear along
     the coarse cell's edge, which the coarse triangles have too)."""
+    grids = _with_wetdry(grids)
     if any(g.curvilinear for g in grids):
         return _curvilinear_leaf_mesh(grids, max_level)
     names = (
@@ -772,6 +806,11 @@ class AmrDataset(Dataset):
     def label(self) -> str:
         return f"{self.solver} free surface AMR"
 
+    @property
+    def curvilinear(self) -> bool:
+        """Grids of a curvilinear grid (G 50): structured grids (``.vts``)."""
+        return self.frames[0].pieces[0].suffix == ".vts"
+
     def default_variable(self) -> str:
         for name in ("eta", "elevation", "Hs"):  # (Hs: SEASTATE's AMR maps)
             if name in self.components:
@@ -880,3 +919,66 @@ def amr_datasets(folder: Path) -> list[Dataset]:
         return []
     _times_from_files(dataset)
     return [dataset]
+
+
+# ======================================================================== the bed
+class AmrBedDataset(Dataset):
+    """The bed under an AMR surface on a curvilinear grid, from its grids' cell field
+    ``bed``: with blocks (G 50 1) the run's bed output holds block 0 alone, the
+    blocks 1 … are only among the AMR grids (and the patches have the finer bed).
+    The first output (a fixed bed, written once), or every output when the run's
+    bed moves (sediment: more than one bed output)."""
+
+    #: made from another output, not written by the run: not converted into a store
+    derived = True
+
+    def __init__(self, amr: Dataset, moving: bool = False):
+        self.amr = amr
+        frames = list(amr.frames) if moving else list(amr.frames[:1])
+        super().__init__(f"{amr.key}_bed", amr.solver, "bed", frames, amr.folder)
+        if amr.times is not None:
+            self.times = np.asarray(amr.times[: len(frames)], np.float64)
+        self.run_id = amr.run_id
+        self.run_started = amr.run_started
+        self.earlier_run = amr.earlier_run
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        return "RectilinearGrid", {"elevation": 1, "level": 1}
+
+    @property
+    def label(self) -> str:
+        return f"{self.amr.label.replace('free surface', 'bed')} (blocks and patches)"
+
+    def written_span(self) -> tuple[float, float]:
+        return self.amr.written_span()
+
+    def read(self, index: int, variables: list[str] | None = None, **_options) -> SurfaceMesh:
+        """The leaf surface of the grids at the height of the bed, every level."""
+        mesh = self.amr.read(index, ["bed"])
+        bed = mesh.point_data.get("bed")
+        if bed is None:
+            raise ValueError(f"{self.amr.label}: no bed in output {self.frames[index].step}")
+        points = np.array(mesh.points, np.float32, copy=True)
+        points[:, 2] = bed
+        data = {"elevation": np.asarray(bed, np.float32)}
+        if "level" in mesh.point_data:
+            data["level"] = mesh.point_data["level"]
+        return SurfaceMesh(points, mesh.triangles, data).with_normals()
+
+
+def amr_beds(datasets: list[Dataset]) -> list[Dataset]:
+    """The beds of the AMR surfaces on a curvilinear grid that write the bed
+    (:class:`AmrBedDataset`), shown in place of the run's bed output."""
+    beds = []
+    for dataset in datasets:
+        if dataset.role != "amr" or "bed" not in dataset.components:
+            continue
+        if not getattr(dataset, "curvilinear", False):
+            continue
+        written = [d for d in datasets if d.role == "bed" and d.solver == dataset.solver]
+        moving = any(len(d) > 1 and d.same_run_as(dataset) for d in written)
+        try:
+            beds.append(AmrBedDataset(dataset, moving))
+        except ValueError as error:
+            log.warning("%s: no bed from its grids: %s", dataset.key, error)
+    return beds

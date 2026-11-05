@@ -31,7 +31,10 @@ the blocks 1 … of a multi-block grid (`G 50 1`) are among them, level-0 grids 
 to block 0. The *Free Surface AMR* draws each place once: the cells another grid
 shows (`covered`: a finer patch over them, or the ring of block 0, whose cells the
 blocks hold) are left out, and the grids of two ranks or two blocks share the
-points on their border, without a crack.
+points on their border, without a crack. The bed shown is then that of the AMR
+grids (their `bed`): the bed output of a multi-block run holds block 0 alone. Dry
+land (*Hide dry land*) is where the elevation is above the bed by REEF3D's thin
+film only (5 mm or less).
 
 The *Free Surface AMR* has the **velocity** of the free surface: NHFLOW's top
 layer (`u_top`, `v_top`), SFLOW's `u`, `v`, `w`, joined into one vector, to colour

@@ -63,9 +63,10 @@ def test_leaf_surface_covers_the_domain_once(tmp_path):
             np.abs(centre[:, 1] - 1.5) < 0.45
         )
         assert (level[mesh.triangles[inside]] == 2.0).all()
-        # heights: the elevation; eta for exaggeration; depth from WL for dry land
+        # heights: the elevation; eta for exaggeration; where it is wet (from NHFLOW's
+        # wet flag, G 30) for dry land
         assert np.allclose(mesh.points[:, 2], mesh.point_data["eta"] + AMR_DEPTH, atol=1e-6)
-        assert "depth" in mesh.point_data
+        assert "wetdry" in mesh.point_data
         # the borders of the patches (3 patches from the second output on)
         patches = sum(g.level > 0 for g in grids)
         borders = sum(2 * (g.nx + g.ny) for g in grids if g.level > 0)
@@ -81,7 +82,8 @@ def test_other_solvers(tmp_path, solver):
     assert set(AMR_FIELDS[solver]) <= set(dataset.components)
     mesh = dataset.read(1, ["eta"])
     assert _area(mesh) == pytest.approx(24.0)
-    assert ("depth" in mesh.point_data) == ("WL" in AMR_FIELDS[solver])
+    # where it is wet, for dry land: SFLOW's wetdry; FNPF's elevation above the bed
+    assert "wetdry" in mesh.point_data
     if solver == "SFLOW":  # an Int32 field: read as such, drawn as float
         grid = read_grid(dataset.grid_files(1)[0], ["wetdry"])
         assert grid.cell_data["wetdry"].dtype == np.int32

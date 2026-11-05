@@ -56,6 +56,11 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- NHFLOW on a curvilinear grid with blocks (`G 50 1`): **Hide dry land** works on the
+  Free Surface AMR (dry where the elevation is above the bed by REEF3D's film only,
+  5 mm or less; also from `WL` or `wet`, which NHFLOW's AMR output wrote only with
+  G 30), and the **bed** is that of all blocks and patches, from the AMR grids'
+  `bed` (the bed output holds block 0 alone).
 - Turn the view gradually: a slider and a degree box next to *Probe* turn it about
   the vertical through the middle of the view (0° from the top: the model's y up),
   in 2D and 3D, the tilt and the zoom kept; they follow the mouse.

@@ -236,10 +236,13 @@ def chosen_datasets(
     lead = shown.get("free_surface") or shown.get("bed") or shown.get("volume")
     picked: dict[str, Dataset] = {}
     for role in roles:
-        if role in shown:
+        if role in shown and not getattr(shown[role], "derived", False):
             picked[role] = shown[role]
             continue
-        options = [d for d in case.datasets.values() if d.role == role]
+        # (not what LAGOON makes of other outputs, e.g. the bed of AMR grids)
+        options = [
+            d for d in case.datasets.values() if d.role == role and not getattr(d, "derived", False)
+        ]
         if lead is not None:
             # DEM and rod trees are written for the solver they are coupled to
             options = [d for d in options if d.solver == lead.solver or d.same_run_as(lead)]

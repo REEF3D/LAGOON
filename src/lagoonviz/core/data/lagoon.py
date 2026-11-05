@@ -734,6 +734,11 @@ class StoreAmrDataset(Dataset):
     def label(self) -> str:
         return f"{self.solver} free surface AMR (LAGOON)"
 
+    @property
+    def curvilinear(self) -> bool:
+        """Grids of a curvilinear grid (G 50): x and y of every node."""
+        return bool(self.amr.curvilinear)
+
     def default_variable(self) -> str:
         for name in ("eta", "elevation"):
             if name in self.components:

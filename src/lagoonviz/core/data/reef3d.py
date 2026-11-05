@@ -872,6 +872,10 @@ class Case:
         if options:
             chosen["amr"] = preferred(options)
             chosen.pop("free_surface", None)
+            # its bed, of all blocks and patches (a curvilinear grid's), for the run's
+            beds = [d for d in pool if getattr(d, "amr", None) is chosen["amr"]]
+            if beds:
+                chosen["bed"] = beds[0]
         solid = self._solids_of(lead)
         if solid is not None:
             chosen["solid"] = solid
@@ -1682,7 +1686,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     the VTK output)."""
     from lagoon_format.store import is_store
 
-    from lagoonviz.core.data.amr import AMR_FOLDER, amr_datasets
+    from lagoonviz.core.data.amr import AMR_FOLDER, amr_beds, amr_datasets
     from lagoonviz.core.data.amr3d import FolderBlocks, amr_outputs, is_volume_amr
     from lagoonviz.core.data.lagoon import find_stores, store_blocks, store_datasets, stored_series
 
@@ -1759,6 +1763,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     refined = in_stores + [r for r in refined if r[0] not in taken]
     for solver, blocks, folder in refined:
         datasets = _with_refinement(datasets, solver, blocks, folder)
+    # on a curvilinear grid with blocks, the bed of the blocks is only in the AMR grids
+    datasets += amr_beds(datasets)
     if path == case_dir or store_paths:  # the case itself: its solids too
         datasets += solid_datasets(case_dir)
     series = find_series(case_dir)
