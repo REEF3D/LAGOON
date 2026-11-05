@@ -56,6 +56,10 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- DIVEMesh's STL geometry (`S 1 1`, `solid.stl`, ASCII or binary) is built from
+  control.txt too, placed as DIVEMesh places it (S 4 scale, S 7 move, S 8 turn): a
+  case without DIVEMesh's own solid file (`DIVEMesh_Paraview`, e.g. synced to another
+  computer) showed its boxes and piers but not the ogee weir of its STL.
 - CFD: the **bed** is shown (CFD writes none): the floor of its volume, or the zero
   level of its bed level set `topo` when it writes one; not stored by lagoon-convert.
 - Volumes: an **Outline** (off, dark, white), the edges of the volume's box as

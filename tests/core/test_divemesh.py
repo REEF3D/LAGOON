@@ -205,3 +205,57 @@ def test_solids_outside_the_runs_domain_are_not_shown(reef3d_run):
     assert [i.properties["dataset"] for i in _structures(reef3d_run)] == ["divemesh_solids"]
     _box_vtp(vtp, (15000.0, 6000.0, 0.0), (15010.0, 6010.0, 1.0))  # a fjord far away
     assert not _structures(reef3d_run)
+
+
+def _cube_stl(path, binary):
+    """A unit cube 0..1 as an STL file, ASCII or binary (outward normals)."""
+    faces = []
+    for axis in range(3):
+        for side in (0.0, 1.0):
+            square = []
+            for a, b in ((0, 0), (1, 0), (1, 1), (0, 1)):
+                corner = [0.0, 0.0, 0.0]
+                corner[axis] = side
+                corner[(axis + 1) % 3], corner[(axis + 2) % 3] = float(a), float(b)
+                square.append(corner)
+            first, second = [square[0], square[1], square[2]], [square[0], square[2], square[3]]
+            if side == 0.0:
+                first, second = first[::-1], second[::-1]
+            faces += [first, second]
+    if binary:
+        record = np.dtype([("normal", "<f4", 3), ("corners", "<f4", (3, 3)), ("a", "<u2")])
+        table = np.zeros(len(faces), record)
+        table["corners"] = faces
+        path.write_bytes(b"\0" * 80 + np.uint32(len(faces)).tobytes() + table.tobytes())
+    else:
+        lines = ["solid cube"]
+        for face in faces:
+            lines += ["facet normal 0 0 0", "outer loop"]
+            lines += [f"vertex {x} {y} {z}" for x, y, z in face]
+            lines += ["endloop", "endfacet"]
+        path.write_text("\n".join(lines + ["endsolid cube"]) + "\n")
+
+
+@pytest.mark.parametrize("binary", [False, True])
+def test_the_stl_geometry_from_control(tmp_path, binary):
+    """S 1 1: DIVEMesh's STL geometry (solid.stl), placed as DIVEMesh places it
+    (scaled by S 4, moved by S 7, turned by S 8 about z), with the other solids when
+    they are built from control.txt (bug: the ogee weir of an STL was missing when
+    DIVEMesh's own solid file was not there or older than control.txt)."""
+    _cube_stl(tmp_path / "solid.stl", binary)
+    control = tmp_path / "control.txt"
+    control.write_text(
+        "B 10 -5 5 -5 5 0 3\nS 1 1   // solid.stl\nS 4 2.0\nS 7 1.0 0.0 0.0\nS 8 90.0\n"
+        "S 10 3 4 3 4 0 1   // a box\n"
+    )
+    points, triangles, skipped = solids_from_control(control)
+    assert skipped == []
+    assert len(triangles) == 12 + 12
+    stl = points[: 12 * 3]
+    # 2 m wide, moved 1 m in x (1..3), turned 90° about z: x -2..0, y 1..3
+    np.testing.assert_allclose(stl.min(axis=0), [-2.0, 1.0, 0.0], atol=1e-6)
+    np.testing.assert_allclose(stl.max(axis=0), [0.0, 3.0, 2.0], atol=1e-6)
+    assert _volume(points, triangles) == pytest.approx(8.0 + 1.0)
+    assert find_solids(tmp_path) == control  # buildable: the STL alone would do
+    (tmp_path / "solid.stl").unlink()
+    assert solids_from_control(control)[2] == ["S 1"]  # its file gone: left out

@@ -7,9 +7,10 @@ DIVEMesh writes every solid of ``control.txt`` (the S commands and an STL geomet
 as triangles into ``DIVEMesh_Paraview/REEF3D_Solid.vtp``; that file is read when it
 is there. Without it (DIVEMesh run elsewhere), the common solids are built from
 ``control.txt`` itself, as DIVEMesh builds them: boxes (S 10), cylinders (S 32,
-S 33), cones (S 41 - S 43), spheres (S 51), wedges (S 61 - S 63) and polyhedra from
-their corners (S 81 - S 84). Cylinders and cones without their own extent span the
-domain (B 10).
+S 33), cones (S 41 - S 43), spheres (S 51), wedges (S 61 - S 63), polyhedra from
+their corners (S 81 - S 84) and the STL geometry (S 1 1: ``solid.stl``, ASCII or
+binary, scaled by S 4, moved by S 7 and turned about z by S 8). Cylinders and cones
+without their own extent span the domain (B 10).
 
 Only a case's own solids are shown (:func:`find_solids`): in a folder where several
 cases run, the solid file there can be another case's.
@@ -68,7 +69,7 @@ def find_solids(case_dir: str | Path) -> Path | None:
         if vtp_found:
             log.info("%s: not shown, control.txt has no solids", vtp)
         return None
-    buildable = any(code in BUILDERS for code, _ in solids)
+    buildable = any(code in BUILDERS or _stl_on(code, values, case_dir) for code, values in solids)
     if vtp_found and (not buildable or not _older(vtp, control)):
         return vtp
     return control if buildable else None
@@ -136,8 +137,11 @@ def solids_from_control(control: Path) -> tuple[np.ndarray, np.ndarray, list[str
     for code, values in solids:
         builder = BUILDERS.get(code)
         try:
-            triangles = builder(values, domain) if builder else None
-        except (IndexError, ValueError, ZeroDivisionError):
+            if _stl_on(code, values, control.parent):
+                triangles = stl_solid(control)
+            else:
+                triangles = builder(values, domain) if builder else None
+        except (IndexError, ValueError, ZeroDivisionError, OSError):
             triangles = None
         if triangles is None or not len(triangles):
             skipped.append(f"S {code}")
@@ -149,6 +153,65 @@ def solids_from_control(control: Path) -> tuple[np.ndarray, np.ndarray, list[str
         return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32), skipped
     p = np.concatenate(points).astype(np.float32)
     return p, np.arange(len(p), dtype=np.uint32).reshape(-1, 3), skipped
+
+
+# ======================================================================== STL
+#: DIVEMesh's STL geometry, in the case folder (S 1 1)
+STL_FILE = "solid.stl"
+
+
+def _stl_on(code: int, values: list[float], case_dir: Path) -> bool:
+    """S 1 1: the STL geometry is part of the solids (and its file is there)."""
+    return code == 1 and bool(values) and values[0] == 1 and (Path(case_dir) / STL_FILE).is_file()
+
+
+def read_stl(path: str | Path) -> np.ndarray:
+    """The triangles of an STL file, ASCII or binary: (n, 3, 3) corners."""
+    data = Path(path).read_bytes()
+    if len(data) >= 84:
+        count = int(np.frombuffer(data, "<u4", 1, 80)[0])
+        if len(data) == 84 + 50 * count:  # binary: 50 bytes per triangle
+            record = np.dtype([("normal", "<f4", 3), ("corners", "<f4", (3, 3)), ("a", "<u2")])
+            return np.frombuffer(data, record, count, 84)["corners"].astype(np.float64)
+    import re
+
+    numbers = re.findall(rb"vertex\s+(\S+)\s+(\S+)\s+(\S+)", data)
+    corners = np.array(numbers, dtype=np.float64) if numbers else np.zeros((0, 3))
+    return corners[: len(corners) // 3 * 3].reshape(-1, 3, 3)
+
+
+def stl_solid(control: Path) -> np.ndarray:
+    """DIVEMesh's STL geometry of a case (``solid.stl`` next to ``control.txt``) placed
+    as DIVEMesh places it: scaled by S 4, moved by S 7 (dx, dy, dz), then turned by
+    S 8 degrees about the vertical through the origin. (n, 3, 3) corners."""
+    corners = read_stl(Path(control).parent / STL_FILE)
+    scale, shift, turn = 1.0, None, 0.0
+    try:
+        text = Path(control).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    for line in text.splitlines():
+        words = line.split("//")[0].split()
+        if len(words) < 3 or words[0] != "S":
+            continue
+        try:
+            code, values = int(words[1]), [float(w) for w in words[2:]]
+        except ValueError:
+            continue
+        if code == 4:
+            scale = values[0]
+        elif code == 7 and len(values) >= 3:
+            shift = values[:3]
+        elif code == 8:
+            turn = values[0]
+    corners = corners * scale
+    if shift is not None:
+        corners = corners + np.asarray(shift, np.float64)
+    if turn:
+        c, s = math.cos(math.radians(turn)), math.sin(math.radians(turn))
+        x, y = corners[..., 0].copy(), corners[..., 1].copy()
+        corners[..., 0], corners[..., 1] = c * x - s * y, s * x + c * y
+    return corners
 
 
 # ======================================================================== shapes
