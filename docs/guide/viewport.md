@@ -41,7 +41,8 @@ case's georeference ([Maps](maps.md)), else the model's y. The slider and the
 degree box next to *Probe* turn the view gradually about the vertical through the
 middle of the view, in 2D and in 3D, the tilt and the zoom kept: the degrees say
 where it looks, from the model's y towards its x (from the top 0° is the model's y
-up the screen, 90° its x up). They follow the view when you turn it with the mouse.
+up the screen, 90° its x up), in steps of 1°. They follow the view when you turn it
+with the mouse.
 A *Background map* under the case follows the 2D view, fetched
 again in finer detail when you zoom in and for the new area when you pan; a bar
 above the view counts its tiles while they come.

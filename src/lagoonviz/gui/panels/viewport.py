@@ -466,15 +466,16 @@ class Viewport3D(QWidget):
         bar.addSpacing(6)
         self.turn_slider = QSlider(Qt.Horizontal)
         self.turn_slider.setRange(0, 360)
-        self.turn_slider.setPageStep(15)
+        self.turn_slider.setSingleStep(1)  # 1° per step: arrow keys, page keys, clicks
+        self.turn_slider.setPageStep(1)
         self.turn_slider.setFixedWidth(120)
         self.turn_slider.setToolTip(turn_tip)
         self.turn_slider.valueChanged.connect(lambda value: self.turn_view(float(value)))
         bar.addWidget(self.turn_slider)
         self.turn_box = QDoubleSpinBox()
         self.turn_box.setRange(0.0, 360.0)
-        self.turn_box.setDecimals(1)
-        self.turn_box.setSingleStep(5.0)
+        self.turn_box.setDecimals(0)  # whole degrees
+        self.turn_box.setSingleStep(1.0)
         self.turn_box.setWrapping(True)  # past 360° on to 0°
         self.turn_box.setSuffix("°")
         self.turn_box.setKeyboardTracking(False)  # turns when the number is entered
