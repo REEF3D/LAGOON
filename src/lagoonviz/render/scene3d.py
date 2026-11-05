@@ -117,6 +117,9 @@ HEADLAMP = (0.4, -0.6, 1.0)
 #: 2D from the top: the headlamp, fixed in the scene, shines as it does in the 3D view
 #: (along the perspective view's direction); straight down it would light every flat
 #: face fully and put a glare over them, a washed-out picture
+#: 2D from the top: the heights everything lies between (the background map at -0.5,
+#: the free surface at 3, the marks at 4: manager.PLAN_LAYERS), with room to spare
+PLAN_DEPTH = (-20.0, 20.0)
 PLAN_HEADLAMP = tuple(
     -np.asarray(VIEWS["perspective"][0]) / np.linalg.norm(VIEWS["perspective"][0])
 )
@@ -1586,8 +1589,31 @@ class SceneRenderer:
             self.frame()
 
     def render(self, renderer: gfx.WgpuRenderer) -> None:
+        self.fit_plan_depth()
         self.apply_effects(renderer)
         renderer.render(self.scene, self.camera)
+
+    def fit_plan_depth(self) -> None:
+        """2D from the top: the depth range of the camera over the flat layers alone.
+
+        There every item is a flat layer a few metres over the next (the bed at 0, the
+        free surface at 3: manager.PLAN_LAYERS) and its grid and contour lines a few
+        centimetres over it. The orthographic camera's own depth range reaches 100
+        times the view's size to both sides: kilometres for a large model, which left
+        the depth buffer too coarse to tell the lines from their surface, so they
+        vanished under it once the view was moved. In 3D the camera's own again."""
+        camera = self.camera
+        forward = np.asarray(camera.world.forward, dtype=float)
+        if self.plan and camera.fov == 0 and forward[2] < -1.0 + 1e-6:
+            height = float(camera.world.position[2])
+            low, high = PLAN_DEPTH
+            wanted = (height - high, height - low)  # distances along the view, down
+            if camera.depth_range != wanted:
+                camera.depth_range = wanted
+            self._plan_depth = True
+        elif getattr(self, "_plan_depth", False):
+            camera.depth_range = None
+            self._plan_depth = False
 
     def _set_fog(self, fog: tuple[str, float]) -> None:
         """The fog for the camera as it is now: clear up to the scene, half thick

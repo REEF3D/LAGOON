@@ -272,3 +272,42 @@ def test_the_view_turns_to_a_heading(reef3d_run):
             np.linalg.norm((position - centre)[:2])
         )
     assert np.asarray(view.camera.local.position, float) == pytest.approx(position, abs=1e-6)
+
+
+def test_2d_lines_stay_over_their_surface(reef3d_run):
+    """2D from the top: the camera's depth range spans the flat layers alone, so the
+    depth buffer tells a surface (the free surface's layer at 3) from its grid lines
+    5 cm over it, however the view is zoomed or moved; in 3D its own again."""
+    from lagoonviz.core import Session
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        if mesh is not None:
+            view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+    view.set_plan(True)
+    view.set_orthographic(True)
+    view.frame("top")
+    view.camera.width *= 1e4  # zoomed far out: before, the range grew with it
+    view.camera.height *= 1e4
+    view.fit_plan_depth()
+    near, far = view.camera.near, view.camera.far
+    height = float(view.camera.world.position[2])
+    assert near <= height - 4.5 and far >= height + 0.5  # the marks and the maps inside
+    assert far - near <= 50.0  # 24-bit depth: steps of 3 µm, not of metres
+
+    def depth(z):
+        matrix = np.asarray(view.camera.projection_matrix) @ np.asarray(
+            view.camera.world.inverse_matrix
+        )
+        point = matrix @ np.array([0.0, 0.0, z, 1.0])
+        return point[2] / point[3]
+
+    assert abs(depth(3.05) - depth(3.0)) > 1e-4
+    view.set_plan(False)
+    view.set_orthographic(False)
+    view.fit_plan_depth()
+    assert view.camera.depth_range is None

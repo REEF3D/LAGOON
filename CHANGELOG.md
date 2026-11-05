@@ -56,6 +56,10 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- 2D: grid lines (and contour lines) no longer vanish under their surface after the
+  view is zoomed or moved: the camera's depth range now spans the flat layers alone,
+  not 100 times the view's size to both sides (kilometres for a large model, too
+  coarse for lines 5 cm over the surface).
 - NHFLOW on a curvilinear grid with blocks (`G 50 1`): **Hide dry land** works on the
   Free Surface AMR (dry where the elevation is above the bed by REEF3D's film only,
   5 mm or less; also from `WL` or `wet`, which NHFLOW's AMR output wrote only with
