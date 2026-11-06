@@ -52,6 +52,16 @@ def parse(argv: list[str]) -> tuple[Path, bool, tuple[int, int] | None]:
     return folder, resume, frames
 
 
+def _with_denoiser() -> bool:
+    """Whether this Blender's Cycles has OpenImageDenoise (some Linux packages are
+    built without; rendering with denoising on then stops with an error)."""
+    try:
+        import _cycles  # Cycles' own module, there once Cycles is loaded
+    except ImportError:
+        return True
+    return bool(getattr(_cycles, "with_openimagedenoise", True))
+
+
 def set_input(node, names, value) -> bool:
     """Set the first of ``names`` the node has (input names changed between Blender
     versions: "Transmission" became "Transmission Weight", ...)."""
@@ -201,6 +211,11 @@ def setup_render(scene, settings: dict) -> str:
             setattr(cycles, name, value)
         except (AttributeError, TypeError):
             pass
+    if not _with_denoiser():
+        # a Blender built without OpenImageDenoise (some Linux packages) stops at the
+        # render with denoising on: without it, more samples are needed instead
+        cycles.use_denoising = False
+        cycles.samples = max(int(settings["samples"]), 64)
     for transform in (settings.get("view_transform", "AgX"), "AgX", "Filmic", "Standard"):
         try:
             scene.view_settings.view_transform = transform

@@ -54,7 +54,10 @@ a separate program; Blender's window never opens.
 
 Clear water (a free surface coloured by nothing) goes to Blender as a body of
 water: the surface, walls along the sides of the domain and the shore, and a
-floor. Above water it is rendered as [ÆgirFrames](https://github.com/NTNU-MCS/aegir-frames)
+floor. A CFD run's free surface (the iso-surface of the level set `phi`) coloured
+by nothing goes as its water as it is: the part of the volume where `phi` is 0 or
+more, closed by the faces of the domain under water, so a jet over a weir or a
+breaking wave keeps its shape (no walls or floor are added). Above water it is rendered as [ÆgirFrames](https://github.com/NTNU-MCS/aegir-frames)
 renders the ocean: glass in the look's water colour that refracts and reflects
 what the camera sees, while light, shadows and reflections pass through it, so the
 bed and the structures under it are lit as in air and cast their shadows on the

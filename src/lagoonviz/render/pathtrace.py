@@ -1093,6 +1093,34 @@ class _Collector:
             return
         film = np.full(len(positions), 1e6, np.float32)  # walls and floor: deep
         film[: len(top)] = film_top
+        self._add_water_body(shown, positions, triangles, smooth, film, extent, depth, extended)
+
+    def water_volume(self, shown, positions, triangles, smooth) -> None:
+        """A closed body of water as it is, e.g. CFD's: the part of its volume where
+        the level set phi is 0 or more (the free surface and the faces of the domain
+        under water), drawn as water like a free surface's body (:meth:`water`), with
+        no walls or floor added (it is no height field: a jet over a weir, a breaking
+        wave)."""
+        p = np.asarray(positions, float)
+        finite = p[np.isfinite(p).all(axis=1)]
+        if not len(finite) or not len(triangles):
+            return
+        extent = max(float(np.ptp(finite[:, :2], axis=0).max()), 1e-6)
+        film = np.full(len(p), 1e6, np.float32)
+        depth = float(np.ptp(finite[:, 2]))
+        if self.bed is not None:
+            ok = np.isfinite(p).all(axis=1)
+            film[ok] = np.maximum(p[ok, 2] - self.bed(p[ok, :2]), 0.0)
+            surface = np.unique(np.asarray(triangles, np.int64)[np.asarray(smooth, bool)])
+            if len(surface):
+                depth = float(np.mean(film[surface]))
+        depth = max(depth, 0.02 * extent)
+        self._add_water_body(shown, p, triangles, smooth, film, extent, depth, None)
+
+    def _add_water_body(self, shown, positions, triangles, smooth, film, extent, depth, extended):
+        """The material of a closed body of water and the body itself (see
+        :meth:`water`): above water ÆgirFrames' glass, under water an absorbing and
+        scattering body."""
         tint = linear(_hex(self.preset.water_color))
         under = self.preset.fog is not None
         if not under:
@@ -1252,6 +1280,50 @@ class _Collector:
         self.far = max(self.far, SEA_REACH * extent)
 
 
+#: the level set of a two-phase run (CFD): water where it is 0 or more
+LEVEL_SET = "phi"
+
+
+def _level_set_water(session, item_id: str, item, mesh, shown):
+    """CFD's free surface (an iso-surface or iso-volume of the level set phi) drawn
+    plain (coloured by nothing, not see-through) as water: the closed body of the
+    water, the part of the volume where phi is at least the surface's value (its
+    free surface and the faces of the domain under water), as shown (the vertical
+    scale), with the free surface smooth and the faces of the domain flat:
+    (positions, triangles, smooth), or None for other items."""
+    if item.kind not in ("iso_surface", "iso_volume") or not shown.visible:
+        return None
+    if str(item.properties.get("iso_by", "none")) != LEVEL_SET:
+        return None
+    if shown.values is not None or shown.opacity < 1.0 or shown.point_size is not None:
+        return None
+    value = float(item.properties.get("iso_value", item.properties.get("iso_min", 0.0)))
+    if item.kind == "iso_volume":
+        body = mesh
+    else:
+        dataset = session.data.dataset(item_id)
+        index = session.data.frame_index(item_id)
+        if dataset is None or index is None:
+            return None
+        try:
+            body = dataset.read_iso_volume(index, LEVEL_SET, value, 1e30, [LEVEL_SET])
+        except (OSError, ValueError, KeyError) as error:
+            log.warning("%s: its water not made (%s): drawn as a surface", item.name, error)
+            return None
+    if not body.n_triangles:
+        return None
+    drawn = session.data.display(item_id, body)
+    triangles = np.asarray(drawn.triangles, np.int64).reshape(-1, 3)
+    phi = body.point_data.get(LEVEL_SET)
+    if phi is None or np.ndim(phi) != 1:
+        smooth = np.ones(len(triangles), bool)
+    else:
+        span = max(float(np.nanmax(np.abs(phi))) if len(phi) else 1.0, 1e-9)
+        on = np.abs(np.asarray(phi, np.float64) - value) <= 1e-6 * span
+        smooth = on[triangles].all(axis=1)  # the free surface; the domain's faces flat
+    return drawn.positions, triangles.astype(np.uint32), smooth
+
+
 def _frame_objects(
     session, preset: Preset, pixel: float, bounds=None, pixels: int = 1920 * 1080
 ) -> _Collector:
@@ -1279,7 +1351,11 @@ def _frame_objects(
         except ValueError:
             out.bed = None
     for item_id, item, mesh, shown in shown_items:
-        out.surface(item.kind, shown, mesh.triangles)
+        body = _level_set_water(session, item_id, item, mesh, shown)
+        if body is not None:  # CFD's free surface: its water, the part where phi >= 0
+            out.water_volume(shown, *body)
+        else:
+            out.surface(item.kind, shown, mesh.triangles)
         if not shown.visible:
             continue
         overlays = (

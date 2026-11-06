@@ -56,6 +56,11 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- Path tracing (Blender Cycles): a CFD run's free surface (the iso-surface of `phi`)
+  coloured by nothing is rendered as its water, the closed part of the volume where
+  phi >= 0 (it was a matt sheet); coloured by a variable it stays a sheet. A Blender
+  built without OpenImageDenoise (some Linux packages) renders without denoising
+  instead of stopping.
 - Opening or reloading a CFD run with refined blocks in its store is many times
   faster (the weir case: 43 s to 2.6 s in a VM): the blocks of every output are found
   from the set's grid table, their fields read only when shown (all of every output

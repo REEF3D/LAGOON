@@ -931,3 +931,65 @@ def test_hdr_run_lengths():
             decoded += list(coded[at + 1 : at + 1 + count])
             at += 1 + count
     assert decoded == row.tolist()
+
+
+@pytest.mark.parametrize("look", ["open_ocean", "underwater"])
+def test_cfd_free_surface_goes_to_blender_as_its_water(tmp_path, look):
+    """CFD's free surface (the iso-surface of the level set phi) drawn plain is its
+    water in Blender: the closed part of the volume where phi >= 0 (the free surface
+    smooth, the faces of the domain under water flat), refracting like water, not a
+    coloured sheet. Coloured by a variable it stays a sheet."""
+    import shutil
+
+    from reef3d_fixtures import DEPTH, make_run
+
+    root = make_run(tmp_path / "cfd", solver="CFD", frames=2, print_interval=0.5)
+    for name in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):  # CFD writes a volume only
+        shutil.rmtree(root / name)
+    session = Session()
+    session.open_case(root)
+    free = next(i.id for i in session.scene if i.kind == "iso_surface")
+    session.set_property(free, "variable", "none")
+    path = export_scene(session, tmp_path / "out", [0.0], (64, 36), look, 4)
+    scene = json.loads(path.read_text())
+    frame = scene["frames"][0]
+    index, entry = next((i, o) for i, o in enumerate(frame["objects"]) if o["name"] == free)
+    water = scene["materials"][entry["material"]]
+    assert water["water"] and water["transmission"] == 1.0
+    assert water["ior"] == pytest.approx(1.33, abs=0.01)
+    with np.load(tmp_path / "out" / frame["data"]) as arrays:
+        positions, triangles = arrays[f"positions_{index}"], arrays[f"triangles_{index}"]
+        smooth = arrays[f"smooth_{index}"]
+    # closed but for slivers where the free surface meets the domain's sides (the cut
+    # of a side's triangles and of the cells' tetrahedra cross a face differently)
+    keys = {tuple(np.round(p, 6)) for p in positions}
+    number = {k: i for i, k in enumerate(sorted(keys))}
+    merged = np.array([number[tuple(np.round(p, 6))] for p in positions])[triangles]
+    edges = {}
+    for a, b, c in merged:
+        for e in ((a, b), (b, c), (c, a)):
+            edges[e] = edges.get(e, 0) + 1
+    assert all(n == 1 for n in edges.values())  # faces out consistently
+    open_edges = [e for e in edges if (e[1], e[0]) not in edges]
+    assert len(open_edges) < 0.05 * len(edges)
+    corners = np.array(sorted(keys))[np.array(open_edges, int).ravel()]
+    low, high = positions.min(axis=0), positions.max(axis=0)
+    on_side = np.isclose(corners[:, :2], low[:2], atol=1e-4) | np.isclose(
+        corners[:, :2], high[:2], atol=1e-4
+    )
+    assert on_side.any(axis=1).all()  # only on the domain's sides
+    p = positions.astype(float)
+    volume = np.einsum(
+        "ij,ij->i", p[triangles[:, 0]], np.cross(p[triangles[:, 1]], p[triangles[:, 2]])
+    )
+    assert volume.sum() > 0  # facing out
+    assert smooth.any() and not smooth.all()  # the free surface; the domain's faces
+    top = positions[triangles[smooth]].reshape(-1, 3)
+    assert abs(float(np.median(top[:, 2])) - DEPTH) < 0.5  # the free surface on top
+    assert positions[:, 2].min() < DEPTH - 0.4  # down to the bottom of the domain
+    # coloured by the velocity: a sheet in its colours, as before
+    session.set_property(free, "variable", "velocity")
+    path = export_scene(session, tmp_path / "out2", [0.0], (64, 36), look, 4)
+    scene = json.loads(path.read_text())
+    entry = next(o for o in scene["frames"][0]["objects"] if o["name"] == free)
+    assert not scene["materials"][entry["material"]].get("water")
