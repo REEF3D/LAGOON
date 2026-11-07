@@ -28,6 +28,8 @@ import numpy as np
 G = 9.81
 
 SPRAY, FOAM, BUBBLE = 0, 1, 2
+#: grid points along the domain's edges where no white water is born
+EDGE = 2
 KINDS = {SPRAY: "spray", FOAM: "foam", BUBBLE: "bubbles"}
 
 
@@ -121,6 +123,110 @@ class SurfaceGrid:
             None if breaking is None else grid(breaking),
         )
 
+    @classmethod
+    def from_scattered(
+        cls,
+        points,
+        velocity,
+        cell: float | None = None,
+        triangles=None,
+        fill: int = 2,
+        like: SurfaceGrid | None = None,
+    ) -> SurfaceGrid | None:
+        """A surface whose points are on no grid (CFD's free surface, an iso-surface
+        of the volume; AMR) put on one: grid points ``cell`` apart (default: the
+        median plan length of the triangles' edges, about the volume's cell size),
+        each the highest point near it (the top of an overturning crest) with its
+        velocity. Holes of up to ``fill`` grid points (no point of the surface came
+        near) take their neighbours' mean, so they make no false crests; the rest
+        stays dry (NaN). ``like``: on that surface's grid (the frames of a film on
+        one grid, so the white water carries on from frame to frame). None with too
+        few points."""
+        full = np.asarray(points, float).reshape(-1, 3)
+        speed = np.asarray(velocity, float).reshape(-1, 3)
+        ok = np.isfinite(full).all(axis=1) & np.isfinite(speed).all(axis=1)
+        if ok.sum() < 4:
+            return None
+        t = None
+        if triangles is not None and len(triangles):
+            t = np.asarray(triangles, np.int64).reshape(-1, 3)
+            t = t[ok[t].all(axis=1)]
+        if like is not None and len(like.xs) > 1 and len(like.ys) > 1:
+            xs, ys = like.xs, like.ys
+            cell = float(xs[1] - xs[0])
+        else:
+            xs = ys = None
+        if not cell and t is not None and len(t):
+            edges = np.concatenate(
+                [full[t[:, a], :2] - full[t[:, b], :2] for a, b in ((0, 1), (1, 2), (2, 0))]
+            )
+            lengths = np.linalg.norm(edges, axis=1)
+            lengths = lengths[lengths > 0]
+            cell = float(np.median(lengths)) if len(lengths) else None
+        p, vel = full[ok], speed[ok]
+        if xs is None:
+            low, high = p[:, :2].min(axis=0), p[:, :2].max(axis=0)
+            if not cell or cell <= 0:
+                cell = float(max(high - low)) / max(math.sqrt(len(p)), 2.0)
+            n = np.maximum(np.round((high - low) / cell).astype(np.int64) + 1, 2)
+            if n[0] * n[1] > 4_000_000:  # a coarser grid for a very large surface
+                cell *= math.sqrt(n[0] * n[1] / 4_000_000)
+                n = np.maximum(np.round((high - low) / cell).astype(np.int64) + 1, 2)
+            xs = low[0] + cell * np.arange(n[0])
+            ys = low[1] + cell * np.arange(n[1])
+        low = np.array([xs[0], ys[0]])
+        n = np.array([len(xs), len(ys)])
+        if t is not None and len(t):
+            # points across the triangles too: a coarse cell (AMR's level 0 next to a
+            # refined block) leaves no grid point without one
+            extra, extra_vel = _triangle_points(full, speed, t, 0.5 * cell)
+            p, vel = np.concatenate([p, extra]), np.concatenate([vel, extra_vel])
+        inside = (
+            (p[:, 0] >= xs[0] - cell / 2)
+            & (p[:, 0] <= xs[-1] + cell / 2)
+            & (p[:, 1] >= ys[0] - cell / 2)
+            & (p[:, 1] <= ys[-1] + cell / 2)
+        )
+        p, vel = p[inside], vel[inside]
+        i = np.clip(np.round((p[:, 0] - low[0]) / cell).astype(np.int64), 0, n[0] - 1)
+        j = np.clip(np.round((p[:, 1] - low[1]) / cell).astype(np.int64), 0, n[1] - 1)
+        # the highest point of each grid point: sorted by height, the last one wins
+        order = np.argsort(p[:, 2], kind="stable")
+        z = np.full(tuple(n), np.nan)
+        u, v, w = (np.full(tuple(n), np.nan) for _ in range(3))
+        z[i[order], j[order]] = p[order, 2]
+        for field, k in ((u, 0), (v, 1), (w, 2)):
+            field[i[order], j[order]] = vel[order, k]
+        for _ in range(max(int(fill), 0)):
+            holes = ~np.isfinite(z)
+            if not holes.any():
+                break
+            fields = [z, u, v, w]
+            sums = [np.zeros_like(z) for _ in fields]
+            count = np.zeros_like(z)
+            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                shifted = np.full_like(z, np.nan)
+                src = (
+                    slice(max(-di, 0), n[0] - max(di, 0)),
+                    slice(max(-dj, 0), n[1] - max(dj, 0)),
+                )
+                dst = (
+                    slice(max(di, 0), n[0] - max(-di, 0)),
+                    slice(max(dj, 0), n[1] - max(-dj, 0)),
+                )
+                shifted[dst] = z[src]
+                there = np.isfinite(shifted)
+                count += there
+                for total, field in zip(sums, fields, strict=True):
+                    moved = np.zeros_like(z)
+                    moved[dst] = field[src]
+                    total += np.where(there, np.nan_to_num(moved), 0.0)
+            # a hole between water on two sides at least (not the dry land's edge)
+            filled = holes & (count >= 2)
+            for total, field in zip(sums, fields, strict=True):
+                field[filled] = total[filled] / count[filled]
+        return cls(xs, ys, z, u, v, w)
+
     def blend(self, other: SurfaceGrid, s: float) -> SurfaceGrid:
         """The surface a fraction ``s`` of the way to ``other`` (same grid)."""
         if s <= 0.0 or other.z.shape != self.z.shape:
@@ -163,6 +269,29 @@ class SurfaceGrid:
         return out
 
 
+def _triangle_points(points, velocity, triangles, spacing: float, most: int = 32):
+    """Points inside the triangles at most ``spacing`` apart (barycentric steps, up to
+    ``most`` along an edge) with their interpolated velocity; the corners are not
+    among them."""
+    corners = points[triangles]  # (n, 3, 3)
+    longest = np.max(
+        np.linalg.norm(corners[:, :, :2] - np.roll(corners[:, :, :2], 1, axis=1), axis=2), axis=1
+    )
+    steps = np.clip(np.ceil(longest / max(spacing, 1e-12)), 1, most).astype(np.int64)
+    out, out_vel = [np.zeros((0, 3))], [np.zeros((0, 3))]
+    for m in np.unique(steps):
+        if m < 2:
+            continue
+        chosen = triangles[steps == m]
+        a, b = np.meshgrid(np.arange(m + 1), np.arange(m + 1), indexing="ij")
+        keep = (a + b <= m) & ~(((a == 0) | (a == m)) & ((b == 0) | (b == m)))
+        a, b = a[keep] / m, b[keep] / m
+        weights = np.stack([1.0 - a - b, a, b], axis=1)  # (k, 3)
+        out.append(np.einsum("kc,ncd->nkd", weights, points[chosen]).reshape(-1, 3))
+        out_vel.append(np.einsum("kc,ncd->nkd", weights, velocity[chosen]).reshape(-1, 3))
+    return np.concatenate(out), np.concatenate(out_vel)
+
+
 def _ramp(value, low: float, high: float) -> np.ndarray:
     """0 below ``low``, 1 above ``high``, linear between (Ihmsen's clamping)."""
     return np.clip((np.nan_to_num(value, nan=0.0) - low) / (high - low), 0.0, 1.0)
@@ -199,6 +328,10 @@ def potentials(grid: SurfaceGrid, depth: float) -> tuple[np.ndarray, np.ndarray]
     dry = ~np.isfinite(grid.z)
     breaking_crest[dry] = 0.0
     trapped[dry] = 0.0
+    # none along the domain's edges: the slopes there are one-sided, and a surface
+    # cut from the volume (CFD's) bends up or down in the last cells at an outlet
+    for field in (breaking_crest, trapped):
+        field[:EDGE], field[-EDGE:], field[:, :EDGE], field[:, -EDGE:] = 0.0, 0.0, 0.0, 0.0
     return breaking_crest, trapped
 
 

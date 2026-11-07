@@ -45,6 +45,36 @@ def test_grid_from_points_in_any_order():
     assert SurfaceGrid.from_points(scattered, np.zeros((200, 3))) is None
 
 
+def test_a_surface_on_no_grid_is_put_on_one():
+    """CFD's free surface (an iso-surface: points on the cells' edges, in no order) and
+    AMR: put on a grid of the cell size, each grid point the highest point near it;
+    a hole of a grid point or two takes its neighbours' mean, no false crest."""
+    surface = wave(0.0)
+    x, y = np.meshgrid(XS, YS, indexing="ij")
+    nodes = np.c_[x.ravel(), y.ravel(), surface.z.ravel()]
+    # the iso-surface's points between the nodes too (on the horizontal edges), lower
+    half = np.c_[x.ravel() + 0.025, y.ravel(), surface.z.ravel() - 0.01][: -len(YS)]
+    rng = np.random.default_rng(5)
+    keep = rng.random(len(nodes)) > 0.02  # a few holes
+    points = np.concatenate([nodes[keep], half])
+    velocity = np.c_[np.interp(points[:, 0], XS, surface.u[:, 0]), 0 * points[:, :2]]
+    order = rng.permutation(len(points))
+    grid = SurfaceGrid.from_scattered(points[order], velocity[order], cell=0.05)
+    assert grid.z.shape == surface.z.shape
+    assert np.isfinite(grid.z).all()  # the holes filled
+    assert np.abs(grid.z - surface.z).max() < 0.05  # half a cell of the steep face
+    crest, _ = potentials(grid, DEPTH)
+    assert crest.max() > 0.3 and crest[x > 6].max() == 0.0  # at the crest only
+    # the cell size from the triangles' edges; the next frame on the same grid
+    triangles = np.arange(3 * (len(nodes) // 3)).reshape(-1, 3)
+    estimated = SurfaceGrid.from_scattered(nodes, 0 * nodes, triangles=triangles)
+    assert estimated is not None and 0.02 < estimated.h < 0.2
+    first_half = nodes[: len(nodes) // 2]
+    later = SurfaceGrid.from_scattered(first_half, 0 * first_half, like=grid)
+    assert later.z.shape == grid.z.shape and np.isnan(later.z).any()  # dry where none
+    assert SurfaceGrid.from_scattered(nodes[:2], 0 * nodes[:2]) is None
+
+
 def test_born_at_the_breaking_crest():
     crest, trapped = potentials(wave(0.0), DEPTH)
     x, _ = np.meshgrid(XS, YS, indexing="ij")
@@ -98,3 +128,22 @@ def test_how_much_white_water():
     full = run(2.0)
     light = run(2.0, rate=20.0 * 0.35, lifetime=12.0 * 0.35)
     assert len(light) < 0.6 * len(full)
+
+
+def test_coarse_and_fine_triangles_leave_no_holes():
+    """AMR: a refined block's small triangles beside level 0's large ones; the grid
+    (of the small cell size) has a value under the large ones too."""
+    xc, yc = np.meshgrid(np.arange(0.0, 4.01), np.arange(0.0, 2.01), indexing="ij")
+    coarse = np.c_[xc.ravel(), yc.ravel(), np.ones(xc.size)]  # cells of 1 m
+    xf, yf = np.meshgrid(np.arange(4.0, 6.01, 0.1), np.arange(0.0, 2.01, 0.1), indexing="ij")
+    fine = np.c_[xf.ravel(), yf.ravel(), np.ones(xf.size)]
+    points = np.concatenate([coarse, fine])
+    triangles = []
+    for offset, (nx, ny) in ((0, xc.shape), (len(coarse), xf.shape)):
+        for i in range(nx - 1):
+            for j in range(ny - 1):
+                a = offset + i * ny + j
+                triangles += [[a, a + ny, a + 1], [a + ny, a + ny + 1, a + 1]]
+    grid = SurfaceGrid.from_scattered(points, np.zeros_like(points), triangles=triangles, fill=0)
+    assert grid.h == pytest.approx(0.1, rel=0.3)
+    assert np.isfinite(grid.z).all() and np.allclose(grid.z, 1.0)

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### White water for CFD
+
+- Path traced CFD runs (Cycles) had no white water: their free surface is an
+  iso-surface of the volume (phi at 0), not a free surface item, and its points are
+  on no grid. It is now put on a grid of its cell size (the highest point near
+  each grid point; points across the triangles too, so AMR's coarse cells leave no
+  holes), the same for every output, with the water depth from the bed: spray,
+  foam and bubbles where the water plunges over a weir and in the jump below it.
+  The *Free Surface AMR* gets white water the same way.
+- No white water is born in the last two cells along the domain's edges (one-sided
+  slopes; CFD's surface bends up at an outlet).
+- The warm-up before a still reads at most 24 outputs.
+
 ### FNPF and NHFLOW runs without a free surface
 
 - A run that writes its volume (`P 10`) and bed but no free surface (no `P 180`)

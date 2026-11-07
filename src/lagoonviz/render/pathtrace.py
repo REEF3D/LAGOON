@@ -1473,23 +1473,36 @@ class WhiteWater:
     """Foam, spray and bubbles for the frames of a film (:mod:`lagoonviz.core.foam`):
     the simulation runs through REEF3D's outputs up to each frame's time, from a
     warm-up before the first one, so a still shows foam that has had time to form.
-    Off (``ok`` False) without a free surface with velocity on a grid, or without
-    times in seconds."""
+    The free surface shown: REEF3D's (on its grid), else the Free Surface AMR, else
+    CFD's (the level set phi at 0, an iso-surface of the volume): those two are put
+    on a grid of their cell size first (:meth:`SurfaceGrid.from_scattered`). Off
+    (``ok`` False) without a free surface with velocity, or without times in
+    seconds."""
+
+    #: outputs read at most on the way to a time (the warm-up before a still)
+    WARM_OUTPUTS = 24
+    #: the kinds of items that are a free surface, in the order they are taken
+    SURFACES = ("free_surface", "amr", "iso_surface")
 
     def __init__(self, session, settings=None) -> None:
         from lagoonviz.core.foam import FoamSettings
 
         self.session = session
         self.settings = settings or FoamSettings()
-        self.item = next(
-            (
-                item_id
-                for item_id in session.data.data_items()
-                if session.scene.get(item_id).kind == "free_surface"
-                and session.scene.get(item_id).visible
-            ),
-            None,
-        )
+        shown = [
+            session.scene.get(item_id)
+            for item_id in session.data.data_items()
+            if session.scene.get(item_id).visible
+        ]
+        shown = [
+            item
+            for item in shown
+            if item.kind in self.SURFACES
+            and (item.kind != "iso_surface" or item.properties.get("iso_by") == "phi")
+        ]
+        shown.sort(key=lambda item: self.SURFACES.index(item.kind))
+        self.item = shown[0].id if shown else None
+        self.scattered = None  # the grid a surface on none is put on, for every frame
         times, _, unit = session.data.timeline()
         self.outputs = np.asarray(times, float) if unit == "s" else np.zeros(0)
         self.sim = None
@@ -1505,19 +1518,58 @@ class WhiteWater:
         index = data.frame_index(self.item, time)
         if dataset is None or index is None or "velocity" not in dataset.components:
             return None, None
-        wanted = [n for n in ("velocity", "breaking", "WL", "depth") if n in dataset.components]
-        raw = dataset.read(index, wanted)
+        if self.session.scene.get(self.item).kind == "iso_surface":
+            # CFD: the level set phi at 0, cut from the volume (as drawn, cached)
+            raw = data.load(self.item, time)
+            if raw is None or "velocity" not in raw.point_data or not raw.n_points:
+                return None, None
+        else:
+            wanted = [n for n in ("velocity", "breaking", "WL", "depth") if n in dataset.components]
+            raw = dataset.read(index, wanted)
         points = data.placed(self.item, raw.points)  # exaggerated as drawn
-        grid = SurfaceGrid.from_points(
-            points, raw.point_data["velocity"], raw.point_data.get("breaking")
-        )
+        velocity = raw.point_data["velocity"]
+        grid = None
+        if self.scattered is None:
+            grid = SurfaceGrid.from_points(points, velocity, raw.point_data.get("breaking"))
+        if grid is None:  # an iso-surface, AMR: on a grid of its own, the same each frame
+            grid = SurfaceGrid.from_scattered(
+                points, velocity, triangles=raw.triangles, like=self.scattered
+            )
+            if grid is not None and self.scattered is None:
+                self.scattered = grid
+        if grid is None:
+            return None, None
         depth = None
         for name in ("WL", "depth"):  # the water depth (NHFLOW: WL, FNPF: depth)
             if name in raw.point_data and depth is None:
                 values = np.asarray(raw.point_data[name], float)
                 values = values[np.isfinite(values) & (values > 0)]
                 depth = float(np.median(values)) if len(values) else None
+        if depth is None:
+            depth = self._depth_over_bed(grid, time)
         return grid, depth
+
+    def _depth_over_bed(self, grid, time: float) -> float | None:
+        """The water depth from the bed shown (CFD writes none: its bed is the floor of
+        its volume): the median height of the surface over the median of the bed."""
+        data = self.session.data
+        for item_id in data.data_items():
+            item = self.session.scene.get(item_id)
+            if item.kind != "bathymetry" or not item.visible:
+                continue
+            try:
+                bed = data.load(item_id, time)
+            except (OSError, ValueError, KeyError):
+                continue
+            if bed is None or not bed.n_points:
+                continue
+            floor = data.placed(item_id, bed.points)[:, 2]
+            floor = floor[np.isfinite(floor)]
+            top = grid.z[np.isfinite(grid.z)]
+            if len(floor) and len(top):
+                depth = float(np.median(top) - np.median(floor))
+                return depth if depth > 0 else None
+        return None
 
     def at(self, time: float) -> dict[str, tuple[np.ndarray, np.ndarray]]:
         """The white water at a time (per kind: positions and radii)."""
@@ -1539,6 +1591,10 @@ class WhiteWater:
             self.grid, _ = self._surface(start)
             self.sim.time = start
         steps = self.outputs[(self.outputs > self.sim.time + 1e-9) & (self.outputs < time)]
+        if len(steps) > self.WARM_OUTPUTS:  # a long warm-up: every so many outputs
+            # (a surface cut from the volume, CFD's, takes a second or two each)
+            every = math.ceil(len(steps) / self.WARM_OUTPUTS)
+            steps = steps[::-1][::every][::-1]
         for t in [*steps.tolist(), time]:
             if t <= self.sim.time + 1e-9:
                 continue

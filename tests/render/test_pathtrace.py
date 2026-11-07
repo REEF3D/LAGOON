@@ -872,6 +872,33 @@ def test_white_water_follows_the_outputs(tmp_path):
     assert session.scene.time == 1.0
 
 
+def test_cfd_white_water_from_its_free_surface(tmp_path):
+    """Bug: a CFD run rendered no white water: its free surface is an iso-surface of
+    the volume (phi at 0), not a free surface item, and its points are on no grid.
+    It is put on one (the same for every output) and the depth comes from its bed."""
+    import shutil
+
+    from reef3d_fixtures import DEPTH, make_run
+
+    from lagoonviz.render.pathtrace import WhiteWater
+
+    run = make_run(tmp_path / "cfd", solver="CFD", frames=4, print_interval=0.5)
+    for name in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):  # CFD writes a volume only
+        shutil.rmtree(run / name)
+    session = Session()
+    session.open_case(run)
+    white = WhiteWater(session)
+    assert white.ok and session.scene.get(white.item).kind == "iso_surface"
+    grid, depth = white._surface(0.5)
+    assert grid is not None and np.isfinite(grid.z).mean() > 0.9
+    assert abs(float(np.nanmedian(grid.z)) - DEPTH) < 0.5
+    assert depth is not None and depth > 0
+    again, _ = white._surface(1.0)
+    assert again.z.shape == grid.z.shape  # one grid: the foam carries on
+    particles = white.at(1.5)
+    assert white.ok and isinstance(particles, dict)
+
+
 def test_sky_picture_is_turned_to_the_sun(reef3d_run, tmp_path):
     """Open ocean and Diorama: ÆgirFrames' sky picture lights the scene and is seen
     behind it, turned so its sun stands in the sun's direction; plain AgX, a weak

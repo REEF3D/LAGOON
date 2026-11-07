@@ -110,8 +110,14 @@ velocity from output to output. Its size and lifetime scale with the case (the
 cells and the water depth), so a flume and a coast look alike. A still runs the
 foam from a few wave periods before its time, so it has formed.
 
-It needs the free surface's velocity on its grid (NHFLOW and FNPF write it) and
-the output times in seconds. How much there is: *View → White water in Cycles*
+It needs the free surface's velocity (NHFLOW and FNPF write it on their grid)
+and the output times in seconds. CFD's free surface (the level set `phi` at 0, cut
+from the volume) and the *Free Surface AMR* are on no grid: they are put on one of
+their cell size first (the highest point near each grid point, the top of an
+overturning crest), the same for every output, and CFD's water depth comes from
+its bed. No white water is born in the last two cells along the domain's edges.
+The warm-up before a still reads at most 24 outputs (every so many over a long
+one): a surface cut from the volume takes a second or two each. How much there is: *View → White water in Cycles*
 (*None*, *Light*, *Medium*, *Heavy*; Medium by default, Heavy as much as before
 October 2026), also in the export dialog, or `--white-water light` on the command
 line (`--no-foam`: none). In a script, `path_trace(..., foam="light")`.
