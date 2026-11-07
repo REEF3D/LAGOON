@@ -56,6 +56,11 @@
   ring of block 0), the ranks and blocks joined without a crack. The format: AMR
   sets of curvilinear grids (`horizontal: "curvilinear"`, SPEC 11);
   `lagoon-convert` keeps them so.
+- The Open ocean and Diorama looks follow the timeline about four times faster: the
+  open edges of the bed and the water (for the stand's sides) were found by sorting
+  rows at every frame (150 ms of 200 for a surface of 25 000 points). The run monitor
+  reads the run log once per change instead of every three seconds in the window's
+  thread (a quarter second for a long log).
 - Path tracing (Blender Cycles): a CFD run's free surface (the iso-surface of `phi`)
   coloured by nothing is rendered as its water, the closed part of the volume where
   phi >= 0 (it was a matt sheet); coloured by a variable it stays a sheet. A Blender

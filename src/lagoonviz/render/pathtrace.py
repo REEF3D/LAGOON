@@ -445,9 +445,24 @@ def _facing_up_and_rim(p: np.ndarray, t: np.ndarray) -> tuple[np.ndarray, np.nda
     up = np.cross(b - a, c - a)[:, 2] >= 0
     t = np.where(up[:, None], t, t[:, ::-1])
     edges = np.concatenate([t[:, [0, 1]], t[:, [1, 2]], t[:, [2, 0]]])
-    keys = np.sort(edges, axis=1)
-    _, inverse, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
-    return t, edges[counts[inverse.ravel()] == 1]
+    if not len(edges):
+        return t, edges
+    # an edge as one int64 whichever way round, sorted: an open edge occurs once
+    # (np.unique over rows sorted them as records: ten times slower, and the 3D view
+    # does this for the bed and the water at every frame in the stand's looks)
+    span = int(edges.max()) + 1
+    keys = np.minimum(edges[:, 0], edges[:, 1]).astype(np.int64) * span + np.maximum(
+        edges[:, 0], edges[:, 1]
+    )
+    order = np.argsort(keys)
+    ordered = keys[order]
+    alone = np.ones(len(keys), bool)
+    twice = ordered[1:] == ordered[:-1]
+    alone[1:][twice] = False
+    alone[:-1][twice] = False
+    once = np.zeros(len(keys), bool)
+    once[order[alone]] = True
+    return t, edges[once]
 
 
 def skirt(positions: np.ndarray, triangles: np.ndarray, bottom: float):

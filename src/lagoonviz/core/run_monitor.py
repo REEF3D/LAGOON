@@ -163,10 +163,12 @@ def ctrl_changes(current: str, started: str) -> list[str]:
 # ----------------------------------------------------------------- the status
 def _runs(case_dir: Path, solver: str = "") -> list:
     """The runs of the case's run log (of ``solver``, if given, and if it has any)."""
-    from lagoon_format.run import read_case
+    from lagoonviz.core.data.reef3d import run_log
 
     try:
-        history = read_case(case_dir)
+        # read once per change of the log (the monitor asks every few seconds, in the
+        # window's thread: a long run's log is megabytes, a quarter second each time)
+        history = run_log(Path(case_dir))
     except (OSError, ValueError):
         return []
     if history is None or not history.runs:
