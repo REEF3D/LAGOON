@@ -77,6 +77,11 @@ session.set_sun(azimuth=200, elevation=20)  # degrees
 session.set_sun()                           # the look's own sun again
 ```
 
+The sun casts shadows in the 3D view (in the looks that have them), not in 2D: a
+2D view, from the top, the front or the side, is a drawing straight at the items.
+Slices, the volume and iso-volumes cast none (they are views into the water); the
+bed, the free surface and the structures do.
+
 *View → Theme* switches the window between light and dark.
 
 ![The Ocean look](../images/view-ocean.png)

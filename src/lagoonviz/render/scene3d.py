@@ -81,8 +81,15 @@ WATER_KINDS = ("free_surface", "amr")
 #: mostly from -x, across the crests of waves that travel along x (REEF3D's usual
 #: set-up), so the slopes facing it and facing away differ clearly
 SUN_DIRECTION = np.array(DEFAULT_SUN) / np.linalg.norm(DEFAULT_SUN)
-#: shadow map depth bias, as a fraction of the shadow camera's depth range
-SHADOW_BIAS = 0.0008
+#: shadow map depth bias, in texels of the shadow map (pygfx has no slope-scaled
+#: bias: a face the sun grazes, and the 5 x 5 texels its shadow is softened over,
+#: need several texels' depth or they shade themselves in diagonal bands)
+SHADOW_BIAS_TEXELS = 8.0
+#: the shadow map's texels across (pygfx's, 0.9 - 0.17)
+SHADOW_MAP_TEXELS = 1024
+#: items that cast no shadow: views into the water (a slice, the volume's skin,
+#: iso-volumes) would only shade themselves and the bed under the water
+NO_SHADOW_CAST = frozenset({"slice", "volume", "iso_volume"})
 
 #: room around the data when framing (perspective makes the near side look larger)
 FRAME_MARGIN = 1.05
@@ -143,6 +150,32 @@ def _look_background(look: dict, sun=None) -> gfx.Background:
         texture = environment_texture(name, sun=key)
         return gfx.Background(None, gfx.BackgroundSkyboxMaterial(map=texture))
     return _background(look["background"])
+
+
+def _seen_from(sun, low, high) -> tuple[float, float, float]:
+    """The width, height and depth of the box (``low``, ``high``) seen along the sun's
+    light (``sun``: towards the sun), in the frame pygfx's shadow camera takes when
+    it looks at the box with z up (across, up, along the light)."""
+    sun = np.asarray(sun, float) / max(float(np.linalg.norm(sun)), 1e-12)
+    forward = -sun
+    up = np.array([0.0, 0.0, 1.0])
+    if abs(float(forward @ up)) > 0.999:  # straight down: y is up on the map
+        up = np.array([0.0, 1.0, 0.0])
+    right = np.cross(forward, up)
+    right /= np.linalg.norm(right)
+    upward = np.cross(right, forward)
+    corners = np.array(
+        [
+            (x, y, z)
+            for x in (low[0], high[0])
+            for y in (low[1], high[1])
+            for z in (low[2], high[2])
+        ],
+        float,
+    )
+    corners -= corners.mean(axis=0)
+    extents = [2 * float(np.abs(corners @ axis).max()) for axis in (right, upward, forward)]
+    return tuple(max(e, 1e-6) for e in extents)
 
 
 def _sun_direction(look: dict) -> np.ndarray:
@@ -292,6 +325,7 @@ class SceneRenderer:
         self._fog = None
         self.sun.cast_shadow = bool(look.get("shadows", False))
         self.plan = False
+        self.two_d = False
         self.scene.add(self.sun)
         self._shadow_fit: tuple | None = None
         self.camera = gfx.PerspectiveCamera(45, 16 / 9)
@@ -492,7 +526,7 @@ class SceneRenderer:
             )
             mesh = gfx.Mesh(geometry, self._material(kind, shown))
             self._grain(mesh, shown.positions, kind, shown.material)
-            mesh.cast_shadow = True
+            mesh.cast_shadow = kind not in NO_SHADOW_CAST
             mesh.receive_shadow = True
             self.content.add(mesh)
             current = _Shown(mesh, kind, shown.colormap, shown.triangles, shown.values is not None)
@@ -724,19 +758,30 @@ class SceneRenderer:
         low, high = corners
         centre = (low + high) / 2
         radius = max(float(np.linalg.norm(high - low)) / 2, 1e-6)
-        fit = (*np.round(centre, 3), round(radius, 3), *np.round(self.sun_direction, 6))
+        fit = (*np.round(low, 3), *np.round(high, 3), *np.round(self.sun_direction, 6))
         if fit == self._shadow_fit:
             return
         self._shadow_fit = fit
+        # the box seen from the sun: the shadow map covers just that (not the box's
+        # bounding sphere: a long flume left its texels many times too coarse)
+        width, height, depth = _seen_from(self.sun_direction, low, high)
+        margin = 0.02 * radius
+        width, height = width + 2 * margin, height + 2 * margin
         self.sun.target.local.position = tuple(centre)
-        self.sun.local.position = tuple(centre + self.sun_direction * 2 * radius)
+        self.sun.local.position = tuple(centre + self.sun_direction * (depth / 2 + margin))
         shadow = getattr(self.sun, "shadow", None)
         if shadow is None:
             return
         camera = shadow.camera
-        camera.width = camera.height = 2 * radius
-        camera.depth_range = (0.0, 4 * radius)
-        shadow.bias = SHADOW_BIAS
+        try:  # the map's rows run as :func:`_seen_from` reckons them
+            camera.world.reference_up = (0.0, 0.0, 1.0)
+        except AttributeError:
+            pass
+        camera.width, camera.height = width, height
+        reach = depth + 2 * margin
+        camera.depth_range = (0.0, reach)
+        texel = max(width, height) / SHADOW_MAP_TEXELS
+        shadow.bias = min(SHADOW_BIAS_TEXELS * texel / reach, 0.05)
         shadow.cull_mode = "none"  # open surfaces (water, bed) cast shadows from both sides
 
     def _update_lines(self, kind: str, shown: DisplaySurface) -> None:
@@ -851,7 +896,7 @@ class SceneRenderer:
             self.sun_override if self.sun_override is not None else _sun_direction(look)
         )
         self._sun_colour(look)
-        self.sun.cast_shadow = bool(look.get("shadows", False)) and not self.plan
+        self.sun.cast_shadow = self._shadows(look)
         self._shadow_fit = None
         self._fit_shadow()
         self.headlamp.intensity = look["headlamp"]
@@ -1550,12 +1595,24 @@ class SceneRenderer:
         darken the lower layers, so they are off. The headlamp shines as in the 3D
         view, not straight down."""
         self.plan = bool(on)
-        look = STYLES[self.style_name]
-        self.sun.cast_shadow = bool(look.get("shadows", False)) and not self.plan
+        self.sun.cast_shadow = self._shadows(STYLES[self.style_name])
         self._shadow_fit = None
         self._fit_shadow()
         self._place_headlamp()
         self._refresh_stand()  # no stand in 2D
+
+    def set_two_d(self, on: bool) -> None:
+        """Any 2D view (from the top, the front or the side): a drawing straight at
+        the items, without the sun's shadows (on a section seen from the side they
+        were only diagonal bands)."""
+        self.two_d = bool(on)
+        self.sun.cast_shadow = self._shadows(STYLES[self.style_name])
+        self._shadow_fit = None
+        self._fit_shadow()
+
+    def _shadows(self, look: dict) -> bool:
+        """The sun casts shadows: the look has them, in 3D."""
+        return bool(look.get("shadows", False)) and not self.plan and not self.two_d
 
     def _place_headlamp(self) -> None:
         """On the camera in 3D (it shines along the view); in 2D from the top fixed in

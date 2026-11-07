@@ -311,3 +311,53 @@ def test_2d_lines_stay_over_their_surface(reef3d_run):
     view.set_orthographic(False)
     view.fit_plan_depth()
     assert view.camera.depth_range is None
+
+
+def test_shadows_without_diagonal_bands(reef3d_run):
+    """Bug: solids, slices and the volume's sides were shaded in diagonal bands (the
+    shadow map's texels on faces the sun grazes). The shadow map covers the scene's
+    box as the sun sees it, its bias is in texels of the map, the views into the
+    water cast no shadow, and no 2D view has shadows."""
+    import pygfx as gfx
+
+    from lagoonviz.core import Session
+    from lagoonviz.render.scene3d import (
+        NO_SHADOW_CAST,
+        SHADOW_BIAS_TEXELS,
+        SHADOW_MAP_TEXELS,
+        SceneRenderer,
+        _seen_from,
+    )
+
+    # a long, narrow flume seen from the sun straight above: the map is as long and
+    # as narrow as the flume (a sphere around it was 8640 m both ways)
+    width, height, depth = _seen_from((0.0, 0.0, 1.0), (0, 0, 0), (8640, 1.5, 600))
+    assert sorted([width, height]) == pytest.approx([1.5, 8640])
+    assert depth == pytest.approx(600)
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    for item_id in session.data.data_items():
+        mesh = session.data.load(item_id)
+        if mesh is not None:
+            view.update(session.scene.get(item_id).kind, session.data.display(item_id, mesh))
+    assert view.sun.cast_shadow
+    shadow = view.sun.shadow
+    low, high = view.bounds(visible_only=False)
+    radius = float(np.linalg.norm(high - low)) / 2
+    assert max(shadow.camera.width, shadow.camera.height) < 2.05 * radius
+    texel = max(shadow.camera.width, shadow.camera.height) / SHADOW_MAP_TEXELS
+    reach = shadow.camera.depth_range[1] - shadow.camera.depth_range[0]
+    assert shadow.bias * reach == pytest.approx(SHADOW_BIAS_TEXELS * texel)
+    # the camera's frame is the one the extents were reckoned in
+    shadow._update_matrix(view.sun)
+    forward = np.asarray(shadow.camera.world.forward)
+    assert forward == pytest.approx(-np.asarray(view.sun_direction), abs=1e-6)
+    view.set_two_d(True)  # 2D from the side
+    assert not view.sun.cast_shadow
+    view.set_two_d(False)
+    assert view.sun.cast_shadow
+    for kind in ("slice", "volume", "iso_volume"):
+        assert kind in NO_SHADOW_CAST
+    surface = next(s for s in view._shown.values() if isinstance(s.mesh, gfx.Mesh))
+    assert surface.mesh.cast_shadow  # the free surface and bed still do

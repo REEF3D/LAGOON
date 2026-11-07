@@ -173,6 +173,8 @@ class OffscreenView:
                 self.scene.set_plan(True)
             two_d = (self.view or "").startswith("2d")
             if two_d or (plan.plan_view and not self.view and not plan.camera):
+                self.scene.set_two_d(True)  # a 2D view: no shadows, as in the window
+            if two_d or (plan.plan_view and not self.view and not plan.camera):
                 # orthographic from the 2D view's side, as the 2D view
                 self.scene.set_orthographic(True)
                 self.scene.frame(plan.plan_side)

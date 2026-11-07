@@ -1100,6 +1100,7 @@ class Viewport3D(QWidget):
         self._use_controls(CONTROLS_2D if on else BLENDER_CONTROLS)
         self.ortho_button.setEnabled(not on)
         self.view.set_plan(on and side == "top")
+        self.view.set_two_d(on)
         self.view.set_orthographic(on or self.ortho_button.isChecked())
         self._mark_2d_side()
         if frame:

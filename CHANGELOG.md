@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Shadows without diagonal bands
+
+- Structures, slices and the volume's sides were shaded in diagonal bands: the sun's
+  shadow map was spread over the scene's bounding sphere (a long flume left its
+  texels many times too coarse) with a bias too small for faces the sun grazes.
+  The map now covers the scene's box as the sun sees it, its bias is 8 of its
+  texels, slices, the volume and iso-volumes cast no shadow (views into the water:
+  they only shaded themselves and the bed under the water), and no 2D view has
+  shadows (from the front or the side they were only bands).
+
 ### White water for CFD
 
 - Path traced CFD runs (Cycles) had no white water: their free surface is an
