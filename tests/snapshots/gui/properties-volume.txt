@@ -5,7 +5,7 @@ QWidget
   Case: choice 'first case' of ['first case', 'run [case-1]']
   Dataset: choice 'automatic (NHFLOW volume)' of ['automatic (NHFLOW volume)', 'NHFLOW volume [nhflow_volume]']
   Colour by: choice 'velocity' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
-  Colour map: choice 'ocean' of ['reef3d', 'ocean', 'tension', 'lagoon_blue', 'balance', 'viridis', 'rainbow', 'sand', 'greys', 'white']
+  Colour map: choice 'reef3d' of ['reef3d', 'ocean', 'tension', 'lagoon_blue', 'balance', 'viridis', 'rainbow', 'sand', 'greys', 'white']
   Automatic range: checkbox '' on
   Range from: choice '1st - 99th percentile' of ['1st - 99th percentile', 'lowest to highest']
   Range min: number 0.1455 in [-1e+30, 1e+30] decimals 30

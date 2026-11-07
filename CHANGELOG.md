@@ -7,6 +7,12 @@
 - *Open case* is ⌘O (Ctrl+O), *Open session* ⇧⌘O (Ctrl+Shift+O): the other way
   round before.
 
+### Colour map
+
+- The volume, slices, iso-surfaces (CFD's free surface too), iso-volumes and
+  streamlines start with the `reef3d` colour map, as the free surface does; before
+  `ocean`.
+
 ### Shadows without diagonal bands
 
 - Structures, slices and the volume's sides were shaded in diagonal bands: the sun's

@@ -57,7 +57,7 @@ def test_slice_item_in_a_run(reef3d_run):
         mesh.point_data["pressure"], 1000 * 9.81 * (DEPTH - z), rtol=1e-4, atol=1e-2
     )
     shown = s.data.display(slice_id, mesh)
-    assert shown.values is not None and shown.colormap == "ocean"
+    assert shown.values is not None and shown.colormap == "reef3d"
 
 
 def test_vertical_slice_follows_the_free_surface(reef3d_run):

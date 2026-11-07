@@ -43,7 +43,9 @@ Surfaces, slices and objects share these properties:
 - **Colour by**: a variable of the output (a vector's magnitude, or one of its
   components, `velocity.x`), or `none` for a plain colour.
 - **Colour map**: `reef3d`, `ocean`, `tension`, `lagoon_blue`, `balance`,
-  `viridis`, `rainbow` (Google's Turbo), `sand`, `greys`, `white`.
+  `viridis`, `rainbow` (Google's Turbo), `sand`, `greys`, `white`. The free
+  surface, volume, slices, iso-surfaces, iso-volumes and streamlines start with
+  `reef3d`.
 - **Automatic range** is fitted to every frame shown, as *Fit range to this frame*
   would be: playing, the colours follow the values of each output, and *Range min*
   and *Range max* show the frame's range. For the same colours at every time (a

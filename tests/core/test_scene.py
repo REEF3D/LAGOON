@@ -57,7 +57,7 @@ def test_load_fills_missing_defaults():
         }
     )
     props = scene.get("slice-1").properties
-    assert props["normal"] == "x" and props["colormap"] == "ocean"
+    assert props["normal"] == "x" and props["colormap"] == "reef3d"
 
 
 def test_rejects_unknown_session_version():
