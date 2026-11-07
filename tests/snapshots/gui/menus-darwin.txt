@@ -1,5 +1,5 @@
 File
-  Open case...  [Ctrl+Shift+O]
+  Open case...  [Ctrl+O]
   New case...
   New case from map...
   Open output file...
@@ -10,7 +10,7 @@ File
   Run DIVEMesh (disabled)
   ----
   New session  [Ctrl+N]
-  Open session...  [Ctrl+O]
+  Open session...  [Ctrl+Shift+O]
   Save session  [Ctrl+S]
   Save session as...  [Ctrl+Shift+S]
   ----

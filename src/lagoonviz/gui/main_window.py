@@ -255,7 +255,7 @@ class MainWindow(QMainWindow):
         self.act_open_case = self._action(
             "Open &case...",
             self.open_case_dialog,
-            "Ctrl+Shift+O",
+            QKeySequence.Open,  # ⌘O: what one opens most
             tip="Open a REEF3D case folder (or one of its REEF3D_* output folders)",
         )
         self.act_open_case.setIconText("Open case")
@@ -328,7 +328,7 @@ class MainWindow(QMainWindow):
         self.act_mode_results.setChecked(True)
         self.act_new = self._action("&New session", self.new_session, QKeySequence.New)
         self.act_open = self._action(
-            "&Open session...", self.open_session_dialog, QKeySequence.Open
+            "&Open session...", self.open_session_dialog, "Ctrl+Shift+O"
         )
         self.act_save = self._action("&Save session", self.save_session, QKeySequence.Save)
         self.act_save_as = self._action(

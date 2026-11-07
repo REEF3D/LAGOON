@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Shortcuts
+
+- *Open case* is ⌘O (Ctrl+O), *Open session* ⇧⌘O (Ctrl+Shift+O): the other way
+  round before.
+
 ### Shadows without diagonal bands
 
 - Structures, slices and the volume's sides were shaded in diagonal bands: the sun's
