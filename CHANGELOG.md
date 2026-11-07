@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### FNPF and NHFLOW runs without a free surface
+
+- A run that writes its volume (`P 10`) and bed but no free surface (no `P 180`)
+  opened with its bed alone, its volume switched off: the tank was not to be seen.
+  It now opens with the top of its σ-grid volume from the LAGOON store as its free
+  surface (`eta`, `elevation`, `depth` and the volume's variables), and a flume (one
+  cell across, or far narrower than long, e.g. 8640 m × 1.5 m) with its volume and
+  bed, since from above a flume is a thin line.
+- Solids a store took from a `REEF3D_Solid.vtp` another case left in the folder are
+  not shown when the case's control.txt, unchanged since the run, has no solid
+  commands (REEF3D patch LAGOON/0026 leaves them out of the store).
+
 ### Run monitor
 
 - A warning when a run ends before its first output after t = 0 (e.g. N 45 100

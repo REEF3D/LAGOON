@@ -638,3 +638,31 @@ def test_the_solids_go_into_the_store(tmp_path):
     session.open_case(run)
     solid = next(i for i in session.scene if i.kind == "structure")
     assert session.data.dataset(solid.id).stored
+
+
+def test_left_over_solids_in_a_store_are_not_shown(tmp_path):
+    """Bug: a store took its solids from a REEF3D_Solid.vtp another case left in the
+    folder (the home folder), and the case without solids showed them. control.txt,
+    unchanged since the run, has no solid commands: the store's solids are passed over."""
+    import os
+
+    from lagoon_format.store import StoreWriter
+
+    run = make_run(tmp_path / "case", frames=2)
+    (run / "control.txt").write_text("B 10 0.0 8.0 0.0 4.0 0.0 1.0\n")
+    old = (run / "control.txt").stat().st_mtime - 60
+    os.utime(run / "control.txt", (old, old))
+    report = convert(run)
+    writer = StoreWriter.open(report.store)
+    box = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], np.float64)
+    writer.set_solids(box, np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]), "left over")
+    writer.close()
+    session = Session()
+    session.open_case(run)
+    assert not [i for i in session.scene if i.kind == "structure"]
+    # copied on its own (no control.txt to tell): shown
+    alone = tmp_path / "elsewhere" / report.store.name
+    shutil.copytree(report.store, alone)
+    session = Session()
+    session.open_case(alone)
+    assert [i for i in session.scene if i.kind == "structure"]

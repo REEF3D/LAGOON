@@ -45,6 +45,15 @@ A **CFD** run has no free surface file: it opens with its free surface as an
 iso-surface of the volume, *Free surface*, where the level set `phi` is 0 (coloured
 by the velocity), the volume itself switched off, and its floating bodies.
 
+An **FNPF or NHFLOW** run that writes its volume (`P 10`) but no free surface
+(no `P 180`) opens with the top of its σ-grid volume in the LAGOON store as its free
+surface (*free surface (top of the volume)*): `eta` its height over the still water
+level (the bed's height plus its still water depth), `depth` the still water depth,
+and the volume's variables at the top level. A **flume** (one cell across, or far
+narrower than long) opens with its volume and bed instead: from above a flume is a
+thin line, and its tank is its side. The top is there to be chosen as a *Free
+surface* item's dataset.
+
 With **adaptive mesh refinement**, CFD writes the refined blocks of every output in
 `REEF3D_CFD_AMR`: an index per output (`REEF3D-CFD-AMR-<output>.vtm`) and its blocks,
 3D grids of half, a quarter, ... of the volume's cell size. LAGOON joins them to the

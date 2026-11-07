@@ -809,6 +809,32 @@ class Case:
             chosen["seastate"] = preferred(maps)
         return chosen
 
+    @staticmethod
+    def _with_volume_top(
+        pool: list[Dataset], surfaces: list[Dataset], refined: list[Dataset]
+    ) -> list[Dataset]:
+        """The surfaces to choose from when the latest run wrote a σ-grid volume and a
+        bed but no free surface (FNPF or NHFLOW with ``P 10`` and no ``P 180``): the top
+        of the volume (:class:`~lagoonviz.core.data.lagoon.VolumeTopDataset`) is its
+        free surface. In a flume (one cell across, or far narrower than long) the
+        volume itself is shown instead, so its beds are left out of the surfaces: from
+        above, a flume's surfaces are thin lines and its tank is its side."""
+        if not surfaces or refined or any(d.role == "free_surface" for d in surfaces):
+            return surfaces
+        volumes = [d for d in pool if d.role == "volume"]
+        if not volumes:
+            return surfaces
+        lead = max(volumes, key=lambda d: d.written_span()[1])
+        newest_bed = max(surfaces, key=lambda d: d.written_span()[1])
+        if not (
+            lead.same_run_as(newest_bed) or lead.written_span()[1] >= newest_bed.written_span()[1]
+        ):
+            return surfaces  # the volume is of an older run than the bed
+        if _flume(lead):
+            return []
+        tops = [d for d in pool if d.role == "free_surface" and getattr(d, "volume", None) is lead]
+        return surfaces + tops[:1] if tops else surfaces
+
     def _main_datasets(self) -> dict[str, Dataset]:
         """What to show when the case is opened: the most recent run's surfaces.
 
@@ -828,6 +854,7 @@ class Case:
             if d.role in ("free_surface", "bed") and not getattr(d, "derived", False)
         ]
         refined = [d for d in pool if d.role == "amr"]
+        surfaces = self._with_volume_top(pool, surfaces, refined)
         if not surfaces and refined:
             amr = preferred(refined)
             beds = [d for d in pool if getattr(d, "amr", None) is amr]
@@ -852,8 +879,15 @@ class Case:
                 return found
             lead = max(volumes, key=lambda d: d.written_span()[1])
             chosen = {"volume": lead}
-            beds = [d for d in pool if getattr(d, "volume", None) is lead]
-            if beds:  # the bed of a CFD run (it writes none), drawn first
+            # the bed of a CFD run (it writes none, LAGOON makes it of the volume), or
+            # the bed a σ-grid run (FNPF, NHFLOW) writes next to its volume
+            beds = [d for d in pool if d.role == "bed" and getattr(d, "volume", None) is lead]
+            beds += [
+                d
+                for d in pool
+                if d.role == "bed" and not getattr(d, "derived", False) and d.same_run_as(lead)
+            ]
+            if beds:  # drawn first
                 chosen = {"bed": beds[0], **chosen}
             solid = self._solids_of(lead)
             if solid is not None:
@@ -1212,7 +1246,8 @@ def solid_datasets(case_dir: Path, stores: list[Path] | None = None) -> list[Dat
     from lagoonviz.core.data.forcing import find_forcing
 
     found: list[Dataset] = []
-    source = _stored_solids(stores or [], read_ctrl_solver(case_dir)) or find_solids(case_dir)
+    source = _stored_solids(stores or [], read_ctrl_solver(case_dir), case_dir)
+    source = source or find_solids(case_dir)
     if source is not None:
         found.append(SolidDataset(source, case_dir))
     forcing = find_forcing(case_dir)
@@ -1226,18 +1261,42 @@ def solid_datasets(case_dir: Path, stores: list[Path] | None = None) -> list[Dat
     return found
 
 
-def _stored_solids(stores: list[Path], solver: str | None) -> Path | None:
-    """The store that holds solids (SPEC 12), of ``solver`` first; None if none does."""
+def _stored_solids(
+    stores: list[Path], solver: str | None, case_dir: Path | None = None
+) -> Path | None:
+    """The store that holds solids (SPEC 12), of ``solver`` first; None if none does.
+
+    Solids a store took from a ``REEF3D_Solid.vtp`` another case left in the folder
+    (REEF3D before it checked control.txt) are passed over: when the case's
+    control.txt, unchanged since the run began, has no solid commands."""
     from lagoon_format.store import Store, StoreError
 
     ordered = sorted(stores, key=lambda s: _store_solver(s) != (solver or "").upper())
     for store in ordered:
         try:
-            if Store(store).solids() is not None:
-                return store
+            if Store(store).solids() is None:
+                continue
         except (OSError, ValueError, KeyError, StoreError):
             continue
+        if case_dir is not None and _no_solids_set_up(Path(store), Path(case_dir)):
+            log.info("%s: its solids not shown, control.txt has none", store)
+            continue
+        return store
     return None
+
+
+def _no_solids_set_up(store: Path, case_dir: Path) -> bool:
+    """True if the case's control.txt has no solid commands and was written before
+    the store's solids (the run's control.txt, not one edited since)."""
+    from lagoonviz.core.data.divemesh import read_commands
+
+    control = case_dir / "control.txt"
+    try:
+        if control.stat().st_mtime > (store / "solids").stat().st_mtime:
+            return False
+        return not read_commands(control)[1]
+    except (OSError, ValueError):
+        return False
 
 
 def run_domains(case_dir: Path, run_ids) -> dict[str, tuple[np.ndarray, np.ndarray]]:
@@ -1760,7 +1819,13 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
 
     from lagoonviz.core.data.amr import AMR_FOLDER, amr_beds, amr_datasets
     from lagoonviz.core.data.amr3d import FolderBlocks, amr_outputs, is_volume_amr
-    from lagoonviz.core.data.lagoon import find_stores, store_blocks, store_datasets, stored_series
+    from lagoonviz.core.data.lagoon import (
+        find_stores,
+        store_blocks,
+        store_datasets,
+        stored_series,
+        volume_tops,
+    )
 
     path = Path(path).expanduser()
     if path.is_dir() and path.name == RUN_FOLDER:
@@ -1838,6 +1903,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     # on a curvilinear grid with blocks, the bed of the blocks is only in the AMR grids
     datasets += amr_beds(datasets)
     datasets += volume_beds(datasets)  # CFD writes no bed: its volume's
+    datasets += volume_tops(datasets)  # FNPF, NHFLOW with only P 10: its volume's top
     if path == case_dir or store_paths:  # the case itself: its solids too
         datasets += solid_datasets(case_dir, store_paths)
     series = find_series(case_dir)
@@ -1970,6 +2036,22 @@ def _floor(outside: SurfaceMesh) -> tuple[np.ndarray, np.ndarray]:
     kept = triangles[on[triangles].all(axis=1)]
     used, inverse = np.unique(kept, return_inverse=True)
     return points[used].astype(np.float32), inverse.reshape(-1, 3).astype(np.uint32)
+
+
+def _flume(volume: Dataset, narrow: float = 0.02) -> bool:
+    """True for a volume in a flume: one cell across (two grid lines) in y or x, or
+    narrower than ``narrow`` times its length (LAGOON stores' volumes; others: False)."""
+    output = getattr(volume, "output", None)
+    if output is None or getattr(output, "grid", "surface") not in ("sigma", "cartesian"):
+        return False
+    _nz, ny, nx = output.shape
+    if min(ny, nx) <= 2:
+        return True
+    if getattr(output, "curvilinear", False):
+        return False
+    width = abs(float(output.y[-1]) - float(output.y[0]))
+    length = abs(float(output.x[-1]) - float(output.x[0]))
+    return min(width, length) < narrow * max(width, length)
 
 
 def volume_beds(datasets: list[Dataset]) -> list[Dataset]:

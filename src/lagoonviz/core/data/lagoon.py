@@ -793,6 +793,109 @@ class StoreAmrDataset(Dataset):
         return (float(x), float(y), 0.0), values
 
 
+class VolumeTopDataset(Dataset):
+    """The free surface of a run that writes none (FNPF or NHFLOW with ``P 10`` and no
+    ``P 180``): the top level of its σ-grid volume in a store, which is the free surface,
+    read alone (one level per output). ``eta`` is its height over the still water level
+    (that of the bed's still water depth, else of the first output) and ``depth`` the
+    still water depth over the volume's bottom (dry land where it is none), as REEF3D
+    writes them with a free surface."""
+
+    #: made from another output, not written by the run: not converted into a store
+    derived = True
+    source = "lagoon"
+
+    def __init__(self, volume: StoreDataset, bed: Dataset | None = None):
+        self.volume = volume
+        self.bed = bed
+        self._level: float | None = None
+        super().__init__(
+            f"{volume.key}_top", volume.solver, "free_surface", list(volume.frames), volume.folder
+        )
+        self.times = volume.times
+        self.run_id = volume.run_id
+        self.run_started = volume.run_started
+        self.earlier_run = volume.earlier_run
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        components = dict(self.volume.output.variables)
+        components.update({"eta": 1, "elevation": 1, "depth": 1})
+        return "PolyData", components
+
+    @property
+    def label(self) -> str:
+        return f"{self.solver} free surface (top of the volume, LAGOON)"
+
+    def written_span(self) -> tuple[float, float]:
+        return self.volume.written_span()
+
+    def refresh(self) -> bool:
+        grown = self.volume.refresh()
+        self.frames = list(self.volume.frames)
+        self.times = self.volume.times
+        self._step_array = None
+        return grown
+
+    def still_level(self) -> float:
+        """The still water level: the bed's height plus its still water depth where it
+        is under water, else the median height of the first output's surface."""
+        if self._level is None:
+            level = None
+            if self.bed is not None:
+                try:
+                    bed = self.bed.read(0, ["depth"])
+                    depth = bed.point_data.get("depth")
+                    if depth is not None and np.ndim(depth) == 1:
+                        wet = np.isfinite(depth) & (depth > 0)
+                        if wet.any():
+                            level = float(np.median(bed.points[wet, 2] + depth[wet]))
+                except (OSError, ValueError, KeyError):
+                    level = None
+            if level is None:
+                top = self.volume.output.heights(0, level=self.volume.output.shape[0] - 1)
+                level = float(np.nanmedian(top))
+            self._level = level
+        return self._level
+
+    def read(self, index: int, variables: list[str] | None = None, **_options) -> SurfaceMesh:
+        output = self.volume.output
+        nz, ny, nx = output.shape
+        wanted = list(output.variables) if variables is None else variables
+        names = [n for n in self.volume._arrays(wanted) or [] if n in output.variables]
+        top = output.heights(index, level=nz - 1)
+        bottom = output.heights(index, level=0)
+        data = {n: output.read(n, index, level=nz - 1) for n in names}
+        level = self.still_level()
+        data["eta"] = (top - level).astype(np.float32)
+        data["elevation"] = top.astype(np.float32)
+        data["depth"] = (level - bottom).astype(np.float32)
+        if output.curvilinear:
+            points = plan_points(output.xc, output.yc, top).reshape(ny, nx, 3)
+            normals = plan_normals(points)
+        else:
+            x, y = output.x.astype(np.float32), output.y.astype(np.float32)
+            normals = grid_normals(top, x, y)
+            points = grid_points(x, y, top).reshape(ny, nx, 3)
+        return _face(points, data, False, normals)
+
+
+def volume_tops(datasets: list[Dataset]) -> list[Dataset]:
+    """The free surfaces of the σ-grid volumes in stores of runs that write no free
+    surface (:class:`VolumeTopDataset`), with the bed of the run, if any."""
+    tops = []
+    for volume in datasets:
+        if not isinstance(volume, StoreDataset) or volume.role != "volume":
+            continue
+        if volume.output.grid != "sigma":
+            continue
+        same = [d for d in datasets if d.solver == volume.solver and d.same_run_as(volume)]
+        if any(d.role in ("free_surface", "amr") for d in same):
+            continue
+        beds = [d for d in same if d.role == "bed" and not getattr(d, "derived", False)]
+        tops.append(VolumeTopDataset(volume, beds[0] if beds else None))
+    return tops
+
+
 def store_datasets(path: str | Path) -> list[Dataset]:
     """The datasets of a LAGOON store, keyed like REEF3D's (``fnpf_volume``)."""
     store = Store(path)
