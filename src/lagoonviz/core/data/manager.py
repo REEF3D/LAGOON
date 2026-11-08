@@ -306,6 +306,8 @@ class FrameKey:
     #: every how many grid lines a surface is read (1: full detail; more while
     #: the time moves in the streaming memory mode)
     detail: int = 1
+    #: the case shown with its mirror image: () no, ("y", plane) about y = plane
+    mirror: tuple = ()
 
 
 def _kind_of(key) -> tuple:
@@ -419,6 +421,8 @@ class DataManager:
         self.scene = scene
         self.cache = cache or FrameCache()
         self._cases: dict[str, Case] = {}
+        #: the domain's y range of each case item (for *Mirror in y*)
+        self._y_spans: dict[str, tuple[float, float]] = {}
         self._errors: dict[str, str] = {}
         self._resolved: dict[str, str] = {}
         self._auto_ranges: dict[tuple, tuple[float, float]] = {}
@@ -468,6 +472,7 @@ class DataManager:
             paths.append(key)
         self._still_water.clear()
         self._wet.clear()
+        self._y_spans.clear()
         self._logged = None
         self.__dict__.pop("_volume_boxes", None)  # (a new run: another domain)
         with self._samples_lock:
@@ -995,7 +1000,47 @@ class DataManager:
         elif item.kind == "amr" and not item.properties.get("patches", True):
             extra = ("levels", 0)  # the base grid alone, without the refined patches
         detail = self._detail(dataset) if not extra else 1
-        return FrameKey(self._case_key(item_id), dataset.key, index, arrays, extra, detail)
+        plane = self.mirror_plane(item_id)
+        mirror = ("y", plane) if plane is not None else ()
+        return FrameKey(self._case_key(item_id), dataset.key, index, arrays, extra, detail, mirror)
+
+    def mirror_plane(self, item_id: str) -> float | None:
+        """The plane y = value its case is mirrored about (the case's *Mirror in y*:
+        its domain's lower or upper side; control.txt's B 10, else the results' box),
+        or None."""
+        case_item = self.case_item(item_id)
+        if case_item is None:
+            return None
+        side = str(case_item.properties.get("mirror_y", "off"))
+        if side not in ("lower side", "upper side"):
+            return None
+        span = self._y_span(case_item.id)
+        if span is None:
+            return None
+        return float(span[0] if side == "lower side" else span[1])
+
+    def _y_span(self, case_id: str) -> tuple[float, float] | None:
+        """The domain's y range of a case, kept once found."""
+        found = self._y_spans.get(case_id)
+        if found is not None:
+            return found
+        case = self._cases.get(self._case_key(case_id)) if case_id in self.scene else None
+        if case is None:
+            return None
+        from lagoonviz.core.data.divemesh import read_commands
+
+        span = None
+        control = Path(case.path) / "control.txt"
+        domain = read_commands(control)[0] if control.is_file() else None
+        if domain is not None and domain[3] > domain[2]:
+            span = (float(domain[2]), float(domain[3]))
+        else:
+            extent = _results_extent(case)
+            if extent is not None:
+                span = (float(extent[0][1]), float(extent[1][1]))
+        if span is not None:
+            self._y_spans[case_id] = span
+        return span
 
     def _detail(self, dataset) -> int:
         """Every how many grid lines a surface is read: coarser only while the time
@@ -1025,6 +1070,18 @@ class DataManager:
         mesh = self.cache.get(key)
         if mesh is not None:
             return mesh
+        if key.mirror:
+            # read as it is (not kept: the mirrored mesh is), then with its image
+            from lagoonviz.core.data.mesh import mirrored_y
+
+            mesh = mirrored_y(self._read_key(replace(key, mirror=())), float(key.mirror[1]))
+        else:
+            mesh = self._read_key(key)
+        self.cache.put(key, mesh)
+        return mesh
+
+    def _read_key(self, key: FrameKey) -> SurfaceMesh:
+        """Read a frame (no cache)."""
         case = self._cases.get(key.case) or self.open(key.case)
         dataset = case.datasets[key.dataset]
         if key.extra and key.extra[0] == "slice":
@@ -1053,7 +1110,6 @@ class DataManager:
                 for name in key.arrays:
                     if dataset.components.get(name) in (1, 3):
                         self._sampled_values(dataset, name)
-        self.cache.put(key, mesh)
         return mesh
 
     def load(self, item_id: str, time: float | None = None) -> SurfaceMesh | None:
@@ -1231,6 +1287,10 @@ class DataManager:
         if exaggeration != 1.0:
             level = self.case_water_level(item_id)
             low[2], high[2] = (level + exaggeration * (z - level) for z in (low[2], high[2]))
+        plane = self.mirror_plane(item_id)
+        if plane is not None:  # with the mirror image: the box of both
+            images = (2.0 * plane - low[1], 2.0 * plane - high[1])
+            low[1], high[1] = min(low[1], *images), max(high[1], *images)
         return self._box_lines(item_id, low, high, True)
 
     def _box_lines(self, item_id: str, low, high, visible: bool) -> Trails:
@@ -1509,7 +1569,7 @@ class DataManager:
         parts = []
         newer = self._centres(key, mesh)
         for index in range(key.index - 1, max(key.index - count, 0) - 1, -1):
-            older_key = FrameKey(key.case, key.dataset, index, key.arrays, key.extra)
+            older_key = replace(key, index=index, detail=1)
             older = self._centres(older_key)
             if older is None:
                 break

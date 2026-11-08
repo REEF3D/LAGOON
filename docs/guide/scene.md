@@ -15,7 +15,7 @@ script the session writes ([Scripting](../scripting.md)).
 
 | Item | Shows |
 | --- | --- |
-| Case | a REEF3D run; its *Vertical scale* applies to all its items |
+| Case | a REEF3D run; its *Vertical scale* and *Mirror in y* apply to all its items |
 | Case set-up | the input files' domain, sides, relaxation zones, gauges, probes, bodies ([Case set-up](setup.md)) |
 | DIVEMesh grid | the grid lines on the faces of the domain, the MPI partition ([Case set-up](setup.md)) |
 | geo.dat points | the points of `geo.dat`, coloured by height, with their number and spacing ([Case set-up](setup.md#the-points-of-geodat)) |
@@ -125,6 +125,16 @@ arrows like the free surface and the Free Surface AMR (*Contour lines of*, *Vect
 so only the wet free surface shows: FNPF's surface where it has no water depth,
 NHFLOW's and SFLOW's over their dry cells (`wetdry`), the AMR surface likewise.
 The bed can leave out what is under still water (*Hide wet land*).
+
+## Mirror in y
+
+A run of half a symmetric domain (a structure in the middle of a flume, its
+symmetry plane a wall of the domain) is shown whole with the case's *Mirror in y*:
+*lower side* or *upper side* mirrors every item of the case about that side of the
+domain in y (control.txt's B 10, else the box of the results). The image's `v`
+and the y components of vectors (`velocity.y`) change sign, vorticity's x and z
+components too (a pseudo-vector); probes read the image as well, and white water
+in path traced films covers it. The case set-up and the grid stay as computed.
 
 ## Reading values
 

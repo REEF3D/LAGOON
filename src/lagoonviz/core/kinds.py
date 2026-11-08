@@ -278,6 +278,14 @@ KINDS: dict[str, KindSpec] = {
                 tip="Use the case's vertical scale for every item (surface, bed, bodies, "
                 "slices, gauges); off: each surface and bed has its own",
             ),
+            "mirror_y": PropertySpec(
+                "off",
+                "Mirror in y",
+                choices=("off", "lower side", "upper side"),
+                tip="A run of half a symmetric domain shown whole: every item of the "
+                "case with its mirror image about the domain's lower or upper side in y "
+                "(v and the y components of vectors turned)",
+            ),
         },
     ),
     "free_surface": KindSpec(

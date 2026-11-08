@@ -90,6 +90,68 @@ class SurfaceMesh:
         return scalar_values(self.point_data, variable)
 
 
+#: scalars that are a y component (they change sign in the mirror image)
+Y_COMPONENTS = frozenset({"v", "V", "vy", "Vy", "v_top", "v_bed", "velocity y"})
+#: scalars that are the x or z component of a pseudo-vector (vorticity: a mirror in
+#: y turns its x and z components, not its y)
+PSEUDO_XZ = frozenset({"vorticity x", "vorticity z", "omega_x", "omega_z"})
+#: vectors that are pseudo-vectors
+PSEUDO_VECTORS = frozenset({"vorticity"})
+
+
+def mirrored_y(mesh: SurfaceMesh, plane: float) -> SurfaceMesh:
+    """The mesh and its mirror image about the plane y = ``plane`` (a run of half a
+    symmetric domain shown whole): the image's triangles wound the other way (its
+    faces still face out), its normals and its vectors' y components turned (a
+    pseudo-vector's x and z: vorticity), its scalars that are y components turned,
+    and its particles' ids made their own (-id - 1), so trails stay apart."""
+    n = mesh.n_points
+    image = np.array(mesh.points, dtype=np.float32, copy=True)
+    image[:, 1] = 2.0 * plane - image[:, 1]
+    data = {}
+    for name, values in mesh.point_data.items():
+        values = np.asarray(values)
+        other = values.copy()
+        if values.ndim == 2 and values.shape[1] >= 2:
+            if name in PSEUDO_VECTORS and values.shape[1] == 3:
+                other[:, 0] *= -1
+                other[:, 2] *= -1
+            else:
+                other[:, 1] *= -1
+        elif name in Y_COMPONENTS or name in PSEUDO_XZ:
+            other = -other
+        elif name == "id":
+            other = -values - 1
+        data[name] = np.concatenate([values, other])
+    triangles = np.asarray(mesh.triangles)
+    if triangles.size:
+        triangles = np.concatenate([triangles, triangles[:, ::-1].astype(np.int64) + n])
+    normals = None
+    if mesh.normals is not None:
+        flipped = np.array(mesh.normals, dtype=np.float32, copy=True)
+        flipped[:, 1] *= -1
+        normals = np.concatenate([mesh.normals, flipped]).astype(np.float32, copy=False)
+
+    def doubled(pairs):
+        if pairs is None:
+            return None
+        pairs = np.asarray(pairs)
+        if not pairs.size:
+            return pairs
+        return np.concatenate([pairs, pairs.astype(np.int64) + n]).astype(pairs.dtype)
+
+    return SurfaceMesh(
+        np.concatenate([np.asarray(mesh.points, np.float32), image]),
+        np.ascontiguousarray(triangles, dtype=np.asarray(mesh.triangles).dtype)
+        if triangles.size
+        else mesh.triangles,
+        data,
+        normals=normals,
+        segments=doubled(mesh.segments),
+        outlines=doubled(mesh.outlines),
+    )
+
+
 def scalar_values(point_data: dict[str, np.ndarray], variable: str) -> np.ndarray | None:
     """One float32 value per point for a variable name, or ``None`` for ``"none"``."""
     if not variable or variable == "none":

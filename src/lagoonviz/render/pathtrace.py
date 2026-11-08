@@ -1526,6 +1526,11 @@ class WhiteWater:
         else:
             wanted = [n for n in ("velocity", "breaking", "WL", "depth") if n in dataset.components]
             raw = dataset.read(index, wanted)
+            plane = data.mirror_plane(self.item)
+            if plane is not None:  # the case shown with its mirror image
+                from lagoonviz.core.data.mesh import mirrored_y
+
+                raw = mirrored_y(raw, plane)
         points = data.placed(self.item, raw.points)  # exaggerated as drawn
         velocity = raw.point_data["velocity"]
         grid = None

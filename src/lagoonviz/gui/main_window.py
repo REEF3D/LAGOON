@@ -327,9 +327,7 @@ class MainWindow(QMainWindow):
             self.mode_group.addAction(action)
         self.act_mode_results.setChecked(True)
         self.act_new = self._action("&New session", self.new_session, QKeySequence.New)
-        self.act_open = self._action(
-            "&Open session...", self.open_session_dialog, "Ctrl+Shift+O"
-        )
+        self.act_open = self._action("&Open session...", self.open_session_dialog, "Ctrl+Shift+O")
         self.act_save = self._action("&Save session", self.save_session, QKeySequence.Save)
         self.act_save_as = self._action(
             "Save session &as...", self.save_session_as, QKeySequence.SaveAs

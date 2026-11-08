@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Mirror in y
+
+- *Mirror in y* on the case: a run of half a symmetric domain shown whole, every
+  item with its mirror image about the domain's lower or upper side in y (from
+  control.txt's B 10, else the results' box). `v` and the y components of vectors
+  change sign in the image, vorticity's x and z components; probes, contour lines,
+  arrows, the volume's outline and white water follow.
+
 ### Shortcuts
 
 - *Open case* is ⌘O (Ctrl+O), *Open session* ⇧⌘O (Ctrl+Shift+O): the other way
