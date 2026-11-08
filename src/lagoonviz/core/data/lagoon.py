@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import threading
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -115,6 +116,39 @@ def _flat(values: np.ndarray, count: int) -> np.ndarray:
     return values.reshape(count, -1) if values.ndim == 3 else values.reshape(-1)
 
 
+_SIDES: ThreadPoolExecutor | None = None
+
+
+def _side_pool() -> ThreadPoolExecutor:
+    """Threads that read a volume's four sides at once."""
+    global _SIDES
+    if _SIDES is None:
+        _SIDES = ThreadPoolExecutor(4, thread_name_prefix="lagoon-sides")
+    return _SIDES
+
+
+class _BlockPieces(Sequence):
+    """The blocks of one output of a store as a frame's pieces, their paths made when
+    asked for: a long run's store has thousands of outputs of several blocks each (the
+    paths of all of them took a second and a half each time the case was opened)."""
+
+    __slots__ = ("folder", "numbers", "t")
+
+    def __init__(self, folder: Path, numbers: tuple[int, ...], t: int):
+        self.folder, self.numbers, self.t = folder, numbers, t
+
+    def __len__(self) -> int:
+        return len(self.numbers)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        return self.folder / f"b{self.numbers[index]:04d}" / f"t{self.t}"
+
+    def __eq__(self, other) -> bool:
+        return list(self) == list(other)
+
+
 class StoreDataset(Dataset):
     """One output of a LAGOON store (volume, free surface, bed)."""
 
@@ -140,12 +174,9 @@ class StoreDataset(Dataset):
 
     def _frames(self) -> list[Frame]:
         blocks = self.output.group.path / "blocks"
+        numbers = tuple(b.number for b in self.output.blocks)
         return [
-            Frame(
-                int(step),
-                self.store.path,
-                [blocks / f"b{b.number:04d}" / f"t{t}" for b in self.output.blocks],
-            )
+            Frame(int(step), self.store.path, _BlockPieces(blocks, numbers, t))
             for t, step in enumerate(self.output.steps)
         ]
 
@@ -294,13 +325,18 @@ class StoreDataset(Dataset):
             if flip:
                 normals *= -1.0
             faces.append(_face(points, data, flip, normals))
-        for axis, line, flip, outward in (
+        sides = (
             (0, 0, True, (-1.0, 0.0, 0.0)),
             (0, nx - 1, False, (1.0, 0.0, 0.0)),
             (1, 0, False, (0.0, -1.0, 0.0)),
             (1, ny - 1, True, (0.0, 1.0, 0.0)),
-        ):
-            z, data = self._side(index, axis, line, names)
+        )
+        # the four sides read at once (each a few small chunks per block: the time is in
+        # opening files, which threads overlap)
+        read = list(
+            _side_pool().map(lambda side: self._side(index, side[0], side[1], names), sides)
+        )
+        for (axis, line, flip, outward), (z, data) in zip(sides, read, strict=True):
             if curved:  # the side follows the grid's boundary line; normals from its triangles
                 px = output.xc[:, line] if axis == 0 else output.xc[line, :]
                 py = output.yc[:, line] if axis == 0 else output.yc[line, :]

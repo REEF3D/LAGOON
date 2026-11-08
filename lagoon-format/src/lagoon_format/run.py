@@ -115,37 +115,43 @@ def read_log(path: str | Path, log: RunLog | None = None) -> RunLog:
     path = Path(path)
     case = path.parent.parent if path.parent.name == FOLDER else path.parent
     log = log or RunLog(case)
-    runs = {r.id: r for r in log.runs}
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.split("\n")
     if lines and lines[-1] != "":
         log.warnings.append(f"{path.name}: last line incomplete (run killed while writing?)")
-    for number, line in enumerate(lines[:-1], start=1):
+    _parse(lines[:-1], log, path.name, 1)
+    return log
+
+
+def _parse(lines: list[str], log: RunLog, name: str, first: int) -> None:
+    """Records (complete lines, numbered from ``first``) into ``log``."""
+    runs = {r.id: r for r in log.runs}
+    for number, line in enumerate(lines, start=first):
         if not line.strip():
             continue
         try:
             record = json.loads(line)
         except json.JSONDecodeError as error:
-            log.warnings.append(f"{path.name}:{number}: not JSON ({error.msg})")
+            log.warnings.append(f"{name}:{number}: not JSON ({error.msg})")
             continue
         kind = record.get("type")
         if kind == "run":
             if record.get("format") != FORMAT:
-                log.warnings.append(f"{path.name}:{number}: format {record.get('format')!r}")
+                log.warnings.append(f"{name}:{number}: format {record.get('format')!r}")
             if int(record.get("version", 0)) > VERSION:
                 log.warnings.append(
-                    f"{path.name}:{number}: version {record.get('version')} is newer than "
+                    f"{name}:{number}: version {record.get('version')} is newer than "
                     f"{VERSION}; reading what is known"
                 )
             run = Run(str(record.get("run", "")), str(record.get("solver", "")), record)
             if run.id in runs:
-                log.warnings.append(f"{path.name}:{number}: run {run.id} started twice")
+                log.warnings.append(f"{name}:{number}: run {run.id} started twice")
             runs[run.id] = run
             log.runs.append(run)
         elif kind == "stream":
             run = runs.get(str(record.get("run", "")))
             if run is None:
-                log.warnings.append(f"{path.name}:{number}: stream of an unknown run")
+                log.warnings.append(f"{name}:{number}: stream of an unknown run")
                 continue
             run.record.setdefault("streams", {})[str(record.get("name", ""))] = record.get(
                 "stream", {}
@@ -153,7 +159,7 @@ def read_log(path: str | Path, log: RunLog | None = None) -> RunLog:
         elif kind == "output":
             run = runs.get(str(record.get("run", "")))
             if run is None:
-                log.warnings.append(f"{path.name}:{number}: output of an unknown run")
+                log.warnings.append(f"{name}:{number}: output of an unknown run")
                 continue
             iteration = record.get("iteration")
             run.outputs.append(
@@ -170,18 +176,69 @@ def read_log(path: str | Path, log: RunLog | None = None) -> RunLog:
             if run is not None:
                 run.end = record
         # other types: ignored (newer writers)
-    return log
+
+
+@dataclass
+class _Growing:
+    """A run log file read so far: up to ``offset`` (after its last complete line)."""
+
+    inode: int
+    offset: int
+    lines: int
+    log: RunLog
+
+
+#: the run log files read, by path: a running simulation's log only grows, so only
+#: what it wrote since is read again (a long run's log is megabytes, and opening a case
+#: while it runs read it a dozen times, a second each)
+_GROWING: dict[str, _Growing] = {}
+
+
+def _read_growing(path: Path) -> tuple[RunLog, bool]:
+    """One run log file's runs (kept and added to as the file grows) and whether its
+    last line is incomplete (being written)."""
+    key = str(path)
+    info = path.stat()
+    known = _GROWING.get(key)
+    if known is None or known.inode != info.st_ino or info.st_size < known.offset:
+        known = _Growing(info.st_ino, 0, 0, RunLog(path.parent))
+        if len(_GROWING) > 64:
+            _GROWING.clear()
+        _GROWING[key] = known
+    partial = False
+    if info.st_size > known.offset:
+        with path.open("rb") as stream:
+            stream.seek(known.offset)
+            data = stream.read()
+        end = data.rfind(b"\n")
+        partial = end + 1 < len(data)
+        if end >= 0:
+            lines = data[:end].decode("utf-8", errors="replace").split("\n")
+            _parse(lines, known.log, path.name, known.lines + 1)
+            known.offset += end + 1
+            known.lines += len(lines)
+    return known.log, partial
 
 
 def read_case(folder: str | Path) -> RunLog | None:
-    """All run logs of a case folder, or None if it has none."""
+    """All run logs of a case folder, or None if it has none. A log read before is
+    only read on from where it was (the runs returned are shared with later reads:
+    a running simulation's run gets the outputs it writes)."""
     folder = Path(folder)
     paths = sorted((folder / FOLDER).glob(PATTERN)) + sorted(folder.glob(PATTERN))
     if not paths:
         return None
     log = RunLog(folder)
     for path in paths:
-        read_log(path, log)
+        try:
+            part, partial = _read_growing(path)
+        except OSError as error:
+            log.warnings.append(f"{path.name}: not read ({error})")
+            continue
+        log.runs.extend(part.runs)
+        log.warnings.extend(part.warnings)
+        if partial:
+            log.warnings.append(f"{path.name}: last line incomplete (run killed while writing?)")
     log.runs.sort(key=lambda r: r.started)
     return log
 

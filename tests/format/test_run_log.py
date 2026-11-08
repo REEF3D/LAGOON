@@ -239,3 +239,43 @@ def test_outputs_in_a_store(tmp_path):
     records.append(output("lagoon_volume", 3, 0.25))
     log_file.write_text("".join(json.dumps(r) + "\n" for r in records))
     assert any("lagoon_volume go backwards" in p for p in check(read_case(root)))
+
+
+def test_a_growing_log_is_read_on_from_where_it_was(tmp_path):
+    """A running simulation's log only grows: read again, only what was written since
+    is read (opening a case read a long log a dozen times, a second each), the
+    half-written last line too once it is complete; a log written anew (a new run in
+    its place, shorter) is read from the start."""
+    import lagoon_format.run as run_module
+
+    root = _write_case(tmp_path / "case", crash=True)
+    path = root / "REEF3D_Case" / "REEF3D_NHFLOW_run.jsonl"
+    first = read_case(root)
+    assert len(first.runs[1].outputs) == 2
+    assert any("incomplete" in w for w in first.warnings)
+    known = run_module._GROWING[str(path)]
+    offset = known.offset
+    with path.open("a") as stream:  # the half line completed, and one more output
+        stream.write(
+            '0Q", "step": 9, "time": 9.0}\n'.replace("0Q", "1003T154312Z-bbbb")
+            + json.dumps(
+                {
+                    "type": "output",
+                    "run": "20261003T154312Z-bbbb",
+                    "step": 2,
+                    "time": 0.5,
+                    "streams": ["fsf"],
+                }
+            )
+            + "\n"
+        )
+    second = read_case(root)
+    assert known.offset > offset and run_module._GROWING[str(path)] is known
+    outputs = second.runs[1].outputs
+    assert [o.step for o in outputs][-1] == 2 and len(outputs) == 4
+    assert not any("incomplete" in w for w in second.warnings)
+    # written anew: read from the start
+    _write_case(tmp_path / "other")
+    path.write_text((tmp_path / "other" / "REEF3D_Case" / "REEF3D_NHFLOW_run.jsonl").read_text())
+    third = read_case(root)
+    assert [len(r.outputs) for r in third.runs] == [6, 2]

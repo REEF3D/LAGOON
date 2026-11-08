@@ -176,6 +176,7 @@ class Output:
             if b.nz is None and self.nlevels:
                 b.nz = self.nlevels
         self._arrays: dict[tuple[int, str], Array] = {}
+        self._has: dict[tuple[int, str], bool] = {}
         self._owner: np.ndarray | None = None
         self.refresh()
 
@@ -197,6 +198,7 @@ class Output:
         n = min(time.shape[0], step.shape[0])
         self.times = time[:n].astype(np.float64)
         self.steps = step[:n].astype(np.int64)
+        self._has = {key: True for key, found in getattr(self, "_has", {}).items() if found}
         for array in self._arrays.values():
             array.reload()
         return n
@@ -210,10 +212,16 @@ class Output:
         return array
 
     def has(self, name: str, block: int | None = None) -> bool:
-        """True if the block (any block when None) has the array."""
+        """True if the block (any block when None) has the array: found once (an
+        array a block has stays; one it has not is looked for again after
+        :meth:`refresh`), not by a file system look-up each output read."""
         if block is None:
-            return any(name in b.group for b in self.blocks)
-        return name in self.blocks[block].group
+            return any(self.has(name, b.number) for b in self.blocks)
+        key = (int(block), name)
+        found = self._has.get(key)
+        if found is None:
+            found = self._has[key] = name in self.blocks[block].group
+        return found
 
     @property
     def owner(self) -> np.ndarray:

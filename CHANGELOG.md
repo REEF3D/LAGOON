@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Faster with a long run going on
+
+- Opening a case while its run goes on (a log of megabytes that grows each step)
+  took 21 s for the home folder's FNPF run: the run log was read anew a dozen
+  times, since it had grown each time, and its 12000 frame paths resolved each
+  time. The log is now read on from where it was (lagoon-format `read_case`),
+  the paths are not resolved one by one, and a store's thousands of outputs make
+  their block paths only when asked for: 1.6 s.
+- A frame of a σ-grid volume from the store, as the timeline is dragged: its four
+  sides are read at once, and whether a block has an array is looked up once, not
+  for every output: about 95 ms instead of 300 ms for the same flume (12 blocks).
+
 ### Mirror in y
 
 - *Mirror in y* on the case: a run of half a symmetric domain shown whole, every

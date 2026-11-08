@@ -16,6 +16,7 @@ files, merged across MPI ranks into one surface.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 from dataclasses import dataclass, field
@@ -1436,8 +1437,10 @@ def _owners(case_dir: Path) -> dict[Path, tuple[Run, Output]]:
     found: dict[Path, tuple[Run, Output]] = {}
     log = run_log(case_dir) if stamp else None
     if log is not None:
+        # the case folder is resolved: its files' paths need not be (12000 of them took
+        # seconds, each time a running simulation's log grew)
         for path, (run, output, _stream) in log.owners().items():
-            found[(case_dir / path).resolve()] = (run, output)
+            found[Path(os.path.normpath(case_dir / path))] = (run, output)
     _OWNERS[case_dir] = (stamp, found)
     return found
 
@@ -1465,8 +1468,13 @@ def _split(frames: list[Frame], owners: dict) -> list[tuple[list[Frame], Run | N
     if owners:
         by_run: dict[str, tuple[Run, list[Frame], list[float]]] = {}
         unknown: list[Frame] = []
+        folders: dict[Path, Path] = {}  # each folder resolved once, not each frame
         for frame in frames:
-            owner = owners.get(frame.path.resolve())
+            parent = frame.path.parent
+            folder = folders.get(parent)
+            if folder is None:
+                folder = folders[parent] = parent.resolve()
+            owner = owners.get(folder / frame.path.name)
             if owner is None:
                 unknown.append(frame)
                 continue
