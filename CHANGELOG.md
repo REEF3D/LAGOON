@@ -9,6 +9,11 @@
   control.txt's B 10, else the results' box). `v` and the y components of vectors
   change sign in the image, vorticity's x and z components; probes, contour lines,
   arrows, the volume's outline and white water follow.
+- No gap at the plane: a surface whose points stop short of it (the cells'
+  centres, half a cell from the wall) is joined to its image by a strip of
+  triangles; and the plane is control.txt's B 10 only when the results lie in that
+  domain (a store opened in a folder with another case's control.txt was mirrored
+  about that domain's side, far from its own), else the results' own side.
 
 ### Shortcuts
 

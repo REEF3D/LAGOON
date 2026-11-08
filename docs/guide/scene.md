@@ -131,7 +131,9 @@ The bed can leave out what is under still water (*Hide wet land*).
 A run of half a symmetric domain (a structure in the middle of a flume, its
 symmetry plane a wall of the domain) is shown whole with the case's *Mirror in y*:
 *lower side* or *upper side* mirrors every item of the case about that side of the
-domain in y (control.txt's B 10, else the box of the results). The image's `v`
+domain in y (control.txt's B 10 when the results lie in it, else the results'
+own side). A surface whose points stop short of the plane (the cells' centres) is
+joined to its image across it. The image's `v`
 and the y components of vectors (`velocity.y`) change sign, vorticity's x and z
 components too (a pseudo-vector); probes read the image as well, and white water
 in path traced films covers it. The case set-up and the grid stay as computed.

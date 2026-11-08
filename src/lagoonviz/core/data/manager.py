@@ -1006,8 +1006,8 @@ class DataManager:
 
     def mirror_plane(self, item_id: str) -> float | None:
         """The plane y = value its case is mirrored about (the case's *Mirror in y*:
-        its domain's lower or upper side; control.txt's B 10, else the results' box),
-        or None."""
+        its domain's lower or upper side; control.txt's B 10 when the results lie in
+        it, else the results' box), or None."""
         case_item = self.case_item(item_id)
         if case_item is None:
             return None
@@ -1029,15 +1029,20 @@ class DataManager:
             return None
         from lagoonviz.core.data.divemesh import read_commands
 
-        span = None
         control = Path(case.path) / "control.txt"
         domain = read_commands(control)[0] if control.is_file() else None
+        results = _results_y_span(case)
+        span = results
         if domain is not None and domain[3] > domain[2]:
-            span = (float(domain[2]), float(domain[3]))
-        else:
-            extent = _results_extent(case)
-            if extent is not None:
-                span = (float(extent[0][1]), float(extent[1][1]))
+            planned = (float(domain[2]), float(domain[3]))
+            near = 0.05 * (planned[1] - planned[0])
+            # B 10's sides, when the results are of this domain (not another case's
+            # control.txt in a shared folder): the wall may lie half a cell beyond the
+            # results' last points
+            if results is None or (
+                abs(results[0] - planned[0]) <= near and abs(results[1] - planned[1]) <= near
+            ):
+                span = planned
         if span is not None:
             self._y_spans[case_id] = span
         return span
@@ -2541,6 +2546,28 @@ def _results_extent(case: Case) -> tuple[np.ndarray, np.ndarray] | None:
         high = high.copy()
         high[2] = low[2] + 1e-3 * max(high[0] - low[0], high[1] - low[1])
     return low, high
+
+
+def _results_y_span(case: Case) -> tuple[float, float] | None:
+    """The y range of the shown results (free surface, bed, volume, AMR): of their
+    first output, else their last (a store's first output may be gone)."""
+    lows, highs = [], []
+    for role, dataset in case.main_datasets().items():
+        if role not in ("free_surface", "bed", "volume", "amr"):
+            continue
+        for index in dict.fromkeys((0, len(dataset) - 1)):
+            try:
+                low, high = dataset.bounds(index)
+            except (OSError, ValueError, KeyError, IndexError, AttributeError):
+                try:  # an AMR surface: read (once, when the mirror is switched on)
+                    low, high = dataset.read(index, []).bounds()
+                except (OSError, ValueError, KeyError, IndexError, AttributeError):
+                    continue
+            if np.isfinite(low[1]) and np.isfinite(high[1]) and high[1] > low[1]:
+                lows.append(float(low[1]))
+                highs.append(float(high[1]))
+                break
+    return (min(lows), max(highs)) if lows else None
 
 
 def shows(kind: str, dataset) -> bool:

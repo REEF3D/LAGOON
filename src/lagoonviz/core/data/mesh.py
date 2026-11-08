@@ -125,7 +125,10 @@ def mirrored_y(mesh: SurfaceMesh, plane: float) -> SurfaceMesh:
         data[name] = np.concatenate([values, other])
     triangles = np.asarray(mesh.triangles)
     if triangles.size:
-        triangles = np.concatenate([triangles, triangles[:, ::-1].astype(np.int64) + n])
+        strip = _strip_to_image(mesh.points, triangles, plane)
+        triangles = np.concatenate(
+            [triangles.astype(np.int64), triangles[:, ::-1].astype(np.int64) + n, strip]
+        )
     normals = None
     if mesh.normals is not None:
         flipped = np.array(mesh.normals, dtype=np.float32, copy=True)
@@ -150,6 +153,44 @@ def mirrored_y(mesh: SurfaceMesh, plane: float) -> SurfaceMesh:
         segments=doubled(mesh.segments),
         outlines=doubled(mesh.outlines),
     )
+
+
+def _strip_to_image(points, triangles, plane: float) -> np.ndarray:
+    """Triangles that close the gap between a surface and its mirror image (its
+    points the first n, the image's the next n) when its edge next to the plane is
+    not on it: points at the cells' centres, a grid that stops short of the wall.
+    For each open edge a -> b along that side: (b, a, a') and (b, a', b'), wound as
+    the surface. Empty when that edge is on the plane or the surface ends farther
+    from it than two of its cells."""
+    empty = np.zeros((0, 3), np.int64)
+    t = np.asarray(triangles, np.int64)
+    p = np.asarray(points, np.float64)
+    n = len(p)
+    if not len(t) or not n:
+        return empty
+    distance = np.abs(p[:, 1] - plane)
+    finite = np.isfinite(distance)
+    if not finite.any():
+        return empty
+    nearest = float(distance[finite].min())
+    # the cell size from a sample of edges (all of them took a second for 1e6)
+    sample = t[:: max(len(t) // 4096, 1)]
+    lengths = np.linalg.norm(p[sample[:, 0]] - p[sample[:, 1]], axis=1)
+    lengths = lengths[np.isfinite(lengths) & (lengths > 0)]
+    spacing = float(np.median(lengths)) if len(lengths) else 0.0
+    if spacing <= 0 or nearest <= 1e-6 * spacing or nearest > 2.0 * spacing:
+        return empty  # on the plane, or farther than two cells from it
+    near = distance <= nearest + 0.25 * spacing
+    edges = np.concatenate([t[:, [0, 1]], t[:, [1, 2]], t[:, [2, 0]]])
+    edges = edges[near[edges[:, 0]] & near[edges[:, 1]]]  # along the side next to it
+    if not len(edges):
+        return empty
+    _, inverse, counts = np.unique(
+        np.sort(edges, axis=1), axis=0, return_inverse=True, return_counts=True
+    )
+    open_edges = edges[counts[inverse.ravel()] == 1]  # in one triangle only
+    a, b = open_edges[:, 0], open_edges[:, 1]
+    return np.concatenate([np.stack([b, a, a + n], 1), np.stack([b, a + n, b + n], 1)])
 
 
 def scalar_values(point_data: dict[str, np.ndarray], variable: str) -> np.ndarray | None:
