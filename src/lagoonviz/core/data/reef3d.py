@@ -19,7 +19,7 @@ import logging
 import os
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -505,6 +505,7 @@ class Dataset:
         value: float,
         variables: list[str] | None = None,
         grid_lines: bool = True,
+        water_side: bool = False,
     ) -> SurfaceMesh:
         """The iso-surface of a volume frame where ``variable`` equals ``value``.
 
@@ -512,6 +513,12 @@ class Dataset:
         read once and kept, like slices; neighbouring cut points are merged so the
         surface shades smoothly. With ``grid_lines`` its grid lines too (the mesh's
         ``outlines``: where it crosses the cells' faces), a third of the time.
+
+        With ``water_side`` (CFD's free surface, phi at 0) the colours come from just
+        below the level set's interface band (:func:`water_side_values`): inside the
+        band the density is smoothed over F 45 cells, so phi = 0 carries part of the
+        hydrostatic pressure of the band and a blend of the water's and the air's
+        velocity, both set by the cell size (with AMR: a step at every block edge).
         """
         if self.kind != "UnstructuredGrid":  # a surface: its line at the value
             from lagoonviz.core.data.mesh import iso_lines
@@ -536,7 +543,36 @@ class Dataset:
             if grid_lines:
                 plan = with_grid_lines(plan, distance, connectivity, offsets, types)
             parts.append(plan.apply(piece.points, piece.point_data))
-        return _joined(parts)
+        surface = _joined(parts)
+        if water_side and variable == "phi" and float(value) == 0.0 and surface.n_points:
+            surface = self._water_side(frame, arrays, surface)
+        return surface
+
+    def _water_side(self, frame: Frame, arrays: list[str], surface: SurfaceMesh) -> SurfaceMesh:
+        """The free surface (phi at 0) with the colours of phi = depth below it: the
+        depth is the interface band of the coarsest grid at the surface (F 45 of the
+        case's ctrl.txt, default 2.1, plus 0.3 of its cell height)."""
+        level = float(np.median(surface.points[:, 2]))
+        pieces = [self._piece(p, point_arrays=arrays, with_cells=False) for p in frame.pieces]
+        height = max((_cell_height(piece.points, level) for piece in pieces), default=0.0)
+        if height <= 0.0:
+            return surface
+        depth = (_interface_cells(self.folder) + 0.3) * height
+        layers = []
+        for at in (depth, 2.0 * depth):
+            parts = []
+            for number, (path, piece) in enumerate(zip(frame.pieces, pieces, strict=True)):
+                _, connectivity, offsets, types = self._piece_cells(number, path, piece)
+                field = scalar_values(piece.point_data, "phi")
+                distance = field.astype(np.float64) - at
+                plan = plan_level(distance, connectivity, offsets, types, True)
+                plan = orient_by_field(plan, piece.points, field)
+                parts.append(plan.apply(piece.points, piece.point_data))
+            layer = _joined(parts) if parts else None
+            if layer is None or not layer.n_points:
+                return surface
+            layers.append(layer)
+        return water_side_values(surface, layers[0], layers[1], depth)
 
     def read_iso_volume(
         self,
@@ -1512,6 +1548,91 @@ def _lines_mesh(lines: list[np.ndarray], grid) -> SurfaceMesh:
         data,
         segments=segments.astype(np.uint32),
     )
+
+
+#: arrays of the free surface that stay its own (where it is, which grid), not the water's
+OWN_ARRAYS = ("phi", "elevation", "level", "covered")
+
+
+def water_side_values(
+    surface: SurfaceMesh, below: SurfaceMesh, deeper: SurfaceMesh, depth: float
+) -> SurfaceMesh:
+    """``surface`` (phi at 0) with the values of the water under it, taken at phi =
+    ``depth`` (``below``) and 2 ``depth`` (``deeper``) and extrapolated linearly up to
+    phi = 0 (2 v(depth) - v(2 depth)): the hydrostatic pressure of the layer and the
+    decay of the velocity with depth taken out. The points of each layer are lifted
+    against their normals (an iso-surface faces the rising phi, into the water) onto
+    the free surface, and each point of ``surface`` gets the inverse distance
+    weighted values of the four nearest lifted points of each layer. Points without
+    both layers within twice ``depth`` keep their own values."""
+    near = np.ones(surface.n_points, bool)
+    values = []
+    for layer, lift in ((below, depth), (deeper, 2.0 * depth)):
+        mixed, close = _lifted_values(surface, layer, lift, 2.0 * depth)
+        near &= close
+        values.append(mixed)
+    data = dict(surface.point_data)
+    for name in values[0]:
+        if name in OWN_ARRAYS or name not in data or name not in values[1]:
+            continue
+        guess = 2.0 * values[0][name] - values[1][name]
+        own = np.array(data[name], copy=True)
+        own[near] = guess[near].astype(own.dtype, copy=False)
+        data[name] = own
+    return replace(surface, point_data=data)
+
+
+def _lifted_values(surface: SurfaceMesh, layer: SurfaceMesh, lift: float, reach: float):
+    """The values of ``layer`` at the points of ``surface``, ``layer`` lifted by
+    ``lift`` against its normals; and where a lifted point lies within ``reach``."""
+    from scipy.spatial import cKDTree
+
+    layer.with_normals()
+    lifted = layer.points.astype(np.float64) - lift * layer.normals.astype(np.float64)
+    k = min(4, len(lifted))
+    distance, index = cKDTree(lifted).query(surface.points.astype(np.float64), k=k)
+    if k == 1:
+        distance, index = distance[:, None], index[:, None]
+    weight = 1.0 / np.maximum(distance, 1e-6 * reach)
+    weight /= weight.sum(axis=1, keepdims=True)
+    mixed = {
+        name: np.einsum("nk,nk...->n...", weight, np.asarray(values, np.float64)[index])
+        for name, values in layer.point_data.items()
+        if name not in OWN_ARRAYS
+    }
+    return mixed, distance[:, 0] <= reach
+
+
+def _cell_height(points: np.ndarray, level: float) -> float:
+    """The height of a grid's cells at ``level`` (0: the grid does not reach it)."""
+    heights = np.unique(np.round(points[:, 2].astype(np.float64), 7))
+    above = int(np.searchsorted(heights, level))
+    if above <= 0 or above >= len(heights):
+        return 0.0
+    return float(heights[above] - heights[above - 1])
+
+
+_F45: dict[Path, float] = {}
+
+
+def _interface_cells(folder: Path) -> float:
+    """F 45 of the case's ctrl.txt (the interface band in cells), default 2.1."""
+    folder = Path(folder)
+    if folder not in _F45:
+        value = 2.1
+        for where in (folder, *list(folder.parents)[:2]):
+            ctrl = where / "ctrl.txt"
+            if ctrl.is_file():
+                try:
+                    for line in ctrl.read_text(errors="replace").splitlines():
+                        words = line.split()
+                        if words[:2] == ["F", "45"] and len(words) > 2:
+                            value = float(words[2])
+                except (OSError, ValueError):
+                    pass
+                break
+        _F45[folder] = value
+    return _F45[folder]
 
 
 def _joined(parts: list[SurfaceMesh]) -> SurfaceMesh:

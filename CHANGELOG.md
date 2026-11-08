@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### CFD's free surface coloured from the water
+
+- With CFD mesh refinement the free surface showed a step in pressure (about
+  40 Pa in a wave flume with 25 mm and 12.5 mm cells) and in velocity at every
+  block edge. The water is the same on both sides (6 cm under the surface the
+  blocks and the volume agree to 0.3 Pa); the step was where the colours were
+  taken: at `phi` = 0, inside the level set's interface band, where the density
+  is smoothed over `F 45` cells and the pressure carries part of the band's
+  hydrostatic pressure, about 0.15 x the band x rho g, so half as much on a block
+  of half the cells. The free surface's colours now come from the water under the
+  band of the coarsest grid (`phi` = depth and 2 depth, extrapolated up to the
+  surface): the step falls to 0.3 Pa (spread 3 Pa) in pressure and to a quarter
+  in velocity, and the surface pressure is atmospheric, not 90 Pa above it. The
+  iso-surface's *Colours from*: *water side* (the default for `phi`) or *surface*
+  (at `phi` = 0, as before).
+
 ### Faster with a long run going on
 
 - Opening a case while its run goes on (a log of megabytes that grows each step)

@@ -449,6 +449,15 @@ KINDS: dict[str, KindSpec] = {
             ),
             "iso_value": PropertySpec(0.0, "Value", tip="Where the surface lies"),
             **_colouring("none", "reef3d"),
+            "colours_from": PropertySpec(
+                "water side",
+                "Colours from",
+                choices=("water side", "surface"),
+                tip="CFD's free surface (phi at 0): the colours from the water just below the "
+                "level set's interface band (F 45 cells of the coarsest grid), alike on every "
+                "AMR level; surface: at phi = 0, inside the band, where pressure and velocity "
+                "depend on the cell size",
+            ),
             **_grid_lines("the surface crosses (with AMR: of every level)"),
             **_exaggeration("Scales heights about the still water level"),
         },
