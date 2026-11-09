@@ -21,7 +21,7 @@ class Clock:
 
 def test_the_pacer_plays_as_fast_as_frames_come():
     clock = Clock()
-    pacer = Pacer(window=3.0, enough=6, clock=clock)
+    pacer = Pacer(arrivals=12, clock=clock)
     assert pacer.interval(1 / 12, 0) == pytest.approx(1 / 12)  # nothing known yet
     # a frame becomes ready every 0.5 s; playing shows them as they come
     for step in range(8):
@@ -29,22 +29,28 @@ def test_the_pacer_plays_as_fast_as_frames_come():
         pacer.note(shown=step, ready_ahead=1)
     assert pacer.read_interval() == pytest.approx(0.5)
     assert pacer.interval(1 / 12, 1) == pytest.approx(0.5)
-    # enough read ahead: the frame rate asked for
-    assert pacer.interval(1 / 12, 6) == pytest.approx(1 / 12)
-    # slower than 2 s a frame: 2 s at most
-    for step in range(8, 14):
-        clock.now = 2.5 * step
-        pacer.note(shown=step, ready_ahead=0)
-    assert pacer.interval(1 / 12, 0) == pytest.approx(2.0)
-    # bug: everything read (nothing being read), or the end of the range near: a
-    # short case played at 2 s a frame. The frame rate then.
+    # bug: batches of four every 2 s (four threads): over a few seconds "nothing
+    # came", and playing raced through each batch. The rate holds: 0.5 s a frame.
+    pacer.reset()
+    furthest = 0
+    for batch in range(6):
+        clock.now = 10.0 + 2.0 * batch
+        furthest += 4
+        pacer.note(shown=furthest - 4, ready_ahead=4)
+        for _ in range(3):  # ticks while nothing comes
+            clock.now += 0.4
+            pacer.note(shown=furthest - 4, ready_ahead=4)
+            assert pacer.interval(1 / 12, 4) == pytest.approx(0.5) or batch == 0
+    # nothing being read (every frame there), or the last frames of the range: the
+    # frame rate (a bug paced a short case, every frame read, at 2 s a frame)
     assert pacer.interval(1 / 12, 0, reading=False) == pytest.approx(1 / 12)
     assert pacer.interval(1 / 12, 2, left=2) == pytest.approx(1 / 12)
-    # nothing came of late: the next frame waits for its data anyway
-    for step in range(14, 20):
-        clock.now = 60.0 + 0.5 * step
-        pacer.note(shown=14, ready_ahead=0)
-    assert pacer.interval(1 / 12, 0) == pytest.approx(1 / 12)
+    # slow frames: 5 s at most
+    pacer.reset()
+    for step in range(4):
+        clock.now = 100.0 + 9.0 * step
+        pacer.note(shown=step, ready_ahead=0)
+    assert pacer.interval(1 / 12, 0) == pytest.approx(5.0)
     pacer.reset()
     assert pacer.read_interval() is None
 

@@ -12,6 +12,13 @@
 
 ### Playing and the slider after 0092
 
+- CFD's free surface still played jumpily: frames read on several threads come in
+  batches, and over a few seconds without a new one the pacer took it for "nothing
+  comes" and raced through the next batch. It now measures over the last twelve
+  frames that became ready (the rate holds between batches) and paces whenever
+  frames are being read, not only while few are ready; it counts up to 48 frames
+  ahead (a count stopped at six grew as playing moved on, and paced itself).
+
 - Fixed: with 0092 a case played at one frame in 2 s, or seemed not to play: once
   every frame was read (or near the end of the range) the pacer took "no new frames
   ready" for "frames come slowly". It now paces only while frames are being read
