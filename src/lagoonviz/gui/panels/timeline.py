@@ -314,6 +314,8 @@ class TimelinePanel(QWidget):
         # let go: the time is where the handle is, whatever happened meanwhile
         self.slider.sliderReleased.connect(lambda: self._on_slider(self.slider.value()))
         self.slider.sliderPressed.connect(lambda: self._set_moving(True))
+        # taking the slider: the frames read ahead for playing make way
+        self.slider.sliderPressed.connect(lambda: self.loader and self.loader.cancel_ahead())
         self.slider.sliderReleased.connect(lambda: self._set_moving(self.play_button.isChecked()))
         # the play range: dragged on the slider, kept in the session when let go
         self.slider.rangeReleased.connect(self._store_range)
@@ -633,6 +635,8 @@ class TimelinePanel(QWidget):
             self.timer.start(0)
         else:
             self.timer.stop()
+            if self.loader is not None:
+                self.loader.cancel_ahead()  # the frames read ahead that have not started
 
     def _tick(self) -> None:
         if not self.play_button.isChecked():
@@ -652,7 +656,10 @@ class TimelinePanel(QWidget):
             shown = self.frame_of(self.session.scene.time)
             ready = self._ready_ahead(shown)
             self.pacer.note(shown, ready)
-            interval = self.pacer.interval(interval, ready)
+            low, high = self.play_bounds()
+            left = (high - shown) if not self.repeat_button.isChecked() else None
+            reading = self.loader is not None and self.loader.busy > 0
+            interval = self.pacer.interval(interval, ready, reading, left)
         wait = self._last_step + interval - time.monotonic()
         if wait > 0.002:
             self.timer.start(max(int(wait * 1000), 1))

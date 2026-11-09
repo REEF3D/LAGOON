@@ -49,13 +49,18 @@ class Pacer:
             return float("inf")  # nothing came meanwhile
         return (t1 - t0) / (f1 - f0)
 
-    def interval(self, frame_interval: float, ready_ahead: int) -> float:
-        """The interval to the next frame: ``frame_interval`` (1 / fps) while at least
-        ``enough`` frames are ready ahead, else the read interval if that is longer
-        (at most 2 s: the frame shown waits for its data anyway)."""
-        if ready_ahead >= self.enough:
+    def interval(
+        self, frame_interval: float, ready_ahead: int, reading: bool = True, left: int | None = None
+    ) -> float:
+        """The interval to the next frame: ``frame_interval`` (1 / fps), or the read
+        interval if that is longer (at most 2 s) while frames are being read
+        (``reading``) and fewer than ``enough`` are ready ahead (or than are ``left``
+        to the end of the play range). Nothing being read, or every frame there: the
+        frame rate (a bug paced a short case, every frame read, at 2 s a frame)."""
+        enough = self.enough if left is None else min(self.enough, max(left, 0))
+        if not reading or ready_ahead >= enough:
             return frame_interval
-        reading = self.read_interval()
-        if reading is None:
-            return frame_interval
-        return max(frame_interval, min(reading, 2.0))
+        measured = self.read_interval()
+        if measured is None or measured == float("inf"):
+            return frame_interval  # nothing came of late: the next frame waits for its data
+        return max(frame_interval, min(measured, 2.0))

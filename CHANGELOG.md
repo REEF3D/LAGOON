@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Playing and the slider after 0092
+
+- Fixed: with 0092 a case played at one frame in 2 s, or seemed not to play: once
+  every frame was read (or near the end of the range) the pacer took "no new frames
+  ready" for "frames come slowly". It now paces only while frames are being read
+  and fewer than six (or than are left) are ready.
+- Fixed: the timeline stuck at the first frame (play, the slider): reading ahead
+  queued the whole play range at once (performance memory use), and the frame
+  asked for waited behind all of them (frames cut from a volume: minutes). A few
+  frames are queued at a time now, and stopping or taking the slider drops those
+  not started.
+- The frame budget counts each frame's triangles: a store's surface makes its own
+  for every frame, and a free surface of a million points held twice the budget;
+  reading a whole play range ahead could run the computer out of memory.
+
 ### CFD's free surface coloured from the water
 
 - With CFD mesh refinement the free surface showed a step in pressure (about
@@ -17,6 +32,19 @@
   in velocity, and the surface pressure is atmospheric, not 90 Pa above it. The
   iso-surface's *Colours from*: *water side* (the default for `phi`) or *surface*
   (at `phi` = 0, as before).
+
+### CFD's free surface plays steadily, and faster
+
+- Playing a CFD run (its free surface the level set phi at 0, cut from the volume
+  for every frame) showed a few frames and then stood still for a long while: the
+  frames read ahead on several threads came in batches, and playing raced through
+  each batch at the frame rate. While few frames are ready ahead, it now plays no
+  faster than they come (`lagoonviz.core.playback.Pacer`): steadily.
+- Each frame is cut in about 40 % of the time (the Chen half-cylinder case with
+  its refined block: 1.07 s to 0.40 s): the volume's cells without those under the
+  blocks are kept by where the blocks are, not by output (a refinement that stays
+  has the same cells in every output); where the nodes lie on the lattice is found
+  once per run; marching tetrahedra gathers each cell set's corners once.
 
 ### Faster with a long run going on
 

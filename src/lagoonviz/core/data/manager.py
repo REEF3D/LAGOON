@@ -334,9 +334,17 @@ class FrameCache:
 
     @staticmethod
     def size_of(mesh: SurfaceMesh) -> int:
-        # triangles are shared between frames of a dataset, so they are not counted
-        normals = mesh.normals.nbytes if mesh.normals is not None else 0
-        return mesh.points.nbytes + normals + sum(a.nbytes for a in mesh.point_data.values())
+        """The bytes a frame holds. Its triangles count too: they were left out as
+        shared between frames, but a surface read from a store makes its own for
+        every frame (its wet cells), and a free surface of a million points held
+        twice the budget (the computer ran out of memory reading a whole play range
+        ahead); an array shared with the frame before is counted once more, the safe
+        side."""
+        total = mesh.points.nbytes + sum(a.nbytes for a in mesh.point_data.values())
+        for extra in (mesh.normals, mesh.triangles, mesh.segments, mesh.outlines):
+            if extra is not None:
+                total += extra.nbytes
+        return total
 
     def get(self, key: FrameKey) -> SurfaceMesh | None:
         with self._lock:
@@ -2724,6 +2732,8 @@ class BackgroundLoader:
         self._pending: dict[FrameKey, Future] = {}
         self._wants: dict[object, FrameKey] = {}  # owner -> the frame it waits for
         self._holders: dict[FrameKey, set] = {}  # frame -> owners waiting for it
+        #: frames asked for by reading ahead (no owner), in the order asked
+        self._ahead: dict[FrameKey, Future] = {}
         self._lock = threading.Lock()
 
     def set_workers(self, workers: int) -> None:
@@ -2814,12 +2824,54 @@ class BackgroundLoader:
         if step:
             fits = int(manager.cache.max_bytes // step) - 2  # the shown frame, one spare
             upcoming = upcoming[: max(1, fits)]
+        wanted = []
         for when in upcoming:
             for item_id in item_ids:
                 key = manager.frame_key(item_id, when)
                 if key is not None and key not in manager.cache:
-                    self.request(key)
+                    wanted.append(key)
+        # only a few frames queued at a time (playing asks again at every frame and
+        # the window moves on): the whole play range queued at once kept the frame
+        # the slider or the next frame asked for waiting behind hundreds of others
+        # (frames cut from a volume take a second each: minutes)
+        keep = set(wanted)
+        with self._lock:
+            # not those a view waits for too (the future is shared)
+            stale = [
+                f
+                for k, f in self._ahead.items()
+                if k not in keep and not f.done() and not self._holders.get(k)
+            ]
+            self._ahead = {k: f for k, f in self._ahead.items() if k in keep and not f.done()}
+            room = max(self.AHEAD_PER_WORKER * self.workers, 4) - len(self._ahead)
+        for future in stale:
+            future.cancel()  # outside the lock: cancelling runs callbacks that take it
+        for key in wanted:
+            if room <= 0:
+                break
+            with self._lock:
+                queued = key in self._ahead
+            if queued:
+                continue
+            future = self.request(key)
+            with self._lock:
+                self._ahead[key] = future
+            room -= 1
         return len(upcoming)
+
+    #: frames read ahead queued at a time, per worker
+    AHEAD_PER_WORKER = 2
+
+    def cancel_ahead(self) -> None:
+        """Drop the frames queued by reading ahead that have not started (playing
+        stopped, the slider taken): what is asked for next is read at once."""
+        with self._lock:
+            pending = [
+                f for k, f in self._ahead.items() if not f.done() and not self._holders.get(k)
+            ]
+            self._ahead.clear()
+        for future in pending:
+            future.cancel()
 
     @property
     def busy(self) -> int:

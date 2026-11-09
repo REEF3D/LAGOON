@@ -31,11 +31,20 @@ def test_the_pacer_plays_as_fast_as_frames_come():
     assert pacer.interval(1 / 12, 1) == pytest.approx(0.5)
     # enough read ahead: the frame rate asked for
     assert pacer.interval(1 / 12, 6) == pytest.approx(1 / 12)
-    # nothing comes: waits at most 2 s between frames
+    # slower than 2 s a frame: 2 s at most
     for step in range(8, 14):
-        clock.now = 0.5 * step
-        pacer.note(shown=8, ready_ahead=0)
+        clock.now = 2.5 * step
+        pacer.note(shown=step, ready_ahead=0)
     assert pacer.interval(1 / 12, 0) == pytest.approx(2.0)
+    # bug: everything read (nothing being read), or the end of the range near: a
+    # short case played at 2 s a frame. The frame rate then.
+    assert pacer.interval(1 / 12, 0, reading=False) == pytest.approx(1 / 12)
+    assert pacer.interval(1 / 12, 2, left=2) == pytest.approx(1 / 12)
+    # nothing came of late: the next frame waits for its data anyway
+    for step in range(14, 20):
+        clock.now = 60.0 + 0.5 * step
+        pacer.note(shown=14, ready_ahead=0)
+    assert pacer.interval(1 / 12, 0) == pytest.approx(1 / 12)
     pacer.reset()
     assert pacer.read_interval() is None
 
@@ -90,3 +99,42 @@ def test_the_lattice_of_a_run_is_found_once():
     second = amr3d.volume_lattice([piece(1.0)], ["phi"])
     assert len(amr3d._LATTICES) == 1  # the same nodes: found once
     np.testing.assert_allclose(second[3]["phi"], first[3]["phi"] + 1.0)
+
+
+def test_reading_ahead_keeps_a_short_queue_and_makes_way(tmp_path):
+    """Bug: playing queued the whole play range at once (performance memory use);
+    the frame the slider asked for waited behind all of them (frames cut from a
+    volume: a second each, minutes) and the view stayed on the first frame. A few
+    frames are queued at a time, and taking the slider drops those not started."""
+    import threading
+
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.core import Session
+    from lagoonviz.core.data.manager import BackgroundLoader
+
+    run = make_run(tmp_path / "run", frames=12, print_interval=0.5)
+    session = Session()
+    session.open_case(run)
+    data = session.data
+    gate = threading.Event()
+    original = data.load_key
+
+    def slow(key):
+        gate.wait(5)
+        return original(key)
+
+    data.load_key = slow
+    loader = BackgroundLoader(data, workers=1)
+    times, _, _ = data.timeline()
+    items = data.shown_items()
+    loader.prefetch(items, float(times[0]), frames_ahead=12, times=times)
+    assert len(loader._ahead) <= max(BackgroundLoader.AHEAD_PER_WORKER * 1, 4)
+    loader.cancel_ahead()
+    assert not loader._ahead
+    # what the view asks for now is not behind the cancelled ones
+    key = data.frame_key(items[0], float(times[-1]))
+    future = loader.request(key, owner="view")
+    gate.set()
+    assert future.result(timeout=10) is not None
+    loader.shutdown()
