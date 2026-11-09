@@ -3,7 +3,9 @@
 ## Time series
 
 Each **Time series** item is a row in the **Plots** panel under the 3D view, all
-rows on one time axis: wave gauges (`WSF`), probes, 6DOF motions and velocities,
+rows on one time axis (LAGOON starts with the timeline alone below the 3D view: the
+Plots panel comes up when time series are ticked, or with *View → Plots*; the free
+surface lines, the run monitor and the Python console likewise): wave gauges (`WSF`), probes, 6DOF motions and velocities,
 forces, run-up and bed gauges. A case opened with such files gets them as items by
 itself, switched off: tick them in the scene to show their rows and their gauges in
 3D. *Add → Time series* adds more. They are named as REEF3D's User Guide names

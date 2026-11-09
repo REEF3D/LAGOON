@@ -31,8 +31,13 @@ def test_panels_exist(window):
         "timeline",
         "console",
         "setup",
+        "run",
     }
-    assert window.centralWidget().objectName() == "viewports"
+    # as LAGOON starts: the timeline alone at the bottom (View shows the others)
+    bottom = [n for n in ("plots", "profiles", "run", "console", "timeline")
+              if not window.docks[n].isHidden()]  # fmt: skip
+    assert bottom == ["timeline"]
+    assert window.viewports.objectName() == "viewports"
     assert window.viewport.objectName() == "viewport"
     assert window.windowTitle() == "Untitled - LAGOON"
 
@@ -178,13 +183,30 @@ def test_layout_saved_between_runs(qtbot, tmp_path):
     settings = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
     first = MainWindow(Session(), settings=settings)
     qtbot.addWidget(first)
-    first.docks["console"].hide()
+    assert first.docks["console"].isHidden()  # the timeline alone at the bottom
+    first.docks["console"].show()
     first.close()
     second = MainWindow(Session(), settings=settings)
     qtbot.addWidget(second)
-    assert second.docks["console"].isHidden()
-    second.reset_layout()
     assert not second.docks["console"].isHidden()
+    second.reset_layout()
+    assert second.docks["console"].isHidden() and not second.docks["timeline"].isHidden()
+
+
+def test_ticked_time_series_bring_up_their_panel(window, tmp_path):
+    """The Plots panel starts hidden; ticking time series (or free surface lines)
+    shows their panel, as they draw nowhere else."""
+    from reef3d_fixtures import make_run
+
+    window.open_case(str(make_run(tmp_path / "run", series=True, profiles=True)))
+    assert window.docks["plots"].isHidden()
+    series = next(i for i in window.session.scene if i.kind == "series")
+    window.session.set_visible(series.id, True)
+    assert not window.docks["plots"].isHidden()
+    window.docks["profiles"].hide()
+    profile = next(i for i in window.session.scene if i.kind == "profile")
+    window.session.set_visible(profile.id, True)
+    assert not window.docks["profiles"].isHidden()
 
 
 # ----------------------------------------------------------------- phase 1: cases
@@ -901,8 +923,10 @@ def test_full_screen_viewer_shows_only_the_view_and_the_player(window):
     window.timeline.exit_full_screen.click()  # the button does the same
     assert not window.full_screen
     assert not window.full_screen and not window.toolbar.isHidden()
-    for name in ("scene", "properties", "plots", "timeline", "console"):
+    for name in ("scene", "properties", "timeline"):
         assert not window.docks[name].isHidden(), name
+    for name in ("plots", "console"):  # hidden before: hidden after
+        assert window.docks[name].isHidden(), name
 
 
 def test_properties_show_the_automatic_range(window, reef3d_run):

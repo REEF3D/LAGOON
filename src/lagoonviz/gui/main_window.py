@@ -64,7 +64,10 @@ from lagoonviz.gui.theme import DEFAULT_THEME, THEME_LOOKS, apply_theme
 log = logging.getLogger(__name__)
 SESSION_FILTER = f"LAGOON session (*{SESSION_EXTENSION});;All files (*)"
 #: bump when the dock layout changes, so stale saved layouts are ignored
-LAYOUT_VERSION = 5  # 5: the Run monitor
+LAYOUT_VERSION = 6  # 5: the Run monitor; 6: the timeline alone at the bottom
+#: the panels at the bottom that start hidden (View shows them; ticking time series or
+#: free surface lines shows theirs): the timeline alone below the 3D view
+HIDDEN_AT_START = ("plots", "profiles", "run", "console")
 #: the items the toolbar adds (the Add menu has them all)
 #: items that cut a case's volume (made for the case of the selected item)
 VOLUME_TOOLS = ("slice", "iso_surface", "iso_volume", "streamlines", "volume")
@@ -209,6 +212,8 @@ class MainWindow(QMainWindow):
         self._dock("run", "Run monitor", self.run_monitor, Qt.BottomDockWidgetArea)
         self.tabifyDockWidget(self.docks["profiles"], self.docks["run"])
         self.docks["plots"].raise_()
+        for name in HIDDEN_AT_START:  # in their places, for when they are shown
+            self.docks[name].hide()
         self._default_state = self.saveState(LAYOUT_VERSION)
         self._sized = False
 
@@ -216,6 +221,7 @@ class MainWindow(QMainWindow):
         self.scene_tree.itemPicked.connect(self._item_picked)
         self.bridge.historyChanged.connect(self._on_history)
         self.bridge.sceneChanged.connect(self._on_mode_event)
+        self.bridge.sceneChanged.connect(self._show_plot_panel)
         self.bridge.timeChanged.connect(self._plots_time)
 
         self._build_actions()
@@ -666,8 +672,14 @@ class MainWindow(QMainWindow):
 
     def _apply_default_sizes(self) -> None:
         self.resizeDocks([self.docks["scene"], self.docks["properties"]], [260, 300], Qt.Horizontal)
-        self.resizeDocks([self.docks["plots"], self.docks["timeline"]], [240, 80], Qt.Vertical)
-        self.resizeDocks([self.docks["timeline"], self.docks["console"]], [700, 500], Qt.Horizontal)
+        if self.docks["plots"].isHidden():
+            self.resizeDocks([self.docks["timeline"]], [80], Qt.Vertical)
+        else:
+            self.resizeDocks([self.docks["plots"], self.docks["timeline"]], [240, 80], Qt.Vertical)
+        if not self.docks["console"].isHidden():
+            self.resizeDocks(
+                [self.docks["timeline"], self.docks["console"]], [700, 500], Qt.Horizontal
+            )
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         super().showEvent(event)
@@ -1250,9 +1262,28 @@ class MainWindow(QMainWindow):
     def reset_layout(self) -> None:
         self.leave_plots()
         self.restoreState(self._default_state, LAYOUT_VERSION)
-        for dock in self.docks.values():
-            dock.show()
+        setup = self.session.mode == "setup"
+        for name, dock in self.docks.items():
+            dock.setVisible(name not in HIDDEN_AT_START and (name != "setup" or setup))
+        self.docks["setup" if setup else "properties"].raise_()
         self._apply_default_sizes()
+
+    def _show_plot_panel(self, event: str, item_id: str) -> None:
+        """Time series or free surface lines ticked while their panel is hidden (the
+        timeline alone at the bottom, as LAGOON starts): their panel comes up, as
+        they would draw nowhere else."""
+        if event not in ("added", "changed") or item_id not in self.session.scene:
+            return
+        if self.plots_mode or self.full_screen:
+            return
+        item = self.session.scene.get(item_id)
+        name = {"series": "plots", "profile": "profiles"}.get(item.kind)
+        if name is None or not item.visible:
+            return
+        dock = self.docks[name]
+        if dock.isHidden():
+            dock.show()
+            dock.raise_()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt naming)
         if not self.confirm_discard():

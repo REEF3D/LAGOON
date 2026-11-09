@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### The timeline alone below the 3D view
+
+- LAGOON starts with only the timeline below the 3D view: the Plots, Free surface
+  lines, Run monitor and Python console panels are in their places but hidden.
+  *View* shows them, and ticking time series or free surface lines brings up their
+  panel. *Reset layout* goes back to this. The layout saved before is reset once
+  (layout version 6).
+
 ### Playing and the slider after 0092
 
 - Fixed: with 0092 a case played at one frame in 2 s, or seemed not to play: once
