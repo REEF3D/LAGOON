@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import os
+import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 
@@ -844,6 +846,39 @@ def plan_cut(
     return replace(plan, line_a=line_a, line_b=line_b, line_t=line_t)
 
 
+#: the corner nodes of each cell, by cell type, of the cell sets cut lately (a
+#: volume's cells stay from output to output: gathered once, not for every cut)
+_CELL_NODES: OrderedDict = OrderedDict()
+_CELL_NODES_LOCK = threading.Lock()
+#: at most so many bytes of them
+CELL_NODES_BYTES = 512 << 20
+
+
+def _cells_by_type(connectivity, offsets, types) -> list[tuple[int, tuple, np.ndarray]]:
+    """(corners, split into tetrahedra, (cells, corners) nodes) for each cell type of
+    a cell set that marching tetrahedra cuts; kept for the last few cell sets."""
+    key = (id(connectivity), id(offsets), id(types), len(connectivity), len(offsets))
+    with _CELL_NODES_LOCK:
+        found = _CELL_NODES.get(key)
+        if found is not None and found[0] is connectivity:
+            _CELL_NODES.move_to_end(key)
+            return found[1]
+    starts = np.concatenate(([0], offsets[:-1])).astype(np.int64)
+    groups = []
+    for cell_type in np.unique(types):
+        if int(cell_type) not in CELL_TETS:
+            continue
+        n_nodes, split = CELL_TETS[int(cell_type)]
+        first = starts[types == cell_type]
+        groups.append((n_nodes, split, connectivity[first[:, None] + np.arange(n_nodes)]))
+    size = sum(g[2].nbytes for g in groups)
+    with _CELL_NODES_LOCK:
+        _CELL_NODES[key] = (connectivity, groups, size)  # held: its id stays its own
+        while len(_CELL_NODES) > 1 and sum(v[2] for v in _CELL_NODES.values()) > CELL_NODES_BYTES:
+            _CELL_NODES.popitem(last=False)
+    return groups
+
+
 def plan_level(
     distance: np.ndarray,
     connectivity: np.ndarray,
@@ -858,17 +893,12 @@ def plan_level(
     made once, so the surface is connected and shades smoothly.
     """
     distance = np.asarray(distance, dtype=np.float64)
-    starts = np.concatenate(([0], offsets[:-1])).astype(np.int64)
+    positive = distance > 0
     tets: list[np.ndarray] = []
-    for cell_type in np.unique(types):
-        if int(cell_type) not in CELL_TETS:
-            continue
-        n_nodes, split = CELL_TETS[int(cell_type)]
-        first = starts[types == cell_type]
-        nodes = connectivity[first[:, None] + np.arange(n_nodes)]
-        signs = distance[nodes]
-        crossing = (signs.min(axis=1) <= 0) & (signs.max(axis=1) > 0)
-        nodes = nodes[crossing]
+    for n_nodes, split, nodes in _cells_by_type(connectivity, offsets, types):
+        # cut: some corners above, some not (as min <= 0 < max, on booleans)
+        above = np.count_nonzero(positive[nodes], axis=1)
+        nodes = nodes[(above > 0) & (above < n_nodes)]
         for tet in split:
             tets.append(nodes[:, list(tet)])
     none = np.zeros(0, np.int64)

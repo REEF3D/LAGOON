@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from lagoonviz.core.data.manager import BackgroundLoader
+from lagoonviz.core.playback import Pacer
 from lagoonviz.gui.bridge import SessionBridge
 from lagoonviz.gui.icons import icon
 from lagoonviz.gui.perf import PERF
@@ -375,6 +376,8 @@ class TimelinePanel(QWidget):
         self.timer.setTimerType(Qt.PreciseTimer)  # a few ms matter at 120 fps
         self.timer.timeout.connect(self._tick)
         self._last_step = 0.0
+        #: plays no faster than the frames ahead are read, while few are ready
+        self.pacer = Pacer()
         bridge.timeChanged.connect(self._show_time)
         bridge.sceneChanged.connect(self._on_scene)
         self.update_range()
@@ -626,6 +629,7 @@ class TimelinePanel(QWidget):
             if not low <= here < high:  # outside the range, or at its end: from its start
                 self.go_to_start()
             self._last_step = 0.0
+            self.pacer.reset()
             self.timer.start(0)
         else:
             self.timer.stop()
@@ -642,6 +646,13 @@ class TimelinePanel(QWidget):
             self.timer.start(4)
             return
         interval = 1.0 / max(self.fps.value(), 1)
+        if self.has_frames:
+            # few frames read ahead (each cut from a volume, say): as fast as they come,
+            # steadily, not a burst of the few that are there and then a long pause
+            shown = self.frame_of(self.session.scene.time)
+            ready = self._ready_ahead(shown)
+            self.pacer.note(shown, ready)
+            interval = self.pacer.interval(interval, ready)
         wait = self._last_step + interval - time.monotonic()
         if wait > 0.002:
             self.timer.start(max(int(wait * 1000), 1))
@@ -649,6 +660,20 @@ class TimelinePanel(QWidget):
         self._last_step = time.monotonic()
         self._advance()
         self.timer.start(max(int(interval * 1000) - 2, 1))
+
+    def _ready_ahead(self, shown: int) -> int:
+        """Frames after the one shown that are read already (up to what the pacer
+        needs to know)."""
+        if not len(self.times):
+            return 0
+        start = shown - self.first_frame + 1
+        try:
+            return _ready_count(
+                self.session.data, self.session.data.shown_items(), self.times, start,
+                self.pacer.enough,
+            )  # fmt: skip
+        except (KeyError, ValueError):  # an item removed meanwhile
+            return self.pacer.enough
 
     def _advance(self) -> None:
         if self.busy() or self.slider.isSliderDown():
@@ -679,6 +704,20 @@ class TimelinePanel(QWidget):
                 return
             time = self.time_of(low)
         self.session.set_time(time)
+
+
+def _ready_count(data, items: list[str], times, start: int, most: int) -> int:
+    """How many frames from ``start`` on (indices into ``times``) are read for every
+    item, one after the other."""
+    count = 0
+    for index in range(start, min(start + most, len(times))):
+        when = float(times[index])
+        for item_id in items:
+            key = data.frame_key(item_id, when)
+            if key is not None and key not in data.cache:
+                return count
+        count += 1
+    return count
 
 
 def _frames_ahead(fps: int, in_range: int = 0) -> int:

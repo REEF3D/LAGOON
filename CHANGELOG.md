@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### CFD's free surface plays steadily, and faster
+
+- Playing a CFD run (its free surface the level set phi at 0, cut from the volume
+  for every frame) showed a few frames and then stood still for a long while: the
+  frames read ahead on several threads came in batches, and playing raced through
+  each batch at the frame rate. While few frames are ready ahead, it now plays no
+  faster than they come (`lagoonviz.core.playback.Pacer`): steadily.
+- Each frame is cut in about 40 % of the time (the Chen half-cylinder case with
+  its refined block: 1.07 s to 0.40 s): the volume's cells without those under the
+  blocks are kept by where the blocks are, not by output (a refinement that stays
+  has the same cells in every output); where the nodes lie on the lattice is found
+  once per run; marching tetrahedra gathers each cell set's corners once.
+
 ### Faster with a long run going on
 
 - Opening a case while its run goes on (a log of megabytes that grows each step)

@@ -229,20 +229,42 @@ def _simplex(x, y, z, values: np.ndarray, px, py, pz) -> np.ndarray:
     return out.astype(np.float32)
 
 
+#: where a run's volume nodes lie on its lattice, by the pieces' points (see
+#: :func:`volume_lattice`)
+_LATTICES: dict[tuple, tuple] = {}
+_LATTICE_LOCK = threading.Lock()
+
+
 def volume_lattice(pieces: list[Piece], names: list[str]):
     """The volume's nodes as a lattice: (x, y, z, {name: (nz, ny, nx[, c])}), NaN
     where no piece has a node; None if its points are no lattice."""
     pieces = [p for p in pieces if len(p.points)]
     if not pieces:
         return None
-    points = np.concatenate([p.points for p in pieces]).astype(np.float64)
-    axes = [np.unique(np.round(points[:, d], 5)) for d in range(3)]
-    if (
-        np.prod([a.size for a in axes], dtype=np.float64) > 8.0 * len(points)
-        or min(a.size for a in axes) < 2
-    ):
+    # where the nodes lie on the lattice: the same in every output of a run (found
+    # once: rounding, sorting and searching the points took a sixth of an iso-surface)
+    key = tuple((len(p.points), hash(np.ascontiguousarray(p.points).tobytes())) for p in pieces)
+    with _LATTICE_LOCK:
+        found = _LATTICES.get(key)
+    if found is None:
+        points = np.concatenate([p.points for p in pieces]).astype(np.float64)
+        axes = [np.unique(np.round(points[:, d], 5)) for d in range(3)]
+        if (
+            np.prod([a.size for a in axes], dtype=np.float64) > 8.0 * len(points)
+            or min(a.size for a in axes) < 2
+        ):
+            found = (None, None)
+        else:
+            ijk = tuple(np.searchsorted(axes[d], np.round(points[:, d], 5)) for d in range(3))
+            found = (axes, ijk)
+        with _LATTICE_LOCK:
+            if len(_LATTICES) > 8:
+                _LATTICES.clear()
+            _LATTICES[key] = found
+    axes, ijk = found
+    if axes is None:
         return None
-    i, j, k = (np.searchsorted(axes[d], np.round(points[:, d], 5)) for d in range(3))
+    i, j, k = ijk
     arrays = {}
     for name in names:
         parts = [p.point_data.get(name) for p in pieces]
@@ -651,9 +673,17 @@ class RefinedVolume(Dataset):
 
     def _piece_cells(self, number: int, path: Path, piece) -> tuple:
         """The cells of one piece of a frame: the volume's without those under the
-        frame's blocks change from output to output, so they are kept by frame."""
+        frame's blocks. Kept by where the blocks are, not by frame: a refinement that
+        stays (CFD's G 15 box around a structure) has the same cells in every output,
+        and finding the covered ones took a third of each iso-surface (the free
+        surface, as the run plays)."""
         index = self._frame_of.get(path, -1)
-        key = (number, path)
+        if path in self._block_keys:  # a refined block itself: its own cells
+            key = (number, path)
+        else:
+            files = self.amr_blocks(index) if index >= 0 else []
+            boxes = tuple(tuple(round(v, 9) for v in self.blocks.box(f)) for f in files)
+            key = (number, piece.points.shape[0], boxes)
         with self._amr_lock:
             cells = self._own_cells.get(key)
         if cells is None or cells[0] != piece.points.shape[0]:
@@ -665,10 +695,7 @@ class RefinedVolume(Dataset):
                 full.types,
             )
             with self._amr_lock:
-                # the cells of the frames being looked at (the latest few)
-                for old in [k for k in self._own_cells if self._frame_of.get(k[1], -2) < index - 2]:
-                    del self._own_cells[old]
-                if len(self._own_cells) > 512:
+                if len(self._own_cells) > 256:
                     self._own_cells.clear()
                 self._own_cells[key] = cells
         return cells
