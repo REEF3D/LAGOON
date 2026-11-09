@@ -19,6 +19,7 @@ QWidget
   Bar title: text ''
   Bar numbers: choice 'auto' of ['auto', 'integer', '1 decimal', '2 decimals', '3 decimals', 'scientific']
   Bar ticks: number 0 in [0, 11] decimals 0
+  Colours from: choice 'water side' of ['water side', 'surface']
   Grid lines: choice 'off' of ['off', 'dark', 'white']
   Vertical scale: _LogSlider
       slider in [0, 1000]

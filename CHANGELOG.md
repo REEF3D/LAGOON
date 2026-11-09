@@ -2,18 +2,21 @@
 
 ## Unreleased
 
-### CFD's free surface plays steadily, and faster
+### CFD's free surface coloured from the water
 
-- Playing a CFD run (its free surface the level set phi at 0, cut from the volume
-  for every frame) showed a few frames and then stood still for a long while: the
-  frames read ahead on several threads came in batches, and playing raced through
-  each batch at the frame rate. While few frames are ready ahead, it now plays no
-  faster than they come (`lagoonviz.core.playback.Pacer`): steadily.
-- Each frame is cut in about 40 % of the time (the Chen half-cylinder case with
-  its refined block: 1.07 s to 0.40 s): the volume's cells without those under the
-  blocks are kept by where the blocks are, not by output (a refinement that stays
-  has the same cells in every output); where the nodes lie on the lattice is found
-  once per run; marching tetrahedra gathers each cell set's corners once.
+- With CFD mesh refinement the free surface showed a step in pressure (about
+  40 Pa in a wave flume with 25 mm and 12.5 mm cells) and in velocity at every
+  block edge. The water is the same on both sides (6 cm under the surface the
+  blocks and the volume agree to 0.3 Pa); the step was where the colours were
+  taken: at `phi` = 0, inside the level set's interface band, where the density
+  is smoothed over `F 45` cells and the pressure carries part of the band's
+  hydrostatic pressure, about 0.15 x the band x rho g, so half as much on a block
+  of half the cells. The free surface's colours now come from the water under the
+  band of the coarsest grid (`phi` = depth and 2 depth, extrapolated up to the
+  surface): the step falls to 0.3 Pa (spread 3 Pa) in pressure and to a quarter
+  in velocity, and the surface pressure is atmospheric, not 90 Pa above it. The
+  iso-surface's *Colours from*: *water side* (the default for `phi`) or *surface*
+  (at `phi` = 0, as before).
 
 ### Faster with a long run going on
 

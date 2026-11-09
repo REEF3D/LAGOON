@@ -972,7 +972,11 @@ class DataManager:
             # its grid lines are made with it only when they are shown (a third of
             # the time of a large iso-surface, e.g. CFD's free surface)
             lines = str(item.properties.get("grid_lines", "off")) != "off"
-            extra = ("iso", variable, float(item.properties.get("iso_value", 0.0)), lines)
+            # CFD's free surface: the colours from the water below the interface band
+            water = variable == "phi" and (
+                str(item.properties.get("colours_from", "water side")) == "water side"
+            )
+            extra = ("iso", variable, float(item.properties.get("iso_value", 0.0)), lines, water)
         elif item.kind == "iso_volume":
             variable = str(item.properties.get("iso_by", "none"))
             if variable == "none":
@@ -1093,8 +1097,14 @@ class DataManager:
             mesh = dataset.read_slice(key.index, key.extra[1], key.extra[2], list(key.arrays))
         elif key.extra and key.extra[0] == "iso":
             lines = bool(key.extra[3]) if len(key.extra) > 3 else True
+            water = bool(key.extra[4]) if len(key.extra) > 4 else False
             mesh = dataset.read_iso(
-                key.index, key.extra[1], key.extra[2], list(key.arrays), grid_lines=lines
+                key.index,
+                key.extra[1],
+                key.extra[2],
+                list(key.arrays),
+                grid_lines=lines,
+                water_side=water,
             )
         elif key.extra and key.extra[0] == "isovol":
             _, variable, low, high = key.extra
