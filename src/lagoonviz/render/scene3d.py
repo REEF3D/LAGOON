@@ -256,6 +256,12 @@ def _texel_coords(unit: np.ndarray, colormap: str, n: int | None = None) -> np.n
     return np.ascontiguousarray(coords, dtype=np.float32)
 
 
+#: lines drawn on a slice are moved this share of their distance towards the camera
+#: (:meth:`SceneRenderer.face_camera`): in front of the slice for the depth buffer, and on
+#: the screen exactly where they belong
+FACING_SHARE = 1e-3
+
+
 def _update_buffer(geometry: gfx.Geometry, name: str, data: np.ndarray) -> bool:
     """Write new data into an existing buffer. False if the size changed."""
     buffer = getattr(geometry, name, None)
@@ -347,6 +353,9 @@ class SceneRenderer:
         self._gauges: dict[str, gfx.Group] = {}
         #: contour lines of an item; outside ``content``, like the gauges
         self._contours: dict[str, gfx.Line] = {}
+        #: lines drawn towards the camera (:meth:`face_camera`): their own positions,
+        #: and the camera they were last moved for
+        self._facing: dict[str, tuple[np.ndarray, tuple | None]] = {}
         #: arrows drawn in a colour of their own (white, black, grey): kept on a new look
         self._own_colours: dict[str, str] = {}
         #: the Diorama look's stand: the sides of the bed and of the water, per item
@@ -1305,8 +1314,14 @@ class SceneRenderer:
             if line is not None:
                 self.scene.remove(line)
                 del self._contours[key]
+            self._facing.pop(key, None)
             return
         positions = np.array(lines.segments.reshape(-1, 3), np.float32)
+        if getattr(lines, "facing", False):
+            self._facing[key] = (positions, self._camera_state())
+            positions = self._towards_camera(positions)
+        else:
+            self._facing.pop(key, None)
         if line is not None and _update_buffer(line.geometry, "positions", positions):
             line.visible = lines.visible
             if color is not None:
@@ -1335,6 +1350,7 @@ class SceneRenderer:
         self.set_outline(None)
         for key in list(self._contours):
             self.scene.remove(self._contours.pop(key))
+        self._facing.clear()
         self._framed = False
         self.set_marker(None)
 
@@ -1654,8 +1670,50 @@ class SceneRenderer:
 
     def render(self, renderer: gfx.WgpuRenderer) -> None:
         self.fit_plan_depth()
+        self.face_camera()
         self.apply_effects(renderer)
         renderer.render(self.scene, self.camera)
+
+    def _camera_state(self) -> tuple:
+        camera = self.camera
+        return (
+            tuple(np.round(np.asarray(camera.world.position, float), 9)),
+            tuple(np.round(np.asarray(camera.world.forward, float), 9)),
+            float(camera.fov),
+        )
+
+    def _towards_camera(self, positions: np.ndarray) -> np.ndarray:
+        """Points moved :data:`FACING_SHARE` of their distance towards the camera:
+        where they were on the screen (along the line of sight; in parallel
+        projection against the view), just in front of the surface they lie on."""
+        camera = self.camera
+        eye = np.asarray(camera.world.position, np.float64)
+        points = np.asarray(positions, np.float64)
+        if float(camera.fov) > 0.0:
+            moved = points + FACING_SHARE * (eye - points)
+        else:
+            forward = np.asarray(camera.world.forward, np.float64)
+            distance = np.linalg.norm(points - eye, axis=1, keepdims=True)
+            moved = points - FACING_SHARE * distance * forward
+        return moved.astype(np.float32)
+
+    def face_camera(self) -> None:
+        """The lines drawn on a slice, moved towards the camera as it is now (before
+        each draw; only when the camera moved). On the slice itself they flickered
+        in and out of it; lifted off it by a fixed amount they floated clear of it
+        (a long flume) or sank into it (zoomed out)."""
+        if not self._facing:
+            return
+        state = self._camera_state()
+        for key, (positions, done) in list(self._facing.items()):
+            line = self._contours.get(key)
+            if line is None:
+                del self._facing[key]
+                continue
+            if done == state:
+                continue
+            _update_buffer(line.geometry, "positions", self._towards_camera(positions))
+            self._facing[key] = (positions, state)
 
     def fit_plan_depth(self) -> None:
         """2D from the top: the depth range of the camera over the flat layers alone.

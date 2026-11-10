@@ -121,9 +121,10 @@ def test_a_slice_shows_its_grid_lines(reef3d_run):
     lines = s.data.patch_outlines(slice_id, mesh, shown)
     assert lines is not None and lines.color == "#1e2833"
     ends = lines.segments.astype(float)
-    # on both sides of the plane, just off it
-    assert np.unique(np.round(ends[..., 1], 6)).size == 2
-    assert np.abs(ends[..., 1] - 2.5).max() < 0.05
+    # on the plane, drawn towards the camera by the 3D view (lifted off it to both
+    # sides they floated clear of a long flume's slice, two grids side by side)
+    assert lines.facing
+    np.testing.assert_allclose(ends[..., 1], 2.5, atol=1e-5)
     # the vertical grid lines stand at every x of the grid
     vertical = np.isclose(ends[:, 0, 0], ends[:, 1, 0])
     xs = np.unique(np.round(ends[vertical, 0, 0], 4))

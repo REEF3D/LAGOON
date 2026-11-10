@@ -144,6 +144,9 @@ class Trails:
     segments: np.ndarray  # (k, 2, 3) float32
     visible: bool
     color: str = "#7f7f7f"
+    #: on their surface, moved towards the camera as they are drawn (a slice's grid
+    #: lines: :meth:`~lagoonviz.render.scene3d.SceneRenderer.face_camera`), not lifted off it
+    facing: bool = False
 
 
 @dataclass
@@ -1382,19 +1385,18 @@ class DataManager:
             if not len(edges):
                 return None
         segments = np.array(shown.positions[edges], np.float32)
+        color = "#ffffff" if colour == "white" else "#1e2833"
+        if item.kind == "slice" and not self.scene.flat:
+            # on the slice, drawn a little towards the camera (lifted off it to both
+            # sides by a share of its length they floated well clear of a long flume's
+            # slice, two grids side by side)
+            return Trails(item_id, segments, shown.visible, color, facing=True)
         span = np.ptp(shown.positions, axis=0)
         # just off the surface (the lines are its cells' edges): far enough not to
         # flicker into it, near enough not to float over it in a shallow case
-        share = 2.5e-3 if item.kind == "slice" else 3e-4
-        lift = 0.06 if self.scene.flat else share * float(max(span.max(), 1e-9))
-        axis = AXES.get(str(item.properties.get("normal", "z")), 2) if item.kind == "slice" else 2
-        if self.scene.flat or (item.kind in ("slice", "amr") and axis == 2):
+        lift = 0.06 if self.scene.flat else 3e-4 * float(max(span.max(), 1e-9))
+        if self.scene.flat or item.kind in ("slice", "amr"):
             segments[..., 2] += lift
-        elif item.kind == "slice":  # a vertical slice: on both of its sides
-            other = segments.copy()
-            segments[..., axis] += lift
-            other[..., axis] -= lift
-            segments = np.concatenate([segments, other])
         elif shown.normals is not None and len(shown.normals) == len(shown.positions):
             # off the surface along its normals (a volume's sides face sideways)
             offset = lift * np.asarray(shown.normals, np.float32)[edges]
@@ -1406,9 +1408,7 @@ class DataManager:
                 segments += offset
         else:
             segments[..., 2] += lift
-        return Trails(
-            item_id, segments, shown.visible, "#ffffff" if colour == "white" else "#1e2833"
-        )
+        return Trails(item_id, segments, shown.visible, color)
 
     def _grid_lines(self, item_id: str, mesh: SurfaceMesh) -> np.ndarray | None:
         """The grid lines of a surface or a volume's outside: the edges of its

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### A slice's grid lines on the slice
+
+- Fixed: a slice's grid lines floated clear of it, a grid on each side (in a
+  flume a few centimetres off the slice, two grids side by side, the lower edge's
+  lines over the bed). They were lifted off the slice by a share of its length. They
+  now lie on the slice and the 3D view draws them a thousandth of their distance
+  towards the camera: in front of the slice, exactly where they belong on the
+  screen, from either side and at any zoom.
+
 ### CFD's free surface: read near the surface, cut on all cores
 
 - From a LAGOON store, CFD's free surface reads the level set and then the other

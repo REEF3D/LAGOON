@@ -361,3 +361,48 @@ def test_shadows_without_diagonal_bands(reef3d_run):
         assert kind in NO_SHADOW_CAST
     surface = next(s for s in view._shown.values() if isinstance(s.mesh, gfx.Mesh))
     assert surface.mesh.cast_shadow  # the free surface and bed still do
+
+
+def test_a_slices_grid_lines_lie_on_it_as_seen(reef3d_run):
+    """A slice's grid lines are drawn a little towards the camera: in front of the
+    slice for the depth buffer, on the screen exactly where they belong, from either
+    side and however far away (lifted to both sides by a share of the slice's
+    length, they floated clear of a long flume's slice: two grids beside it)."""
+    from lagoonviz.core import Session
+    from lagoonviz.render.scene3d import FACING_SHARE, SceneRenderer
+
+    session = Session()
+    session.open_case(reef3d_run)
+    view = SceneRenderer()
+    slice_id = session.add_slice("y", position=2.5)
+    session.set_property(slice_id, "grid_lines", "dark")
+    mesh = session.data.load(slice_id)
+    shown = session.data.display(slice_id, mesh)
+    view.update("slice", shown)
+    lines = session.data.patch_outlines(slice_id, mesh, shown)
+    assert lines.facing
+    view.update_outlines(slice_id, lines)
+    drawn = view._contours[f"{slice_id}#outlines"]
+    ends = lines.segments.reshape(-1, 3).astype(np.float64)
+
+    def clip(points):
+        matrix = np.asarray(view.camera.projection_matrix) @ np.asarray(
+            view.camera.world.inverse_matrix
+        )
+        h = np.c_[points, np.ones(len(points))] @ matrix.T
+        return h[:, :3] / h[:, 3:]
+
+    for side in (-1.0, 1.0):
+        view.camera.show_object((5.0, 2.5, 1.0, 6.0), view_dir=(0.3, -side, -0.4), up=(0, 0, 1))
+        view.face_camera()
+        moved = np.asarray(drawn.geometry.positions.data, np.float64)
+        eye = np.asarray(view.camera.world.position, float)
+        np.testing.assert_allclose(
+            np.linalg.norm(moved - ends, axis=1),
+            FACING_SHARE * np.linalg.norm(eye - ends, axis=1),
+            rtol=1e-3,
+        )
+        assert np.all(np.sign(moved[:, 1] - 2.5) == np.sign(eye[1] - 2.5))  # the near side
+        a, b = clip(ends), clip(moved)
+        np.testing.assert_allclose(b[:, :2], a[:, :2], atol=1e-5)  # where they were seen
+        assert np.all(b[:, 2] < a[:, 2])  # and in front
