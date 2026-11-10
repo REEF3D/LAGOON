@@ -202,6 +202,7 @@ PLAIN_COLORS = {
 #: colours of the materials of bodies and structures
 MATERIAL_COLORS = {
     "steel": "#8f9aa6",
+    "offshore structure": "#f2b300",  # offshore yellow (safety yellow, as RAL 1003)
     "concrete": "#b4afa6",
     "rock": "#6f6a64",
     "ice": "#e3f1fa",

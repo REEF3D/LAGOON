@@ -4,7 +4,7 @@ QWidget
   Visible: checkbox '' on
   Case: choice 'first case' of ['first case', 'run [case-1]']
   Dataset: choice 'automatic' of ['automatic', 'NHFLOW bed [nhflow_bed]', 'NHFLOW free surface [nhflow_free_surface]', 'NHFLOW volume [nhflow_volume]']
-  Material: choice 'rock' of ['steel', 'concrete', 'rock', 'ice', 'wood']
+  Material: choice 'rock' of ['steel', 'offshore structure', 'concrete', 'rock', 'ice', 'wood']
   Colour by: choice 'none' of ['none']
   Colour map: choice 'viridis' of ['reef3d', 'ocean', 'tension', 'lagoon_blue', 'balance', 'viridis', 'rainbow', 'sand', 'greys', 'white'] (disabled)
   Automatic range: checkbox '' on (disabled)

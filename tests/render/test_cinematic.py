@@ -127,6 +127,9 @@ def test_materials():
     assert surface_of("slice") == "plain"
     assert SURFACES["steel"].metalness > 0.5 and SURFACES["water"].roughness < 0.1
     assert SURFACES["sand"].grain == "sand"
+    # painted steel: the paint's colour, not a metal's reflection
+    assert surface_of("structure", "offshore structure") == "offshore structure"
+    assert SURFACES["offshore structure"].metalness == 0.0
     uv = grain_coords(np.array([[0.0, 0.0, 0.0], [0.6, 1.2, 0.0]], np.float32), 0.6)
     assert uv.dtype == np.float32 and np.allclose(uv[1], (1.0, 2.0))
 

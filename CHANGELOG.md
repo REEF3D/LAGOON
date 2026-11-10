@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Offshore structure: a material in offshore yellow
+
+- Bodies, structures and the other objects have a new **Material**, *Offshore
+  structure*: painted steel in offshore yellow (#f2b300, as RAL 1003 signal
+  yellow), glossy in the cinematic looks and in path tracing (a clear coat, not a
+  metal's reflection).
+
 ### Nets
 
 - The nets of bars REEF3D computes (X 320: quasi-static and dynamic bag,

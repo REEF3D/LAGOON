@@ -200,6 +200,8 @@ SURFACES = {
     "rock": Surface(0.85, grain="rock", relief=35.0, tile=2.0),
     "concrete": Surface(0.8, grain="concrete", relief=8.0, tile=1.0),
     "steel": Surface(0.35, metalness=0.9),
+    # painted steel of platforms, jackets, buoys: a glossy coat of offshore yellow
+    "offshore structure": Surface(0.4, clearcoat=0.3),
     "ice": Surface(0.18, ior=1.31, clearcoat=0.6),
     "wood": Surface(0.7),
     "plain": Surface(0.6),

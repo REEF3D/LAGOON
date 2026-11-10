@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-MATERIALS = ("steel", "concrete", "rock", "ice", "wood")
+MATERIALS = ("steel", "offshore structure", "concrete", "rock", "ice", "wood")
 #: colour maps that were renamed or replaced; old sessions and scripts keep working
 COLORMAP_ALIASES = {"cividis": "rainbow", "turbo": "rainbow", "jet": "rainbow"}
 

@@ -80,8 +80,10 @@ Surfaces, slices and objects share these properties:
   `velocity (black)` or `velocity (grey)`; then how many arrows, and their length. They are spread over the area the surface covers, so a river in a
   wide domain gets them all on its water; the longest reach about the next arrow.
 
-Bodies, structures and the other objects have a **Material** (steel, concrete,
-rock, ice, wood): its colour, and how the [cinematic looks](cinematic.md) draw it.
+Bodies, structures and the other objects have a **Material** (steel, offshore
+structure, concrete, rock, ice, wood): its colour, and how the
+[cinematic looks](cinematic.md) draw it. *Offshore structure* is painted steel in
+offshore yellow, as platforms, jackets and buoys are.
 
 ## Statistics over time
 

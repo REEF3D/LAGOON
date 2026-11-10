@@ -40,7 +40,8 @@ For showcase pictures rather than for reading values.
     ![Diorama classic](../images/look-diorama-classic.png)
 
 They use physically based materials: smooth water that reflects its
-surroundings, sand and rock with a fine grain, concrete, steel, ice and wood (the
+surroundings, sand and rock with a fine grain, concrete, steel, offshore structure (painted
+steel in offshore yellow, glossy), ice and wood (the
 *Material* of bodies, structures and other objects). The surroundings are made by
 LAGOON; nothing is downloaded. Water coloured by a variable keeps its colours;
 coloured by nothing, it takes the look's water colour.
