@@ -17,6 +17,7 @@ Started from the Finder there is no terminal for its messages, so they go to
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import sys
 from pathlib import Path
@@ -36,6 +37,9 @@ def _log_file() -> None:
 
 
 def main() -> int:
+    # the processes cutting iso-surfaces are this program started again: they run
+    # their part and end here (lagoonviz.core.data.cutters)
+    multiprocessing.freeze_support()
     # old macOS versions add a process serial number when the Finder starts an app
     args = [a for a in sys.argv[1:] if not a.startswith("-psn_")]
     if args and args[0] in COMMANDS:

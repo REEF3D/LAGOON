@@ -141,6 +141,16 @@ before being shown). The choice is kept for the next start and applies at once
 (frames beyond the new budget are let go). For `lagoon-render` and scripts,
 `LAGOON_MEMORY=low` (or `performance`, `streaming`) does the same.
 
+Iso-surfaces of large volumes (CFD's free surface, from 200 000 points per
+frame) are cut in processes of their own in the Performance and Balanced modes:
+one per reading thread, at most the computer's cores but one, so the frames read
+ahead are cut side by side on all cores (Python cuts one at a time in threads).
+Each process keeps the case open with what it learnt of its cells. In the Low
+memory and Streaming modes (every process holds its own copy of the cells), and
+with `LAGOON_CUT_PROCESSES=0`, the reading threads cut them as before. From a
+LAGOON store only the levels the free surface passes through are read (and those
+down to where its water-side colours are taken), not the whole volume.
+
 ### Very large cases
 
 Cases of 100 million cells and more (a free surface of 10 million points and

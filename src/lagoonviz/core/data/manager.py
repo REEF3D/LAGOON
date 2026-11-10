@@ -1106,17 +1106,17 @@ class DataManager:
         elif key.extra and key.extra[0] == "iso":
             lines = bool(key.extra[3]) if len(key.extra) > 3 else True
             water = bool(key.extra[4]) if len(key.extra) > 4 else False
-            mesh = dataset.read_iso(
-                key.index,
-                key.extra[1],
-                key.extra[2],
-                list(key.arrays),
-                grid_lines=lines,
-                water_side=water,
-            )
+            args = (key.index, key.extra[1], key.extra[2], list(key.arrays))
+            options = {"grid_lines": lines, "water_side": water}
+            mesh = self._cut_apart(key, dataset, "read_iso", *args, **options)
+            if mesh is None:
+                mesh = dataset.read_iso(*args, **options)
         elif key.extra and key.extra[0] == "isovol":
             _, variable, low, high = key.extra
-            mesh = dataset.read_iso_volume(key.index, variable, low, high, list(key.arrays))
+            args = (key.index, variable, low, high, list(key.arrays))
+            mesh = self._cut_apart(key, dataset, "read_iso_volume", *args)
+            if mesh is None:
+                mesh = dataset.read_iso_volume(*args)
         elif key.extra and key.extra[0] == "stream":
             _, vector, axis, position, count, lines_in = key.extra
             mesh = dataset.read_streamlines(
@@ -1134,6 +1134,19 @@ class DataManager:
                     if dataset.components.get(name) in (1, 3):
                         self._sampled_values(dataset, name)
         return mesh
+
+    @staticmethod
+    def _cut_apart(key: FrameKey, dataset, method: str, *args, **options) -> SurfaceMesh | None:
+        """An iso-surface of a large volume cut in a process of its own (the frames
+        being read ahead are cut side by side, :mod:`~lagoonviz.core.data.cutters`);
+        None: cut it here."""
+        from lagoonviz.core.data import cutters
+
+        if dataset.kind != "UnstructuredGrid":
+            return None
+        if (dataset.points_per_frame() or 0) < cutters.MIN_POINTS:
+            return None
+        return cutters.cut(key.case, key.dataset, method, *args, **options)
 
     def load(self, item_id: str, time: float | None = None) -> SurfaceMesh | None:
         """Read (or fetch from the cache) the mesh an item shows at a time. Blocking."""

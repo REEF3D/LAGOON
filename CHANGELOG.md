@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### CFD's free surface: read near the surface, cut on all cores
+
+- From a LAGOON store, CFD's free surface reads the level set and then the other
+  arrays only for the levels it passes through (and down to where the water-side
+  colours are taken), instead of the whole volume of every frame; the water-side
+  colours are cut from those levels, not from the volume read a second time. With
+  mesh refinement, the seams of the blocks read the volume only round the blocks.
+  The surface is the same; in the AMR wave flume of 0.76 million points a frame took
+  0.5 s instead of 1.1 s (with the water-side colours: 0.9 s instead of 1.1 s).
+- Iso-surfaces of large volumes (200 000 points per frame and more) are cut in
+  processes of their own, one per reading thread (at most the cores but one), so
+  frames read ahead are cut side by side: in threads Python cut one at a time.
+  Not in the low memory and streaming modes; `LAGOON_CUT_PROCESSES=0` turns it
+  off. `python -m lagoonviz` no longer starts a second window in such a process.
+
 ### The timeline alone below the 3D view
 
 - LAGOON starts with only the timeline below the 3D view: the Plots, Free surface

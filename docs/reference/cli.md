@@ -96,6 +96,7 @@ lagoon-setup ~/runs/flume --describe
 | | |
 | --- | --- |
 | `LAGOON_BLENDER` | the Blender executable for path tracing |
+| `LAGOON_CUT_PROCESSES` | processes cutting the iso-surfaces of large volumes (CFD's free surface); `0`: cut in the reading threads (see [The 3D view](../guide/viewport.md#speed-or-memory)) |
 | `LAGOON_DIVEMESH` | the DIVEMesh program (`DiveMESH`) the set-up runs |
 | `LAGOON_LOG` | also write the application's log to this file |
 | `LAGOON_MEMORY` | memory use: `performance`, `balanced` (the default), `low` or `streaming` (see [The 3D view](../guide/viewport.md#speed-or-memory)) |

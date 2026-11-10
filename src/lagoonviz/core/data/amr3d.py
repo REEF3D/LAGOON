@@ -237,7 +237,8 @@ _LATTICE_LOCK = threading.Lock()
 
 def volume_lattice(pieces: list[Piece], names: list[str]):
     """The volume's nodes as a lattice: (x, y, z, {name: (nz, ny, nx[, c])}), NaN
-    where no piece has a node; None if its points are no lattice."""
+    where no piece has a node, or the piece no values of that name; None if its
+    points are no lattice."""
     pieces = [p for p in pieces if len(p.points)]
     if not pieces:
         return None
@@ -265,15 +266,22 @@ def volume_lattice(pieces: list[Piece], names: list[str]):
     if axes is None:
         return None
     i, j, k = ijk
+    starts = np.cumsum([0] + [len(p.points) for p in pieces])
     arrays = {}
     for name in names:
         parts = [p.point_data.get(name) for p in pieces]
-        if any(v is None for v in parts):
+        if all(v is None for v in parts):
             continue
-        values = np.concatenate([np.asarray(v, np.float32) for v in parts])
-        shape = (axes[2].size, axes[1].size, axes[0].size, *values.shape[1:])
-        lattice = np.full(shape, np.nan, np.float32)
-        lattice[k, j, i] = values
+        lattice = None
+        for n, values in enumerate(parts):  # a piece without it (far from every
+            if values is None:  # block, not read): NaN
+                continue
+            values = np.asarray(values, np.float32)
+            if lattice is None:
+                shape = (axes[2].size, axes[1].size, axes[0].size, *values.shape[1:])
+                lattice = np.full(shape, np.nan, np.float32)
+            at = slice(starts[n], starts[n + 1])
+            lattice[k[at], j[at], i[at]] = values
         arrays[name] = lattice
     return axes[0], axes[1], axes[2], arrays
 
@@ -640,10 +648,7 @@ class RefinedVolume(Dataset):
             keys = self.amr_blocks(index)
             blocks = [self.blocks.block(k) for k in keys]
             wanted = [n for n in names if n in self.base.components]
-            pieces = [
-                self.base._piece(p, point_arrays=wanted, with_cells=False)
-                for p in self.base.frames[index].pieces
-            ]
+            pieces = [self._near_piece(p, blocks, wanted) for p in self.base.frames[index].pieces]
             found = seamless_nodes(blocks, names, volume_lattice(pieces, wanted))
         with self._amr_lock:
             for old in [k for k in self._seams if k[0] < index - 2 or k[0] > index + 2]:
@@ -652,6 +657,36 @@ class RefinedVolume(Dataset):
                 self._seams.clear()
             self._seams[key] = found
         return found
+
+    def _near_piece(self, path: Path, blocks: list[Block], names: list[str]) -> Piece:
+        """A piece of the volume for the lattice the blocks' faces take their values
+        from: its points, and ``names`` only if it reaches within two of its cells of
+        a block (the faces look into the coarse cells round them; the rest of the
+        volume, most of it, was read in vain)."""
+        light = self.base._piece(path, point_arrays=[], with_cells=False)
+        if not len(light.points) or not names:
+            return light
+        key = ("near", hash(np.ascontiguousarray(light.points).tobytes()))
+        with self._amr_lock:
+            box = self._own_cells.get(key)
+        if box is None:
+            points = light.points.astype(np.float64)
+            low, high = points.min(axis=0), points.max(axis=0)
+            reach = np.zeros(3)
+            for d in range(3):
+                axis = np.unique(np.round(points[:, d], 5))
+                reach[d] = 2.0 * float(np.max(np.diff(axis))) if len(axis) > 1 else 0.0
+            box = (low - reach, high + reach)
+            with self._amr_lock:
+                if len(self._own_cells) > 256:
+                    self._own_cells.clear()
+                self._own_cells[key] = box
+        low, high = box
+        for block in blocks:
+            b = block.box
+            if all(b[2 * d + 1] >= low[d] and b[2 * d] <= high[d] for d in range(3)):
+                return self.base._piece(path, point_arrays=names, with_cells=False)
+        return light
 
     # ------------------------------------------------------------- pieces
     def _piece(self, path: Path, point_arrays: list[str] | None = None, with_cells: bool = True):
@@ -699,6 +734,48 @@ class RefinedVolume(Dataset):
                     self._own_cells.clear()
                 self._own_cells[key] = cells
         return cells
+
+    def _iso_piece(
+        self,
+        number: int,
+        path: Path,
+        variable: str,
+        value: float,
+        arrays,
+        extra: float | None = 0.0,
+    ):
+        """A piece to cut iso-surfaces from: a block whole; the volume's own pieces
+        as their dataset gives them (a store's: only the levels the iso-surfaces pass
+        through), without the cells under the frame's blocks."""
+        if path in self._block_keys:
+            return super()._iso_piece(number, path, variable, value, arrays, extra)
+        own = [n for n in arrays if n != "level"]
+        cut = self.base._iso_piece(number, path, variable, value, own, extra)
+        if cut is None:
+            return None
+        piece, connectivity, offsets, types = cut
+        if "level" in arrays:
+            piece.point_data["level"] = np.zeros(len(piece.points), np.float32)
+        index = self._frame_of.get(path, -1)
+        files = self.amr_blocks(index) if index >= 0 else []
+        if not files or not len(offsets):
+            return piece, connectivity, offsets, types
+        boxes = tuple(tuple(round(v, 9) for v in self.blocks.box(f)) for f in files)
+        key = ("iso", number, getattr(piece, "band", None), len(piece.points), boxes)
+        with self._amr_lock:
+            cells = self._own_cells.get(key)
+        if cells is None:
+            whole = Piece(piece.kind, piece.points, connectivity, offsets, types, {})
+            kept = _without_covered(whole, list(boxes))
+            cells = (kept.connectivity.astype(np.int32), kept.offsets.astype(np.int64), kept.types)
+            with self._amr_lock:
+                if len(self._own_cells) > 256:
+                    self._own_cells.clear()
+                self._own_cells[key] = cells
+        return (piece, *cells)
+
+    def _water_margin(self) -> float | None:
+        return self.base._water_margin()  # the volume's cells are the coarsest
 
     # ------------------------------------------------------------- reading
     def read(self, index: int, variables: list[str] | None = None) -> SurfaceMesh:

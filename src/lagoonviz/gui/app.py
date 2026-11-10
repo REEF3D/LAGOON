@@ -63,7 +63,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             window.open_case(path)
     _quit_on_ctrl_c(app, window)
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        from lagoonviz.core.data import cutters
+
+        cutters.shutdown()  # the processes cutting iso-surfaces end with the window
 
 
 def _quit_on_ctrl_c(app: QApplication, window: MainWindow) -> None:

@@ -440,6 +440,30 @@ class Dataset:
             parts.append(plan.apply(piece.points, piece.point_data))
         return _joined(parts)
 
+    def _iso_piece(
+        self,
+        number: int,
+        path: Path,
+        variable: str,
+        value: float,
+        arrays,
+        extra: float | None = 0.0,
+    ):
+        """A piece to cut iso-surfaces from: (piece with ``arrays``, connectivity,
+        offsets, types), or None when no level from ``value`` to ``value + extra`` is
+        in it. Here the whole piece; a LAGOON store's volume reads only the levels
+        those iso-surfaces pass through
+        (:meth:`~lagoonviz.core.data.lagoon.StoreDataset._iso_piece`)."""
+        piece = self._piece(path, point_arrays=arrays, with_cells=False)
+        _, connectivity, offsets, types = self._piece_cells(number, path, piece)
+        return piece, connectivity, offsets, types
+
+    def _water_margin(self) -> float | None:
+        """How far into the water (in phi) the free surface's water-side colours
+        look (twice the interface band and a bit, at the largest cell height): what a
+        band read must hold besides phi = 0. None: unknown (whole pieces)."""
+        return None
+
     def point_series(self, variable: str, x: float, y: float) -> tuple[tuple, np.ndarray]:
         """A variable over all frames at the grid point nearest to (x, y), e.g. eta
         under the probe: ((x, y, z) of that point, values per frame).
@@ -530,44 +554,43 @@ class Dataset:
             return iso_lines(surface, field, float(value))
         frame = self.frames[index]
         arrays = self._arrays([*(variables or []), variable]) or []
-        parts = []
+        side = water_side and variable == "phi" and float(value) == 0.0
+        # the water-side colours cut two more surfaces below phi = 0: read the levels
+        # down to them once, with the free surface's
+        extra = self._water_margin() if side else 0.0
+        cuts = []
         for number, path in enumerate(frame.pieces):
-            piece = self._piece(path, point_arrays=arrays, with_cells=False)
-            _, connectivity, offsets, types = self._piece_cells(number, path, piece)
-            field = scalar_values(piece.point_data, variable)
-            if field is None:
-                raise ValueError("an iso-surface needs a variable")
-            distance = field.astype(np.float64) - value
-            plan = plan_level(distance, connectivity, offsets, types, True)
-            plan = orient_by_field(plan, piece.points, field)
-            if grid_lines:
-                plan = with_grid_lines(plan, distance, connectivity, offsets, types)
-            parts.append(plan.apply(piece.points, piece.point_data))
-        surface = _joined(parts)
-        if water_side and variable == "phi" and float(value) == 0.0 and surface.n_points:
-            surface = self._water_side(frame, arrays, surface)
+            cut = self._iso_piece(number, path, variable, float(value), arrays, extra)
+            if cut is not None:  # None: no level of the cut in this piece
+                cuts.append(cut)
+        parts = [_cut_piece(cut, variable, float(value), grid_lines) for cut in cuts]
+        surface = _joined(parts) if parts else _empty_surface()
+        if side and surface.n_points:
+            surface = self._water_side(frame, arrays, cuts, extra, surface)
         return surface
 
-    def _water_side(self, frame: Frame, arrays: list[str], surface: SurfaceMesh) -> SurfaceMesh:
+    def _water_side(
+        self, frame: Frame, arrays: list[str], cuts: list[tuple], extra, surface: SurfaceMesh
+    ) -> SurfaceMesh:
         """The free surface (phi at 0) with the colours of phi = depth below it: the
         depth is the interface band of the coarsest grid at the surface (F 45 of the
-        case's ctrl.txt, default 2.1, plus 0.3 of its cell height)."""
+        case's ctrl.txt, default 2.1, plus 0.3 of its cell height). ``cuts``: the
+        pieces the free surface was cut from, holding phi up to ``extra`` (None: all
+        of it); not as deep as the layers below: read whole."""
         level = float(np.median(surface.points[:, 2]))
-        pieces = [self._piece(p, point_arrays=arrays, with_cells=False) for p in frame.pieces]
-        height = max((_cell_height(piece.points, level) for piece in pieces), default=0.0)
+        height = max((_cell_height(cut[0].points, level) for cut in cuts), default=0.0)
         if height <= 0.0:
             return surface
         depth = (_interface_cells(self.folder) + 0.3) * height
+        if extra is not None and 2.0 * depth > extra:
+            cuts = [
+                cut
+                for number, path in enumerate(frame.pieces)
+                if (cut := self._iso_piece(number, path, "phi", 0.0, arrays, None)) is not None
+            ]
         layers = []
         for at in (depth, 2.0 * depth):
-            parts = []
-            for number, (path, piece) in enumerate(zip(frame.pieces, pieces, strict=True)):
-                _, connectivity, offsets, types = self._piece_cells(number, path, piece)
-                field = scalar_values(piece.point_data, "phi")
-                distance = field.astype(np.float64) - at
-                plan = plan_level(distance, connectivity, offsets, types, True)
-                plan = orient_by_field(plan, piece.points, field)
-                parts.append(plan.apply(piece.points, piece.point_data))
+            parts = [_cut_piece(cut, "phi", at, False) for cut in cuts]
             layer = _joined(parts) if parts else None
             if layer is None or not layer.n_points:
                 return surface
@@ -1548,6 +1571,25 @@ def _lines_mesh(lines: list[np.ndarray], grid) -> SurfaceMesh:
         data,
         segments=segments.astype(np.uint32),
     )
+
+
+def _cut_piece(cut: tuple, variable: str, value: float, grid_lines: bool) -> SurfaceMesh:
+    """The iso-surface where ``variable`` is ``value`` in one piece (``cut``: the
+    piece and its cells, :meth:`Dataset._iso_piece`), facing the rising field."""
+    piece, connectivity, offsets, types = cut
+    field = scalar_values(piece.point_data, variable)
+    if field is None:
+        raise ValueError("an iso-surface needs a variable")
+    distance = field.astype(np.float64) - value
+    plan = plan_level(distance, connectivity, offsets, types, True)
+    plan = orient_by_field(plan, piece.points, field)
+    if grid_lines:
+        plan = with_grid_lines(plan, distance, connectivity, offsets, types)
+    return plan.apply(piece.points, piece.point_data)
+
+
+def _empty_surface() -> SurfaceMesh:
+    return SurfaceMesh(np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32), {})
 
 
 #: arrays of the free surface that stay its own (where it is, which grid), not the water's

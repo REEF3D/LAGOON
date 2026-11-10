@@ -295,6 +295,88 @@ class StoreDataset(Dataset):
         connectivity, offsets, types = cells
         return Piece(self.kind, points, connectivity, offsets, types, data)
 
+    # ------------------------------------------------------------- iso-surfaces
+    def _iso_piece(
+        self,
+        number: int,
+        path: Path,
+        variable: str,
+        value: float,
+        arrays,
+        extra: float | None = 0.0,
+    ):
+        """The part of a block iso-surfaces from ``value`` to ``value + extra`` pass
+        through: the level-set (or the iso variable) read whole, the other arrays only
+        for the levels where it crosses them (a free surface lies in a few of a CFD
+        volume's levels: the rest was read and searched in vain), with the cells of
+        those levels. None when none crosses in this block. Surfaces, fields of more
+        than one component and ``extra`` None: the whole block, as before."""
+        output = self.output
+        name = variable.partition(".")[0]
+        if (
+            extra is None
+            or output.grid not in ("sigma", "cartesian")
+            or variable != name
+            or output.variables.get(name) != 1
+        ):
+            return super()._iso_piece(number, path, variable, value, arrays, extra)
+        t = int(path.name[1:])
+        block = output.blocks[number]
+        field = np.asarray(output.read_block(name, t, block), np.float32)  # (nz, ny, nx)
+        if field.ndim != 3 or field.shape[0] < 2:
+            return super()._iso_piece(number, path, variable, value, arrays, extra)
+        # the layers of cells between two levels where values above ``value`` and
+        # values up to ``value + extra`` both occur (a cell crossing some level of the
+        # range is in one of them)
+        known = np.isfinite(field)
+        top = value + max(float(extra), 0.0)
+        some_above = ((field > value) & known).reshape(len(field), -1).any(axis=1)
+        some_below = ((field <= top) & known).reshape(len(field), -1).any(axis=1)
+        layers = np.flatnonzero(
+            (some_above[:-1] | some_above[1:]) & (some_below[:-1] | some_below[1:])
+        )
+        if not len(layers):
+            return None
+        k0, k1 = int(layers[0]), int(layers[-1]) + 2  # the levels k0 .. k1 - 1
+        rows = slice(k0, k1)
+        (i0, j0), (i1, j1) = block.start, block.stop
+        px, py = (a.astype(np.float32) for a in output.plan(i0, i1, j0, j1))
+        z = output.heights(t, block)[rows]
+        x = np.broadcast_to(px[None], z.shape)
+        y = np.broadcast_to(py[None], z.shape)
+        points = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=1).astype(np.float32)
+        data = {}
+        for other in arrays:
+            if other not in output.variables:
+                raise KeyError(f"{output.name}: no variable {other!r}")
+            if other == name:
+                values = field[rows]
+            else:
+                values = output.array(block, other).get((t, rows))
+            components = output.variables[other]
+            data[other] = values.reshape(-1, components) if components > 1 else values.ravel()
+        nz, ny, nx = k1 - k0, *field.shape[1:]
+        key = (number, nz, ny, nx)
+        with self._cells_lock:
+            cells = self._cells_cache.get(key)
+            if cells is None:
+                cells = self._cells_cache[key] = _hexahedra(nz, ny, nx)
+        connectivity, offsets, types = cells
+        piece = Piece(self.kind, points, np.zeros(0, np.int64), np.zeros(0, np.int64), None, data)
+        piece.band = (k0, k1)
+        return piece, connectivity, offsets, types
+
+    def _water_margin(self) -> float | None:
+        """A cartesian volume: twice the interface band (F 45 and 0.3 cells) at its
+        tallest cells, and a quarter more (see :meth:`Dataset._water_side`)."""
+        output = self.output
+        if output.grid != "cartesian" or output.z is None or len(output.z) < 2:
+            return None
+        from lagoonviz.core.data.reef3d import _interface_cells
+
+        tallest = float(np.max(np.diff(np.asarray(output.z, np.float64))))
+        return 2.5 * (_interface_cells(self.folder) + 0.3) * tallest
+
     # ------------------------------------------------------------- volume faces
     def read(self, index: int, variables: list[str] | None = None, detail: int = 1) -> SurfaceMesh:
         """The outer faces of a σ-grid volume straight from the store: the bottom and
