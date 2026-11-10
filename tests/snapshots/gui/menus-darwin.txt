@@ -47,6 +47,7 @@ Add
   Bodies
   AMR blocks
   Mooring lines
+  Nets
   Structures
   DEM elements
   Ice floes

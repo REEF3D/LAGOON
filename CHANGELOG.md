@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Nets
+
+- The nets of bars REEF3D computes (X 320: quasi-static and dynamic bag,
+  cylinder, cone and wall nets) are shown with their run, as *Nets* coloured by
+  their tension: from the REEF3D-Net .vtk files of `REEF3D_<SOLVER>_6DOF_Net`
+  (legacy unstructured grids of line cells, now read), or from the LAGOON store,
+  where REEF3D writes them with P 18 (particle set `cfd_net`, `nhflow_net`, role
+  `net`: the knots with Tension, Velocity and Acceleration, the bars with the
+  number of their net; REEF3D patch LAGOON/0027). `lagoon-convert` puts the .vtk
+  files into the store (`--outputs net`).
+
 ### A slice's grid lines on the slice
 
 - Fixed: a slice's grid lines floated clear of it, a grid on each side (in a

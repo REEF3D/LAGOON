@@ -63,6 +63,7 @@ ROLES = {
     "volume": "volume",
     "body": "body",
     "mooring": "mooring",
+    "net": "net",
     "structure": "structure",
     "dem": "dem",
     "ice": "ice",
@@ -86,12 +87,13 @@ _SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp", ".vtk")
 #: structures, DEM elements (REEF3D_DEM_VTP, written by the DEM for any solver)
 _OBJECT_FOLDER = re.compile(
     r"^REEF3D_(?:(?P<solver>[A-Z0-9]+)_)?"
-    r"(?P<what>6DOF_VTP|6DOF_Mooring|VRANS_VTP|FORCING_VTP|DEM_VTP|ICE|RodTree"
+    r"(?P<what>6DOF_VTP|6DOF_Mooring|6DOF_Net|VRANS_VTP|FORCING_VTP|DEM_VTP|ICE|RodTree"
     r"|CPM_Particle|Particles)$"
 )
 _OBJECT_ROLES = {
     "6DOF_VTP": "body",
     "6DOF_Mooring": "mooring",
+    "6DOF_Net": "net",  # nets of bars (X 320): REEF3D-Net-<net>-<output>.vtk
     "VRANS_VTP": "structure",
     "FORCING_VTP": "structure",
     "DEM_VTP": "dem",
@@ -104,9 +106,9 @@ _OBJECT_ROLES = {
 #: MPI rank, or one serial file per output (not one file per object)
 _PARALLEL_OBJECTS = ("CPM_Particle", "Particles")
 #: objects shown with the run that wrote them
-OBJECT_SHOWN = ("body", "mooring", "structure", "dem", "ice", "rods", "particles", "cpm_bed")
+OBJECT_SHOWN = ("body", "mooring", "net", "structure", "dem", "ice", "rods", "particles", "cpm_bed")
 #: roles whose files are drawn as they are (no merging of MPI pieces)
-PLAIN_ROLES = ("body", "mooring", "structure", "dem", "ice", "rods", "particles")
+PLAIN_ROLES = ("body", "mooring", "net", "structure", "dem", "ice", "rods", "particles")
 #: roles whose outputs have their own interval: their times come from the files
 OWN_TIME_ROLES = ("dem", "ice", "rods", "particles")
 #: roles whose cell data (one value per floe or rod) is shown on their points
@@ -137,6 +139,7 @@ ROLE_LABELS = {
     "volume": "volume",
     "body": "bodies",
     "mooring": "mooring lines",
+    "net": "nets",
     "structure": "structures",
     "dem": "DEM elements",
     "ice": "ice floes",
@@ -1006,6 +1009,7 @@ class Case:
             "rods",
             "particles",
             "mooring",
+            "net",
             "free_surface",
             "amr",
         )
@@ -1391,8 +1395,10 @@ def _frames_by_piece(folder: Path) -> dict[str, list[Frame]]:
     steps: dict[str, dict[int, dict[int, Path]]] = {}
     # DEM output numbers its files; structure files may number structures instead
     numbered = folder.name.endswith(_NUMBERED_FOLDERS)
+    # nets: the bars' .vtk files (a sheet net's .stl and Lagrange points are not read)
+    suffixes = (".vtk",) if folder.name.endswith("_6DOF_Net") else _SUFFIXES
     for path in folder.iterdir():
-        if path.suffix not in _SUFFIXES or path.name.startswith("."):
+        if path.suffix not in suffixes or path.name.startswith("."):
             continue
         match = _PIECE_STEP.match(path.stem)
         serial = _SERIAL_STEP.match(path.stem) if numbered else None

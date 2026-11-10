@@ -184,6 +184,7 @@ PLAIN_COLORS = {
     "volume": "#9aa7b4",
     "slice": "#9aa7b4",
     "mooring": "#e0a030",
+    "net": "#3f5f4a",  # dark net green
     "amr_blocks": "#ffd84a",
     "body": "#8f9aa6",
     "structure": "#a7a39b",

@@ -521,11 +521,12 @@ points of all outputs one after another:
 ```
 
 - `cells`: `null` (points only), `"polys"` (polygons: DEM elements, ice floes) or
-  `"lines"` (rods, mooring lines).
+  `"lines"` (rods, mooring lines, the bars of nets).
 - `point_fields`, `cell_fields`: the arrays as written (name → components, data
   type, and the array that holds them: the name with characters other than
   `[A-Za-z0-9_.-]` replaced by `_`).
-- `role`: what LAGOON shows it as (`particles`, `dem`, `ice`, `rods`, `mooring`).
+- `role`: what LAGOON shows it as (`particles`, `dem`, `ice`, `rods`, `mooring`,
+  `net`).
 
 | array                 | shape        | dtype   | content |
 |-----------------------|--------------|---------|---------|
@@ -548,10 +549,16 @@ one. The growing arrays are sharded: shards of 1,048,576 rows, inner chunks of
 pieces; `time` is extended last.
 
 REEF3D writes particle sets itself with `P 18` (rank 0, `lagoon_particles`):
-NHFLOW's particles (`nhflow_particles`), DEM elements (`dem_dem`) and FNPF's ice
-floes (`fnpf_ice`). It writes every output at once, the inner chunk being filled
-again with each output, so a store can be read during a run; `P 18 1` leaves out
-their VTP files.
+NHFLOW's particles (`nhflow_particles`), DEM elements (`dem_dem`), FNPF's ice
+floes (`fnpf_ice`) and the nets of CFD and NHFLOW (`cfd_net`, `nhflow_net`). It
+writes every output at once, the inner chunk being filled again with each output,
+so a store can be read during a run; `P 18 1` leaves out their VTP files.
+
+A net set (role `net`) holds the bar nets (`X 320`) of a run: the knots of every
+net as its points, with `Tension` [N] (and `Velocity` [m/s], `Acceleration`
+[m/s²] when the run has a dynamic net; NaN for a quasi-static net among them), as
+REEF3D's `REEF3D-Net-<net>-<output>.vtk` files have them; the bars as its line
+cells, with the cell field `net`: the number of the net the bar belongs to.
 
 ## 11. Adaptive mesh refinement surfaces and blocks
 

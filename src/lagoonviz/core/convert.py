@@ -43,7 +43,7 @@ from lagoonviz.core.data.vtkxml import (
 ROLES = {"volume": "sigma", "free_surface": "surface", "bed": "surface"}
 #: object outputs stored as particle sets (format 0.2, section 10): points that
 #: change in number from output to output, with cells for objects
-OBJECT_ROLES = ("particles", "dem", "ice", "rods", "mooring")
+OBJECT_ROLES = ("particles", "dem", "ice", "rods", "mooring", "net")
 #: what else is converted (format 0.2): floating bodies (mesh once, a rigid motion
 #: per output), particles and objects, time series tables and free surface lines,
 #: the case's solids (SPEC 12)
@@ -732,7 +732,7 @@ def _layout(arrays: dict[str, np.ndarray]) -> dict[str, tuple[int, str]]:
 
 
 def _convert_objects(case, dataset, role, writer, pool, progress, limit) -> tuple[int, int]:
-    """Particles, DEM elements, ice floes, rods, mooring lines (SPEC 10): the points
+    """Particles, DEM elements, ice floes, rods, mooring lines, nets (SPEC 10): the points
     of every output one after another; cells stored again only when they change."""
     key = dataset.key
     times = _frame_times(case, dataset)

@@ -553,6 +553,14 @@ KINDS: dict[str, KindSpec] = {
             "line_width": PropertySpec(3.0, "Line width [px]", minimum=0.5, maximum=20.0),
         },
     ),
+    "net": KindSpec(
+        "Nets",
+        {
+            **_data_source("nets"),
+            **_colouring("Tension", "tension"),
+            "line_width": PropertySpec(1.5, "Line width [px]", minimum=0.5, maximum=20.0),
+        },
+    ),
     "structure": KindSpec(
         "Structures",
         {

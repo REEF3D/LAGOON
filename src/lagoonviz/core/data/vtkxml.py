@@ -407,11 +407,19 @@ def split_name(path: str | Path) -> tuple[str, int | None, int | None]:
 
 
 # ----------------------------------------------------------------- legacy .vtk
-def read_legacy(path: str | Path, point_arrays: list[str] | None = None) -> Piece:
-    """Read an ASCII legacy VTK POLYDATA file (points, lines, polygons, point data).
+#: legacy VTK cell types: lines (VTK_LINE, VTK_POLY_LINE) and faces (triangle,
+#: polygon, quad)
+_LEGACY_LINES = (3, 4)
+_LEGACY_FACES = (5, 7, 9)
 
-    REEF3D writes mooring lines this way. Lines are returned as two-node segments
-    in ``connectivity``/``offsets`` with ``kind="Lines"``; polygons as ``"PolyData"``.
+
+def read_legacy(path: str | Path, point_arrays: list[str] | None = None) -> Piece:
+    """Read an ASCII legacy VTK file: POLYDATA (points, lines, polygons) or an
+    UNSTRUCTURED_GRID of lines and faces (CELLS and CELL_TYPES), with point data.
+
+    REEF3D writes mooring lines (POLYDATA) and nets (an unstructured grid of bars)
+    this way. Lines are returned as two-node segments in ``connectivity``/``offsets``
+    with ``kind="Lines"``; polygons as ``"PolyData"``.
     """
     path = Path(path)
     tokens = path.read_text(errors="replace").split()
@@ -433,8 +441,10 @@ def read_legacy(path: str | Path, point_arrays: list[str] | None = None) -> Piec
         start = tokens.index("POINTS")
     except ValueError:
         raise VTKFormatError(f"{path}: no POINTS in legacy VTK file") from None
-    if "POLYDATA" not in tokens[:start]:
-        raise VTKFormatError(f"{path}: only legacy POLYDATA files are supported")
+    head = [t.upper() for t in tokens[:start]]
+    if "POLYDATA" not in head and "UNSTRUCTURED_GRID" not in head:
+        raise VTKFormatError(f"{path}: only legacy POLYDATA and UNSTRUCTURED_GRID files")
+    cells: list[np.ndarray] = []  # an unstructured grid's cells, until their types
     position = start
     while position < len(tokens):
         word = tokens[position].upper()
@@ -453,6 +463,22 @@ def read_legacy(path: str | Path, point_arrays: list[str] | None = None) -> Piec
                 if word == "LINES":
                     segments.append(np.stack([cell[:-1], cell[1:]], axis=1))
                 elif word == "POLYGONS":
+                    polys_conn.extend(cell.tolist())
+                    polys_off.append(len(polys_conn))
+        elif word == "CELLS":
+            n_cells, size = (int(v) for v in take(2))
+            values = np.array(take(size), dtype=np.int64)
+            index = 0
+            for _ in range(n_cells):
+                count = int(values[index])
+                cells.append(values[index + 1 : index + 1 + count])
+                index += 1 + count
+        elif word == "CELL_TYPES":
+            types = np.array(take(int(take(1)[0])), dtype=np.int64)
+            for cell, kind in zip(cells, types, strict=False):
+                if kind in _LEGACY_LINES and len(cell) > 1:
+                    segments.append(np.stack([cell[:-1], cell[1:]], axis=1))
+                elif kind in _LEGACY_FACES:
                     polys_conn.extend(cell.tolist())
                     polys_off.append(len(polys_conn))
         elif word == "POINT_DATA":

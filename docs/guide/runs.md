@@ -20,7 +20,7 @@ lagoon figure.lagoon-session                   # a saved session
 
 LAGOON reads the output of NHFLOW, FNPF, SFLOW and CFD: the free surface and bed
 (VTP), the volume (VTU), AMR surfaces (`REEF3D_<SOLVER>_AMR`), floating bodies and
-their mooring lines (6DOF), structures, DEM elements, ice floes, rod trees and
+their mooring lines and nets (6DOF), structures, DEM elements, ice floes, rod trees and
 particles, and the text files of wave gauges (`WSF`), free surface lines (`WSFLINE`),
 6DOF motions and forces. Each MPI rank's piece is read and joined; the parallel
 files (`.pvtu`, `.pvtp`) say which pieces belong together.
@@ -99,7 +99,7 @@ refined patches outlined, at the times SEASTATE wrote.
 
 Opening a case adds the case and its main items to the scene: the free surface
 (or the Free Surface AMR, when the run wrote one) and the bed, the objects of the same
-run (bodies, mooring lines, structures, DEM elements, ice floes, rod trees,
+run (bodies, mooring lines, nets, structures, DEM elements, ice floes, rod trees,
 particles), and its time series and free surface lines. The run's volume is there too,
 switched off: tick it (or *Volume* in the toolbar) to show it. When a folder
 holds the output of several runs, the run written last is shown. Slices and

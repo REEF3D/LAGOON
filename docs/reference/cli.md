@@ -63,7 +63,7 @@ lagoon-convert CASE [options]
 | --- | --- |
 | `CASE` | the REEF3D case folder |
 | `--out OUT` | the store to write (default `CASE/REEF3D_<SOLVER>.lagoon`) |
-| `--outputs OUTPUTS` | what to convert, comma separated: `volume`, `free_surface`, `bed`, `bodies`, `particles`, `dem`, `ice`, `rods`, `mooring`, `series`, `profiles`, `amr` (default: everything there is) |
+| `--outputs OUTPUTS` | what to convert, comma separated: `volume`, `free_surface`, `bed`, `bodies`, `particles`, `dem`, `ice`, `rods`, `mooring`, `net`, `series`, `profiles`, `amr` (default: everything there is) |
 | `--limit LIMIT` | convert at most this many outputs per stream |
 | `--shard-time SHARD_TIME` | outputs per shard file (default 16) |
 
