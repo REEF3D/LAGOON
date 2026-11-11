@@ -3,7 +3,8 @@
 They record what a user sees and can do: menus with shortcuts, toolbar, panels,
 the rows of the properties panel with their editors, values, choices and whether
 they are enabled. Not pixels or fonts, so they hold on every platform (except
-shortcuts, which follow each platform's conventions: those go per platform).
+the menus' shortcuts, which follow each platform's conventions: those go per
+platform; a tooltip's shortcut is written as Linux and Windows write it).
 """
 
 from __future__ import annotations
@@ -33,6 +34,18 @@ def _text(text: str) -> str:
     return text.replace("&", "").replace("\n", " / ")
 
 
+#: macOS writes a shortcut in a tooltip with symbols (⇧⌘F), the others with names
+#: (Shift+Ctrl+F): the tooltips' shortcuts as the others write them, so the
+#: properties' snapshots hold on every platform (the menus' are kept per platform)
+_MAC_KEYS = (("⌃", "Meta+"), ("⌥", "Alt+"), ("⇧", "Shift+"), ("⌘", "Ctrl+"))
+
+
+def _tip(text: str) -> str:
+    for symbol, name in _MAC_KEYS:
+        text = text.replace(symbol, name)
+    return _text(text)
+
+
 def _flags(widget: QWidget) -> str:
     flags = []
     if widget.isHidden():
@@ -50,7 +63,7 @@ def widget_line(widget: QWidget) -> str | None:
         state = ""
         if widget.isCheckable():
             state = " [x]" if widget.isChecked() else " [ ]"
-        tip = f" tip={_text(widget.toolTip())!r}" if widget.toolTip() else ""
+        tip = f" tip={_tip(widget.toolTip())!r}" if widget.toolTip() else ""
         line = f"button {_text(widget.text())!r}{state}{tip}"
     elif isinstance(widget, QComboBox):
         items = [widget.itemText(i) for i in range(widget.count())]

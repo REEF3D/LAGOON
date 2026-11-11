@@ -10,7 +10,7 @@ QWidget
   Range from: choice '1st - 99th percentile' of ['1st - 99th percentile', 'lowest to highest']
   Range min: number 0.1455 in [-1e+30, 1e+30] decimals 30
   Range max: number 2.30665 in [-1e+30, 1e+30] decimals 30
-  button 'Fit range to this frame' tip='Fix the colour range to the values of the current frame (⌘F)'
+  button 'Fit range to this frame' tip='Fix the colour range to the values of the current frame (Ctrl+F)'
   Range [%]: number 100 in [1, 500] decimals 3
   Opacity: number 1 in [0, 1] decimals 3
   Colour bar: checkbox '' on
@@ -18,6 +18,8 @@ QWidget
   Bar numbers: choice 'auto' of ['auto', 'integer', '1 decimal', '2 decimals', '3 decimals', 'scientific']
   Bar ticks: number 0 in [0, 11] decimals 0
   Grid lines: choice 'off' of ['off', 'dark', 'white']
+  Outline: choice 'off' of ['off', 'dark', 'white']
+  Outside: checkbox '' on
   Contour lines of: choice 'none' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
   Contour lines: number 10 in [2, 100] decimals 0
   Colour bands: checkbox '' off
