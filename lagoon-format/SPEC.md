@@ -550,15 +550,23 @@ pieces; `time` is extended last.
 
 REEF3D writes particle sets itself with `P 18` (rank 0, `lagoon_particles`):
 NHFLOW's particles (`nhflow_particles`), DEM elements (`dem_dem`), FNPF's ice
-floes (`fnpf_ice`) and the nets of CFD and NHFLOW (`cfd_net`, `nhflow_net`). It
-writes every output at once, the inner chunk being filled again with each output,
-so a store can be read during a run; `P 18 1` leaves out their VTP files.
+floes (`fnpf_ice`), the nets of CFD and NHFLOW (`cfd_net`, `nhflow_net`), the
+mooring lines (`cfd_mooring`, `nhflow_mooring`, `fnpf_mooring`) and CORAL's
+mooring lines (`coral_mooring`). It writes every output at once, the inner chunk
+being filled again with each output, so a store can be read during a run;
+`P 18 1` leaves out their VTP and .vtk files.
 
 A net set (role `net`) holds the bar nets (`X 320`) of a run: the knots of every
 net as its points, with `Tension` [N] (and `Velocity` [m/s], `Acceleration`
 [m/s²] when the run has a dynamic net; NaN for a quasi-static net among them), as
 REEF3D's `REEF3D-Net-<net>-<output>.vtk` files have them; the bars as its line
 cells, with the cell field `net`: the number of the net the bar belongs to.
+
+A mooring set (role `mooring`) holds the mooring lines of every type (`X 310`:
+catenary, quasi-static bars, dynamic lines, springs): the points of every line,
+with `Tension` [N] as REEF3D's `REEF3D-Mooring-<line>-<output>.vtk` files have
+them; the segments as its line cells, with the cell field `line`: the number of
+the line.
 
 ## 11. Adaptive mesh refinement surfaces and blocks
 

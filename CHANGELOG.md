@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Mooring lines of every type
+
+- REEF3D writes the mooring lines of every type (catenary, quasi-static bars,
+  dynamic lines, springs) into the LAGOON store with P 18 (particle set
+  `cfd_mooring`, `nhflow_mooring`, `fnpf_mooring`, role `mooring`; REEF3D patch
+  LAGOON/0028), and dynamic lines as REEF3D-Mooring .vtk files like the others
+  (before only as REEF3D_CFD_Beam files, which LAGOON does not read). LAGOON shows
+  them as *Mooring lines*, coloured by Tension (SPEC 10).
+
 ### An object without its shadow
 
 - Bodies, structures, DEM elements, ice floes and rod trees have a **Shadow**

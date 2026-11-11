@@ -168,3 +168,47 @@ def test_nets_written_by_reef3d(tmp_path):
     every = s.data.dataset(item.id).read(1, None)
     np.testing.assert_allclose(every.point_data["Velocity"][: len(a)], _net(0, 1)[3])
     assert np.isnan(every.point_data["Velocity"][len(a) :]).all()
+
+
+def test_mooring_lines_written_by_reef3d(tmp_path):
+    """REEF3D's mooring lines of every type in the store (P 18, lagoon_moorings): the
+    points of the lines side by side with Tension, the segments with their line."""
+    from lagoon_format.store import StoreWriter
+
+    root = tmp_path / "cfd"
+    root.mkdir()
+    writer = StoreWriter.create(root / "REEF3D_CFD.lagoon", solver="CFD", run={"run": "R1"})
+    lines = writer.particle_writer(
+        "cfd_mooring",
+        {
+            "point_fields": {"Tension": (1, "float32")},
+            "cells": "lines",
+            "cell_fields": {"line": (1, "int32")},
+            "source": "REEF3D_CFD_6DOF_Mooring",
+            "attributes": {"dataset": "cfd_mooring", "role": "mooring"},
+        },
+    )
+    for frame in range(2):
+        anchors = np.array([[0.5, 0.5, 0.0], [5.5, 5.5, 0.0]])
+        points = np.concatenate([np.linspace(a, [3.0, 3.0, 2.2 - 0.1 * frame], 6) for a in anchors])
+        segments = np.concatenate(
+            [[[i, i + 1] for i in range(5)], [[i, i + 1] for i in range(6, 11)]]
+        )
+        lines.append(
+            0.25 * frame,
+            frame,
+            points.astype(np.float32),
+            {"Tension": np.linspace(50.0, 60.0 + frame, 12).astype(np.float32)},
+            segments.ravel().astype(np.int32),
+            np.arange(2, 21, 2, dtype=np.int32),
+            {"line": np.repeat(np.int32([0, 1]), 5)},
+        )
+    lines.flush()
+    writer.close()
+    s = Session()
+    s.open_case(root)
+    item = next(i for i in s.scene if i.kind == "mooring")
+    assert item.properties["variable"] == "Tension"
+    mesh = s.data.load(item.id, 0.25)
+    assert mesh is not None and len(mesh.segments) == 10 and mesh.n_points == 12
+    assert mesh.point_data["Tension"].max() == np.float32(61.0)
