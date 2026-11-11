@@ -782,6 +782,7 @@ class _Collector:
         smooth=None,
         attributes: dict[str, np.ndarray] | None = None,
         subdivide: bool = False,
+        shadow: bool = True,
     ) -> None:
         positions = np.asarray(positions, np.float32).reshape(-1, 3)
         triangles = np.asarray(triangles, np.uint32).reshape(-1, 3)
@@ -816,6 +817,8 @@ class _Collector:
         levels = subdivision_levels(len(triangles), self.pixels) if subdivide else 0
         if levels:  # smoothed in Blender (its flat faces kept)
             entry["subdivide"] = levels
+        if not shadow:  # lit, but casting no shadow
+            entry["shadow"] = False
         self.objects.append(entry)
 
     def points(self, name: str, positions, radius, material: dict[str, Any]) -> None:
@@ -933,7 +936,15 @@ class _Collector:
             if extended is not None:  # the land and the sea floor run on
                 self.add(shown.item_id, *extended, spec, None)
                 return
-        self.add(shown.item_id, shown.positions, shown.triangles, spec, rgb, subdivide=water)
+        self.add(
+            shown.item_id,
+            shown.positions,
+            shown.triangles,
+            spec,
+            rgb,
+            subdivide=water,
+            shadow=getattr(shown, "shadow", True),
+        )
         if kind == "bathymetry" and self.stand and len(finite):
             # a model on a stand: the bed a solid block, its sides down to a base (land
             # cut off in rock)

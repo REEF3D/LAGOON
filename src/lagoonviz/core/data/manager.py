@@ -122,6 +122,8 @@ class DisplaySurface:
     point_sizes: np.ndarray | None = None
     #: the item's material (bodies, structures, DEM elements), for the cinematic looks
     material: str = ""
+    #: casts a shadow (bodies, structures: their "shadow" setting)
+    shadow: bool = True
     #: colour bands (filled contours): the edges between them as fractions of the
     #: colour range (lagoonviz.core.colormaps.band_edges); empty: smooth colours
     bands: tuple[float, ...] = ()
@@ -1743,6 +1745,7 @@ class DataManager:
             point_size=float(props.get("point_size", 4.0)) if point_kind else None,
             point_sizes=_point_sizes(mesh, props) if point_kind else None,
             material=str(props.get("material", "") or ""),
+            shadow=bool(props.get("shadow", True)),
             bands=bands,
         )
 

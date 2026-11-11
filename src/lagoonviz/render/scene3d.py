@@ -535,13 +535,14 @@ class SceneRenderer:
             )
             mesh = gfx.Mesh(geometry, self._material(kind, shown))
             self._grain(mesh, shown.positions, kind, shown.material)
-            mesh.cast_shadow = kind not in NO_SHADOW_CAST
             mesh.receive_shadow = True
             self.content.add(mesh)
             current = _Shown(mesh, kind, shown.colormap, shown.triangles, shown.values is not None)
             self._shown[shown.item_id] = current
         else:
             self._style(current.mesh.material, kind, shown)
+        # an object's shadow can be switched off (its "shadow" setting)
+        current.mesh.cast_shadow = kind not in NO_SHADOW_CAST and getattr(shown, "shadow", True)
         current.triangles = shown.triangles
         current.low, current.high = _corners(shown.positions)
         current.mesh.visible = shown.visible

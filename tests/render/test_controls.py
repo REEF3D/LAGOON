@@ -406,3 +406,37 @@ def test_a_slices_grid_lines_lie_on_it_as_seen(reef3d_run):
         a, b = clip(ends), clip(moved)
         np.testing.assert_allclose(b[:, :2], a[:, :2], atol=1e-5)  # where they were seen
         assert np.all(b[:, 2] < a[:, 2])  # and in front
+
+
+def test_an_objects_shadow_can_be_switched_off(tmp_path):
+    """Bodies and structures cast a shadow (in the sun's looks and in path tracing)
+    unless their "shadow" setting is off: then they are lit, but the light passes."""
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.core import Session
+    from lagoonviz.render.pathtrace import _Collector
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    run = make_run(tmp_path / "run", frames=2, print_interval=0.5, objects=True)
+    session = Session()
+    session.open_case(run)
+    body = next(i for i in session.scene if i.kind == "body")
+    assert body.properties.get("shadow", True)
+    view = SceneRenderer()
+
+    def drawn():
+        shown = session.data.display(body.id, session.data.load(body.id))
+        view.update("body", shown)
+        return shown, view._shown[body.id].mesh
+
+    shown, mesh = drawn()
+    assert shown.shadow and mesh.cast_shadow and mesh.receive_shadow
+    session.set_property(body.id, "shadow", False)
+    shown, mesh = drawn()
+    assert not shown.shadow and not mesh.cast_shadow and mesh.receive_shadow
+    export = _Collector.__new__(_Collector)  # path tracing: Blender's shadow rays pass it
+    export.objects, export.arrays, export.materials, export.pixels = [], {}, {}, 1000
+    export.add("body", shown.positions, shown.triangles, {}, shadow=shown.shadow)
+    assert export.objects[-1]["shadow"] is False
+    session.set_property(body.id, "shadow", True)
+    assert drawn()[1].cast_shadow

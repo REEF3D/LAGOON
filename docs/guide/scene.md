@@ -83,7 +83,9 @@ Surfaces, slices and objects share these properties:
 Bodies, structures and the other objects have a **Material** (steel, offshore
 structure, concrete, rock, ice, wood): its colour, and how the
 [cinematic looks](cinematic.md) draw it. *Offshore structure* is painted steel in
-offshore yellow, as platforms, jackets and buoys are.
+offshore yellow, as platforms, jackets and buoys are. **Shadow** (on by default)
+switches off the shadow an object casts in the sun's looks and in path tracing: it
+is still lit, but the bed, the water and other objects under it are not darkened.
 
 ## Statistics over time
 

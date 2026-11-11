@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### An object without its shadow
+
+- Bodies, structures, DEM elements, ice floes and rod trees have a **Shadow**
+  setting (on by default). Off, the object casts no shadow in the sun's looks and
+  in path tracing (Blender: not seen by shadow rays); it is still lit itself.
+
 ### Offshore structure: a material in offshore yellow
 
 - Bodies, structures and the other objects have a new **Material**, *Offshore

@@ -64,6 +64,17 @@ class PropertySpec:
     file: str | None = None
 
 
+#: whether an object casts a shadow (the bed, the water and other objects below it
+#: darken in the sun's looks and in path tracing); off: it is lit, but lets the light by
+_SHADOW = {
+    "shadow": PropertySpec(
+        True,
+        "Shadow",
+        tip="Casts a shadow (off: the light passes by it; the object itself is still lit)",
+    )
+}
+
+
 def _data_source(role: str) -> dict[str, PropertySpec]:
     """Properties shared by all items that show a dataset of a case."""
     return {
@@ -534,6 +545,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("bodies"),
             "material": PropertySpec("steel", "Material", choices=MATERIALS),
+            **_SHADOW,
             **_colouring("none", "viridis"),
         },
     ),
@@ -566,6 +578,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("structures"),
             "material": PropertySpec("concrete", "Material", choices=MATERIALS),
+            **_SHADOW,
             **_colouring("none", "greys"),
         },
     ),
@@ -574,6 +587,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("DEM"),
             "material": PropertySpec("rock", "Material", choices=MATERIALS),
+            **_SHADOW,
             **_colouring("none", "viridis"),
             "trail_outputs": PropertySpec(
                 0,
@@ -589,6 +603,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("ice"),
             "material": PropertySpec("ice", "Material", choices=MATERIALS),
+            **_SHADOW,
             **_colouring("none", "viridis"),
         },
     ),
@@ -597,6 +612,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("rod tree"),
             "material": PropertySpec("wood", "Material", choices=MATERIALS),
+            **_SHADOW,
             **_colouring("none", "viridis"),
         },
     ),

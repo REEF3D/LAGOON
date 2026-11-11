@@ -836,6 +836,8 @@ class Frames:
                 if entry.get("subdivide"):
                     subdivide(obj, mesh, int(entry["subdivide"]))
                 self.kept[name] = (obj, digest)
+            # an object whose shadow is switched off: invisible to shadow rays only
+            obj.visible_shadow = bool(entry.get("shadow", True))
             count += len(triangles)
         for name in [n for n in self.kept if n not in wanted]:
             self._drop(name)
