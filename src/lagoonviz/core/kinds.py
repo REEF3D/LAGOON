@@ -469,6 +469,15 @@ KINDS: dict[str, KindSpec] = {
                 "AMR level; surface: at phi = 0, inside the band, where pressure and velocity "
                 "depend on the cell size",
             ),
+            "search": PropertySpec(
+                "near the surface",
+                "Searched",
+                choices=("near the surface", "whole volume"),
+                tip="Near the surface: a LAGOON store's volume is read only around where the "
+                "surface was in the frame before (much faster for a large CFD grid); drops and "
+                "bubbles away from the surface are not found. Whole volume: every level of "
+                "every frame",
+            ),
             **_grid_lines("the surface crosses (with AMR: of every level)"),
             **_exaggeration("Scales heights about the still water level"),
         },

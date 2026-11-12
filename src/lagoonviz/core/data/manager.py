@@ -990,7 +990,16 @@ class DataManager:
             water = variable == "phi" and (
                 str(item.properties.get("colours_from", "water side")) == "water side"
             )
-            extra = ("iso", variable, float(item.properties.get("iso_value", 0.0)), lines, water)
+            # a large volume searched only near the surface of the frame before
+            near = str(item.properties.get("search", "near the surface")) == "near the surface"
+            extra = (
+                "iso",
+                variable,
+                float(item.properties.get("iso_value", 0.0)),
+                lines,
+                water,
+                near,
+            )
         elif item.kind == "iso_volume":
             variable = str(item.properties.get("iso_by", "none"))
             if variable == "none":
@@ -1112,8 +1121,9 @@ class DataManager:
         elif key.extra and key.extra[0] == "iso":
             lines = bool(key.extra[3]) if len(key.extra) > 3 else True
             water = bool(key.extra[4]) if len(key.extra) > 4 else False
+            near = bool(key.extra[5]) if len(key.extra) > 5 else False
             args = (key.index, key.extra[1], key.extra[2], list(key.arrays))
-            options = {"grid_lines": lines, "water_side": water}
+            options = {"grid_lines": lines, "water_side": water, "near_surface": near}
             mesh = self._cut_apart(key, dataset, "read_iso", *args, **options)
             if mesh is None:
                 mesh = dataset.read_iso(*args, **options)

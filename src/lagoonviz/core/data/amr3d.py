@@ -743,6 +743,7 @@ class RefinedVolume(Dataset):
         value: float,
         arrays,
         extra: float | None = 0.0,
+        near: bool = False,
     ):
         """A piece to cut iso-surfaces from: a block whole; the volume's own pieces
         as their dataset gives them (a store's: only the levels the iso-surfaces pass
@@ -750,7 +751,7 @@ class RefinedVolume(Dataset):
         if path in self._block_keys:
             return super()._iso_piece(number, path, variable, value, arrays, extra)
         own = [n for n in arrays if n != "level"]
-        cut = self.base._iso_piece(number, path, variable, value, own, extra)
+        cut = self.base._iso_piece(number, path, variable, value, own, extra, near)
         if cut is None:
             return None
         piece, connectivity, offsets, types = cut

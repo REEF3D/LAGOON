@@ -149,7 +149,12 @@ Each process keeps the case open with what it learnt of its cells. In the Low
 memory and Streaming modes (every process holds its own copy of the cells), and
 with `LAGOON_CUT_PROCESSES=0`, the reading threads cut them as before. From a
 LAGOON store only the levels the free surface passes through are read (and those
-down to where its water-side colours are taken), not the whole volume.
+down to where its water-side colours are taken), not the whole volume. An
+iso-surface's **Searched** setting, *near the surface* by default, reads even the
+level set only around where the surface was in the frame before (and further where
+it reached the edge of that: a rising surface is followed, a jump in time reads the
+whole volume once). Drops and bubbles away from the surface are then not found:
+*whole volume* finds them.
 
 ### Very large cases
 

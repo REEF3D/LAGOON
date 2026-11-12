@@ -23,9 +23,11 @@ def _surface(x, y, t):
     return LEVEL + 0.15 * np.sin(x[None, :] / 1.5 + t) * np.cos(y[:, None] / 2.0)
 
 
-def _cfd_store(root, frames: int = 2):
+def _cfd_store(root, frames: int = 2, rise: float = 0.0, drop: int | None = None):
     """A CFD store: a cartesian volume of 30 levels in two blocks, phi the distance
-    to a wavy free surface (positive in the water), velocity and pressure."""
+    to a wavy free surface (positive in the water), velocity and pressure. ``rise``:
+    the surface rises so much from frame to frame; ``drop``: the frame with a drop of
+    water flying high above the surface."""
     root.mkdir()
     (root / "ctrl.txt").write_text("N 40 3\nF 45 1.6\n")
     x, y = np.linspace(0.0, 6.0, 25), np.linspace(0.0, 3.0, 9)
@@ -47,8 +49,12 @@ def _cfd_store(root, frames: int = 2):
         values = []
         for (i0, _), (nx, _) in blocks:
             bx = x[i0 : i0 + nx]
-            top = _surface(bx, y, t)  # (ny, nx)
+            top = _surface(bx, y, t) + rise * t  # (ny, nx)
             depth = top[None] - z[:, None, None]  # (nz, ny, nx)
+            if t == drop:  # a ball of water of 0.25 m at (3, 1.5, 2.6)
+                gz, gy, gx = np.meshgrid(z, y, bx, indexing="ij")
+                ball = 0.25 - np.sqrt((gx - 3.0) ** 2 + (gy - 1.5) ** 2 + (gz - 2.6) ** 2)
+                depth = np.maximum(depth, ball)
             u = np.zeros((*depth.shape, 3))
             u[..., 0] = 0.3 + 0.1 * z[:, None, None] + 0.05 * bx[None, None, :]
             u[..., 2] = 0.02 * np.cos(bx)[None, None, :]
@@ -167,3 +173,60 @@ def test_how_many_processes(monkeypatch):
         assert cutters.processes() == 0  # one process: the threads do as well
     finally:
         memory.set_mode("balanced")
+
+
+def test_near_the_surface_follows_it(tmp_path):
+    """Searched near the surface: only the levels round where it crossed in the frame
+    read before are read; a surface that rose beyond them is followed (more is read
+    where it reaches the edge), in any order of the frames; the surface is the one
+    the whole volume gives."""
+    root = _cfd_store(tmp_path / "cfd", frames=6, rise=0.25)  # 2.5 levels a frame
+    whole = open_case(root).datasets["cfd_volume"]
+    near = open_case(root).datasets["cfd_volume"]
+    names = ["velocity", "pressure"]
+    reads = []
+    original = near.output.read_block
+
+    def counted(name, t, block):
+        reads.append((name, t))
+        return original(name, t, block)
+
+    near.output.read_block = counted
+    for k in (0, 1, 2, 5, 3, 0, 4):
+        for side in (False, True):
+            a = whole.read_iso(k, "phi", 0.0, names, water_side=side)
+            b = near.read_iso(k, "phi", 0.0, names, water_side=side, near_surface=True)
+            _same(a, b)
+    # whole blocks for the first frame and after the jumps (2 -> 5, 3 -> 0, 0 -> 4: the
+    # surface 7.5 levels or more away, beyond what was read: found in the whole block
+    # then); a frame next to the one before is read near the surface
+    assert {t for _, t in reads} == {0, 5, 4}
+    band = near._bands[(0, "phi", 0.0, 0.0)]
+    assert band[2] == 30 and band[1] - band[0] <= 5
+
+
+def test_near_the_surface_misses_a_drop_far_from_it(tmp_path):
+    """What searching near the surface leaves out: a drop flying high above it is
+    found in the whole volume only."""
+    root = _cfd_store(tmp_path / "cfd", frames=2, drop=1)
+    near = open_case(root).datasets["cfd_volume"]
+    whole = near.read_iso(1, "phi", 0.0, ["velocity"])
+    near.read_iso(0, "phi", 0.0, ["velocity"], near_surface=True)  # the band of the frame before
+    found = near.read_iso(1, "phi", 0.0, ["velocity"], near_surface=True)
+    high = whole.points[:, 2] > 2.2
+    assert high.sum() > 20  # the drop
+    assert not (found.points[:, 2] > 2.2).any()
+    assert found.n_points == whole.n_points - high.sum()
+
+
+def test_the_free_surface_item_searches_near_it(tmp_path):
+    from lagoonviz.core import Session
+
+    root = _cfd_store(tmp_path / "cfd")
+    s = Session()
+    s.open_case(root)
+    free = next(i for i in s.scene if i.kind == "iso_surface")
+    assert free.properties.get("search", "near the surface") == "near the surface"
+    assert s.data.frame_key(free.id).extra[5] is True
+    s.set_property(free.id, "search", "whole volume")
+    assert s.data.frame_key(free.id).extra[5] is False

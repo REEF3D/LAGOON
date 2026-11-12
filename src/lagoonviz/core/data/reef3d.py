@@ -451,6 +451,7 @@ class Dataset:
         value: float,
         arrays,
         extra: float | None = 0.0,
+        near: bool = False,
     ):
         """A piece to cut iso-surfaces from: (piece with ``arrays``, connectivity,
         offsets, types), or None when no level from ``value`` to ``value + extra`` is
@@ -533,6 +534,7 @@ class Dataset:
         variables: list[str] | None = None,
         grid_lines: bool = True,
         water_side: bool = False,
+        near_surface: bool = False,
     ) -> SurfaceMesh:
         """The iso-surface of a volume frame where ``variable`` equals ``value``.
 
@@ -546,6 +548,10 @@ class Dataset:
         band the density is smoothed over F 45 cells, so phi = 0 carries part of the
         hydrostatic pressure of the band and a blend of the water's and the air's
         velocity, both set by the cell size (with AMR: a step at every block edge).
+
+        With ``near_surface`` a LAGOON store's volume is searched only near where the
+        surface was in the frame read before (much less of a large volume read;
+        drops and bubbles away from the surface are not found).
         """
         if self.kind != "UnstructuredGrid":  # a surface: its line at the value
             from lagoonviz.core.data.mesh import iso_lines
@@ -563,7 +569,7 @@ class Dataset:
         extra = self._water_margin() if side else 0.0
         cuts = []
         for number, path in enumerate(frame.pieces):
-            cut = self._iso_piece(number, path, variable, float(value), arrays, extra)
+            cut = self._iso_piece(number, path, variable, float(value), arrays, extra, near_surface)
             if cut is not None:  # None: no level of the cut in this piece
                 cuts.append(cut)
         parts = [_cut_piece(cut, variable, float(value), grid_lines) for cut in cuts]
@@ -1638,7 +1644,8 @@ def _lifted_values(surface: SurfaceMesh, layer: SurfaceMesh, lift: float, reach:
     layer.with_normals()
     lifted = layer.points.astype(np.float64) - lift * layer.normals.astype(np.float64)
     k = min(4, len(lifted))
-    distance, index = cKDTree(lifted).query(surface.points.astype(np.float64), k=k)
+    # on every core (the nearest points of a large free surface: a third of its time)
+    distance, index = cKDTree(lifted).query(surface.points.astype(np.float64), k=k, workers=-1)
     if k == 1:
         distance, index = distance[:, None], index[:, None]
     weight = 1.0 / np.maximum(distance, 1e-6 * reach)

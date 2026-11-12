@@ -46,6 +46,16 @@ _READS = ThreadPoolExecutor(4, thread_name_prefix="lagoon-store")
 SAMPLE_ALL = 500_000
 
 
+def _crossed_layers(field: np.ndarray, value: float, top: float) -> np.ndarray:
+    """The layers of cells between two levels of ``field`` (nz, ny, nx) where values
+    above ``value`` and values up to ``top`` both occur (a cell crossing some level of
+    the range is in one of them)."""
+    known = np.isfinite(field)
+    some_above = ((field > value) & known).reshape(len(field), -1).any(axis=1)
+    some_below = ((field <= top) & known).reshape(len(field), -1).any(axis=1)
+    return np.flatnonzero((some_above[:-1] | some_above[1:]) & (some_below[:-1] | some_below[1:]))
+
+
 def _hexahedra(nz: int, ny: int, nx: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Cells of a block whose points are ordered level, y, x (x fastest)."""
     k, j, i = np.meshgrid(np.arange(nz - 1), np.arange(ny - 1), np.arange(nx - 1), indexing="ij")
@@ -159,6 +169,9 @@ class StoreDataset(Dataset):
         self.output = output
         self._cells_cache: dict[tuple, tuple] = {}
         self._cells_lock = threading.Lock()
+        #: where an iso-surface crossed each block in the frame read last (_crossing):
+        #: (block, variable, value, top) -> (first level, end level, levels)
+        self._bands: dict[tuple, tuple[int, int, int]] = {}
         #: surface variables the same in every output (a still water depth): read once
         self._fixed: dict = {}
         frames = self._frames()
@@ -304,13 +317,18 @@ class StoreDataset(Dataset):
         value: float,
         arrays,
         extra: float | None = 0.0,
+        near: bool = False,
     ):
         """The part of a block iso-surfaces from ``value`` to ``value + extra`` pass
         through: the level-set (or the iso variable) read whole, the other arrays only
         for the levels where it crosses them (a free surface lies in a few of a CFD
         volume's levels: the rest was read and searched in vain), with the cells of
         those levels. None when none crosses in this block. Surfaces, fields of more
-        than one component and ``extra`` None: the whole block, as before."""
+        than one component and ``extra`` None: the whole block, as before.
+
+        ``near``: the iso variable too is read only near where it crossed in the
+        frame read before (:meth:`_crossing`): drops and bubbles away from the
+        surface are not found."""
         output = self.output
         name = variable.partition(".")[0]
         if (
@@ -322,22 +340,13 @@ class StoreDataset(Dataset):
             return super()._iso_piece(number, path, variable, value, arrays, extra)
         t = int(path.name[1:])
         block = output.blocks[number]
-        field = np.asarray(output.read_block(name, t, block), np.float32)  # (nz, ny, nx)
-        if field.ndim != 3 or field.shape[0] < 2:
-            return super()._iso_piece(number, path, variable, value, arrays, extra)
-        # the layers of cells between two levels where values above ``value`` and
-        # values up to ``value + extra`` both occur (a cell crossing some level of the
-        # range is in one of them)
-        known = np.isfinite(field)
         top = value + max(float(extra), 0.0)
-        some_above = ((field > value) & known).reshape(len(field), -1).any(axis=1)
-        some_below = ((field <= top) & known).reshape(len(field), -1).any(axis=1)
-        layers = np.flatnonzero(
-            (some_above[:-1] | some_above[1:]) & (some_below[:-1] | some_below[1:])
-        )
-        if not len(layers):
+        found = self._crossing(number, name, t, block, value, top, near)
+        if found is None:
+            return super()._iso_piece(number, path, variable, value, arrays, extra)
+        if found == ():
             return None
-        k0, k1 = int(layers[0]), int(layers[-1]) + 2  # the levels k0 .. k1 - 1
+        window, start, k0, k1 = found  # the field read for the levels start ...
         rows = slice(k0, k1)
         (i0, j0), (i1, j1) = block.start, block.stop
         px, py = (a.astype(np.float32) for a in output.plan(i0, i1, j0, j1))
@@ -350,12 +359,12 @@ class StoreDataset(Dataset):
             if other not in output.variables:
                 raise KeyError(f"{output.name}: no variable {other!r}")
             if other == name:
-                values = field[rows]
+                values = window[k0 - start : k1 - start]
             else:
                 values = output.array(block, other).get((t, rows))
             components = output.variables[other]
             data[other] = values.reshape(-1, components) if components > 1 else values.ravel()
-        nz, ny, nx = k1 - k0, *field.shape[1:]
+        nz, ny, nx = k1 - k0, *window.shape[1:]
         key = (number, nz, ny, nx)
         with self._cells_lock:
             cells = self._cells_cache.get(key)
@@ -365,6 +374,63 @@ class StoreDataset(Dataset):
         piece = Piece(self.kind, points, np.zeros(0, np.int64), np.zeros(0, np.int64), None, data)
         piece.band = (k0, k1)
         return piece, connectivity, offsets, types
+
+    def _crossing(self, number, name, t, block, value, top, near):
+        """Where the field crosses the range ``value`` .. ``top`` in a block: (the field
+        read, the level it starts at, the first and the end level of the layers of
+        cells it crosses); () when it does not cross; None when the block is no 3D
+        field.
+
+        Whole: the field of all levels. ``near``: only the levels around where it
+        crossed in the frame read before (by the same reader of the dataset) and a
+        margin as deep as that band, at least 3 levels; where it reaches the edge of
+        what was read, more is read (the band's depth again, to the top or the
+        bottom), so a surface that moved or rose is followed. A crossing apart from
+        the band (a drop above, a bubble deep down) is not seen. The first frame, and
+        a block where it was not found near the band, is read whole."""
+        output = self.output
+        array = output.array(block, name)
+        nz = None
+        guess = self._bands.get((number, name, value, top)) if near else None
+        if guess is not None:
+            nz = guess[2]
+            margin = max(3, guess[1] - guess[0])
+            r0, r1 = max(0, guess[0] - margin), min(nz, guess[1] + margin)
+            window = np.asarray(array.get((t, slice(r0, r1))), np.float32)
+        else:
+            window = np.asarray(output.read_block(name, t, block), np.float32)
+            if window.ndim != 3 or window.shape[0] < 2:
+                return None
+            r0, r1, nz = 0, window.shape[0], window.shape[0]
+        while True:
+            layers = _crossed_layers(window, value, top)
+            if not len(layers):
+                if guess is None or (r0 == 0 and r1 == nz):
+                    self._bands.pop((number, name, value, top), None)
+                    return ()
+                # not near the band (the surface left the block?): the whole block
+                window = np.asarray(output.read_block(name, t, block), np.float32)
+                r0, r1, guess = 0, nz, None
+                continue
+            k0, k1 = int(layers[0]) + r0, int(layers[-1]) + 2 + r0
+            low = k0 == r0 and r0 > 0  # at an edge of what was read: read on
+            high = k1 == r1 and r1 < nz
+            if not (low or high):
+                break
+            step = max(3, k1 - k0)
+            if low:
+                below = max(0, r0 - step)
+                more = np.asarray(array.get((t, slice(below, r0))), np.float32)
+                window, r0 = np.concatenate([more, window]), below
+            if high:
+                above = min(nz, r1 + step)
+                more = np.asarray(array.get((t, slice(r1, above))), np.float32)
+                window, r1 = np.concatenate([window, more]), above
+        if near:
+            if len(self._bands) > 4096:
+                self._bands.clear()
+            self._bands[(number, name, value, top)] = (k0, k1, nz)
+        return window, r0, k0, k1
 
     def _water_margin(self) -> float | None:
         """A cartesian volume: twice the interface band (F 45 and 0.3 cells) at its

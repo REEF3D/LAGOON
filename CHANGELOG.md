@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Large CFD volumes: the free surface searched near itself
+
+- An iso-surface from a LAGOON store (CFD's free surface) reads the level set only
+  around where the surface was in the frame before, and more where it reaches the
+  edge (**Searched**: *near the surface*, the default; *whole volume* as before,
+  for drops and bubbles away from the surface). The surface is the same as from the
+  whole volume. In a 5.4 million point volume a frame took 0.35 s instead of
+  0.47 s; with the water-side colours the cutting dominates (1.2 s).
+- The water-side colours look up their nearest points on all cores.
+
 ### Mooring lines of every type
 
 - REEF3D writes the mooring lines of every type (catenary, quasi-static bars,
