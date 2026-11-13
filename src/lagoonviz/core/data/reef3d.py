@@ -452,6 +452,7 @@ class Dataset:
         arrays,
         extra: float | None = 0.0,
         near: bool = False,
+        stride: int = 1,
     ):
         """A piece to cut iso-surfaces from: (piece with ``arrays``, connectivity,
         offsets, types), or None when no level from ``value`` to ``value + extra`` is
@@ -535,6 +536,7 @@ class Dataset:
         grid_lines: bool = True,
         water_side: bool = False,
         near_surface: bool = False,
+        stride: int = 1,
     ) -> SurfaceMesh:
         """The iso-surface of a volume frame where ``variable`` equals ``value``.
 
@@ -551,7 +553,9 @@ class Dataset:
 
         With ``near_surface`` a LAGOON store's volume is searched only near where the
         surface was in the frame read before (much less of a large volume read;
-        drops and bubbles away from the surface are not found).
+        drops and bubbles away from the surface are not found). ``stride``: while the
+        time moves, a LAGOON store's volume (no AMR) is cut from every so many grid
+        lines across (all its levels), a coarser surface in a fraction of the time.
         """
         if self.kind != "UnstructuredGrid":  # a surface: its line at the value
             from lagoonviz.core.data.mesh import iso_lines
@@ -569,7 +573,9 @@ class Dataset:
         extra = self._water_margin() if side else 0.0
         cuts = []
         for number, path in enumerate(frame.pieces):
-            cut = self._iso_piece(number, path, variable, float(value), arrays, extra, near_surface)
+            cut = self._iso_piece(
+                number, path, variable, float(value), arrays, extra, near_surface, stride
+            )
             if cut is not None:  # None: no level of the cut in this piece
                 cuts.append(cut)
         parts = [_cut_piece(cut, variable, float(value), grid_lines) for cut in cuts]

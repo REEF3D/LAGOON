@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Large CFD volumes: a coarser free surface while playing
+
+- While the time moves, the iso-surface of a LAGOON store's volume of more than
+  1.5 million points is cut from every 2nd (3rd, ...) grid line across, all levels
+  of its band, in every memory mode (before: only surfaces, in streaming): in a
+  5.4 million point volume with water-side colours 0.42 s a frame instead of
+  1.23 s, the surface within a cell of the whole one. As soon as the time stands
+  still the frame is shown at full detail; films and stills are always full.
+
 ### Large CFD volumes: the free surface searched near itself
 
 - An iso-surface from a LAGOON store (CFD's free surface) reads the level set only

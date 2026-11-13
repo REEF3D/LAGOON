@@ -8,9 +8,12 @@ same result."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from lagoon_format.store import StoreWriter
+from scipy.spatial import cKDTree
 
 from lagoonviz.core.data import cutters
 from lagoonviz.core.data.lagoon import StoreDataset
@@ -230,3 +233,42 @@ def test_the_free_surface_item_searches_near_it(tmp_path):
     assert s.data.frame_key(free.id).extra[5] is True
     s.set_property(free.id, "search", "whole volume")
     assert s.data.frame_key(free.id).extra[5] is False
+
+
+def test_coarser_while_the_time_moves(tmp_path, monkeypatch):
+    """While the time moves, the iso-surface of a large volume is cut from every 2nd
+    (3rd, ...) grid line across, all levels of its band: the surface where the
+    whole one is, a fraction of its points, no gap between the blocks; at full
+    detail once the time stands still."""
+    from lagoonviz.core import Session
+    from lagoonviz.core.data import manager
+
+    root = _cfd_store(tmp_path / "cfd", frames=3)
+    volume = open_case(root).datasets["cfd_volume"]
+    full = volume.read_iso(1, "phi", 0.0, ["velocity"], water_side=True)
+    coarse = volume.read_iso(1, "phi", 0.0, ["velocity"], water_side=True, stride=2)
+    assert 0 < coarse.n_points < 0.6 * full.n_points
+    gap, _ = cKDTree(full.points).query(coarse.points)
+    assert gap.max() < 0.25  # within a cell (0.25 m across) of the whole surface
+    assert _open_edges(coarse) <= _open_edges(full)  # its rim only: the blocks join
+    s = Session()
+    s.open_case(root)
+    free = next(i for i in s.scene if i.kind == "iso_surface")
+    monkeypatch.setattr(manager, "ISO_PREVIEW_POINTS", 500)  # the volume counts as large
+    assert s.data.frame_key(free.id).detail == 1  # the time stands still
+    s.data.moving = True
+    key = s.data.frame_key(free.id)
+    assert key.detail >= 2 and s.data.coarse
+    assert s.data._read_key(key).n_points < s.data._read_key(replace(key, detail=1)).n_points
+    s.data.moving = False
+    assert s.data.frame_key(free.id).detail == 1
+
+
+def _open_edges(mesh) -> int:
+    """Edges of a surface that only one triangle has (its rim and its gaps)."""
+    points = np.round(mesh.points.astype(np.float64), 5)
+    _, ids = np.unique(points, axis=0, return_inverse=True)
+    t = ids.ravel()[mesh.triangles.astype(np.int64)]
+    edges = np.sort(np.concatenate([t[:, [0, 1]], t[:, [1, 2]], t[:, [2, 0]]]), axis=1)
+    _, count = np.unique(edges, axis=0, return_counts=True)
+    return int((count == 1).sum())

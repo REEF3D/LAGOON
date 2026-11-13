@@ -744,6 +744,7 @@ class RefinedVolume(Dataset):
         arrays,
         extra: float | None = 0.0,
         near: bool = False,
+        stride: int = 1,
     ):
         """A piece to cut iso-surfaces from: a block whole; the volume's own pieces
         as their dataset gives them (a store's: only the levels the iso-surfaces pass

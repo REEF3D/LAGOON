@@ -610,7 +610,8 @@ class TimelinePanel(QWidget):
     # ------------------------------------------------------------- playback
     def _set_moving(self, moving: bool) -> None:
         """The time starts or stops moving: streaming shows large surfaces coarser
-        meanwhile, and at full detail again once it stands still."""
+        meanwhile, every mode the iso-surfaces of large volumes, and at full detail
+        again once it stands still."""
         data = self.session.data
         if data.moving == moving:
             return
@@ -618,7 +619,8 @@ class TimelinePanel(QWidget):
         if not moving:
             from lagoonviz.core import memory
 
-            if memory.current().detail_points:
+            if memory.current().detail_points or data.coarse:
+                data.coarse = False
                 self.session.set_time(self.session.scene.time)  # full detail now
 
     def _toggle_play(self, playing: bool) -> None:

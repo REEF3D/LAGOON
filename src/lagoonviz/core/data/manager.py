@@ -11,6 +11,7 @@ dependency, the GUI only forwards its callbacks to the main thread.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 import weakref
@@ -86,6 +87,9 @@ PLAN_LAYERS = {
     "amr": 3.0,
     "statistics": 3.2,  # over the water: a map of it
 }
+#: while the time moves, the iso-surface of a volume of more points than this is cut
+#: from every 2nd (3rd, ...) grid line across, to about this many points
+ISO_PREVIEW_POINTS = 1_500_000
 #: kinds drawn as points, one screen-space dot each
 POINT_KINDS = ("particles", "geodat")
 #: kinds drawn as the free surface: the still water level, dry land
@@ -462,8 +466,12 @@ class DataManager:
         #: background maps and the georeference of cases
         self.backgrounds = Backgrounds(self)
         #: the time is moving (playing, the timeline dragged): in the streaming memory
-        #: mode, large surfaces are read coarser meanwhile (FrameKey.detail)
+        #: mode, large surfaces are read coarser meanwhile, and in every mode the
+        #: iso-surfaces of large volumes (FrameKey.detail)
         self.moving = False
+        #: a frame was asked for coarser while the time moved: shown at full detail
+        #: once it stands still
+        self.coarse = False
 
     # ------------------------------------------------------------- cases
     def reload(self, case_item_id: str | None = None) -> list[str]:
@@ -1026,7 +1034,10 @@ class DataManager:
             )
         elif item.kind == "amr" and not item.properties.get("patches", True):
             extra = ("levels", 0)  # the base grid alone, without the refined patches
-        detail = self._detail(dataset) if not extra else 1
+        if extra and extra[0] == "iso":
+            detail = self._iso_detail(dataset)
+        else:
+            detail = self._detail(dataset) if not extra else 1
         plane = self.mirror_plane(item_id)
         mirror = ("y", plane) if plane is not None else ()
         return FrameKey(self._case_key(item_id), dataset.key, index, arrays, extra, detail, mirror)
@@ -1085,6 +1096,19 @@ class DataManager:
         points = memory.current().detail_points
         return dataset.detail_stride(points) if points else 1
 
+    def _iso_detail(self, dataset) -> int:
+        """An iso-surface of a large volume (a LAGOON store's: CFD's free surface)
+        while the time moves: cut from every so many grid lines across (all levels),
+        about :data:`ISO_PREVIEW_POINTS` points of the volume; at full detail once the
+        time stands still (:attr:`coarse` tells the timeline to show it again)."""
+        if not self.moving or len(dataset) < 2 or not getattr(dataset, "coarse_iso", False):
+            return 1
+        points = dataset.points_per_frame() or 0
+        stride = max(1, round(math.sqrt(points / ISO_PREVIEW_POINTS)))
+        if stride > 1:
+            self.coarse = True
+        return stride
+
     def _case_key(self, item_id: str) -> str:
         """The key of an item's case among the open cases: the path it was opened
         with, resolved (a LAGOON store opened on its own is that store, not the
@@ -1124,6 +1148,8 @@ class DataManager:
             near = bool(key.extra[5]) if len(key.extra) > 5 else False
             args = (key.index, key.extra[1], key.extra[2], list(key.arrays))
             options = {"grid_lines": lines, "water_side": water, "near_surface": near}
+            if key.detail > 1:  # while the time moves (_iso_detail)
+                options["stride"] = key.detail
             mesh = self._cut_apart(key, dataset, "read_iso", *args, **options)
             if mesh is None:
                 mesh = dataset.read_iso(*args, **options)

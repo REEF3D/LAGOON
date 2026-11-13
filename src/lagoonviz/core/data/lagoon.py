@@ -56,6 +56,12 @@ def _crossed_layers(field: np.ndarray, value: float, top: float) -> np.ndarray:
     return np.flatnonzero((some_above[:-1] | some_above[1:]) & (some_below[:-1] | some_below[1:]))
 
 
+def _every(n: int, stride: int) -> np.ndarray:
+    """Every ``stride``-th of ``n`` grid lines, and the last."""
+    picked = np.arange(0, n, stride)
+    return picked if picked[-1] == n - 1 else np.append(picked, n - 1)
+
+
 def _hexahedra(nz: int, ny: int, nx: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Cells of a block whose points are ordered level, y, x (x fastest)."""
     k, j, i = np.meshgrid(np.arange(nz - 1), np.arange(ny - 1), np.arange(nx - 1), indexing="ij")
@@ -169,6 +175,8 @@ class StoreDataset(Dataset):
         self.output = output
         self._cells_cache: dict[tuple, tuple] = {}
         self._cells_lock = threading.Lock()
+        #: an iso-surface of it can be cut coarser while the time moves (read_iso stride)
+        self.coarse_iso = output.grid in ("sigma", "cartesian")
         #: where an iso-surface crossed each block in the frame read last (_crossing):
         #: (block, variable, value, top) -> (first level, end level, levels)
         self._bands: dict[tuple, tuple[int, int, int]] = {}
@@ -318,6 +326,7 @@ class StoreDataset(Dataset):
         arrays,
         extra: float | None = 0.0,
         near: bool = False,
+        stride: int = 1,
     ):
         """The part of a block iso-surfaces from ``value`` to ``value + extra`` pass
         through: the level-set (or the iso variable) read whole, the other arrays only
@@ -328,7 +337,9 @@ class StoreDataset(Dataset):
 
         ``near``: the iso variable too is read only near where it crossed in the
         frame read before (:meth:`_crossing`): drops and bubbles away from the
-        surface are not found."""
+        surface are not found. ``stride`` > 1: every so many grid lines across (and
+        the block's last), all levels of the band: a coarser surface, while the time
+        moves."""
         output = self.output
         name = variable.partition(".")[0]
         if (
@@ -351,6 +362,12 @@ class StoreDataset(Dataset):
         (i0, j0), (i1, j1) = block.start, block.stop
         px, py = (a.astype(np.float32) for a in output.plan(i0, i1, j0, j1))
         z = output.heights(t, block)[rows]
+        take = None  # every stride-th grid line across, and the last (the next block's first)
+        if stride > 1:
+            ny_, nx_ = z.shape[1:]
+            take = (_every(ny_, stride), _every(nx_, stride))
+            px, py = px[np.ix_(*take)], py[np.ix_(*take)]
+            z = z[:, take[0]][:, :, take[1]]
         x = np.broadcast_to(px[None], z.shape)
         y = np.broadcast_to(py[None], z.shape)
         points = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=1).astype(np.float32)
@@ -362,9 +379,11 @@ class StoreDataset(Dataset):
                 values = window[k0 - start : k1 - start]
             else:
                 values = output.array(block, other).get((t, rows))
+            if take is not None:
+                values = values[:, take[0]][:, :, take[1]]
             components = output.variables[other]
             data[other] = values.reshape(-1, components) if components > 1 else values.ravel()
-        nz, ny, nx = k1 - k0, *window.shape[1:]
+        nz, ny, nx = z.shape
         key = (number, nz, ny, nx)
         with self._cells_lock:
             cells = self._cells_cache.get(key)

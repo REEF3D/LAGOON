@@ -154,7 +154,11 @@ iso-surface's **Searched** setting, *near the surface* by default, reads even th
 level set only around where the surface was in the frame before (and further where
 it reached the edge of that: a rising surface is followed, a jump in time reads the
 whole volume once). Drops and bubbles away from the surface are then not found:
-*whole volume* finds them.
+*whole volume* finds them. While the time moves (playing, the timeline dragged),
+the iso-surface of a volume of more than 1.5 million points is cut from every 2nd
+(3rd, ...) grid line across, all levels of the band: about three times faster, the
+surface within a cell of where it is; at full detail as soon as the time stands
+still. Films and stills are always at full detail.
 
 ### Very large cases
 
