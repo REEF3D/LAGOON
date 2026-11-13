@@ -38,7 +38,7 @@ from lagoonviz.core.commands import (
     WriteCaseFile,
 )
 from lagoonviz.core.data.manager import DataManager
-from lagoonviz.core.data.reef3d import ROLES
+from lagoonviz.core.data.reef3d import ROLES, plic_marker_phi
 from lagoonviz.core.data.setup import has_inputs, reads_geo_dat
 from lagoonviz.core.kinds import KINDS
 from lagoonviz.core.scene import MODES, Scene
@@ -181,9 +181,12 @@ class Session:
                 children.append(AddItem("iso_surface", "Free surface", free))
                 continue
             if kind == "volume" and "phi" in dataset.components:
-                # CFD: its free surface, the level set phi at 0; the volume switched off
+                # CFD: its free surface, the level set phi at 0; the volume switched off.
+                # A VOF-PLIC run written with the phase marker as phi: VOF at 0.5
                 children.append(AddItem(kind, None, props, visible=False))
                 free = {"iso_by": "phi", "iso_value": 0.0}
+                if plic_marker_phi(dataset):
+                    free = {"iso_by": "VOF", "iso_value": 0.5}
                 if "dataset" in props:
                     free["dataset"] = props["dataset"]
                 if "velocity" in dataset.components:

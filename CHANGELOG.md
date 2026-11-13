@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### CFD with VOF-PLIC: the free surface where the PLIC interface is
+
+- A CFD run with VOF-PLIC (`F 80 4`) opens with its free surface at `phi` = 0 as
+  before, but REEF3D now prints that `phi` as the signed distance to the PLIC
+  planes (REEF3D patch LAGOON/0030). Before, it was the solver's phase marker
+  (+1 / -1, (vof - 0.5) dz in the interface cells), whose zero lies at the cell
+  centres: crests and troughs came out as flat terraces, up to 0.37 cells off. A
+  PLIC run written with the marker (found from a sample of `phi`) opens with the
+  iso-surface of `VOF` at 0.5 instead, when it printed `VOF` (`P 72 1`), within
+  0.03 cells of the PLIC planes on resolved waves.
+- The water-side colours of a PLIC run come from half a cell under the surface,
+  not from below an `F 45` band, which a sharp interface does not have.
+- Path tracing and white water take `VOF` at 0.5 as the water's surface, as `phi`.
+
 ### CFD's free surface: the velocity of the water under it, not twice it
 
 - Fixed: on a spillway (a CFD run with mesh refinement) the free surface showed

@@ -164,7 +164,9 @@ def _surface_piece(i0: int, i1: int, frame: int, role: str):
     return points, data, tris.ravel(), offsets
 
 
-def _volume_piece(i0: int, i1: int, frame: int, nz: int = 3, cartesian: bool = False):
+def _volume_piece(
+    i0: int, i1: int, frame: int, nz: int = 3, cartesian: bool = False, plic: bool = False
+):
     xs = np.arange(i0, i1 + 1) * DX
     ys = np.arange(NY) * DX
     sig = np.linspace(0.0, 1.0, nz)
@@ -201,6 +203,12 @@ def _volume_piece(i0: int, i1: int, frame: int, nz: int = 3, cartesian: bool = F
     }
     if cartesian:  # CFD: the level set, the distance below the free surface
         data["phi"] = (DEPTH + e.ravel() - points[:, 2]).astype(np.float32)
+    if cartesian and plic:  # VOF-PLIC as REEF3D wrote it before: VOF, phi the phase marker
+        dz = (DEPTH + 1.0) / (nz - 1)
+        vof = np.clip((DEPTH + e.ravel() - points[:, 2]) / dz + 0.5, 0.0, 1.0)
+        data["VOF"] = vof.astype(np.float32)
+        marker = np.where(vof > 0.999, 1.0, np.where(vof < 0.001, -1.0, (vof - 0.5) * dz))
+        data["phi"] = marker.astype(np.float32)
     offsets = np.arange(1, len(cells) + 1) * 8
     types = np.full(len(cells), 12, np.uint8)
     return points, data, cells.ravel(), offsets, types
@@ -219,11 +227,15 @@ def make_run(
     dem: float | None = None,
     ice: float | None = None,
     rods: float | None = None,
+    plic: bool = False,
 ) -> Path:
-    """Write a REEF3D-like case folder with free surface, bed and volume output."""
+    """Write a REEF3D-like case folder with free surface, bed and volume output
+    (``plic``: a CFD run with VOF-PLIC, F 80 4, its phi the phase marker)."""
     root.mkdir(parents=True, exist_ok=True)
     if print_interval is not None:
-        (root / "ctrl.txt").write_text(f"N 40 3\nP 30 {print_interval}\nP 10 1\n")
+        (root / "ctrl.txt").write_text(
+            f"N 40 3\nP 30 {print_interval}\nP 10 1\n" + ("F 80 4\nP 72 1\n" if plic else "")
+        )
     # split x points among ranks; neighbours share one column of points
     cuts = np.linspace(0, NX - 1, ranks + 1).round().astype(int)
     outputs = [("VTP_FSF", "FSF", "fsf"), ("VTP_BED", "BED", "bed")]
@@ -242,7 +254,7 @@ def make_run(
                 name = f"{stem}-{frame:08d}-{rank + 1:06d}.{ext}"
                 if role == "volume":
                     points, data, conn, offs, types = _volume_piece(
-                        i0, i1, frame, cartesian=solver == "CFD"
+                        i0, i1, frame, nz=21 if plic else 3, cartesian=solver == "CFD", plic=plic
                     )
                 else:
                     points, data, conn, offs = _surface_piece(i0, i1, frame, role)

@@ -1775,27 +1775,74 @@ def _cell_height(points: np.ndarray, level: float) -> float:
     return float(heights[above] - heights[above - 1])
 
 
-_F45: dict[Path, float] = {}
+_CTRL: dict[Path, dict[str, list[str]]] = {}
 
 
-def _interface_cells(folder: Path) -> float:
-    """F 45 of the case's ctrl.txt (the interface band in cells), default 2.1."""
+def _ctrl(folder: Path) -> dict[str, list[str]]:
+    """The commands of the case's ctrl.txt (in ``folder`` or up to two folders above,
+    as a store's output groups lie in it): "F 45" -> its first line's values."""
     folder = Path(folder)
-    if folder not in _F45:
-        value = 2.1
+    if folder not in _CTRL:
+        found: dict[str, list[str]] = {}
         for where in (folder, *list(folder.parents)[:2]):
             ctrl = where / "ctrl.txt"
             if ctrl.is_file():
                 try:
                     for line in ctrl.read_text(errors="replace").splitlines():
                         words = line.split()
-                        if words[:2] == ["F", "45"] and len(words) > 2:
-                            value = float(words[2])
-                except (OSError, ValueError):
+                        if len(words) > 2 and words[0].isalpha() and words[1].isdigit():
+                            found.setdefault(f"{words[0]} {words[1]}", words[2:])
+                except OSError:
                     pass
                 break
-        _F45[folder] = value
-    return _F45[folder]
+        _CTRL[folder] = found
+    return _CTRL[folder]
+
+
+def plic_case(folder: Path) -> bool:
+    """A CFD run with VOF-PLIC (F 80 4 in its ctrl.txt): a sharp interface, no level
+    set band."""
+    words = _ctrl(folder).get("F 80")
+    try:
+        return bool(words) and int(float(words[0])) == 4
+    except ValueError:
+        return False
+
+
+def _interface_cells(folder: Path) -> float:
+    """The interface band in cells: F 45 of the case's ctrl.txt, default 2.1; a
+    VOF-PLIC run (F 80 4): half a cell, its density is not smoothed over a band."""
+    if plic_case(folder):
+        return 0.5
+    words = _ctrl(folder).get("F 45")
+    try:
+        return float(words[0]) if words else 2.1
+    except ValueError:
+        return 2.1
+
+
+def plic_marker_phi(dataset) -> bool:
+    """A VOF-PLIC run (F 80 4) whose phi is REEF3D's phase marker (+1 water, -1 air,
+    (vof - 0.5) dz in the interface cells), as REEF3D wrote it before it printed the
+    distance to the PLIC planes: phi = 0 of the marker lies at the cell centres (flat
+    terraces); the free surface of such a run is drawn at VOF = 0.5. Known from a
+    sample of phi: the marker is exactly 1 or -1 almost everywhere (at least 60 % of
+    the values: a level set nowhere)."""
+    components = getattr(dataset, "components", {}) or {}
+    if "phi" not in components or "VOF" not in components:
+        return False
+    if not plic_case(dataset.folder):
+        return False
+    try:
+        values = dataset.sample_values(0, "phi")
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        log.debug("%s: phi not sampled (%s)", dataset.folder, error)
+        return False
+    if values is None:
+        return False
+    values = np.asarray(values, np.float64).ravel()
+    values = values[np.isfinite(values)]
+    return values.size > 0 and float(np.mean(np.abs(values) == 1.0)) >= 0.6
 
 
 def _joined(parts: list[SurfaceMesh]) -> SurfaceMesh:

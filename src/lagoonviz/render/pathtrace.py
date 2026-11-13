@@ -1308,6 +1308,9 @@ class _Collector:
 
 #: the level set of a two-phase run (CFD): water where it is 0 or more
 LEVEL_SET = "phi"
+#: the fields whose iso-surface is CFD's free surface, water where they are at least its
+#: value: the level set, and the volume fraction of a VOF-PLIC run (VOF at 0.5)
+WATER_FIELDS = (LEVEL_SET, "VOF")
 
 
 def _level_set_water(session, item_id: str, item, mesh, shown):
@@ -1319,7 +1322,8 @@ def _level_set_water(session, item_id: str, item, mesh, shown):
     (positions, triangles, smooth), or None for other items."""
     if item.kind not in ("iso_surface", "iso_volume") or not shown.visible:
         return None
-    if str(item.properties.get("iso_by", "none")) != LEVEL_SET:
+    field = str(item.properties.get("iso_by", "none"))
+    if field not in WATER_FIELDS:
         return None
     if shown.values is not None or shown.opacity < 1.0 or shown.point_size is not None:
         return None
@@ -1332,7 +1336,7 @@ def _level_set_water(session, item_id: str, item, mesh, shown):
         if dataset is None or index is None:
             return None
         try:
-            body = dataset.read_iso_volume(index, LEVEL_SET, value, 1e30, [LEVEL_SET])
+            body = dataset.read_iso_volume(index, field, value, 1e30, [field])
         except (OSError, ValueError, KeyError) as error:
             log.warning("%s: its water not made (%s): drawn as a surface", item.name, error)
             return None
@@ -1340,7 +1344,7 @@ def _level_set_water(session, item_id: str, item, mesh, shown):
         return None
     drawn = session.data.display(item_id, body)
     triangles = np.asarray(drawn.triangles, np.int64).reshape(-1, 3)
-    phi = body.point_data.get(LEVEL_SET)
+    phi = body.point_data.get(field)
     if phi is None or np.ndim(phi) != 1:
         smooth = np.ones(len(triangles), bool)
     else:
@@ -1510,7 +1514,7 @@ class WhiteWater:
             item
             for item in shown
             if item.kind in self.SURFACES
-            and (item.kind != "iso_surface" or item.properties.get("iso_by") == "phi")
+            and (item.kind != "iso_surface" or item.properties.get("iso_by") in WATER_FIELDS)
         ]
         shown.sort(key=lambda item: self.SURFACES.index(item.kind))
         self.item = shown[0].id if shown else None

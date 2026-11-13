@@ -55,6 +55,15 @@ extrapolated up to the surface, its hydrostatic part taken out. The velocity is 
 extrapolated: in a thin, fast layer (a spillway's chute) 2 depth lies in the slow
 flow at the bed. *surface* colours at `phi` = 0 as before.
 
+A CFD run with **VOF-PLIC** (`F 80 4`) has a sharp interface: REEF3D prints its
+`phi` as the signed distance to the PLIC planes (REEF3D patch LAGOON/0030), so the
+*Free surface* at `phi` = 0 passes through the reconstructed interface, and the
+water-side colours come from half a cell under it (no `F 45` band). A PLIC run
+written before that has the solver's phase marker as `phi` (+1 water, -1 air,
+(vof - 0.5) dz in the interface cells), whose zero lies at the cell centres (flat
+terraces at crests and troughs): when it printed the volume fraction (`P 72 1`),
+its *Free surface* is the iso-surface of `VOF` at 0.5 (colours at the surface).
+
 An **FNPF or NHFLOW** run that writes its volume (`P 10`) but no free surface
 (no `P 180`) opens with the top of its σ-grid volume in the LAGOON store as its free
 surface (*free surface (top of the volume)*): `eta` its height over the still water
