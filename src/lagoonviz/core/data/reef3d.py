@@ -790,6 +790,8 @@ class Case:
     domains: dict[str, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
     #: the solver ctrl.txt sets up (A 10), "" if it names none
     ctrl_solver: str = ""
+    #: outputs of the case folder left out because they do not read, and why
+    skipped: list[str] = field(default_factory=list)
 
     @property
     def solver(self) -> str:
@@ -2043,6 +2045,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     stored: list[Dataset] = []
     refined: list[tuple] = []  # CFD's refined blocks of its volume: (solver, blocks, folder)
     store_paths: list[Path] = []
+    skipped: list[str] = []  # outputs of the case folder that do not read, and why
     alone = ""  # a store opened on its own: its solver
     if path.is_dir() and (path in find_stores(path.parent) or is_store(path)):
         # a LAGOON store, also one kept from an earlier run (``*.lagoon-earlier``)
@@ -2074,19 +2077,32 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
         for folder in sorted(path.iterdir()):
             if folder.name == "REEF3D_NHFLOW_FORCING_VTP":
                 continue  # the case's direct forcing solids (solid_datasets)
-            if folder.is_dir() and (
-                _FOLDER.match(folder.name) or _OBJECT_FOLDER.match(folder.name)
-            ):
-                datasets += _dataset_from_folder(folder)
-            elif folder.is_dir() and AMR_FOLDER.match(folder.name):
-                if is_volume_amr(folder):  # CFD: the refined blocks of its volume
-                    solver = AMR_FOLDER.match(folder.name).group("solver")
-                    refined.append((solver, FolderBlocks(amr_outputs(folder)), folder))
-                else:
-                    datasets += amr_datasets(folder)
-        store_paths = find_stores(path) if stores else []
-        for store in store_paths:
-            stored += store_datasets(store)
+            # an output that does not read (its first file empty or cut short: a run
+            # just writing it, a full disk) is left out and said so: the case's other
+            # outputs are shown (it stopped the whole case from opening)
+            try:
+                if folder.is_dir() and (
+                    _FOLDER.match(folder.name) or _OBJECT_FOLDER.match(folder.name)
+                ):
+                    datasets += _dataset_from_folder(folder)
+                elif folder.is_dir() and AMR_FOLDER.match(folder.name):
+                    if is_volume_amr(folder):  # CFD: the refined blocks of its volume
+                        solver = AMR_FOLDER.match(folder.name).group("solver")
+                        refined.append((solver, FolderBlocks(amr_outputs(folder)), folder))
+                    else:
+                        datasets += amr_datasets(folder)
+            except (OSError, ValueError) as error:
+                skipped.append(f"{folder.name} is not shown: {error}")
+        store_paths = []
+        for store in find_stores(path) if stores else []:
+            try:
+                stored += store_datasets(store)
+            except (OSError, ValueError, KeyError) as error:
+                skipped.append(f"{store.name} is not shown: {error}")
+                continue
+            store_paths.append(store)
+        for message in skipped:
+            log.warning("%s", message)
         if not datasets and not stored:
             # a plain folder with VTU/VTP files
             datasets = _dataset_from_folder(path)
@@ -2124,6 +2140,8 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
     run = [d for d in datasets if d.role not in CASE_ROLES]
     written = [f for f in series.values() if f.group != "sea conditions"]  # (for the set-up)
     setup_only = not run and not written and not profiles and path == case_dir
+    if setup_only and skipped and not has_inputs(case_dir):
+        raise ValueError("; ".join(skipped))  # nothing else there: why it does not open
     if setup_only and not has_inputs(case_dir):
         raise ValueError(
             f"no REEF3D VTU/VTP output, time series or input files (control.txt, ctrl.txt) "
@@ -2140,6 +2158,7 @@ def open_case(path: str | Path, stores: bool = True) -> Case:
         profiles=profiles,
         setup_only=setup_only,
         domains=run_domains(case_dir, (d.run_id for d in datasets)),
+        skipped=skipped,
     )
     for dataset in datasets:
         key = dataset.key

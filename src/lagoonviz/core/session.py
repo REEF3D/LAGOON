@@ -136,6 +136,8 @@ class Session:
         """
         path = os.fspath(path)
         case = self.data.open(path)
+        for message in case.skipped:  # outputs that do not read: said in the console
+            self._log(f"# {message}")
         children = []
         for role, dataset in case.main_datasets().items():
             kind = ROLES[role]

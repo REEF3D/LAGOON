@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A case opens without an output that does not read
+
+- An output folder or store whose first file is empty or cut short (a run just
+  writing it, a full disk) no longer keeps the whole case from opening: the
+  case's other outputs are shown, and the Python console and the log say which
+  one is not and why. Opened by itself, such an output says why as before.
+
 ### VTK output: frames read in half the time, long runs open faster
 
 - The normals of a frame read from VTK files (.pvtp, .pvtu) were most of the time

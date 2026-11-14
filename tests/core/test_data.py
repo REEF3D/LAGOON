@@ -1053,3 +1053,30 @@ def test_the_automatic_range_from_percentiles_or_the_extremes():
     assert low == -high and high < 2.0  # symmetric, the spike left out: strong colours
     assert auto_range(values, "lowest to highest") == (-1.0, 9.0)
     assert auto_range(np.linspace(1.0, 2.0, 100), "1st - 99th percentile")[0] > 1.0
+
+
+def test_an_output_that_does_not_read_is_left_out(tmp_path):
+    """The first file of one output empty (a run just writing it, a full disk): the
+    case opens with its other outputs and says which one is not shown (the whole
+    case did not open). Opened by itself, the output says why it does not read."""
+    run = make_run(tmp_path / "run", frames=3)
+    folder = run / "REEF3D_NHFLOW_VTP_FSF"
+    (folder / "REEF3D-NHFLOW-FSF-00000000-000001.vtp").write_bytes(b"")
+    case = open_case(run)
+    assert case.by_role("free_surface") is None
+    assert case.by_role("bed") is not None and case.by_role("volume") is not None
+    assert len(case.skipped) == 1 and case.skipped[0].startswith("REEF3D_NHFLOW_VTP_FSF is not")
+    session = Session()
+    said = []
+    session.subscribe_log(said.append)
+    session.open_case(run)
+    assert [item.kind for item in session.scene] == ["case", "bathymetry", "volume"]
+    assert any(line.startswith("# REEF3D_NHFLOW_VTP_FSF is not shown") for line in said)
+    with pytest.raises(VTKFormatError):
+        open_case(folder)
+    # nothing else in the folder: it does not open, and says why
+    alone = make_run(tmp_path / "alone", frames=2, volume=False)
+    for first in alone.glob("REEF3D_*/*-00000000-000001.vtp"):
+        first.write_bytes(b"")
+    with pytest.raises(ValueError, match="is not shown"):
+        open_case(alone)
