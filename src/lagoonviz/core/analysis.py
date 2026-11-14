@@ -190,12 +190,14 @@ def _lag(time: np.ndarray, sim: np.ndarray, obs: np.ndarray) -> float:
     size = 1 << int(np.ceil(np.log2(2 * n)))
     corr = np.fft.irfft(np.fft.rfft(a, size) * np.conj(np.fft.rfft(b, size)), size)
     reach = max(1, n // 4)
-    lags = np.concatenate([corr[: reach + 1], corr[-reach:]])
-    shifts = np.concatenate([np.arange(reach + 1), np.arange(-reach, 0)])
+    # in the order of the shifts, -reach .. reach: the neighbours of each are the
+    # shifts next to it (no shift at all, the usual case, had none to its left and
+    # was not refined: a lag of less than half a time step read as 0)
+    lags = np.concatenate([corr[-reach:], corr[: reach + 1]])
     k = int(np.argmax(lags))
-    best = float(shifts[k])
-    left, right = lags[k - 1] if k > 0 else None, lags[(k + 1) % lags.size]
-    if left is not None:
+    best = float(k - reach)
+    if 0 < k < lags.size - 1:
+        left, right = lags[k - 1], lags[k + 1]
         curve = left - 2 * lags[k] + right
         if curve < 0:
             best += 0.5 * (left - right) / curve

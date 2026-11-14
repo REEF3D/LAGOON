@@ -210,8 +210,10 @@ def reflection(
         reflected += np.abs(amplitudes[:, 1]) ** 2
     incident *= scale / len(starts)
     reflected *= scale / len(starts)
-    incident[1:-1] *= 2.0
-    reflected[1:-1] *= 2.0
+    # one-sided (the mean and the Nyquist frequency once, as analysis.spectrum)
+    last = None if length % 2 else -1
+    incident[1:last] *= 2.0
+    reflected[1:last] *= 2.0
     # separable: the gauge pairs' spacings away from multiples of half a wave length
     spacing = np.abs(x[:, None] - x[None, :])[np.triu_indices(len(x), 1)]
     worst = np.max(np.abs(np.sin(np.outer(k, spacing))), axis=1)
@@ -285,7 +287,7 @@ def transfer(
         coherence = np.where(sxx * syy > 0, np.abs(sxy) ** 2 / (sxx * syy), np.nan)
     phase = -np.degrees(np.angle(sxy))  # positive: the output comes later
     one_sided = np.ones_like(sxx)
-    one_sided[1:-1] = 2.0
+    one_sided[1 : None if length % 2 else -1] = 2.0
     return Transfer(
         frequency=np.fft.rfftfreq(length, dt),
         gain=gain,

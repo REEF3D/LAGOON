@@ -21,6 +21,13 @@
   REEF3D) opens at once: a file of 67 MB took 24 s, and the time grew with the
   square of its size.
 
+### Wave analysis: small fixes
+
+- The lag between a computed and a measured series is found also when it is less
+  than half a time step (it read as 0 s).
+- The reflection analysis and the transfer function (RAO) count the highest
+  frequency of a segment with an odd number of values fully, as the spectrum does.
+
 ### Large CFD volumes: a coarser free surface while playing
 
 - While the time moves, the iso-surface of a LAGOON store's volume of more than

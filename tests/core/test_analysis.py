@@ -70,3 +70,16 @@ def test_reading_measurement_files(tmp_path):
     path.write_text("nothing here\n")
     with pytest.raises(ValueError):
         read_measurements(path)
+
+
+def test_a_lag_of_less_than_a_time_step():
+    """The lag is refined between the samples also where no whole step fits (it
+    read as 0: the peak at no shift had no neighbour to its left)."""
+    t = np.arange(0, 40, 0.05)
+
+    def wave(time):
+        return np.sin(2 * np.pi * time / 2.0) + 0.3 * np.sin(2 * np.pi * time / 0.7)
+
+    for late in (0.012, -0.012, 0.02):
+        assert compare(t, wave(t - late), t, wave(t)).lag == pytest.approx(late, abs=0.002)
+    assert compare(t, wave(t), t, wave(t)).lag == pytest.approx(0.0, abs=1e-9)
