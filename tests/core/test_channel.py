@@ -46,7 +46,8 @@ def test_the_channel_carries_the_discharge(shape):
     x, y = points[:, 0], points[:, 1]
     for at in (1000.0, 2500.0, 4000.0):
         section = np.isclose(x, at)
-        area = np.trapezoid(lowered[section][np.argsort(y[section])], np.sort(y[section]))
+        integrate = getattr(np, "trapezoid", None) or np.trapz  # NumPy 2 and 1
+        area = integrate(lowered[section][np.argsort(y[section])], np.sort(y[section]))
         h = manning_depth(200.0, 80.0, 2e-4, 0.035)
         # (8 cells across: the trapezoid's banks fall between them)
         assert area == pytest.approx(80.0 * h, rel=0.1 if shape == "trapezoid" else 0.05), at
