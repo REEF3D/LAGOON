@@ -125,6 +125,7 @@ class OffscreenView:
                 self.scene.update_contours(
                     item_id, session.data.contour_lines(item_id, mesh, shown)
                 )
+                self.scene.update_iso_line(item_id, session.data.iso_line(item_id, mesh, shown))
                 self.scene.update_vectors(item_id, session.data.vector_arrows(item_id, mesh, shown))
                 self.scene.update_trails(item_id, session.data.particle_trails(item_id, mesh))
                 self.scene.update_outlines(

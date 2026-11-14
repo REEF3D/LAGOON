@@ -80,25 +80,39 @@ def test_water_only_needs_a_level_set(tmp_path, reef3d_run):
 
 def test_the_line_of_an_iso_surface_on_a_slice(tmp_path):
     """ "Iso-line of" phi at 0: the free surface on the slice, lying on it (drawn
-    towards the camera, not lifted), with the slice's contour lines if it has any."""
+    towards the camera, not lifted), in its own colour, beside contour lines."""
     s, item = _slice(tmp_path, variable="velocity")
     mesh = s.data.load(item)
     shown = s.data.display(item, mesh)
-    assert s.data.contour_lines(item, mesh, shown) is None
+    assert s.data.iso_line(item, mesh, shown) is None
     s.set_property(item, "iso_line_of", "phi")
     mesh = s.data.load(item)
     shown = s.data.display(item, mesh)
-    lines = s.data.contour_lines(item, mesh, shown)
-    assert lines is not None and lines.facing and len(lines.segments)
-    ends = lines.segments.reshape(-1, 3).astype(np.float64)
+    line = s.data.iso_line(item, mesh, shown)
+    assert line is not None and line.facing and len(line.segments)
+    assert line.color == "#ffffff"
+    assert s.data.contour_lines(item, mesh, shown) is None  # no contour lines asked for
+    ends = line.segments.reshape(-1, 3).astype(np.float64)
     np.testing.assert_allclose(ends[:, 1], 1.5, atol=1e-5)  # on the slice
     expected = _surface(ends[:, 0], np.array([1.5]), 0)[0]
     assert np.abs(ends[:, 2] - expected).max() < 0.05  # where the free surface is
     s.set_property(item, "iso_line_value", 0.5)  # half a metre under it
+    s.set_property(item, "iso_line_colour", "red")
     mesh = s.data.load(item)
-    deeper = s.data.contour_lines(item, mesh, s.data.display(item, mesh)).segments
-    assert abs(float(np.median(ends[:, 2]) - np.median(deeper[..., 2])) - 0.5) < 0.05
-    s.set_property(item, "contour_by", "pressure")  # contour lines and the iso-line
+    deeper = s.data.iso_line(item, mesh, s.data.display(item, mesh))
+    assert deeper.color == "#e0302a"
+    assert abs(float(np.median(ends[:, 2]) - np.median(deeper.segments[..., 2])) - 0.5) < 0.05
+    # with Water only: the line along the slice's top
+    s.set_property(item, "iso_line_value", 0.0)
+    s.set_property(item, "water_only", True)
     mesh = s.data.load(item)
-    both = s.data.contour_lines(item, mesh, s.data.display(item, mesh))
-    assert len(both.segments) > len(deeper) and both.levels
+    top = s.data.iso_line(item, mesh, s.data.display(item, mesh))
+    assert top is not None and len(top.segments)
+    # drawn in the 3D view, kept in its colour by another look
+    from lagoonviz.render.scene3d import SceneRenderer
+
+    view = SceneRenderer()
+    view.update_iso_line(item, top)
+    drawn = view._contours[f"{item}#isoline"]
+    view.set_style("ocean")
+    assert tuple(round(c, 3) for c in tuple(drawn.material.color)[:3]) == (0.878, 0.188, 0.165)

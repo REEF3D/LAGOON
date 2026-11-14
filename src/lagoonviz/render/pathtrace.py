@@ -1386,6 +1386,7 @@ def _frame_objects(
             continue
         overlays = (
             ("contours", data.contour_lines(item_id, mesh, shown), CONTOUR_WIDTH, None),
+            ("isoline", data.iso_line(item_id, mesh, shown), CONTOUR_WIDTH * 2, "color"),
             ("vectors", data.vector_arrows(item_id, mesh, shown), VECTOR_WIDTH, "color"),
             ("trails", data.particle_trails(item_id, mesh), TRAIL_WIDTH, "color"),
             ("grid", data.amr_grid_lines(item_id, mesh, shown), OUTLINE_WIDTH * 0.6, "color"),

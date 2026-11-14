@@ -256,6 +256,9 @@ def _texel_coords(unit: np.ndarray, colormap: str, n: int | None = None) -> np.n
     return np.ascontiguousarray(coords, dtype=np.float32)
 
 
+#: a slice's iso-line [px] (contour lines: 1.2)
+ISO_LINE_WIDTH = 2.5
+
 #: lines drawn on a slice are moved this share of their distance towards the camera
 #: (:meth:`SceneRenderer.face_camera`): in front of the slice for the depth buffer, and on
 #: the screen exactly where they belong
@@ -913,7 +916,7 @@ class SceneRenderer:
         for key, line in self._contours.items():
             if key in self._own_colours:  # arrows in white, black or grey
                 continue
-            if not key.endswith("#trails"):  # trails keep their item's colour
+            if not key.endswith(("#trails", "#isoline")):  # these keep their own colour
                 line.material.color = look.get("contours", "#1e2833")
         cinematic = self.preset is not None
         for shown in self._shown.values():
@@ -1260,6 +1263,7 @@ class SceneRenderer:
         if shown is not None and shown.kind == "bathymetry":
             self._bed_heights = None
         self.update_contours(item_id, None)
+        self.update_iso_line(item_id, None)
         self.update_vectors(item_id, None)
         self.update_trails(item_id, None)
         self.update_outlines(item_id, None)
@@ -1269,6 +1273,12 @@ class SceneRenderer:
     def update_contours(self, item_id: str, lines: ContourLines | None) -> None:
         """Contour lines of an item (None or no segments: none), thin and dark."""
         self._update_overlay_lines(item_id, lines, 1.2)
+
+    def update_iso_line(self, item_id: str, line) -> None:
+        """A slice's iso-line (None: none), thicker than contour lines, in its colour."""
+        self._update_overlay_lines(
+            f"{item_id}#isoline", line, ISO_LINE_WIDTH, line.color if line is not None else None
+        )
 
     def update_vectors(self, item_id: str, arrows: VectorArrows | None) -> None:
         """Arrows of an item (None or no segments: none), in their colour (white, black,

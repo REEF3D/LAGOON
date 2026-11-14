@@ -6,9 +6,11 @@
 
 - *Water only* (slices of a CFD run): the slice only where the level set phi is 0
   or more, cut at the free surface; its grid lines end there too.
-- *Iso-line of* and *Iso-line value* (every slice): the line where an iso-surface of
-  a variable crosses the slice (phi at 0: the free surface on it), drawn with the
-  contour lines.
+- *Iso-line of*, *Iso-line value* and *Iso-line colour* (every slice, under the
+  contour line settings): the line where an iso-surface of a variable crosses the
+  slice (phi at 0: the free surface on it), 2.5 px wide in white, black, red or
+  yellow (at first it was drawn as a thin dark contour line, hard to see on a
+  coloured slice).
 - A slice's contour lines lie on it and are drawn towards the camera, as its grid
   lines (they were lifted in z, up the plane of a vertical slice).
 

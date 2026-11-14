@@ -457,6 +457,9 @@ KINDS: dict[str, KindSpec] = {
                 "(e.g. phi at 0: the free surface); none: no line",
             ),
             "iso_line_value": PropertySpec(0.0, "Iso-line value", tip="Where the line lies"),
+            "iso_line_colour": PropertySpec(
+                "white", "Iso-line colour", choices=("white", "black", "red", "yellow")
+            ),
             **_vectors(),
             **_exaggeration("Scales heights about the still water level"),
         },

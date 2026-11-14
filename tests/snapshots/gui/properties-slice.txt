@@ -26,6 +26,7 @@ QWidget
   Colour bands: checkbox '' off
   Iso-line of: choice 'none' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
   Iso-line value: number 0 in [-1e+09, 1e+09] decimals 3
+  Iso-line colour: choice 'white' of ['white', 'black', 'red', 'yellow']
   Vectors of: choice 'none' of ['none', 'velocity (white)', 'velocity (black)', 'velocity (grey)']
   Arrows: number 1000 in [10, 20000] decimals 0
   Arrow length: _LogSlider

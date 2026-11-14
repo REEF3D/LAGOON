@@ -87,6 +87,8 @@ PLAN_LAYERS = {
     "amr": 3.0,
     "statistics": 3.2,  # over the water: a map of it
 }
+#: the colours of a slice's iso-line ("iso_line_colour")
+ISO_LINE_COLOURS = {"white": "#ffffff", "black": "#000000", "red": "#e0302a", "yellow": "#ffd000"}
 #: while the time moves, the iso-surface of a volume of more points than this is cut
 #: from every 2nd (3rd, ...) grid line across, to about this many points
 ISO_PREVIEW_POINTS = 1_500_000
@@ -1534,12 +1536,6 @@ class DataManager:
         if values is not None:
             levels = self.contour_values(item_id, variable, mesh)
             parts.append(contour_segments(shown.positions, shown.triangles, values, levels))
-        if item.kind == "slice":  # the line of an iso-surface on the slice
-            line = str(item.properties.get("iso_line_of", "none"))
-            values = self._scalar_on(mesh, line, shown)
-            if values is not None:
-                at = float(item.properties.get("iso_line_value", 0.0))
-                parts.append(contour_segments(shown.positions, shown.triangles, values, [at]))
         if not parts:
             return None
         segments = np.concatenate(parts) if len(parts) > 1 else parts[0]
@@ -1551,6 +1547,27 @@ class DataManager:
         # a slice's lines lie on it and are drawn towards the camera (lifted in z,
         # they slid up a vertical slice)
         return ContourLines(item_id, segments, levels, shown.visible, facing=slice_)
+
+    def iso_line(self, item_id: str, mesh: SurfaceMesh, shown: DisplaySurface) -> Trails | None:
+        """A slice's "iso_line_of": the line where an iso-surface of that variable (at
+        "iso_line_value") crosses the slice, in its own colour ("iso_line_colour"),
+        lying on the slice (drawn towards the camera); None when it draws none."""
+        item = self.scene.get(item_id)
+        if item.kind != "slice" or shown.triangles.size == 0:
+            return None
+        variable = str(item.properties.get("iso_line_of", "none"))
+        values = self._scalar_on(mesh, variable, shown)
+        if values is None:
+            return None
+        at = float(item.properties.get("iso_line_value", 0.0))
+        segments = contour_segments(shown.positions, shown.triangles, values, [at])
+        if not len(segments):
+            return None
+        colour = ISO_LINE_COLOURS.get(str(item.properties.get("iso_line_colour", "white")))
+        flat = self.scene.flat
+        if flat:
+            segments[..., 2] += 0.06
+        return Trails(item_id, segments, shown.visible, colour or "#ffffff", facing=not flat)
 
     @staticmethod
     def _scalar_on(mesh: SurfaceMesh, variable: str, shown: DisplaySurface):

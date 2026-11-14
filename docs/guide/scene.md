@@ -186,8 +186,8 @@ follow the bed and the free surface). *Water only* shows a slice of a CFD run on
 in the water, where the level set phi is 0 or more, cut at the free surface (its
 grid lines too). *Iso-line of* draws the line where an iso-surface of a variable
 crosses the slice, at *Iso-line value*: phi at 0 is the free surface on the slice,
-pressure or a velocity component a line of equal value (with *Contour lines of* as
-well: both). *Add → Iso-surface* draws where a variable
+pressure or a velocity component a line of equal value. It is drawn thicker than
+contour lines, in its *Iso-line colour* (white, black, red or yellow). *Add → Iso-surface* draws where a variable
 has a *Value*. *Add → Iso-volume* (and its button in the toolbar) draws the part of
 the volume where a variable lies between *From* and *To*, as a closed body: for a
 CFD run it starts with the level set phi from 0 up, the water itself; else the

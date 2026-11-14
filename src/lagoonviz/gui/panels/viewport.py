@@ -860,6 +860,7 @@ class Viewport3D(QWidget):
             with PERF.track("contours and arrows"):
                 data = self.session.data
                 self.view.update_contours(item_id, data.contour_lines(item_id, mesh, shown))
+                self.view.update_iso_line(item_id, data.iso_line(item_id, mesh, shown))
                 self.view.update_vectors(item_id, data.vector_arrows(item_id, mesh, shown))
                 self.view.update_trails(item_id, data.particle_trails(item_id, mesh))
                 self.view.update_outlines(item_id, data.patch_outlines(item_id, mesh, shown))
