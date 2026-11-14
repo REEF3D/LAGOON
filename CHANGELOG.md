@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### The first frame of a case is shown sooner
+
+- Opening a case reads only the frame shown (the others when the time gets to
+  them), but the first frame did more than that before it was shown. A LAGOON
+  store's surface read the first and the last output of every variable whole to
+  see whether it stays the same (a still water depth): a variable that changes
+  is now told from a few tiles of both. And the samples over the run (for arrows
+  and contour lines) are taken in a thread of their own after the frame; for VTK
+  output they were five more outputs read first. The first free surface of a
+  store of 1.5 million points shows in 0.30 s instead of 0.65 s, of a store with
+  3000 outputs in 0.12 s instead of 0.45 s, of a VTK case in 0.6 s instead of
+  1.4 s (bed and free surface).
+
 ### CFD from a LAGOON store: the free surface cut faster, horizontal slices at once
 
 - The iso-surface of a volume (CFD's free surface, the level set at 0) is cut in

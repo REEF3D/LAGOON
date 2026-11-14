@@ -232,9 +232,16 @@ class StoreDataset(Dataset):
             fixed = self._fixed.get(name)
             kept = self._fixed.get((name, detail))
         if not known:
-            first = output.read(name, 0)
-            last = output.read(name, len(output.times) - 1)
-            fixed = first if np.array_equal(first, last, equal_nan=True) else None
+            # some tiles of the first and the last output first (milliseconds): a
+            # variable that changes (eta, the velocity) differs there already, and
+            # both outputs are not read whole before the first frame is shown (they
+            # were: the first frame of a large surface took several frames' time)
+            end = len(output.times) - 1
+            fixed = None
+            if np.array_equal(output.sample(name, 0), output.sample(name, end), equal_nan=True):
+                first = output.read(name, 0)
+                if np.array_equal(first, output.read(name, end), equal_nan=True):
+                    fixed = first
             with self._cells_lock:
                 self._fixed[name] = fixed
         if fixed is None:

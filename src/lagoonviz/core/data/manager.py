@@ -453,6 +453,8 @@ class DataManager:
         #: in a loader thread when the first frame is read (see _sampled_values)
         self._samples: dict[tuple, list[np.ndarray]] = {}
         self._samples_lock = threading.Lock()
+        #: those being sampled now: set when done
+        self._sampling: dict[tuple, threading.Event] = {}
         #: particle trails: ids and their centres of each output read for them
         self._trail_centres: dict[FrameKey, tuple[np.ndarray, np.ndarray]] = {}
         self._still_water: dict[tuple, float] = {}
@@ -1171,11 +1173,34 @@ class DataManager:
         else:
             mesh = dataset.read(key.index, list(key.arrays))
             if dataset.surface_like and len(dataset) > 2:
-                # the colour range's samples over the run, here in the loader thread
-                for name in key.arrays:
-                    if dataset.components.get(name) in (1, 3):
-                        self._sampled_values(dataset, name)
+                # the samples over the run (for arrows and contour lines), in a thread
+                # of their own: the frame is shown first (it waited for them: five
+                # more outputs read before the first frame of a VTK surface)
+                names = [n for n in key.arrays if dataset.components.get(n) in (1, 3)]
+                self._sample_later(dataset, names)
         return mesh
+
+    def _sample_later(self, dataset, names: list[str]) -> None:
+        """Sample variables over the run (:meth:`_sampled_values`) in the background,
+        those not sampled or being sampled already."""
+        with self._samples_lock:
+            wanted = [
+                name
+                for name in names
+                if (dataset.folder, dataset.key, name) not in self._samples
+                and (dataset.folder, dataset.key, name) not in self._sampling
+            ]
+        if not wanted:
+            return
+
+        def work() -> None:
+            for name in wanted:
+                try:
+                    self._sampled_values(dataset, name)
+                except Exception:  # noqa: BLE001 (asked for again when needed)
+                    log.debug("no samples of %s", name, exc_info=True)
+
+        threading.Thread(target=work, name="lagoon-range", daemon=True).start()
 
     @staticmethod
     def _cut_apart(key: FrameKey, dataset, method: str, *args, **options) -> SurfaceMesh | None:
@@ -1523,34 +1548,45 @@ class DataManager:
     def _sampled_values(self, dataset, variable: str, samples: int = 5) -> list[np.ndarray]:
         """A variable's values in a few frames spread over a run (surfaces: cheap),
         kept: each frame's values thinned to at most 200 000, with its lowest and
-        highest. Usually made in a loader thread already (load_key), not while the
-        window waits."""
+        highest. Usually made in a thread of their own once the first frame is read
+        (_sample_later), not while the window waits; asked for meanwhile, they are
+        waited for."""
         key = (dataset.folder, dataset.key, variable)
-        with self._samples_lock:
-            found = self._samples.get(key)
-        if found is not None:
-            return found
+        while True:
+            with self._samples_lock:
+                found = self._samples.get(key)
+                if found is not None:
+                    return found
+                busy = self._sampling.get(key)
+                if busy is None:  # this thread samples; others wait for it
+                    busy = self._sampling[key] = threading.Event()
+                    break
+            busy.wait()  # being sampled in another thread: its samples, not twice
         found = []
-        array = variable.partition(".")[0]
-        if array not in dataset.components:
-            return found
-        for index in np.unique(np.linspace(0, len(dataset) - 1, samples).round().astype(int)):
-            try:
-                values = dataset.sample_values(int(index), variable)
-            except (OSError, ValueError, KeyError):
-                continue
-            if values is None:
-                continue
-            values = np.asarray(values).ravel()
-            finite = values[np.isfinite(values)]
-            if not finite.size:
-                continue
-            step = finite.size // 200_000 + 1
-            found.append(np.concatenate([finite[::step], [finite.min(), finite.max()]]))
-        with self._samples_lock:
-            if len(self._samples) > 64:
-                self._samples.clear()
-            self._samples[key] = found
+        try:
+            array = variable.partition(".")[0]
+            if array in dataset.components:
+                picked = np.unique(np.linspace(0, len(dataset) - 1, samples).round().astype(int))
+                for index in picked:
+                    try:
+                        values = dataset.sample_values(int(index), variable)
+                    except (OSError, ValueError, KeyError):
+                        continue
+                    if values is None:
+                        continue
+                    values = np.asarray(values).ravel()
+                    finite = values[np.isfinite(values)]
+                    if not finite.size:
+                        continue
+                    step = finite.size // 200_000 + 1
+                    found.append(np.concatenate([finite[::step], [finite.min(), finite.max()]]))
+        finally:
+            with self._samples_lock:
+                if len(self._samples) > 64:
+                    self._samples.clear()
+                self._samples[key] = found
+                del self._sampling[key]
+            busy.set()
         return found
 
     def automatic_range(self, item_id: str, read: bool = True) -> tuple[float, float] | None:

@@ -336,3 +336,44 @@ def test_a_folder_of_many_files_is_listed_by_name(tmp_path):
         folder / f"REEF3D-NHFLOW-FSF-00000002-{rank:06d}.vtp" for rank in (1, 2, 3)
     ]
     assert all(piece.is_file() for frame in frames for piece in frame.pieces)
+
+
+def test_the_first_frame_reads_its_own_output_only(store, monkeypatch):
+    """The first frame shown reads what it shows: a variable that changes is told
+    from some tiles of the first and the last output (both were read whole to see
+    whether it stays the same), one that stays is still read once; and the samples
+    over the run are taken in a thread of their own, after the frame."""
+    import threading
+
+    from lagoon_format.store import Output
+
+    read = []
+    whole = Output.read
+    monkeypatch.setattr(
+        Output,
+        "read",
+        lambda self, name, t, *a, **k: read.append((name, t)) or whole(self, name, t, *a, **k),
+    )
+    release = threading.Event()
+    sampled = []
+
+    def slow(self, index, variable):  # the samples wait: the frame does not
+        release.wait(10)
+        sampled.append((variable, index))
+        return self.read_values(index, variable)
+
+    monkeypatch.setattr(lagoon.StoreDataset, "sample_values", slow)
+    s, item, dataset = _surface(store)
+    s.set_time(2.0)
+    mesh = s.data.load(item.id)
+    assert mesh.n_points == NX * NY and not sampled
+    by_name = {name: sorted(t for n, t in read if n == name) for name in ("eta", "depth")}
+    # eta: its output alone; the depth, the same in the first and the last: those
+    assert by_name == {"eta": [2], "depth": [0, FRAMES - 1]}
+    read.clear()
+    release.set()
+    values = s.data._sampled_values(dataset, "eta")  # waits for the thread's
+    assert len(values) == 5 and sorted(sampled).count(("eta", 0)) == 1
+    s.set_time(3.0)
+    again = s.data.load(item.id)
+    assert again.point_data["depth"] is mesh.point_data["depth"]  # the same: read once
