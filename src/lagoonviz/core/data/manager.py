@@ -141,6 +141,9 @@ class ContourLines:
     segments: np.ndarray  # (k, 2, 3) float32
     levels: list[float]
     visible: bool
+    #: on their surface, moved towards the camera as they are drawn (a slice's lines,
+    #: see Trails.facing), not lifted off it
+    facing: bool = False
 
 
 @dataclass
@@ -311,7 +314,8 @@ class FrameKey:
     dataset: str
     index: int
     arrays: tuple[str, ...]
-    #: what is read from the frame: () the surface, ("slice", axis, position) a section
+    #: what is read from the frame: () the surface, ("slice", axis, position[, water])
+    #: a section (water: only where phi >= 0, CFD's water)
     extra: tuple = ()
     #: every how many grid lines a surface is read (1: full detail; more while
     #: the time moves in the streaming memory mode)
@@ -967,6 +971,12 @@ class DataManager:
         if item.kind in WATER_KINDS:
             # dry land is hidden: FNPF writes the depth, NHFLOW and SFLOW wetdry
             arrays.update(("eta", "depth", "wetdry"))
+        if item.kind == "slice":
+            line = str(item.properties.get("iso_line_of", "none"))
+            if line != "none":  # the line of an iso-surface on the slice
+                arrays.add(line.partition(".")[0])
+            if item.properties.get("water_only", False):
+                arrays.add("phi")  # CFD: the water alone (phi >= 0)
         if item.kind == "bathymetry":
             arrays.add("depth")  # still water depth: the level for vertical exaggeration
         if int(item.properties.get("trail_outputs", 0) or 0) > 0:
@@ -989,6 +999,8 @@ class DataManager:
         if item.kind == "slice":
             axis = AXES.get(str(item.properties.get("normal", "y")), 1)
             extra = ("slice", axis, float(item.properties.get("position", 0.0)))
+            if self._water_only(item, dataset):
+                extra = (*extra, True)
         elif item.kind == "iso_surface":
             variable = str(item.properties.get("iso_by", "none"))
             if variable == "none":
@@ -1098,6 +1110,12 @@ class DataManager:
         points = memory.current().detail_points
         return dataset.detail_stride(points) if points else 1
 
+    @staticmethod
+    def _water_only(item, dataset) -> bool:
+        """A slice shown only in the water: its "water_only" setting, and a level set
+        (phi, CFD) to tell the water by."""
+        return bool(item.properties.get("water_only", False)) and "phi" in dataset.components
+
     def _iso_detail(self, dataset) -> int:
         """An iso-surface of a large volume (a LAGOON store's: CFD's free surface)
         while the time moves: cut from every so many grid lines across (all levels),
@@ -1144,6 +1162,11 @@ class DataManager:
         dataset = case.datasets[key.dataset]
         if key.extra and key.extra[0] == "slice":
             mesh = dataset.read_slice(key.index, key.extra[1], key.extra[2], list(key.arrays))
+            if len(key.extra) > 3 and key.extra[3] and "phi" in mesh.point_data:
+                # CFD: the water alone, cut at the level set's zero (phi >= 0)
+                from lagoonviz.core.data.mesh import clip_surface
+
+                mesh = clip_surface(mesh, mesh.point_data["phi"], 0.0, "above")
         elif key.extra and key.extra[0] == "iso":
             lines = bool(key.extra[3]) if len(key.extra) > 3 else True
             water = bool(key.extra[4]) if len(key.extra) > 4 else False
@@ -1503,8 +1526,36 @@ class DataManager:
         them. Levels are round numbers over the variable's automatic range, kept from
         frame to frame. None when the item draws none."""
         item = self.scene.get(item_id)
+        if shown.triangles.size == 0:
+            return None
+        parts, levels = [], []
         variable = str(item.properties.get("contour_by", "none"))
-        if variable == "none" or shown.triangles.size == 0:
+        values = self._scalar_on(mesh, variable, shown)
+        if values is not None:
+            levels = self.contour_values(item_id, variable, mesh)
+            parts.append(contour_segments(shown.positions, shown.triangles, values, levels))
+        if item.kind == "slice":  # the line of an iso-surface on the slice
+            line = str(item.properties.get("iso_line_of", "none"))
+            values = self._scalar_on(mesh, line, shown)
+            if values is not None:
+                at = float(item.properties.get("iso_line_value", 0.0))
+                parts.append(contour_segments(shown.positions, shown.triangles, values, [at]))
+        if not parts:
+            return None
+        segments = np.concatenate(parts) if len(parts) > 1 else parts[0]
+        slice_ = item.kind == "slice" and not self.scene.flat
+        if segments.size and not slice_:
+            span = np.ptp(shown.positions, axis=0)
+            lift = 0.05 if self.scene.flat else 2e-3 * float(max(span.max(), 1e-9))
+            segments[..., 2] += lift
+        # a slice's lines lie on it and are drawn towards the camera (lifted in z,
+        # they slid up a vertical slice)
+        return ContourLines(item_id, segments, levels, shown.visible, facing=slice_)
+
+    @staticmethod
+    def _scalar_on(mesh: SurfaceMesh, variable: str, shown: DisplaySurface):
+        """A variable's values at the points of a mesh as shown; None for none."""
+        if variable == "none":
             return None
         try:
             values = mesh.scalar(variable)
@@ -1512,13 +1563,7 @@ class DataManager:
             return None
         if values is None or values.shape[0] != shown.positions.shape[0]:
             return None
-        levels = self.contour_values(item_id, variable, mesh)
-        segments = contour_segments(shown.positions, shown.triangles, values, levels)
-        if segments.size:
-            span = np.ptp(shown.positions, axis=0)
-            lift = 0.05 if self.scene.flat else 2e-3 * float(max(span.max(), 1e-9))
-            segments[..., 2] += lift
-        return ContourLines(item_id, segments, levels, shown.visible)
+        return values
 
     def contour_values(self, item_id: str, variable: str, mesh: SurfaceMesh) -> list[float]:
         """The levels of an item's contour lines of a variable: about "contour_levels"

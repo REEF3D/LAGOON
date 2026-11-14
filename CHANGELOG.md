@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Slices: the water alone, the line of an iso-surface
+
+- *Water only* (slices of a CFD run): the slice only where the level set phi is 0
+  or more, cut at the free surface; its grid lines end there too.
+- *Iso-line of* and *Iso-line value* (every slice): the line where an iso-surface of
+  a variable crosses the slice (phi at 0: the free surface on it), drawn with the
+  contour lines.
+- A slice's contour lines lie on it and are drawn towards the camera, as its grid
+  lines (they were lifted in z, up the plane of a vertical slice).
+
 ### The first frame of a case is shown sooner
 
 - Opening a case reads only the frame shown (the others when the time gets to

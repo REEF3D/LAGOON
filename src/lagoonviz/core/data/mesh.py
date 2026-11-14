@@ -1260,7 +1260,9 @@ def iso_lines(mesh: SurfaceMesh, field: np.ndarray, level: float) -> SurfaceMesh
 def clip_surface(mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str) -> SurfaceMesh:
     """The part of a triangle surface where ``field`` is at least (``keep`` "above")
     or at most ("below") ``level``: triangles across the level are cut on their
-    edges (points and data interpolated, cut points shared by neighbours)."""
+    edges (points and data interpolated, cut points shared by neighbours). Its
+    ``outlines`` (a slice's grid lines, edges of its triangles) are kept as far as
+    they reach: an outline across the level ends at the cut point of its edge."""
     d = np.asarray(field, np.float64) - float(level)
     if keep == "below":
         d = -d
@@ -1272,11 +1274,12 @@ def clip_surface(mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str) 
     one = count[(count == 1) | (count == 2)] == 1
     if not len(partial):
         kept, compact = np.unique(whole, return_inverse=True)
-        return SurfaceMesh(
+        surface = SurfaceMesh(
             mesh.points[kept],
             compact.reshape(-1, 3).astype(np.uint32),
             {name: values[kept] for name, values in mesh.point_data.items()},
         ).with_normals()
+        return _with_outlines(surface, _clipped_outlines(mesh, d))
     # the odd corner first (inside of one, outside of two), the winding kept
     flags = inside[(count == 1) | (count == 2)]
     odd = np.where(one, flags.argmax(axis=1), (~flags).argmax(axis=1))
@@ -1311,10 +1314,57 @@ def clip_surface(mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str) 
         mixed = va + (w if va.ndim == 2 else t) * (vb - va)
         data[name] = np.concatenate([values, mixed.astype(values.dtype)])
     kept, compact = np.unique(triangles, return_inverse=True)
-    return SurfaceMesh(
+    surface = SurfaceMesh(
         points[kept].astype(np.float32),
         compact.reshape(-1, 3).astype(np.uint32),
         {name: values[kept] for name, values in data.items()},
+    ).with_normals()
+    return _with_outlines(surface, _clipped_outlines(mesh, d))
+
+
+def _clipped_outlines(mesh: SurfaceMesh, d: np.ndarray):
+    """A surface's outlines (point pairs, e.g. a slice's grid lines) where ``d`` >= 0:
+    whole, or up to where they cross 0; as points of their own (two per segment)
+    with their data. None without outlines."""
+    if mesh.outlines is None or not len(mesh.outlines):
+        return None
+    pairs = np.asarray(mesh.outlines, np.int64).reshape(-1, 2)
+    da, db = d[pairs[:, 0]], d[pairs[:, 1]]
+    keep = (da >= 0) | (db >= 0)
+    pairs, da, db = pairs[keep], da[keep], db[keep]
+    # an end outside moves to where the segment crosses: t along a -> b
+    t = da / np.where(da == db, 1.0, da - db)
+    ta = np.where(da >= 0, 0.0, t)
+    tb = np.where(db >= 0, 1.0, t)
+    a, b = pairs[:, 0], pairs[:, 1]
+
+    def along(values, w):
+        va, vb = values[a], values[b]
+        return va + (w[:, None] if va.ndim == 2 else w) * (vb - va)
+
+    points = np.stack([along(mesh.points, ta), along(mesh.points, tb)], axis=1).reshape(-1, 3)
+    data = {
+        name: np.stack([along(v, ta), along(v, tb)], axis=1).reshape(-1, *v.shape[1:])
+        for name, v in mesh.point_data.items()
+    }
+    return points.astype(np.float32), data
+
+
+def _with_outlines(surface: SurfaceMesh, lines) -> SurfaceMesh:
+    """A clipped surface with its outlines' points after its own."""
+    if lines is None or not len(lines[0]):
+        return surface
+    points, data = lines
+    n = surface.n_points
+    return SurfaceMesh(
+        np.concatenate([surface.points, points]).astype(np.float32),
+        surface.triangles,
+        {
+            name: np.concatenate([v, data[name].astype(v.dtype)])
+            for name, v in surface.point_data.items()
+            if name in data
+        },
+        outlines=(n + np.arange(len(points), dtype=np.uint32)).reshape(-1, 2),
     ).with_normals()
 
 

@@ -441,8 +441,22 @@ KINDS: dict[str, KindSpec] = {
             "normal": PropertySpec("y", "Normal", choices=("x", "y", "z")),
             "position": PropertySpec(0.0, "Position [m]", tip="Where the plane cuts the axis"),
             **_colouring("velocity", "reef3d"),
+            "water_only": PropertySpec(
+                False,
+                "Water only",
+                tip="CFD: the slice only where the level set phi >= 0 (the water), cut at "
+                "its zero (the free surface)",
+            ),
             **_grid_lines("the slice cuts"),
             **_contours(),
+            "iso_line_of": PropertySpec(
+                "none",
+                "Iso-line of",
+                provider="variables",
+                tip="The line where an iso-surface of this variable crosses the slice "
+                "(e.g. phi at 0: the free surface); none: no line",
+            ),
+            "iso_line_value": PropertySpec(0.0, "Iso-line value", tip="Where the line lies"),
             **_vectors(),
             **_exaggeration("Scales heights about the still water level"),
         },

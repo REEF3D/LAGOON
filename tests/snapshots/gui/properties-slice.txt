@@ -19,10 +19,13 @@ QWidget
   Bar title: text ''
   Bar numbers: choice 'auto' of ['auto', 'integer', '1 decimal', '2 decimals', '3 decimals', 'scientific']
   Bar ticks: number 0 in [0, 11] decimals 0
+  Water only: checkbox '' off
   Grid lines: choice 'off' of ['off', 'dark', 'white']
   Contour lines of: choice 'none' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
   Contour lines: number 10 in [2, 100] decimals 0
   Colour bands: checkbox '' off
+  Iso-line of: choice 'none' of ['none', 'velocity', 'velocity.x', 'velocity.y', 'velocity.z', 'pressure']
+  Iso-line value: number 0 in [-1e+09, 1e+09] decimals 3
   Vectors of: choice 'none' of ['none', 'velocity (white)', 'velocity (black)', 'velocity (grey)']
   Arrows: number 1000 in [10, 20000] decimals 0
   Arrow length: _LogSlider
