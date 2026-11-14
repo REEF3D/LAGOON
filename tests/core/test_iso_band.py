@@ -272,3 +272,81 @@ def _open_edges(mesh) -> int:
     edges = np.sort(np.concatenate([t[:, [0, 1]], t[:, [1, 2]], t[:, [2, 0]]]), axis=1)
     _, count = np.unique(edges, axis=0, return_counts=True)
     return int((count == 1).sum())
+
+
+def test_the_cells_of_a_band_are_kept_once(tmp_path):
+    """Bands of any depth share one list of cells per block (the first cells of the
+    deepest band cut so far): a list was kept for every depth a band ever had, tens
+    of MB each in a large volume and never dropped."""
+    root = _cfd_store(tmp_path / "cfd", frames=4, rise=0.1)
+    volume = open_case(root).datasets["cfd_volume"]
+    surfaces = []
+    for extra in (0.0, 0.3, 0.9, 0.5):  # bands of several depths
+        for frame in range(4):
+            cut = volume._iso_piece(0, volume.frames[frame].pieces[0], "phi", 0.0, [], extra)
+            piece, connectivity, offsets, types = cut
+            nz = piece.band[1] - piece.band[0]
+            assert len(offsets) == len(types) == (nz - 1) * 8 * 12
+            assert int(connectivity.max()) == len(piece.points) - 1
+            surfaces.append(volume.read_iso(frame, "phi", 0.0, ["pressure"], water_side=True))
+    kept = [key for key in volume._cells_cache if key[0] == "band"]
+    assert len(kept) == 2 == len(volume._cells_cache)  # one per block
+    again = open_case(root).datasets["cfd_volume"]  # the same surfaces from new lists
+    _same(surfaces[-1], again.read_iso(3, "phi", 0.0, ["pressure"], water_side=True))
+
+
+def test_the_same_edges_once_packed_or_not():
+    """The cut points on the same edge are found by one sort of edge and position
+    packed into a number, or (where they do not fit) as before: the same either way."""
+    from lagoonviz.core.data.mesh import _same_edges
+
+    rng = np.random.default_rng(5)
+
+    def as_before(a, b):
+        pairs = np.stack([np.minimum(a, b), np.maximum(a, b)], axis=1)
+        _, first, inverse = np.unique(pairs, axis=0, return_index=True, return_inverse=True)
+        return first, inverse.ravel()
+
+    for points, far in ((500, 40), (2**40, 2**21), (2**40, 40), (1, 1)):
+        a = rng.integers(0, points, 3000)
+        b = a + rng.integers(0, far + 1, 3000)
+        swap = rng.random(3000) < 0.5
+        a, b = np.where(swap, b, a), np.where(swap, a, b)
+        a, b = np.concatenate([a, b[:700]]), np.concatenate([b, a[:700]])  # some twice
+        first, inverse = _same_edges(a.copy(), b.copy())
+        expected = as_before(a, b)
+        np.testing.assert_array_equal(first, expected[0])
+        np.testing.assert_array_equal(inverse, expected[1])
+
+
+def test_a_horizontal_slice_reads_two_levels(tmp_path, monkeypatch):
+    """A horizontal slice of a Cartesian volume in a store: the values between the
+    two levels round the plane on the grid's points, as cutting the hexahedra gives
+    on their upright edges, with only those levels read."""
+    root = _cfd_store(tmp_path / "cfd")
+    volume = open_case(root).datasets["cfd_volume"]
+    names = ["velocity", "pressure", "phi"]
+    at = 1.37
+    read = []
+    get = type(volume.output.array(0, "phi")).get
+    monkeypatch.setattr(
+        type(volume.output.array(0, "phi")),
+        "get",
+        lambda self, key, parallel=True: read.append(key) or get(self, key, parallel),
+    )
+    flat = volume.read_slice(1, 2, at, names)
+    assert read and all(key[1] == slice(13, 15) for key in read)  # 30 levels over 3 m
+    monkeypatch.undo()
+    assert flat.n_points == 2 * 13 * 9 and flat.n_triangles == 2 * 2 * 12 * 8
+    assert np.all(flat.points[:, 2] == np.float32(at)) and flat.normals[:, 2].min() > 0.99
+    assert flat.outlines is not None and len(flat.outlines)
+    cut = Dataset.read_slice(volume, 1, 2, at, names)  # the hexahedra cut
+    tree = cKDTree(cut.points)
+    distance, nearest = tree.query(flat.points)
+    assert distance.max() < 1e-5  # every grid point is a point of the cut
+    for name in names:
+        np.testing.assert_allclose(
+            flat.point_data[name], cut.point_data[name][nearest], rtol=1e-5, atol=1e-3
+        )
+    # outside the levels: nothing, as before
+    assert volume.read_slice(1, 2, 9.0, names).n_points == 0

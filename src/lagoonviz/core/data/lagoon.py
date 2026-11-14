@@ -383,16 +383,26 @@ class StoreDataset(Dataset):
                 values = values[:, take[0]][:, :, take[1]]
             components = output.variables[other]
             data[other] = values.reshape(-1, components) if components > 1 else values.ravel()
-        nz, ny, nx = z.shape
-        key = (number, nz, ny, nx)
-        with self._cells_lock:
-            cells = self._cells_cache.get(key)
-            if cells is None:
-                cells = self._cells_cache[key] = _hexahedra(nz, ny, nx)
-        connectivity, offsets, types = cells
+        connectivity, offsets, types = self._band_cells(number, *z.shape)
         piece = Piece(self.kind, points, np.zeros(0, np.int64), np.zeros(0, np.int64), None, data)
         piece.band = (k0, k1)
         return piece, connectivity, offsets, types
+
+    def _band_cells(self, number: int, nz: int, ny: int, nx: int) -> tuple:
+        """The cells of ``nz`` levels of a block of ny x nx points: the first of the
+        cells of the deepest band cut from it so far (the points are numbered level
+        by level, so the cells of fewer levels are those of more levels' first). One
+        list per block and size across, not one per depth of the band: a surface
+        whose band is as deep in no two frames left a list for each depth behind
+        (tens of MB each, never dropped)."""
+        key = ("band", number, ny, nx)
+        with self._cells_lock:
+            deepest = self._cells_cache.get(key)
+            if deepest is None or deepest[0] < nz:
+                deepest = self._cells_cache[key] = (nz, *_hexahedra(nz, ny, nx))
+        _, connectivity, offsets, types = deepest
+        count = (nz - 1) * (ny - 1) * (nx - 1)
+        return connectivity[: 8 * count], offsets[:count], types[:count]
 
     def _crossing(self, number, name, t, block, value, top, near):
         """Where the field crosses the range ``value`` .. ``top`` in a block: (the field
@@ -659,6 +669,10 @@ class StoreDataset(Dataset):
         lines around the plane (the tiles holding them) are read, and the section is
         their interpolation (exactly what cutting REEF3D's hexahedra gives)."""
         output = self.output
+        if axis == 2 and output.grid == "cartesian":
+            # a horizontal slice of a Cartesian grid lies between two of its levels
+            flat = self._slice_level(index, position, self._arrays(variables) or [])
+            return flat if flat is not None else super().read_slice(index, 2, position, variables)
         if output.grid not in ("sigma", "cartesian") or axis not in (0, 1) or output.curvilinear:
             # a curvilinear grid's lines are not planes: its hexahedra are cut
             return super().read_slice(index, axis, position, variables)
@@ -677,6 +691,49 @@ class StoreDataset(Dataset):
         if not parts:
             return super().read_slice(index, axis, position, variables)
         return _joined(parts)
+
+    def _slice_level(self, t: int, position: float, names: list[str]) -> SurfaceMesh | None:
+        """A horizontal slice of a Cartesian grid (CFD) read straight from the store:
+        only the two levels around the plane are read, each block's part a grid of
+        its points across with the values mixed between the levels (what cutting the
+        hexahedra gives along their upright edges). The whole volume was read and
+        all its cells searched for every frame: seconds for some million points.
+        None: the plane does not lie between two levels."""
+        output = self.output
+        levels = np.asarray(output.z, np.float64)
+        if len(levels) < 2 or not levels[0] <= position <= levels[-1]:
+            return None
+        k = int(np.clip(np.searchsorted(levels, position) - 1, 0, len(levels) - 2))
+        w = float((position - levels[k]) / (levels[k + 1] - levels[k]))
+        parts = []
+        for block in output.blocks:
+            low = k - block.k0
+            if low < 0 or low + 1 >= (block.nz or 0):
+                continue  # the plane does not cross this block's cells
+            (i0, j0), (i1, j1) = block.start, block.stop
+            px, py = output.plan(i0, i1, j0, j1)
+            ny, nx = px.shape
+            points = np.empty((ny * nx, 3), np.float32)
+            points[:, 0] = px.reshape(-1)
+            points[:, 1] = py.reshape(-1)
+            points[:, 2] = position
+            data = {}
+            for name in names:
+                pair = output.array(block, name).get((t, slice(low, low + 2))).astype(np.float64)
+                values = ((1 - w) * pair[0] + w * pair[1]).astype(np.float32)
+                components = output.variables[name]
+                data[name] = values.reshape(-1, components) if components > 1 else values.ravel()
+            j, i = np.meshgrid(np.arange(ny - 1), np.arange(nx - 1), indexing="ij")
+            base = (j * nx + i).ravel()
+            quads = np.stack([base, base + 1, base + nx + 1, base + nx], axis=1)
+            triangles = np.concatenate([quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]])
+            edges = unique_edges(
+                np.concatenate(
+                    [quads[:, [0, 1]], quads[:, [1, 2]], quads[:, [2, 3]], quads[:, [3, 0]]]
+                )
+            )
+            parts.append(SurfaceMesh(points, triangles.astype(np.uint32), data, outlines=edges))
+        return _joined(parts) if parts else None
 
     def _slice_block(self, t, block, axis, low, w, position, names) -> SurfaceMesh:
         output = self.output

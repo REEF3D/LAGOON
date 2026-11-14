@@ -80,8 +80,14 @@ def test_cut_cells_are_gathered_once():
     offsets = np.array([8, 16], np.int64)
     types = np.array([12, 12], np.uint8)
     first = mesh._cells_by_type(connectivity, offsets, types)
-    assert mesh._cells_by_type(connectivity, offsets, types) is first  # kept
-    assert first[0][2].shape == (2, 8)
+    # hexahedra only: their nodes are the list itself (nothing gathered or kept)
+    assert first[0][2].shape == (2, 8) and np.shares_memory(first[0][2], connectivity)
+    # other cells (two tetrahedra and a hexahedron): gathered once, and kept
+    mixed = np.array([0, 1, 2, 4, 1, 2, 3, 5, 0, 1, 3, 2, 4, 5, 7, 6], np.int64)
+    ends, kinds = np.array([4, 8, 16], np.int64), np.array([10, 10, 12], np.uint8)
+    gathered = mesh._cells_by_type(mixed, ends, kinds)
+    assert mesh._cells_by_type(mixed, ends, kinds) is gathered
+    assert [g[2].shape for g in gathered] == [(2, 4), (1, 8)]
     distance = np.array([-1, 1, -1, 1, -1, 1, -1, 1, 2, 2, 2, 2], float)
     plan = mesh.plan_level(distance, connectivity, offsets, types, True)
     assert len(plan.triangles) > 0  # the first cell is cut, the second is not

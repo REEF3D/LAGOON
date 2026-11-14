@@ -983,6 +983,13 @@ CELL_NODES_BYTES = 512 << 20
 def _cells_by_type(connectivity, offsets, types) -> list[tuple[int, tuple, np.ndarray]]:
     """(corners, split into tetrahedra, (cells, corners) nodes) for each cell type of
     a cell set that marching tetrahedra cuts; kept for the last few cell sets."""
+    count = len(types)
+    if count and len(connectivity) == 8 * count and len(offsets) == count:
+        # hexahedra only (a structured block, a CFD grid): their nodes are the cells'
+        # list itself, eight in a row; nothing gathered, nothing kept
+        if int(types.min()) == VTK_HEXAHEDRON == int(types.max()) and int(offsets[-1]) == 8 * count:
+            n_nodes, split = CELL_TETS[VTK_HEXAHEDRON]
+            return [(n_nodes, split, connectivity.reshape(count, 8))]
     key = (id(connectivity), id(offsets), id(types), len(connectivity), len(offsets))
     with _CELL_NODES_LOCK:
         found = _CELL_NODES.get(key)
@@ -1005,6 +1012,49 @@ def _cells_by_type(connectivity, offsets, types) -> list[tuple[int, tuple, np.nd
     return groups
 
 
+def _some_not_all(flags: np.ndarray) -> np.ndarray:
+    """For each row of booleans (cells x corners): some are set, but not all."""
+    count = flags.shape[1]
+    if count == 8 and flags.flags.c_contiguous:  # hexahedra: a row as one number
+        row = flags.view(np.uint64).reshape(-1)
+        return (row != 0) & (row != np.uint64(0x0101010101010101))
+    set_ = flags.sum(axis=1, dtype=np.intp)
+    return (set_ > 0) & (set_ < count)
+
+
+def _same_edges(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The edges (a[i], b[i]), whichever way round, each once: (the first of each,
+    for every edge which of them it is), in the order of their lower and then their
+    higher point, as np.unique gives them for the edges as keys.
+
+    Edge and position are packed into one number where they fit (the edge by its
+    lower point and the difference to the higher, small in a grid) and those are
+    sorted: a plain sort of numbers is several times faster than the sort that
+    keeps track of the positions, which was a quarter of an iso-surface's time."""
+    low, high = np.minimum(a, b), np.maximum(a, b)
+    high -= low  # the difference
+    span = int(high.max()) + 1
+    count = low.size
+    bits = max(count - 1, 1).bit_length()
+    if int(low.min()) < 0 or (int(low.max()) * span + span).bit_length() + bits > 63:
+        keys = low * span + high
+        _, first, inverse = np.unique(keys, return_index=True, return_inverse=True)
+        return first, inverse.reshape(-1)
+    low *= span
+    low += high
+    low <<= bits
+    low += np.arange(count, dtype=np.int64)
+    low.sort()
+    position = low & ((1 << bits) - 1)
+    low >>= bits  # the keys, sorted
+    new = np.empty(count, bool)
+    new[0] = True
+    np.not_equal(low[1:], low[:-1], out=new[1:])
+    inverse = np.empty(count, np.intp)
+    inverse[position] = np.cumsum(new) - 1
+    return position[new], inverse
+
+
 def plan_level(
     distance: np.ndarray,
     connectivity: np.ndarray,
@@ -1021,22 +1071,27 @@ def plan_level(
     distance = np.asarray(distance, dtype=np.float64)
     positive = distance > 0
     tets: list[np.ndarray] = []
-    for n_nodes, split, nodes in _cells_by_type(connectivity, offsets, types):
+    for _, split, nodes in _cells_by_type(connectivity, offsets, types):
         # cut: some corners above, some not (as min <= 0 < max, on booleans)
-        above = np.count_nonzero(positive[nodes], axis=1)
-        nodes = nodes[(above > 0) & (above < n_nodes)]
+        nodes = nodes[_some_not_all(np.take(positive, nodes))]
         for tet in split:
             tets.append(nodes[:, list(tet)])
     none = np.zeros(0, np.int64)
     if not tets:
         return CutPlan(none, none, np.zeros(0), np.zeros((0, 3), np.uint32))
-    tet_nodes = np.concatenate(tets).astype(np.int64)
-    d = distance[tet_nodes]
-    case = ((d > 0) * np.array([1, 2, 4, 8])).sum(axis=1)
+    tet_nodes = np.concatenate(tets).astype(np.int64, copy=False)
+    above = np.take(positive, tet_nodes)
+    case = above[:, 0] + (above[:, 1] << 1) + (above[:, 2] << 2) + (above[:, 3] << 3)
+    del above
+    # the tetrahedra by their case, each case's in their order (a stable sort of
+    # small numbers; picking each of the 14 cases out went through them 14 times)
+    by_case = np.take(tet_nodes, np.argsort(case.astype(np.uint8), kind="stable"), axis=0)
+    ends = np.cumsum(np.bincount(case, minlength=16))
+    del tet_nodes, case
     edges_a, edges_b, triangles = [], [], []
     count = 0
     for code, polygon in _CUT_CASES.items():
-        chosen = tet_nodes[case == code]
+        chosen = by_case[ends[code - 1] : ends[code]]
         n = chosen.shape[0]
         if n == 0:
             continue
@@ -1055,17 +1110,16 @@ def plan_level(
     b = np.concatenate(edges_b)
     triangles = np.concatenate(triangles)
     if merge and a.size:
-        low, high = np.minimum(a, b), np.maximum(a, b)
-        keys = low * (int(max(high.max(), 0)) + 1) + high
-        _, first, inverse = np.unique(keys, return_index=True, return_inverse=True)
+        first, inverse = _same_edges(a, b)
         a, b = a[first], b[first]
-        triangles = inverse.ravel()[triangles]
+        triangles = inverse[triangles]
         keep = (
             (triangles[:, 0] != triangles[:, 1])
             & (triangles[:, 1] != triangles[:, 2])
             & (triangles[:, 0] != triangles[:, 2])
         )
-        triangles = triangles[keep]
+        if not keep.all():
+            triangles = triangles[keep]
     da, db = distance[a], distance[b]
     denominator = np.where(da == db, 1.0, da - db)
     t = da / denominator
@@ -1079,19 +1133,38 @@ def orient_by_field(plan: CutPlan, points: np.ndarray, field: np.ndarray) -> Cut
     of mixed windings cancel, and the surface shaded in dark and light speckles and
     stripes. Facing one way, they shade smoothly.
     """
-    triangles = plan.triangles.astype(np.int64)
-    if not len(triangles):
+    if not len(plan.triangles):
         return plan
-    pa, pb = points[plan.a].astype(np.float64), points[plan.b].astype(np.float64)
-    rising = (field[plan.b] > field[plan.a])[:, None]
-    up = np.where(rising, pb - pa, pa - pb)  # each cut edge, towards the higher value
-    cut = pa + plan.t[:, None] * (pb - pa)
-    normal = np.cross(
-        cut[triangles[:, 1]] - cut[triangles[:, 0]], cut[triangles[:, 2]] - cut[triangles[:, 0]]
-    )
-    flip = (normal * up[triangles].sum(axis=1)).sum(axis=1) < 0
-    triangles[flip] = triangles[flip][:, [0, 2, 1]]
-    return replace(plan, triangles=np.ascontiguousarray(triangles, dtype=np.uint32))
+    corners = [np.ascontiguousarray(plan.triangles[:, c], dtype=np.intp) for c in range(3)]
+    # (np.take, and the sums written out: a third of the time of a[index] and
+    # .sum(axis=1) on arrays of three columns)
+    pa = np.take(points, plan.a, axis=0).astype(np.float64)
+    along = np.take(points, plan.b, axis=0).astype(np.float64)
+    along -= pa  # each cut edge, from a to b
+    cut = along * plan.t[:, None]
+    cut += pa
+    del pa
+    falling = np.take(field, plan.b) <= np.take(field, plan.a)
+    np.negative(along, out=along, where=falling[:, None])  # towards the higher value
+    c0 = np.take(cut, corners[0], axis=0)
+    e1 = np.take(cut, corners[1], axis=0)
+    e1 -= c0
+    e2 = np.take(cut, corners[2], axis=0)
+    e2 -= c0
+    del cut, c0
+    up = np.take(along, corners[0], axis=0)
+    up += np.take(along, corners[1], axis=0)
+    up += np.take(along, corners[2], axis=0)
+    del along
+    facing = (e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]) * up[:, 0]
+    facing += (e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]) * up[:, 1]
+    facing += (e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) * up[:, 2]
+    flip = facing < 0
+    triangles = np.empty(plan.triangles.shape, np.uint32)
+    triangles[:, 0] = plan.triangles[:, 0]
+    triangles[:, 1] = np.where(flip, plan.triangles[:, 2], plan.triangles[:, 1])
+    triangles[:, 2] = np.where(flip, plan.triangles[:, 1], plan.triangles[:, 2])
+    return replace(plan, triangles=triangles)
 
 
 def with_grid_lines(

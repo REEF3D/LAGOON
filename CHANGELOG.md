@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### CFD from a LAGOON store: the free surface cut faster, horizontal slices at once
+
+- The iso-surface of a volume (CFD's free surface, the level set at 0) is cut in
+  two thirds of the time, the same surface point for point: in a 5.4 million
+  point volume with water-side colours 1.35 s a frame instead of 2.0 s, without
+  them 0.45 s instead of 0.55 s (two cores). The cut points on the same edge are
+  found by one plain sort, the triangles are turned to face the rising field
+  with a third of the work, and the tetrahedra are sorted by their case once.
+- The cells of the levels the surface passes through are kept once per block. A
+  list was kept for every depth that band ever had and never dropped: after
+  8 frames of that volume 565 MB, now 99 MB, and it no longer grows while
+  playing.
+- A horizontal slice of a CFD volume in a store reads only the two levels round
+  its plane (the whole volume was read and all its cells searched for every
+  frame): 0.05 s instead of 1.9 s a frame, 73 000 points on the grid instead of
+  1.7 million, with the same values and grid lines.
+
 ### A case opens without an output that does not read
 
 - An output folder or store whose first file is empty or cut short (a run just
