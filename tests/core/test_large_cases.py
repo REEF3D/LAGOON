@@ -7,6 +7,7 @@ import math
 import numpy as np
 import pytest
 from lagoon_format.store import Store, StoreWriter
+from reef3d_fixtures import make_run
 
 from lagoonviz.core import Session, memory
 from lagoonviz.core.data import lagoon
@@ -269,3 +270,69 @@ def test_arrays_read_alike_on_one_thread_or_many(store):
 def test_frame_keys_tell_their_detail_apart():
     a = FrameKey("c", "d", 1, ("eta",))
     assert a.detail == 1 and a != FrameKey("c", "d", 1, ("eta",), (), 3)
+
+
+def test_normals_of_triangles_that_stay_are_added_up_with_a_matrix(monkeypatch):
+    """The triangles of a VTK output stay from output to output: seen again, their
+    normals are added up with a matrix kept for them, the same normals as corner by
+    corner; triangles changed in place get a new one, and none is kept with memory
+    use "low memory"."""
+    from lagoonviz.core import memory
+    from lagoonviz.core.data import mesh
+
+    monkeypatch.setattr(mesh, "CORNERS_MIN", 100)
+    monkeypatch.setattr(mesh, "_CORNERS", type(mesh._CORNERS)())
+    rng = np.random.default_rng(3)
+    points = rng.random((400, 3)).astype(np.float32)
+    triangles = rng.integers(0, 380, (900, 3)).astype(np.uint32)  # 20 points unused
+    triangles[:5] = 7  # triangles without an area
+
+    def kept(array):
+        entry = mesh._CORNERS.get(id(array))
+        return entry is not None and entry[3] is not None
+
+    first = mesh.vertex_normals(points, triangles)
+    assert not kept(triangles)  # seen once: corner by corner
+    again = mesh.vertex_normals(points, triangles)
+    assert kept(triangles)
+    np.testing.assert_allclose(again, first, atol=2e-6)
+    np.testing.assert_allclose(mesh.vertex_normals(2 * points, triangles), first, atol=2e-6)
+    np.testing.assert_array_equal(first[380:], np.tile((0.0, 0.0, 1.0), (20, 1)))
+    # changed in place: not the matrix of the triangles before
+    triangles[:] = triangles[::-1].copy()
+    turned = mesh.vertex_normals(points, triangles)
+    np.testing.assert_allclose(turned, mesh.vertex_normals(points, triangles.copy()), atol=2e-6)
+    # another set of the same size is not mistaken for it
+    other = rng.integers(0, 380, (900, 3)).astype(np.uint32)
+    np.testing.assert_array_equal(
+        mesh.vertex_normals(points, other), mesh.vertex_normals(points, other.copy())
+    )
+    was = memory.mode()
+    try:
+        memory.set_mode("low memory")
+        fresh = triangles.copy()
+        mesh.vertex_normals(points, fresh)
+        mesh.vertex_normals(points, fresh)
+        assert not kept(fresh)
+    finally:
+        memory.set_mode(was)
+
+
+def test_a_folder_of_many_files_is_listed_by_name(tmp_path):
+    """The frames of an output folder: the parallel files and their pieces, whatever
+    else lies in the folder (hidden files, other suffixes, names without numbers)."""
+    from lagoonviz.core.data.reef3d import _frames_in
+
+    run = make_run(tmp_path / "run", frames=4, ranks=3, volume=False)
+    folder = run / "REEF3D_NHFLOW_VTP_FSF"
+    for name in (".hidden.pvtp", "notes.txt", "REEF3D-NHFLOW-FSF.pvtp", "vtp", "x."):
+        (folder / name).write_text("")
+    series = _frames_in(folder)
+    assert list(series) == ["REEF3D-NHFLOW-FSF"]
+    frames = series["REEF3D-NHFLOW-FSF"]
+    assert [f.step for f in frames] == [0, 1, 2, 3]
+    assert frames[2].path == folder / "REEF3D-NHFLOW-FSF-00000002.pvtp"
+    assert frames[2].pieces == [
+        folder / f"REEF3D-NHFLOW-FSF-00000002-{rank:06d}.vtp" for rank in (1, 2, 3)
+    ]
+    assert all(piece.is_file() for frame in frames for piece in frame.pieces)

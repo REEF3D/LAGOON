@@ -103,6 +103,27 @@ def test_not_a_vtk_file(tmp_path):
         read_header(path)
 
 
+def test_the_header_is_found_wherever_the_chunks_end(tmp_path, monkeypatch):
+    """The file is read in chunks until its appended data starts, each chunk
+    searched once (a file with its arrays inline was searched from its start again
+    for every chunk: 24 s for 70 MB): the tag is found also when it lies across
+    the end of a chunk."""
+    from lagoonviz.core.data import vtkxml
+
+    n = 30
+    points = np.random.default_rng(0).random((n, 3)).astype(np.float32)
+    cells = (np.arange(n), np.arange(3, n + 1, 3))
+    for fmt in ("appended", "binary", "ascii"):
+        path = tmp_path / f"{fmt}.vtp"
+        write_piece(path, "PolyData", points, {"a": points[:, 0]}, *cells, fmt=fmt)
+        for chunk in (1, 2, 13, 64, 1 << 16):
+            monkeypatch.setattr(vtkxml, "_HEADER_CHUNK", chunk)
+            piece = read_piece(path)
+            np.testing.assert_allclose(piece.points, points, rtol=1e-6)
+            np.testing.assert_allclose(piece.point_data["a"], points[:, 0], rtol=1e-6)
+            np.testing.assert_array_equal(piece.offsets, cells[1])
+
+
 def test_split_name():
     assert split_name("REEF3D-NHFLOW-FSF-00000696-000001.vtp") == ("REEF3D-NHFLOW-FSF", 696, 1)
     assert split_name("REEF3D-NHFLOW-00000012.pvtu") == ("REEF3D-NHFLOW", 12, None)

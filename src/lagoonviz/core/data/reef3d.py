@@ -50,6 +50,7 @@ from lagoonviz.core.data.vtkxml import (
     read_piece,
     read_time_value,
     split_name,
+    split_stem,
 )
 
 log = logging.getLogger(__name__)
@@ -1441,30 +1442,37 @@ def _frames_in(folder: Path) -> dict[str, list[Frame]]:
         return _frames_by_piece(folder)
     parallel: dict[str, dict[int, Path]] = {}
     serial: dict[str, dict[int, Path]] = {}
-    for path in folder.iterdir():
-        if path.suffix not in _SUFFIXES or path.name.startswith("."):
+    # by name, a path only for the files kept: nearly all files of a run on many
+    # processes are its pieces (a long run: hundreds of thousands), and a path made
+    # for each took most of the time a case took to open (and to open again at
+    # every new output of a run being followed)
+    with os.scandir(folder) as entries:
+        names_in = [entry.name for entry in entries]
+    for name in names_in:
+        file_stem, dot, extension = name.rpartition(".")
+        suffix = dot + extension
+        if not file_stem or suffix not in _SUFFIXES or name.startswith("."):
             continue
-        stem, step, rank = split_name(path)
-        if step is None:
+        is_parallel = suffix in (".pvtu", ".pvtp")
+        stem, step, rank = split_stem(file_stem)
+        if step is None or (rank is not None and not is_parallel):
             continue
-        if path.suffix in (".pvtu", ".pvtp"):
-            parallel.setdefault(stem, {})[step] = path
-        elif rank is None:
-            serial.setdefault(stem, {})[step] = path
+        (parallel if is_parallel else serial).setdefault(stem, {})[step] = folder / name
     series: dict[str, list[Frame]] = {}
     for stem, steps in parallel.items():
         frames = []
+        old = ""
         for step in sorted(steps):
             path = steps[step]
             header = read_parallel_header(path) if not frames else None
             if header is not None:
                 pieces = header.pieces
                 names = [p.name for p in pieces]
+                old = f"-{step:0{_width(path)}d}-"
             else:
                 # pieces follow the same naming in every frame: avoid parsing each file
-                old = f"{split_name(frames[0].path)[1]:0{_width(frames[0].path)}d}"
-                new = f"{step:0{_width(path)}d}"
-                pieces = [path.parent / n.replace(f"-{old}-", f"-{new}-", 1) for n in names]
+                new = f"-{step:0{_width(path)}d}-"
+                pieces = [folder / n.replace(old, new, 1) for n in names]
             frames.append(Frame(step, path, pieces))
         # a .pvtp/.pvtu whose pieces are gone (an earlier run's index file, its pieces
         # written again and removed by a run with P 18 1): not an output

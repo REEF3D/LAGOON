@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### VTK output: frames read in half the time, long runs open faster
+
+- The normals of a frame read from VTK files (.pvtp, .pvtu) were most of the time
+  it took to read: for triangles that stay from output to output (a VTK surface,
+  a volume's outer surface, a vertical slice) they are now added up with a matrix
+  kept for those triangles (not with memory use *Low memory* or *Streaming*), and
+  for triangles that change (an iso-surface) their three components side by side.
+  A free surface of 720 000 points reads in 0.09 s instead of 0.22 s, the outer
+  surface of a volume of 8.6 million points in 0.24 s instead of 0.56 s (two
+  cores); the normals are the same to single precision.
+- The first frame of a volume finds the outer faces of its MPI pieces side by side
+  (8.6 million points: 4.2 s instead of 6.2 s on two cores).
+- A case folder of a long run on many processes opens faster: its output folders
+  are listed by name (150 000 files: 0.6 s instead of 1.3 s), also each time a run
+  being followed writes a new output.
+- A VTK file with its arrays inline (written by ParaView and other tools, not by
+  REEF3D) opens at once: a file of 67 MB took 24 s, and the time grew with the
+  square of its size.
+
 ### Large CFD volumes: a coarser free surface while playing
 
 - While the time moves, the iso-surface of a LAGOON store's volume of more than

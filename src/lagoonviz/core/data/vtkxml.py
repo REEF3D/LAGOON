@@ -39,6 +39,7 @@ VTK_QUAD = 9
 VTK_TRIANGLE = 5
 
 _HEADER_CHUNK = 1 << 16
+_APPENDED = b"<AppendedData"
 
 
 class VTKFormatError(ValueError):
@@ -92,11 +93,15 @@ class ParallelHeader:
 def _read_xml_head(path: Path) -> tuple[str, int | None]:
     """Return the XML text before the appended data and the data start offset."""
     with open(path, "rb") as handle:
-        buffer = b""
+        buffer = bytearray()
         while True:
             chunk = handle.read(_HEADER_CHUNK)
+            # looked for in what is new only (and the tag's length before it): a file
+            # with its arrays inline (no appended data) was searched from its start
+            # again for every chunk read, minutes for a file of some hundred MB
+            searched = max(len(buffer) - len(_APPENDED), 0)
             buffer += chunk
-            marker = buffer.find(b"<AppendedData")
+            marker = buffer.find(_APPENDED, searched)
             if marker >= 0:
                 # data starts after the "_" that follows the AppendedData tag
                 tag_end = buffer.find(b">", marker)
@@ -399,9 +404,15 @@ def read_time_value(path: str | Path, head: int = 4096) -> float | None:
 
 def split_name(path: str | Path) -> tuple[str, int | None, int | None]:
     """Split ``REEF3D-NHFLOW-FSF-00000696-000001.vtp`` into (stem, step, rank)."""
-    match = _PIECE_NAME.match(Path(path).stem)
+    return split_stem(Path(path).stem)
+
+
+def split_stem(stem: str) -> tuple[str, int | None, int | None]:
+    """:func:`split_name` for a file name without its suffix (no path made: a
+    folder of a long run holds hundreds of thousands of files)."""
+    match = _PIECE_NAME.match(stem)
     if not match:
-        return Path(path).stem, None, None
+        return stem, None, None
     rank = match.group("rank")
     return match.group("stem"), int(match.group("step")), int(rank) if rank else None
 

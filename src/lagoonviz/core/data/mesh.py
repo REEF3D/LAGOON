@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Architect: Hans Bihs
 """Plain-NumPy meshes and the geometry steps between files and the renderer.
 
 * :class:`SurfaceMesh` is what every renderer draws: points, triangles and point
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import os
 import threading
+import weakref
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -389,12 +391,21 @@ class VolumePlan:
 
     @classmethod
     def build(cls, pieces: list[Piece], decimals: int = 5) -> VolumePlan:
-        takes, local_faces = [], []
-        for piece in pieces:
+        def outside(piece: Piece) -> tuple[np.ndarray, np.ndarray]:
             faces = outer_faces(piece.connectivity, piece.offsets, piece.types)
             used, compact = np.unique(faces, return_inverse=True)
-            takes.append(used)
-            local_faces.append(compact.reshape(faces.shape))
+            return used, compact.reshape(faces.shape)
+
+        # the pieces side by side (sorting their faces is most of the work of the
+        # first frame of a volume), a few at a time: each needs memory for its faces
+        if len(pieces) > 1 and sum(len(p.offsets) for p in pieces) >= BAND_POINTS:
+            with ThreadPoolExecutor(min(4, os.cpu_count() or 2, len(pieces))) as pool:
+                found = list(pool.map(outside, pieces))
+        else:
+            found = [outside(piece) for piece in pieces]
+        takes = [used for used, _ in found]
+        local_faces = [faces for _, faces in found]
+        del found
         stacked = np.concatenate([p.points[t] for p, t in zip(pieces, takes, strict=True)])
         rounded = np.round(stacked.astype(np.float64), decimals)
         _, first, inverse = np.unique(rounded, axis=0, return_index=True, return_inverse=True)
@@ -420,13 +431,25 @@ class VolumePlan:
         return tuple(p.points.shape[0] for p in pieces) == self.sizes
 
     def apply(self, pieces: list[Piece]) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-        points = np.concatenate([p.points[t] for p, t in zip(pieces, self.take, strict=True)])[
-            self.first
-        ]
+        # (np.take: a third of the time of a[index] for the rows of a 2D array)
+        points = np.take(
+            np.concatenate(
+                [np.take(p.points, t, axis=0) for p, t in zip(pieces, self.take, strict=True)]
+            ),
+            self.first,
+            axis=0,
+        )
         data = {
-            name: np.concatenate(
-                [p.point_data[name][t] for p, t in zip(pieces, self.take, strict=True)]
-            )[self.first]
+            name: np.take(
+                np.concatenate(
+                    [
+                        np.take(p.point_data[name], t, axis=0)
+                        for p, t in zip(pieces, self.take, strict=True)
+                    ]
+                ),
+                self.first,
+                axis=0,
+            )
             for name in pieces[0].point_data
         }
         return points, data
@@ -445,9 +468,9 @@ class MergePlan:
 
     def apply(self, pieces: list[Piece]) -> Piece:
         """Merge pieces (read with or without cells) of the sizes this plan was made for."""
-        points = np.concatenate([p.points for p in pieces])[self.first]
+        points = np.take(np.concatenate([p.points for p in pieces]), self.first, axis=0)
         data = {
-            name: np.concatenate([p.point_data[name] for p in pieces])[self.first]
+            name: np.take(np.concatenate([p.point_data[name] for p in pieces]), self.first, axis=0)
             for name in pieces[0].point_data
         }
         return Piece(pieces[0].kind, points, self.connectivity, self.offsets, self.types, data)
@@ -679,26 +702,127 @@ def _bands(ny: int, nx: int) -> list[tuple[int, int]]:
     return [(int(a), int(b)) for a, b in zip(edges[:-1], edges[1:], strict=True) if b > a]
 
 
+#: who shares each triangle's normal, of the triangle sets seen lately: id of the
+#: triangles -> [the triangles (weakly), a few of their rows, points, the matrix
+#: (points x triangles, a one for each corner) or None, its bytes]. The triangles of
+#: a VTK output, a volume's outer surface or a vertical slice stay from output to
+#: output: adding the normals up with the matrix takes a tenth of the time of adding
+#: them corner by corner, which was most of the time such a frame took to read. A
+#: set seen once gets none (a surface read from a store makes its own triangles for
+#: every output: the matrix would cost more than it saves), and none is kept with
+#: memory use "low memory" or "streaming".
+_CORNERS: OrderedDict = OrderedDict()
+_CORNERS_LOCK = threading.Lock()
+#: at most so many bytes of matrices, and no matrix for fewer triangles than this
+CORNERS_BYTES = 256 << 20
+CORNERS_MIN = 20_000
+#: triangles from which the normals' three components are added up on three threads
+NORMALS_THREADED = 200_000
+
+
+def _rows_sample(triangles: np.ndarray) -> bytes:
+    """A few rows spread over the triangles: they tell a set changed in place."""
+    step = max(1, len(triangles) // 64)
+    return triangles[::step][:65].tobytes()
+
+
+def _corner_matrix(triangles: np.ndarray, n_points: int):
+    """The matrix that adds the triangles' normals up at their corners, for
+    triangles met before (see ``_CORNERS``); None: add them up corner by corner."""
+    if len(triangles) < CORNERS_MIN:
+        return None
+    from lagoonviz.core import memory
+
+    if not memory.current().keep_cells:  # low memory, streaming: nothing kept
+        return None
+    key = id(triangles)
+    sample = _rows_sample(triangles)
+    with _CORNERS_LOCK:
+        entry = _CORNERS.get(key)
+        known = (
+            entry is not None
+            and entry[0]() is triangles
+            and entry[1] == sample
+            and entry[2] == n_points
+        )
+        if known and entry[3] is not None:
+            _CORNERS.move_to_end(key)
+            return entry[3]
+        if not known:  # the first time: remembered, nothing made
+            try:
+                seen = weakref.ref(triangles)
+            except TypeError:
+                return None
+            _CORNERS[key] = [seen, sample, n_points, None, 0]
+            _CORNERS.move_to_end(key)
+            for other in [k for k, v in _CORNERS.items() if v[0]() is None]:
+                del _CORNERS[other]  # their triangles are gone
+            while len(_CORNERS) > 256:
+                _CORNERS.popitem(last=False)
+            return None
+    try:
+        from scipy.sparse import csr_matrix
+    except ImportError:  # SciPy is there with LAGOON; without it, corner by corner
+        return None
+    count = len(triangles)
+    if count >= 2**31 // 3 or n_points >= 2**31:
+        return None
+    rows = np.ascontiguousarray(triangles.T, dtype=np.int32).reshape(-1)
+    columns = np.tile(np.arange(count, dtype=np.int32), 3)
+    matrix = csr_matrix((np.ones(3 * count, np.float32), (rows, columns)), (n_points, count))
+    size = matrix.data.nbytes + matrix.indices.nbytes + matrix.indptr.nbytes
+    with _CORNERS_LOCK:
+        entry = _CORNERS.get(key)
+        if entry is not None and entry[0]() is triangles:
+            entry[3], entry[4] = matrix, size
+            _CORNERS.move_to_end(key)
+            while len(_CORNERS) > 1 and sum(v[4] for v in _CORNERS.values()) > CORNERS_BYTES:
+                _CORNERS.popitem(last=False)
+    return matrix
+
+
 def vertex_normals(positions: np.ndarray, triangles: np.ndarray) -> np.ndarray:
     """Area-weighted vertex normals, (n, 3) float32 and unit length."""
-    normals = np.zeros(positions.shape, np.float64)
-    if triangles.size:
-        tri = triangles.astype(np.intp, copy=False)
-        p = positions.astype(np.float32, copy=False)
-        p0 = p[tri[:, 0]]
-        face = np.cross(p[tri[:, 1]] - p0, p[tri[:, 2]] - p0)
-        n = positions.shape[0]
-        for c in range(3):
+    n = positions.shape[0]
+    if not triangles.size:
+        normals = np.zeros((n, 3), np.float32)
+        normals[:, 2] = 1.0
+        return normals
+    if triangles.dtype.kind not in "iu":
+        triangles = triangles.astype(np.intp)
+    p = positions.astype(np.float32, copy=False)
+    # (np.take: a third of the time of p[index] for rows of a 2D array)
+    p0 = np.take(p, triangles[:, 0], axis=0)
+    face = np.cross(
+        np.take(p, triangles[:, 1], axis=0) - p0, np.take(p, triangles[:, 2], axis=0) - p0
+    )
+    del p0
+    matrix = _corner_matrix(triangles, n)
+    if matrix is not None:
+        normals = matrix @ face  # single precision: each a sum of a few normals
+    else:
+        corners = [np.ascontiguousarray(triangles[:, c], dtype=np.intp) for c in range(3)]
+        normals = np.empty((n, 3), np.float64)
+
+        def add_up(c: int) -> None:
             weights = face[:, c]
-            normals[:, c] = (
-                np.bincount(tri[:, 0], weights, n)
-                + np.bincount(tri[:, 1], weights, n)
-                + np.bincount(tri[:, 2], weights, n)
-            )
-    length = np.linalg.norm(normals, axis=1, keepdims=True)
-    normals /= np.where(length > 0, length, 1.0)
-    normals[length[:, 0] == 0] = (0.0, 0.0, 1.0)
-    return normals.astype(np.float32)
+            total = np.bincount(corners[0], weights, n)
+            total += np.bincount(corners[1], weights, n)
+            total += np.bincount(corners[2], weights, n)
+            normals[:, c] = total
+
+        if len(triangles) >= NORMALS_THREADED and (os.cpu_count() or 1) > 1:
+            list(_pool().map(add_up, range(3)))  # x, y and z side by side
+        else:
+            for c in range(3):
+                add_up(c)
+    length = np.sqrt(np.einsum("ij,ij->i", normals, normals))
+    flat = length == 0
+    length[flat] = 1.0
+    normals /= length[:, None]
+    if flat.any():
+        normals[flat] = (0.0, 0.0, 1.0)
+    return normals.astype(np.float32, copy=False)
 
 
 # ----------------------------------------------------------------- slicing
@@ -765,10 +889,12 @@ class CutPlan:
             b = np.concatenate([b, self.line_b])
             weight = np.concatenate([weight, self.line_t])
         t = weight[:, None]
-        cut = points[a] + t * (points[b] - points[a])
+        pa = np.take(points, a, axis=0)
+        cut = pa + t * (np.take(points, b, axis=0) - pa)
+        del pa
         data = {}
         for name, values in point_data.items():
-            va, vb = values[a], values[b]
+            va, vb = np.take(values, a, axis=0), np.take(values, b, axis=0)
             data[name] = (va + (t if va.ndim == 2 else weight) * (vb - va)).astype(np.float32)
         outlines = None
         if self.line_a is not None:  # a slice: its grid lines (none in a piece it misses)
