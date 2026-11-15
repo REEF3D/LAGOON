@@ -428,21 +428,34 @@ class Dataset:
             raise ValueError(f"{self.label}: only volumes can be sliced")
         frame = self.frames[index]
         arrays = self._arrays(variables)
+        layout = self._cut_layout(index)
         parts = []
         for number, path in enumerate(frame.pieces):
             piece = self._piece(path, point_arrays=arrays, with_cells=False)
             _, connectivity, offsets, types = self._piece_cells(number, path, piece)
             # σ-grids move only vertically: an x or y plane cuts the same edges in every frame
-            key = (number, axis, float(position), piece.points.shape[0])
+            key = (number, axis, float(position), piece.points.shape[0], layout)
             plan = self._cuts.get(key) if axis in (0, 1) else None
             if plan is None:
                 plan = plan_cut(piece.points, connectivity, offsets, types, axis, position)
                 if axis in (0, 1):
-                    if len(self._cuts) > 64:  # positions dragged through: keep it small
+                    # positions dragged through: keep it small (a few planes' pieces)
+                    if len(self._cuts) > max(64, 4 * len(frame.pieces)):
                         self._cuts.clear()
                     self._cuts[key] = plan
             parts.append(plan.apply(piece.points, piece.point_data))
         return _joined(parts)
+
+    def _cuts_together(self, cuts: list[tuple]) -> list[tuple]:
+        """The pieces an iso-surface is cut from (:meth:`_iso_piece`), those that
+        are better cut as one put together: here each on its own (a volume with
+        refined blocks: its many small blocks as one)."""
+        return cuts
+
+    def _cut_layout(self, index: int):
+        """What the cells of a frame's pieces depend on besides the piece: nothing
+        here (a volume with refined blocks: where they lie)."""
+        return None
 
     def _iso_piece(
         self,
@@ -579,7 +592,8 @@ class Dataset:
             )
             if cut is not None:  # None: no level of the cut in this piece
                 cuts.append(cut)
-        parts = [_cut_piece(cut, variable, float(value), grid_lines) for cut in cuts]
+        together = self._cuts_together(cuts)
+        parts = [_cut_piece(cut, variable, float(value), grid_lines) for cut in together]
         surface = _joined(parts) if parts else _empty_surface()
         if side and surface.n_points:
             surface = self._water_side(frame, arrays, cuts, extra, surface)
@@ -605,6 +619,7 @@ class Dataset:
                 if (cut := self._iso_piece(number, path, "phi", 0.0, arrays, None)) is not None
             ]
         layers = []
+        cuts = self._cuts_together(cuts)
         for at in (depth, 2.0 * depth):
             parts = [_cut_piece(cut, "phi", at, False) for cut in cuts]
             layer = _joined(parts) if parts else None

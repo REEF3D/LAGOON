@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### CFD with mesh refinement: frames in a fraction of the time
+
+- A refinement that stays where it is (CFD's G 15 box round a structure) is
+  planned once: the outer surface of the volume with its blocks found its outer
+  faces again for every frame, and a slice cut every piece anew (the blocks'
+  files are each output's own, and the plans went by the files). With 64 blocks
+  in a volume of 1.1 million points the outer surface takes 0.4 s a frame
+  instead of 2.0 s, a slice 0.15 s instead of 0.55 s.
+- Many blocks: the time grew with the square of their number (every block asked
+  every other whether it is a neighbour, for every array, frame and item). With
+  1000 blocks the free surface takes 2.3 s a frame instead of 8 to 10 s, the
+  outer surface 1.3 s instead of 12 s, a slice 0.4 s instead of 8 s.
+- The blocks an iso-surface passes through are cut as one piece (a thousand
+  blocks were a thousand cuts, three times with the water-side colours), and
+  those it does not pass through are not made. The surface has the same points
+  and values; its triangles come in another order.
+- A block's values at its nodes are worked out once per frame and array,
+  whichever items show them (the free surface, a slice and the volume each made
+  all of their own), and the volume's cells under the blocks are found from the
+  cells near them only.
+- Blocks that move with the flow are cut anew as before (the outer surface 1.4 s
+  instead of 2.1 s, a slice 0.65 s instead of 1.25 s with 64 blocks).
+
 ### Slices: the water alone, the line of an iso-surface
 
 - *Water only* (slices of a CFD run): the slice only where the level set phi is 0

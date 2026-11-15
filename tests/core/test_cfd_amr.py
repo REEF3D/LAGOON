@@ -302,3 +302,121 @@ def test_the_blocks_meet_without_a_crack(tmp_path):
                 levels = list(np.linspace(values.min(), values.max(), 12)[1:-1])
                 lines = contour_segments(cut.points, cut.triangles, values, levels)
                 assert len(lines) and _loose_ends(lines, _in_cut) < 1e-5, (index, y, name)
+
+
+def test_a_refinement_that_stays_is_planned_once(tmp_path, monkeypatch):
+    """Blocks in the same places from output to output (their files are each
+    output's own): the outer surface's faces and a slice's cuts are found once,
+    not for every frame; blocks that move are planned anew."""
+    from lagoonviz.core.data import mesh, reef3d
+
+    root = cfd_amr_case(tmp_path)
+    volume = Session().data.open(root).datasets["cfd_volume"]
+    assert volume._layout(0) == volume._layout(1) == volume._layout(2)
+    built, cut = [], []
+    build, plan_cut = mesh.VolumePlan.build, reef3d.plan_cut
+    monkeypatch.setattr(
+        mesh.VolumePlan, "build", staticmethod(lambda pieces: built.append(1) or build(pieces))
+    )
+    monkeypatch.setattr(reef3d, "plan_cut", lambda *a: cut.append(1) or plan_cut(*a))
+    outside = [volume.read(frame, ["velocity"]) for frame in (0, 1, 2)]
+    assert len(built) == 1 and outside[1].triangles is outside[0].triangles
+    slices = [volume.read_slice(frame, 1, 2.0, ["level"]) for frame in (0, 1, 2, 0)]
+    assert len(cut) == len(volume.frames[0].pieces)  # each piece once
+    assert slices[3].n_points == slices[0].n_points
+    # a block moved in output 1: another layout, its own plans (and not the others')
+    moved = [BLOCKS[0], (2, (3.0, 4.0), (1.5, 2.5), (1.5, 2.25), (4, 4, 2))]
+    other = cfd_amr_case(tmp_path / "moved")
+    amr = other / "REEF3D_CFD_AMR"
+    level, xr, yr, zr, cells = moved[1]
+    write_block(amr / "REEF3D-CFD-AMR-00000001-00001.vtr", level, xr, yr, zr, cells, 1)
+    write_block(amr / "REEF3D-CFD-AMR-00000001-00000.vtr", *BLOCKS[0], 1, (xr, yr, zr))
+    volume = Session().data.open(other).datasets["cfd_volume"]
+    assert volume._layout(0) == volume._layout(2) != volume._layout(1)
+    built.clear()
+    surfaces = [volume.read(frame, ["level"]) for frame in (0, 1, 2)]
+    assert len(built) == 2 and surfaces[2].triangles is surfaces[0].triangles
+    cuts = [volume.read_slice(frame, 1, 2.0, ["level"]) for frame in (0, 1, 2)]
+    inner = [c.points[c.point_data["level"] == 2][:, 0] for c in cuts]
+    assert inner[0].min() < 2.6 and inner[1].min() > 2.99 and inner[2].min() < 2.6
+
+
+def test_the_blocks_are_cut_as_one(tmp_path, monkeypatch):
+    """The blocks an iso-surface passes through are cut together (a thousand
+    blocks were a thousand cuts), those it does not pass through not at all: the
+    same points with the same values, the same triangles in another order."""
+    from lagoonviz.core.data.amr3d import RefinedVolume
+    from lagoonviz.core.data.reef3d import Dataset
+
+    root = cfd_amr_case(tmp_path)
+    volume = Session().data.open(root).datasets["cfd_volume"]
+
+    def by_rows(triangles):
+        return triangles[np.lexsort(triangles.T[::-1])]
+
+    for options in ({}, {"water_side": True}, {"grid_lines": True}):
+        names = ["velocity", "level"]
+        together = volume.read_iso(1, "phi", 0.0, names, **{"grid_lines": False, **options})
+        with monkeypatch.context() as each:  # every block on its own, as before
+            each.setattr(RefinedVolume, "_cuts_together", Dataset._cuts_together)
+            alone = volume.read_iso(1, "phi", 0.0, names, **{"grid_lines": False, **options})
+        np.testing.assert_array_equal(together.points, alone.points)
+        for name in alone.point_data:
+            np.testing.assert_array_equal(together.point_data[name], alone.point_data[name])
+        np.testing.assert_array_equal(by_rows(together.triangles), by_rows(alone.triangles))
+        np.testing.assert_allclose(together.normals, alone.normals, atol=1e-6)
+        if options.get("grid_lines"):
+            np.testing.assert_array_equal(by_rows(together.outlines), by_rows(alone.outlines))
+    # a level no block reaches (phi = 2: a metre under the blocks): none made
+    made = []
+    piece = RefinedVolume._piece
+    monkeypatch.setattr(
+        RefinedVolume,
+        "_piece",
+        lambda self, path, *a, **k: made.append(path) or piece(self, path, *a, **k),
+    )
+    deep = volume.read_iso(1, "phi", 1.9, ["level"], grid_lines=False)
+    assert deep.n_triangles and set(np.unique(deep.point_data["level"])) == {0.0}
+    assert not [path for path in made if path in volume._block_keys]
+
+
+def test_cells_under_blocks_and_seams_per_array(tmp_path):
+    """The volume's cells under the blocks are found from the cells near them (as
+    asking every cell for every block finds them), and a block's node values are
+    worked out once per frame and array, whichever arrays are asked for together."""
+    from lagoonviz.core.data import amr3d
+
+    root = cfd_amr_case(tmp_path)
+    volume = Session().data.open(root).datasets["cfd_volume"]
+    piece = volume.base._piece(volume.base.frames[0].pieces[0], point_arrays=[])
+    boxes = [volume.blocks.box(key) for key in volume.amr_blocks(0)]
+    kept = amr3d._without_covered(piece, boxes)
+    cells = piece.connectivity.reshape(-1, 8)
+    centres = piece.points[cells].mean(axis=1)
+    inside = np.zeros(len(cells), bool)
+    for x0, x1, y0, y1, z0, z1 in boxes:
+        inside |= (
+            (centres[:, 0] > x0) & (centres[:, 0] < x1) & (centres[:, 1] > y0)
+            & (centres[:, 1] < y1) & (centres[:, 2] > z0) & (centres[:, 2] < z1)
+        )  # fmt: skip
+    assert inside.any() and not inside.all()
+    np.testing.assert_array_equal(kept.connectivity, cells[~inside].ravel())
+    assert amr3d._without_covered(piece, []) is piece
+    made = []
+    seamless = amr3d.seamless_nodes
+
+    def amr3d_seamless(blocks, names, lattice=None):
+        made.append(list(names))
+        return seamless(blocks, names, lattice)
+
+    try:
+        amr3d.seamless_nodes = amr3d_seamless
+        both = volume._seamless(1, ["phi", "velocity"])
+        one = volume._seamless(1, ["velocity"])
+        more = volume._seamless(1, ["velocity", "phi", "level"])
+    finally:
+        amr3d.seamless_nodes = seamless
+    assert made == [["phi", "velocity"]]
+    block = volume.amr_blocks(1)[0]
+    assert one[block]["velocity"] is both[block]["velocity"] is more[block]["velocity"]
+    assert set(one[block]) == {"velocity"} and set(more[block]) == {"phi", "velocity"}

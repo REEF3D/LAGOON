@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 import numpy as np
@@ -59,8 +60,9 @@ class Block:
             float(self.z[-1]),
         )
 
-    @property
+    @cached_property
     def level(self) -> int:
+        # (once: asked for many times per block and frame, each time over its cells)
         level = self.cells.get("level")
         return int(round(float(np.nanmax(level)))) if level is not None and level.size else 0
 
@@ -134,6 +136,45 @@ def _nodes(cells: np.ndarray) -> np.ndarray:
     return out / 8.0
 
 
+#: the cells of blocks by their size and which of them a finer block covers:
+#: (connectivity, offsets, types), read-only. A run has blocks of a few sizes, the
+#: same from output to output: they were made again for every block of every frame,
+#: twice (once to cut it, once for its points).
+_BLOCK_CELLS: dict[tuple, tuple] = {}
+_BLOCK_CELLS_LOCK = threading.Lock()
+BLOCK_CELLS_BYTES = 256 << 20
+
+
+def block_cells(nz: int, ny: int, nx: int, covered: np.ndarray | None = None) -> tuple:
+    """The cells of a block of nz x ny x nx cells no finer block covers, as a
+    piece's (connectivity, offsets, types); kept (see ``_BLOCK_CELLS``)."""
+    hidden = None
+    if covered is not None:
+        hidden = np.asarray(covered).ravel() >= 0.5
+        if not hidden.any():
+            hidden = None
+    key = (nz, ny, nx, None if hidden is None else hash(np.packbits(hidden).tobytes()))
+    with _BLOCK_CELLS_LOCK:
+        found = _BLOCK_CELLS.get(key)
+    if found is not None:
+        return found[:3]
+    cells = _hexahedra(nz, ny, nx)
+    if hidden is not None:
+        cells = cells[~hidden]
+    connectivity = np.ascontiguousarray(cells, dtype=np.int64).reshape(-1)
+    offsets = (np.arange(1, len(cells) + 1) * 8).astype(np.int64)
+    types = np.full(len(cells), 12, np.uint8)  # VTK_HEXAHEDRON
+    for array in (connectivity, offsets, types):
+        array.flags.writeable = False
+    size = connectivity.nbytes + offsets.nbytes + types.nbytes
+    with _BLOCK_CELLS_LOCK:
+        total = sum(v[3] for v in _BLOCK_CELLS.values())
+        while _BLOCK_CELLS and total + size > BLOCK_CELLS_BYTES:
+            total -= _BLOCK_CELLS.pop(next(iter(_BLOCK_CELLS)))[3]
+        _BLOCK_CELLS[key] = (connectivity, offsets, types, size)
+    return connectivity, offsets, types
+
+
 def _hexahedra(nz: int, ny: int, nx: int) -> np.ndarray:
     """The cells (nz * ny * nx, 8) of a block, its nodes ordered z, y, x (x fastest),
     in VTK's cell order (x fastest)."""
@@ -185,13 +226,7 @@ def block_piece(
     if not with_cells:
         empty = np.zeros(0, np.int64)
         return Piece("UnstructuredGrid", points, empty, empty, np.zeros(0, np.uint8), data)
-    cells = _hexahedra(nz, ny, nx)
-    covered = block.cells.get("covered")
-    if covered is not None:
-        cells = cells[np.asarray(covered).ravel() < 0.5]
-    connectivity = cells.ravel().astype(np.int64)
-    offsets = (np.arange(1, len(cells) + 1) * 8).astype(np.int64)
-    types = np.full(len(cells), 12, np.uint8)  # VTK_HEXAHEDRON
+    connectivity, offsets, types = block_cells(nz, ny, nx, block.cells.get("covered"))
     return Piece("UnstructuredGrid", points, connectivity, offsets, types, data)
 
 
@@ -200,17 +235,15 @@ def block_piece(
 _EIGHT = [(dz, dy, dx) for dz in (0, 1) for dy in (0, 1) for dx in (0, 1)]
 
 
-def _simplex(x, y, z, values: np.ndarray, px, py, pz) -> np.ndarray:
-    """Values on a node lattice (len(z), len(y), len(x)[, c]) at points, linear in
-    each of the six tetrahedra a cell is cut into (as :func:`plan_level` cuts a
-    hexahedron: round its diagonal from the lowest to the highest corner). A finer
-    block's face takes so exactly the values the coarser cells' cut has there, and
-    the two meet without a crack."""
+def _simplex_plan(x, y, z, px, py, pz) -> tuple:
+    """Where points lie in a node lattice (len(z), len(y), len(x)) for
+    :func:`_simplex`: the four corners of each point's tetrahedron (k, j, i) and
+    their weights. The same for every array on the lattice: found once."""
     index, fraction = [], []
     for axis, p in zip((x, y, z), (px, py, pz), strict=True):
         axis = np.asarray(axis, np.float64)
-        i = np.clip(np.searchsorted(axis, p, "right") - 1, 0, len(axis) - 2)
-        f = np.clip((p - axis[i]) / (axis[i + 1] - axis[i]), 0.0, 1.0)
+        i = np.minimum(np.maximum(np.searchsorted(axis, p, "right") - 1, 0), len(axis) - 2)
+        f = np.minimum(np.maximum((p - axis[i]) / (axis[i + 1] - axis[i]), 0.0), 1.0)
         index.append(i)
         fraction.append(f)
     f = np.stack(fraction, axis=1)
@@ -219,14 +252,31 @@ def _simplex(x, y, z, values: np.ndarray, px, py, pz) -> np.ndarray:
     weights = (1.0 - fs[:, 0], fs[:, 0] - fs[:, 1], fs[:, 1] - fs[:, 2], fs[:, 2])
     corner = np.zeros((len(f), 3), np.int64)
     rows = np.arange(len(f))
-    out = None
-    for step, w in enumerate(weights):
+    corners = []
+    for step in range(4):
         if step:
             corner[rows, order[:, step - 1]] = 1
-        v = values[index[2] + corner[:, 2], index[1] + corner[:, 1], index[0] + corner[:, 0]]
+        corners.append((index[2] + corner[:, 2], index[1] + corner[:, 1], index[0] + corner[:, 0]))
+    return corners, weights
+
+
+def _simplex_values(plan: tuple, values: np.ndarray) -> np.ndarray:
+    """The values of a lattice (nz, ny, nx[, c]) at the points of a plan."""
+    out = None
+    for (k, j, i), w in zip(*plan, strict=True):
+        v = values[k, j, i]
         part = (w[:, None] if v.ndim == 2 else w) * v.astype(np.float64)
         out = part if out is None else out + part
     return out.astype(np.float32)
+
+
+def _simplex(x, y, z, values: np.ndarray, px, py, pz) -> np.ndarray:
+    """Values on a node lattice (len(z), len(y), len(x)[, c]) at points, linear in
+    each of the six tetrahedra a cell is cut into (as :func:`plan_level` cuts a
+    hexahedron: round its diagonal from the lowest to the highest corner). A finer
+    block's face takes so exactly the values the coarser cells' cut has there, and
+    the two meet without a crack."""
+    return _simplex_values(_simplex_plan(x, y, z, px, py, pz), values)
 
 
 #: where a run's volume nodes lie on its lattice, by the pieces' points (see
@@ -286,14 +336,6 @@ def volume_lattice(pieces: list[Piece], names: list[str]):
     return axes[0], axes[1], axes[2], arrays
 
 
-def _touch(a: tuple, b: tuple, reach: tuple) -> bool:
-    """Whether box ``b`` reaches into box ``a`` widened by ``reach`` (dx, dy, dz)."""
-    return all(
-        b[2 * d + 1] >= a[2 * d] - reach[d] and b[2 * d] <= a[2 * d + 1] + reach[d]
-        for d in range(3)
-    )
-
-
 def _centres(edges: np.ndarray) -> np.ndarray:
     """Cell centres of a lattice and of one cell beyond each end."""
     e = np.asarray(edges, np.float64)
@@ -303,18 +345,33 @@ def _centres(edges: np.ndarray) -> np.ndarray:
 
 def _padded(cells: np.ndarray) -> np.ndarray:
     """Cells (nz, ny, nx[, c]) with a layer beyond each face, carried on linearly."""
-    padded = np.asarray(cells, np.float32)
-    for axis in range(3):
-        n = padded.shape[axis]
-        first = np.take(padded, [0], axis=axis)
-        last = np.take(padded, [n - 1], axis=axis)
+    cells = np.asarray(cells, np.float32)
+    nz, ny, nx = cells.shape[:3]
+    padded = np.empty((nz + 2, ny + 2, nx + 2, *cells.shape[3:]), np.float32)
+    padded[1:-1, 1:-1, 1:-1] = cells
+    # axis by axis, each over what the axes before it added (one array filled in
+    # place: taking and joining slices was a tenth of the time of the blocks' seams)
+    for axis, n in enumerate((nz, ny, nx)):
+        inner = tuple(slice(None) if d < axis else slice(1, -1) for d in range(axis + 1, 3))
+        before = (slice(None),) * axis
+
+        def at(i, before=before, inner=inner):
+            return (*before, i, *inner)
+
         if n > 1:
-            before = 2.0 * first - np.take(padded, [1], axis=axis)
-            after = 2.0 * last - np.take(padded, [n - 2], axis=axis)
+            padded[at(0)] = 2.0 * padded[at(1)] - padded[at(2)]
+            padded[at(n + 1)] = 2.0 * padded[at(n)] - padded[at(n - 1)]
         else:
-            before, after = first, last
-        padded = np.concatenate([before, padded, after], axis=axis)
+            padded[at(0)] = padded[at(1)]
+            padded[at(n + 1)] = padded[at(n)]
     return padded
+
+
+def _cell_of(edges: np.ndarray, at: np.ndarray) -> np.ndarray:
+    """The cell of a lattice (its ``edges``) each of ``at`` lies in, the first or
+    the last for those beyond."""
+    cell = np.searchsorted(edges, at, "right") - 1
+    return np.minimum(np.maximum(cell, 0), len(edges) - 2)
 
 
 def seamless_nodes(blocks: list[Block], names: list[str], lattice=None) -> dict[Path, dict]:
@@ -333,16 +390,24 @@ def seamless_nodes(blocks: list[Block], names: list[str], lattice=None) -> dict[
     values. Returns block path -> {name: (nz + 1, ny + 1, nx + 1[, c])}."""
     order = sorted(range(len(blocks)), key=lambda n: blocks[n].level)
     boxes = [b.box for b in blocks]
+    levels = np.array([b.level for b in blocks], np.int64)
+    lows = np.array([b[0::2] for b in boxes], np.float64).reshape(-1, 3)
+    highs = np.array([b[1::2] for b in boxes], np.float64).reshape(-1, 3)
     done: dict[int, dict[str, np.ndarray]] = {}
     for n in order:
         block = blocks[n]
         level = block.level
-        reach = tuple(float(max(a[1] - a[0], a[-1] - a[-2])) for a in (block.x, block.y, block.z))
-        near = [m for m in range(len(blocks)) if m != n and _touch(boxes[n], boxes[m], reach)]
-        same = [m for m in near if blocks[m].level == level]
-        coarser = sorted(
-            (m for m in near if blocks[m].level < level), key=lambda m: -blocks[m].level
+        reach = np.array(
+            [float(max(a[1] - a[0], a[-1] - a[-2])) for a in (block.x, block.y, block.z)]
         )
+        # the blocks that reach into this one widened by a cell (all at once: asking
+        # block by block made a thousand blocks a million questions per frame)
+        touching = ((highs >= lows[n] - reach) & (lows <= highs[n] + reach)).all(axis=1)
+        touching[n] = False
+        near = np.flatnonzero(touching)
+        same = [int(m) for m in near[levels[near] == level]]
+        coarser = [int(m) for m in near[levels[near] < level]]
+        coarser.sort(key=lambda m: -levels[m])
         own = [name for name in names if name in block.cells]
         nz, ny, nx = (len(a) - 1 for a in (block.z, block.y, block.x))
         xc, yc, zc = _centres(block.x), _centres(block.y), _centres(block.z)
@@ -359,9 +424,10 @@ def seamless_nodes(blocks: list[Block], names: list[str], lattice=None) -> dict[
             if not take.any():
                 continue
             kk, jj, ii = np.nonzero(take)
-            oi = np.clip(np.searchsorted(ox, xc[ii], "right") - 1, 0, len(ox) - 2)
-            oj = np.clip(np.searchsorted(oy, yc[jj], "right") - 1, 0, len(oy) - 2)
-            ok = np.clip(np.searchsorted(oz, zc[kk], "right") - 1, 0, len(oz) - 2)
+            # (the other block's cell along each axis first, then for each cell)
+            oi = _cell_of(ox, xc)[ii]
+            oj = _cell_of(oy, yc)[jj]
+            ok = _cell_of(oz, zc)[kk]
             for name in own:
                 if name in other.cells:
                     padded[name][kk, jj, ii] = np.asarray(other.cells[name])[ok, oj, oi]
@@ -387,18 +453,22 @@ def seamless_nodes(blocks: list[Block], names: list[str], lattice=None) -> dict[
                 if not at.any():
                     continue
                 other = blocks[m]
+                # (where the nodes lie in the coarser block: once for all arrays)
+                plan = _simplex_plan(other.x, other.y, other.z, px[at], py[at], pz[at])
+                ka, ja, ia = kk[at], jj[at], ii[at]
                 for name in own:
                     if name in done[m]:
-                        nodes[name][kk[at], jj[at], ii[at]] = _simplex(
-                            other.x, other.y, other.z, done[m][name], px[at], py[at], pz[at]
-                        )
+                        nodes[name][ka, ja, ia] = _simplex_values(plan, done[m][name])
                 open_ &= ~at
             if lattice is not None and open_.any():
                 lx, ly, lz, arrays = lattice
+                plan = None
                 for name in own:
                     if name not in arrays:
                         continue
-                    found = _simplex(lx, ly, lz, arrays[name], px[open_], py[open_], pz[open_])
+                    if plan is None:
+                        plan = _simplex_plan(lx, ly, lz, px[open_], py[open_], pz[open_])
+                    found = _simplex_values(plan, arrays[name])
                     good = np.isfinite(found).reshape(len(found), -1).all(axis=1)
                     sel = np.flatnonzero(open_)[good]
                     nodes[name][kk[sel], jj[sel], ii[sel]] = found[good]
@@ -600,6 +670,9 @@ class RefinedVolume(Dataset):
         self._plans: dict[tuple, VolumePlan] = {}
         self._own_cells: dict[tuple, tuple] = {}
         self._seams: dict[tuple, dict] = {}
+        self._seam_arrays: dict[tuple, dict] = {}  # (frame, array) -> block -> nodes
+        self._layouts: dict[int, int] = {}  # frame -> its layout (see _layout)
+        self._layout_of: dict[tuple, int] = {}
         self._amr_lock = threading.Lock()
         frames = []
         for index, frame in enumerate(base.frames):
@@ -634,27 +707,62 @@ class RefinedVolume(Dataset):
         """The refined blocks of a frame."""
         return self._frame_blocks[index]
 
+    def _layout(self, index: int) -> int:
+        """Which blocks a frame has, as a number: the same for frames whose blocks
+        have the same levels and lie in the same places, one after the other (a
+        refinement that stays, CFD's G 15 box: every output). What is planned for
+        the cells of one such frame (the outer surface, the cuts of a slice) holds
+        for the others."""
+        with self._amr_lock:
+            known = self._layouts.get(index)
+        if known is not None:
+            return known
+        where = tuple(
+            (self.blocks.level(key), *(round(v, 9) for v in self.blocks.box(key)))
+            for key in self.amr_blocks(index)
+        )
+        with self._amr_lock:
+            return self._layouts.setdefault(
+                index, self._layout_of.setdefault(where, len(self._layout_of))
+            )
+
     def _seamless(self, index: int, names: list[str]) -> dict[Path, dict]:
         """The node values of a frame's blocks, alike on both sides of their faces
-        (:func:`seamless_nodes`), kept for the frames being looked at."""
+        (:func:`seamless_nodes`), kept for the frames being looked at. Each array is
+        worked out once per frame, whichever items ask for it (the free surface, a
+        slice and the volume ask for different ones: each made all of its own)."""
         names = sorted(n for n in names if n not in ("level", "elevation"))
         key = (index, tuple(names))
         with self._amr_lock:
             found = self._seams.get(key)
+            missing = [n for n in names if (index, n) not in self._seam_arrays]
         if found is not None:
             return found
-        found = {}
-        if names:
+        made = {}
+        if missing:
             keys = self.amr_blocks(index)
             blocks = [self.blocks.block(k) for k in keys]
-            wanted = [n for n in names if n in self.base.components]
+            wanted = [n for n in missing if n in self.base.components]
             pieces = [self._near_piece(p, blocks, wanted) for p in self.base.frames[index].pieces]
-            found = seamless_nodes(blocks, names, volume_lattice(pieces, wanted))
+            nodes = seamless_nodes(blocks, missing, volume_lattice(pieces, wanted))
+            made = {
+                name: {path: of[name] for path, of in nodes.items() if name in of}
+                for name in missing
+            }
         with self._amr_lock:
             for old in [k for k in self._seams if k[0] < index - 2 or k[0] > index + 2]:
                 del self._seams[old]
+            for old in [k for k in self._seam_arrays if k[0] < index - 2 or k[0] > index + 2]:
+                del self._seam_arrays[old]
             if len(self._seams) > 16:
                 self._seams.clear()
+            for name, of in made.items():
+                self._seam_arrays.setdefault((index, name), of)
+            arrays = {name: self._seam_arrays.get((index, name), {}) for name in names}
+            found = {}
+            if names:
+                for path in self.amr_blocks(index):
+                    found[path] = {n: of[path] for n, of in arrays.items() if path in of}
             self._seams[key] = found
         return found
 
@@ -712,13 +820,14 @@ class RefinedVolume(Dataset):
         stays (CFD's G 15 box around a structure) has the same cells in every output,
         and finding the covered ones took a third of each iso-surface (the free
         surface, as the run plays)."""
-        index = self._frame_of.get(path, -1)
         if path in self._block_keys:  # a refined block itself: its own cells
-            key = (number, path)
-        else:
-            files = self.amr_blocks(index) if index >= 0 else []
-            boxes = tuple(tuple(round(v, 9) for v in self.blocks.box(f)) for f in files)
-            key = (number, piece.points.shape[0], boxes)
+            block = self.blocks.block(path)
+            nz, ny, nx = len(block.z) - 1, len(block.y) - 1, len(block.x) - 1
+            return (piece.points.shape[0], *block_cells(nz, ny, nx, block.cells.get("covered")))
+        index = self._frame_of.get(path, -1)
+        files = self.amr_blocks(index) if index >= 0 else []
+        boxes = tuple(tuple(round(v, 9) for v in self.blocks.box(f)) for f in files)
+        key = (number, piece.points.shape[0], boxes)
         with self._amr_lock:
             cells = self._own_cells.get(key)
         if cells is None or cells[0] != piece.points.shape[0]:
@@ -750,7 +859,17 @@ class RefinedVolume(Dataset):
         as their dataset gives them (a store's: only the levels the iso-surfaces pass
         through), without the cells under the frame's blocks."""
         if path in self._block_keys:
-            return super()._iso_piece(number, path, variable, value, arrays, extra)
+            # a block none of the iso-surfaces passes through (most blocks of a
+            # refinement many cells high): not made
+            seams = self._seamless(self._block_frame[path], list(arrays))
+            nodes = seams.get(path, {}).get(variable.partition(".")[0])
+            if extra is not None and nodes is not None and nodes.ndim == 3 and nodes.size:
+                low, high = float(np.nanmin(nodes)), float(np.nanmax(nodes))
+                if high <= value or low > value + extra:  # (nothing known: NaN, kept)
+                    return None
+            piece = self._piece(path, point_arrays=arrays)  # once: points and cells
+            piece.block = True
+            return piece, piece.connectivity, piece.offsets, piece.types
         own = [n for n in arrays if n != "level"]
         cut = self.base._iso_piece(number, path, variable, value, own, extra, near)
         if cut is None:
@@ -776,6 +895,49 @@ class RefinedVolume(Dataset):
                 self._own_cells[key] = cells
         return (piece, *cells)
 
+    def _cuts_together(self, cuts: list[tuple]) -> list[tuple]:
+        """The blocks among the pieces as one piece (their points and cells one
+        after the other, where the first block stood): an iso-surface is cut from
+        them at once. A refinement of a thousand blocks was a thousand small cuts
+        per iso-surface, three with the water-side colours, most of their time
+        spent getting each started. The points and their values are those of the
+        blocks cut one by one, in the same order; the triangles come in another."""
+        blocks = [n for n, cut in enumerate(cuts) if getattr(cut[0], "block", False)]
+        if len(blocks) < 2:
+            return cuts
+        pieces = [cuts[n][0] for n in blocks]
+        starts = np.cumsum([0] + [len(piece.points) for piece in pieces])
+        names = set.intersection(*(set(piece.point_data) for piece in pieces))
+        connectivity = np.concatenate(
+            [
+                cuts[n][1].astype(np.int64, copy=False) + start
+                for n, start in zip(blocks, starts[:-1], strict=True)
+            ]
+        )
+        ends = np.cumsum([0] + [len(cuts[n][1]) for n in blocks])
+        offsets = np.concatenate(
+            [
+                cuts[n][2].astype(np.int64, copy=False) + end
+                for n, end in zip(blocks, ends[:-1], strict=True)
+            ]
+        )
+        types = np.concatenate([cuts[n][3] for n in blocks])
+        one = Piece(
+            pieces[0].kind,
+            np.concatenate([piece.points for piece in pieces]),
+            connectivity,
+            offsets,
+            types,
+            {name: np.concatenate([piece.point_data[name] for piece in pieces]) for name in names},
+        )
+        first = blocks[0]
+        rest = set(blocks[1:])
+        return [
+            (one, connectivity, offsets, types) if n == first else cut
+            for n, cut in enumerate(cuts)
+            if n not in rest
+        ]
+
     def _water_margin(self) -> float | None:
         return self.base._water_margin()  # the volume's cells are the coarsest
 
@@ -785,7 +947,9 @@ class RefinedVolume(Dataset):
         frame = self.frames[index]
         arrays = self._arrays(variables)
         light = [self._piece(p, point_arrays=arrays, with_cells=False) for p in frame.pieces]
-        key = tuple(str(p) for p in self.amr_blocks(index)) or ("",)
+        # by where the blocks lie, not by their files (each output's own): the outer
+        # faces were found again for every frame, most of its time
+        key = (self._layout(index),)
         with self._lock:
             plan = self._plans.get(key)
             if plan is None or not plan.accepts(light):
@@ -802,9 +966,8 @@ class RefinedVolume(Dataset):
         )
         return mesh.with_normals()
 
-    def read_slice(self, index, axis, position, variables=None) -> SurfaceMesh:
-        self._cuts.clear()  # the cells change with the blocks: cut anew
-        return super().read_slice(index, axis, position, variables)
+    def _cut_layout(self, index: int):
+        return self._layout(index)  # the cells change with the blocks: their cuts too
 
     def read_values(self, index: int, variable: str):
         return self.base.read_values(index, variable)
@@ -834,17 +997,30 @@ def _without_covered(piece: Piece, boxes: list[tuple]) -> Piece:
     if not count or piece.connectivity.size != 8 * count:  # hexahedra only
         return piece
     cells = piece.connectivity.reshape(-1, 8)
-    centres = piece.points[cells].mean(axis=1)
+    if not boxes:
+        return piece
+    # the centres, corner by corner (np.take: a fraction of the time of
+    # points[cells].mean(axis=1)), and only the cells in the box round all blocks
+    # asked block by block: most of a piece lies far from any (with some dozen
+    # blocks this was the largest part of a frame)
+    points = np.asarray(piece.points, np.float32)
+    centres = np.take(points, cells[:, 0], axis=0)
+    for corner in range(1, 8):
+        centres += np.take(points, cells[:, corner], axis=0)
+    centres /= np.float32(8.0)
+    low = [min(b[2 * d] for b in boxes) for d in range(3)]
+    high = [max(b[2 * d + 1] for b in boxes) for d in range(3)]
+    near = np.ones(len(cells), bool)
+    for d in range(3):
+        near &= (centres[:, d] > low[d]) & (centres[:, d] < high[d])
+    which = np.flatnonzero(near)
     inside = np.zeros(len(cells), bool)
-    for x0, x1, y0, y1, z0, z1 in boxes:
-        inside |= (
-            (centres[:, 0] > x0)
-            & (centres[:, 0] < x1)
-            & (centres[:, 1] > y0)
-            & (centres[:, 1] < y1)
-            & (centres[:, 2] > z0)
-            & (centres[:, 2] < z1)
-        )
+    if which.size:
+        cx, cy, cz = (centres[which, d] for d in range(3))
+        within = np.zeros(which.size, bool)
+        for x0, x1, y0, y1, z0, z1 in boxes:
+            within |= (cx > x0) & (cx < x1) & (cy > y0) & (cy < y1) & (cz > z0) & (cz < z1)
+        inside[which[within]] = True
     if not inside.any():
         return piece
     kept = cells[~inside]
