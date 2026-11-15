@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### CFD mesh refinement: the refined free surface with P 180 too
+
+- Fixed: a CFD run with mesh refinement that also wrote its free surface
+  (`P 180 1`) opened with that surface, which REEF3D makes from the level set on
+  level 0 alone: the refined cells did not show on the free surface. It opens
+  with the free surface cut from the refined volume now (*Free surface*, finer
+  where the blocks are); the P 180 surface is in the scene, switched off, as
+  *Free surface (level 0)*.
+
 ### CFD with mesh refinement: frames in a fraction of the time
 
 - A refinement that stays where it is (CFD's G 15 box round a structure) is

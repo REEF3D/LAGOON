@@ -139,6 +139,10 @@ class Session:
         for message in case.skipped:  # outputs that do not read: said in the console
             self._log(f"# {message}")
         children = []
+        # CFD with mesh refinement: the free surface REEF3D writes (P 180) is the level
+        # set's zero on level 0 alone; the iso-surface of the refined volume has the
+        # refined cells (shown instead, the P 180 surface there, switched off)
+        refined = _refined_cfd_volume(case)
         for role, dataset in case.main_datasets().items():
             kind = ROLES[role]
             props: dict[str, Any] = {}
@@ -161,6 +165,20 @@ class Session:
                     props["vectors_of"] = "wave_direction"
             if kind == "amr_blocks":  # there, switched off: a tick shows them
                 children.append(AddItem(kind, None, props, visible=False))
+                continue
+            if (
+                role == "free_surface"
+                and refined is not None
+                and dataset.solver == refined.solver
+                and dataset.same_run_as(refined)
+            ):
+                children.append(AddItem(kind, "Free surface (level 0)", props, visible=False))
+                free = {"iso_by": "phi", "iso_value": 0.0}
+                if sum(d.role == "volume" for d in case.datasets.values()) > 1:
+                    free["dataset"] = refined.key
+                if "velocity" in refined.components:
+                    free["variable"] = "velocity"
+                children.append(AddItem("iso_surface", "Free surface", free))
                 continue
             if kind == "volume" and "phi" in dataset.components:
                 # CFD: its free surface, the level set phi at 0; the volume switched off
@@ -3545,3 +3563,16 @@ def _window(times, values, t0: float, t1: float):
     inside = (times > t0) & (times < t1)
     t = np.concatenate([[t0], times[inside], [t1]])
     return t, np.interp(t, times, values)
+
+
+def _refined_cfd_volume(case):
+    """The volume of a case's CFD run with mesh refinement (its refined blocks, the
+    level set phi), whose free surface is cut from it; None for others."""
+    volume = case.main_volume()
+    if volume is None:
+        volume = case.main_datasets().get("volume")
+    if volume is None or volume.solver != "CFD" or "phi" not in volume.components:
+        return None
+    from lagoonviz.core.data.amr3d import RefinedVolume
+
+    return volume if isinstance(volume, RefinedVolume) else None

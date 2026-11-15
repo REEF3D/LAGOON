@@ -72,7 +72,10 @@ across it. The free surface, slices,
 iso-surfaces and iso-volumes are then as fine as the refinement, e.g. around a
 floating body; *Colour by* `level` shows where (0: the volume's own cells), and the
 free surface's *Grid lines* (dark or white) draw where it crosses the cells' faces,
-of every level. The item **AMR blocks** (in the scene, switched off) draws the outlines of the blocks,
+of every level. A run that also writes its free surface (`P 180`) gets it cut from
+the volume all the same: REEF3D's `P 180` surface is the level set's zero on the
+volume's own cells (level 0) alone; it is in the scene too, *Free surface (level 0)*,
+switched off. The item **AMR blocks** (in the scene, switched off) draws the outlines of the blocks,
 coloured by their level. Only the blocks an output's index lists are read: a file
 left over from an earlier run is not. Streamlines and time series at a point come
 from the volume's own cells.

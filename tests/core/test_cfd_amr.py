@@ -65,9 +65,11 @@ def _union(ranges):
     return tuple((min(r[d][0] for r in ranges), max(r[d][1] for r in ranges)) for d in range(3))
 
 
-def cfd_amr_case(tmp_path, frames=3, refined=(0, 1, 2), blocks=BLOCKS):
+def cfd_amr_case(tmp_path, frames=3, refined=(0, 1, 2), blocks=BLOCKS, keep_free_surface=False):
     root = make_run(tmp_path / "cfd", solver="CFD", frames=frames, print_interval=0.5)
     for name in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):
+        if name.endswith("FSF") and keep_free_surface:  # as with P 180
+            continue
         shutil.rmtree(root / name)
     amr = root / "REEF3D_CFD_AMR"
     amr.mkdir()
@@ -420,3 +422,39 @@ def test_cells_under_blocks_and_seams_per_array(tmp_path):
     block = volume.amr_blocks(1)[0]
     assert one[block]["velocity"] is both[block]["velocity"] is more[block]["velocity"]
     assert set(one[block]) == {"velocity"} and set(more[block]) == {"phi", "velocity"}
+
+
+def test_with_refinement_the_free_surface_is_the_refined_one(tmp_path):
+    """A CFD run with mesh refinement that also writes its free surface (P 180): that
+    surface is the level set's zero on level 0 alone, so the free surface shown is the
+    iso-surface of the refined volume (finer where the blocks are); the P 180 surface
+    is there, switched off. The same from the LAGOON store."""
+    from lagoonviz.core.convert import convert
+
+    root = cfd_amr_case(tmp_path, keep_free_surface=True)
+    for opened in (root, "store"):
+        if opened == "store":
+            convert(root)
+            shutil.rmtree(root / "REEF3D_CFD_VTU")
+            shutil.rmtree(root / "REEF3D_CFD_AMR")
+            shutil.rmtree(root / "REEF3D_CFD_VTP_FSF")
+        s = Session()
+        s.open_case(root)
+        items = {i.name: i for i in s.scene}
+        free = items["Free surface"]
+        assert free.kind == "iso_surface" and free.visible
+        assert free.properties["iso_by"] == "phi"
+        level0 = items["Free surface (level 0)"]
+        assert level0.kind == "free_surface" and not level0.visible
+        mesh = s.data.load(free.id)
+        s.set_property(free.id, "variable", "level")
+        levels = s.data.load(free.id).point_data["level"]
+        assert mesh.n_points and set(np.unique(levels)) == {0.0, 1.0, 2.0}
+
+
+def test_without_refinement_the_written_free_surface_is_shown(tmp_path):
+    root = make_run(tmp_path / "cfd", solver="CFD", frames=2, print_interval=0.5)
+    s = Session()
+    s.open_case(root)
+    kinds = [(i.kind, i.visible) for i in s.scene]
+    assert ("free_surface", True) in kinds and not any(k == "iso_surface" for k, _ in kinds)
