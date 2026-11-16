@@ -2,7 +2,8 @@
 interface band the density is smoothed over F 45 cells, so the pressure at phi = 0
 carries part of the band's hydrostatic pressure and the velocity a blend of water and
 air, both set by the cell size: with AMR a step at every block edge. The colours are
-taken at phi = depth and 2 depth below the band and extrapolated up to the surface."""
+taken at phi = depth below the band of the surface's own grid level; the pressure also
+at 2 depth, extrapolated up to the surface."""
 
 import numpy as np
 from test_cfd_amr import cfd_amr_case
@@ -48,12 +49,25 @@ def test_the_water_side_takes_out_the_band_and_the_layer():
     deeper = _plane(0.5 - 2 * depth, **_flow(0.5))
     got = water_side_values(surface, below, deeper, depth)
     np.testing.assert_allclose(got.point_data["pressure"], 50.0, atol=0.05)  # atmospheric
-    expected = 0.2 + 0.5 * 0.5  # the velocity extrapolated to the surface
+    expected = 0.2 + 0.5 * (0.5 - depth)  # the velocity at depth, not extrapolated
     np.testing.assert_allclose(got.point_data["velocity"][:, 0], expected, atol=1e-5)
     np.testing.assert_allclose(got.point_data["velocity"][:, 2], surface.points[:, 0], atol=1e-4)
     # where the surface is and which grid it is on stay its own
     np.testing.assert_array_equal(got.point_data["level"], surface.point_data["level"])
     np.testing.assert_array_equal(got.points, surface.points)
+
+
+def test_a_thin_fast_layer_keeps_its_velocity():
+    """A spillway's chute: 2 depth lies in the slow layer at the bed, and
+    2 v(depth) - v(2 depth) made the surface twice as fast as the water."""
+    depth = 0.25
+    surface = _plane(1.0, velocity=lambda p: np.tile([6.0, 0.0, 0.0], (len(p), 1)))
+    below = _plane(1.0 - depth, velocity=lambda p: np.tile([6.5, 0.0, 0.0], (len(p), 1)))
+    deeper = _plane(1.0 - 2 * depth, velocity=lambda p: np.tile([1.0, 0.0, 0.0], (len(p), 1)))
+    got = water_side_values(surface, below, deeper, depth)
+    np.testing.assert_allclose(got.point_data["velocity"][:, 0], 6.5, atol=1e-5)
+    alone = water_side_values(surface, below, None, depth)  # no second layer read
+    np.testing.assert_allclose(alone.point_data["velocity"][:, 0], 6.5, atol=1e-5)
 
 
 def test_points_without_water_under_them_keep_their_own_values():
@@ -89,3 +103,37 @@ def test_the_free_surface_item_reads_the_water_side(tmp_path):
     key = s.data.frame_key(free.id)
     assert key.extra[0] == "iso" and key.extra[4] is True
     assert s.data.load(free.id).n_triangles
+
+
+def test_each_grid_level_its_own_depth(tmp_path, monkeypatch):
+    """With mesh refinement the band is F 45 cells of each grid: each level's part of
+    the surface takes the water at its own depth (a block of half the cells, half as
+    deep); without the pressure one layer alone."""
+    import lagoonviz.core.data.reef3d as reef3d
+
+    root = cfd_amr_case(tmp_path)
+    with open(root / "ctrl.txt", "a") as ctrl:
+        ctrl.write("F 45 0.1\n")  # a band the coarse test grid has water under
+    s = Session()
+    volume = s.data.case(s.open_case(root)).datasets["cfd_volume"]
+    seen = []
+    original = reef3d.water_side_values
+
+    def spy(surface, below, deeper, depth):
+        seen.append((round(depth, 6), set(np.unique(surface.point_data["level"])), deeper))
+        return original(surface, below, deeper, depth)
+
+    monkeypatch.setattr(reef3d, "water_side_values", spy)
+    plain = volume.read_iso(0, "phi", 0.0, ["velocity"])
+    water = volume.read_iso(0, "phi", 0.0, ["velocity"], water_side=True)
+    assert "level" not in water.point_data  # read for the levels, not given
+    cells = 0.1 + 0.3
+    heights = {0: 1.5, 1: 0.75, 2: 0.375}  # the fixture's levels
+    assert sorted((d, tuple(lv)) for d, lv, _ in seen) == sorted(
+        (round(cells * h, 6), (float(level),)) for level, h in heights.items()
+    )
+    assert all(deeper is None for *_, deeper in seen)  # no pressure: one layer
+    assert np.abs(water.point_data["velocity"] - plain.point_data["velocity"]).max() > 0.0
+    seen.clear()
+    volume.read_iso(0, "phi", 0.0, ["velocity", "pressure"], water_side=True)
+    assert seen and all(deeper is not None for *_, deeper in seen)

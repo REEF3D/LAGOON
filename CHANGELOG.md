@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### CFD's free surface: the velocity of the water under it, not twice it
+
+- Fixed: on a spillway (a CFD run with mesh refinement) the free surface showed
+  about twice the velocity of a slice through the same water (11.5 m/s on the
+  chute where the water flows at 6.5 m/s, 8 m/s over the stilling basin's jump
+  where it is 2 m/s). Its water-side colours were taken at `phi` = depth and
+  2 depth below the coarsest grid's interface band, half a metre and a metre
+  under the surface, and extrapolated up to it (2 v(depth) - v(2 depth)): in a
+  layer a metre thick the deeper one lies in the slow flow at the bed or across
+  the jump, and the extrapolation doubled the velocity.
+- The velocity (and every variable but the pressure) is now the water's at
+  `phi` = depth, not extrapolated; the pressure is still extrapolated, its
+  hydrostatic part taken out.
+- With mesh refinement each grid level takes its depth from its own cells (REEF3D's
+  band is `F 45` cells of each grid): 0.24 m on the weir's 0.1 m cells instead
+  of 0.49 m. The surface on the weir now agrees with a slice under it to a few
+  per cent. Without pressure only the one layer is cut: the water-side colours
+  cost half as much (0.9 s instead of 1.8 s a frame on the weir).
+
 ### CFD mesh refinement: the refined free surface with P 180 too
 
 - Fixed: a CFD run with mesh refinement that also wrote its free surface

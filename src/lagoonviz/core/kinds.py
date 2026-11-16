@@ -482,7 +482,7 @@ KINDS: dict[str, KindSpec] = {
                 "Colours from",
                 choices=("water side", "surface"),
                 tip="CFD's free surface (phi at 0): the colours from the water just below the "
-                "level set's interface band (F 45 cells of the coarsest grid), alike on every "
+                "level set's interface band (F 45 cells of the grid it is on), alike on every "
                 "AMR level; surface: at phi = 0, inside the band, where pressure and velocity "
                 "depend on the cell size",
             ),

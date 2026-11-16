@@ -48,9 +48,12 @@ colours come from the water just under the level set's interface band (*Colours
 from*: *water side*): inside the band (`F 45` cells) the density is smoothed, so at
 `phi` = 0 the pressure carries part of the band's hydrostatic pressure and the
 velocity is a blend of water and air, both set by the cell size, with mesh
-refinement a step at every block edge. The pressure and velocity at `phi` = depth
-and 2 depth (depth: the band of the coarsest grid at the surface plus 0.3 cells)
-are extrapolated up to the surface. *surface* colours at `phi` = 0 as before.
+refinement a step at every block edge. The colours are taken at `phi` = depth
+(depth: the band of the grid the surface is on plus 0.3 of its cells; with mesh
+refinement each level by its own cells); the pressure also at 2 depth and
+extrapolated up to the surface, its hydrostatic part taken out. The velocity is not
+extrapolated: in a thin, fast layer (a spillway's chute) 2 depth lies in the slow
+flow at the bed. *surface* colours at `phi` = 0 as before.
 
 An **FNPF or NHFLOW** run that writes its volume (`P 10`) but no free surface
 (no `P 180`) opens with the top of its σ-grid volume in the LAGOON store as its free

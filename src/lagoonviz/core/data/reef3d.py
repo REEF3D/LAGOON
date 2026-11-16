@@ -582,7 +582,10 @@ class Dataset:
         frame = self.frames[index]
         arrays = self._arrays([*(variables or []), variable]) or []
         side = water_side and variable == "phi" and float(value) == 0.0
-        # the water-side colours cut two more surfaces below phi = 0: read the levels
+        own = arrays
+        if side and "level" in self.components and "level" not in arrays:
+            arrays = [*arrays, "level"]  # (AMR) each grid's band its own depth
+        # the water-side colours cut more surfaces below phi = 0: read the levels
         # down to them once, with the free surface's
         extra = self._water_margin() if side else 0.0
         cuts = []
@@ -597,36 +600,69 @@ class Dataset:
         surface = _joined(parts) if parts else _empty_surface()
         if side and surface.n_points:
             surface = self._water_side(frame, arrays, cuts, extra, surface)
+        if arrays is not own:
+            data = {k: v for k, v in surface.point_data.items() if k != "level"}
+            surface = replace(surface, point_data=data)
         return surface
 
     def _water_side(
         self, frame: Frame, arrays: list[str], cuts: list[tuple], extra, surface: SurfaceMesh
     ) -> SurfaceMesh:
-        """The free surface (phi at 0) with the colours of phi = depth below it: the
-        depth is the interface band of the coarsest grid at the surface (F 45 of the
-        case's ctrl.txt, default 2.1, plus 0.3 of its cell height). ``cuts``: the
-        pieces the free surface was cut from, holding phi up to ``extra`` (None: all
-        of it); not as deep as the layers below: read whole."""
-        level = float(np.median(surface.points[:, 2]))
-        height = max((_cell_height(cut[0].points, level) for cut in cuts), default=0.0)
-        if height <= 0.0:
+        """The free surface (phi at 0) with the colours of the water below it
+        (:func:`water_side_values`): at phi = depth, the interface band of the grid the
+        surface is on (F 45 of the case's ctrl.txt, default 2.1, plus 0.3 of its cell
+        height), the pressure also at 2 depth. With AMR each grid level by its own
+        cells: REEF3D's band is so many cells of each grid, and the coarsest grid's
+        depth (half a metre and more) lay across a spillway's chute or a jet, whose
+        velocity is another. ``cuts``: the pieces the free surface was cut from, holding
+        phi up to ``extra`` (None: all of it); not as deep as the layers below: read
+        whole."""
+        groups = _by_level(cuts)
+        median = float(np.median(surface.points[:, 2]))
+        heights = {level: _group_height(group, median) for level, group in groups.items()}
+        cells = _interface_cells(self.folder) + 0.3
+        deepest = 2.0 * cells * max(heights.values(), default=0.0)
+        if deepest <= 0.0:
             return surface
-        depth = (_interface_cells(self.folder) + 0.3) * height
-        if extra is not None and 2.0 * depth > extra:
+        if extra is not None and deepest > extra:
             cuts = [
                 cut
                 for number, path in enumerate(frame.pieces)
                 if (cut := self._iso_piece(number, path, "phi", 0.0, arrays, None)) is not None
             ]
-        layers = []
-        cuts = self._cuts_together(cuts)
-        for at in (depth, 2.0 * depth):
-            parts = [_cut_piece(cut, "phi", at, False) for cut in cuts]
-            layer = _joined(parts) if parts else None
-            if layer is None or not layer.n_points:
-                return surface
-            layers.append(layer)
-        return water_side_values(surface, layers[0], layers[1], depth)
+            groups = _by_level(cuts)
+        pressure = any(_is_pressure(name) for name in arrays)
+        levels = surface.point_data.get("level")
+        on = np.rint(levels).astype(np.int64) if levels is not None else None
+        data = {name: np.array(values, copy=True) for name, values in surface.point_data.items()}
+        for level, group in groups.items():
+            depth = cells * heights.get(level, 0.0)
+            if depth <= 0.0:
+                continue
+            mask = (on == level) if on is not None and len(groups) > 1 else None
+            if mask is not None and not mask.any():
+                continue
+            group = self._cuts_together(group)
+            layers = []
+            for at in (depth, 2.0 * depth) if pressure else (depth,):
+                parts = [_cut_piece(cut, "phi", at, False) for cut in group]
+                layer = _joined(parts) if parts else None
+                layers.append(layer if layer is not None and layer.n_points else None)
+            if layers[0] is None:
+                continue
+            points = surface.points if mask is None else surface.points[mask]
+            values = {
+                name: (values if mask is None else values[mask]) for name, values in data.items()
+            }
+            part = SurfaceMesh(points, np.zeros((0, 3), np.uint32), values)
+            deeper = layers[1] if len(layers) > 1 else None
+            got = water_side_values(part, layers[0], deeper, depth)
+            for name, values in got.point_data.items():
+                if mask is None:
+                    data[name] = values
+                else:
+                    data[name][mask] = values
+        return replace(surface, point_data=data)
 
     def read_iso_volume(
         self,
@@ -1640,31 +1676,72 @@ OWN_ARRAYS = ("phi", "elevation", "level", "covered")
 
 
 def water_side_values(
-    surface: SurfaceMesh, below: SurfaceMesh, deeper: SurfaceMesh, depth: float
+    surface: SurfaceMesh, below: SurfaceMesh, deeper: SurfaceMesh | None, depth: float
 ) -> SurfaceMesh:
     """``surface`` (phi at 0) with the values of the water under it, taken at phi =
-    ``depth`` (``below``) and 2 ``depth`` (``deeper``) and extrapolated linearly up to
-    phi = 0 (2 v(depth) - v(2 depth)): the hydrostatic pressure of the layer and the
-    decay of the velocity with depth taken out. The points of each layer are lifted
-    against their normals (an iso-surface faces the rising phi, into the water) onto
-    the free surface, and each point of ``surface`` gets the inverse distance
-    weighted values of the four nearest lifted points of each layer. Points without
-    both layers within twice ``depth`` keep their own values."""
-    near = np.ones(surface.n_points, bool)
-    values = []
-    for layer, lift in ((below, depth), (deeper, 2.0 * depth)):
-        mixed, close = _lifted_values(surface, layer, lift, 2.0 * depth)
-        near &= close
-        values.append(mixed)
+    ``depth`` (``below``) and 2 ``depth`` (``deeper``). The points of each layer are
+    lifted against their normals (an iso-surface faces the rising phi, into the water)
+    onto the free surface, and each point of ``surface`` gets the inverse distance
+    weighted values of the four nearest lifted points of each layer.
+
+    The pressure is extrapolated linearly up to phi = 0 (2 p(depth) - p(2 depth)): the
+    hydrostatic pressure of the layer taken out. The velocity and the other variables
+    are those at ``depth``, not extrapolated: in a thin, fast layer (a spillway's
+    chute, a jet) 2 ``depth`` lies near the bed or across the layer, where the flow is
+    another, and 2 v(depth) - v(2 depth) doubled the velocity. Points without the
+    layers they need within twice ``depth`` keep their own values (``deeper`` None: the
+    pressure its own)."""
+    first, close = _lifted_values(surface, below, depth, 2.0 * depth)
+    second, close_too = {}, close
+    if deeper is not None:
+        second, close_too = _lifted_values(surface, deeper, 2.0 * depth, 2.0 * depth)
     data = dict(surface.point_data)
-    for name in values[0]:
-        if name in OWN_ARRAYS or name not in data or name not in values[1]:
+    for name, value in first.items():
+        if name in OWN_ARRAYS or name not in data:
             continue
-        guess = 2.0 * values[0][name] - values[1][name]
+        if _is_pressure(name):
+            if name not in second:
+                continue
+            guess, near = 2.0 * value - second[name], close & close_too
+        else:
+            guess, near = value, close
         own = np.array(data[name], copy=True)
         own[near] = guess[near].astype(own.dtype, copy=False)
         data[name] = own
     return replace(surface, point_data=data)
+
+
+def _by_level(cuts: list[tuple]) -> dict[int, list[tuple]]:
+    """The pieces an iso-surface is cut from by their grid level (their ``level``
+    array; without it, or a volume's own pieces: 0)."""
+    groups: dict[int, list[tuple]] = {}
+    for cut in cuts:
+        levels = cut[0].point_data.get("level")
+        level = 0
+        if levels is not None and len(levels):
+            top = float(np.nanmax(levels))
+            level = int(round(top)) if np.isfinite(top) else 0
+        groups.setdefault(level, []).append(cut)
+    return groups
+
+
+def _group_height(cuts: list[tuple], level: float) -> float:
+    """The cell height of a grid level's pieces: a refined block's (even), the
+    volume's own at ``level`` (the free surface's middle height; the tallest)."""
+    heights = []
+    for cut in cuts:
+        points = cut[0].points
+        if getattr(cut[0], "block", False):
+            z = np.unique(np.round(points[:, 2].astype(np.float64), 7))
+            heights.append(float(np.min(np.diff(z))) if len(z) > 1 else 0.0)
+        else:
+            heights.append(_cell_height(points, level))
+    return max(heights, default=0.0)
+
+
+def _is_pressure(name: str) -> bool:
+    """A pressure (hydrostatic in the water: extrapolated up to the surface)."""
+    return "pressure" in name.lower()
 
 
 def _lifted_values(surface: SurfaceMesh, layer: SurfaceMesh, lift: float, reach: float):
