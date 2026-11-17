@@ -100,6 +100,19 @@ item of the case: NHFLOW's file of them (`REEF3D_NHFLOW_FORCING_VTP`, with an ST
 and DIVEMesh's solids), or, before a run or when ctrl.txt was changed since, the
 boxes, cylinders, jacket members, spheres and wedges built from ctrl.txt.
 
+**CFD's porous structures** (VRANS: boxes B 270, cylinders B 274, wedges B 281 and
+B 282, plates B 291 in ctrl.txt, each with its porosity `n`, stone size `d50`, α and
+β) are a *Porous structures* item, built from ctrl.txt, before a run and after. Where
+they overlap REEF3D gives the cells the later one's material (the boxes first, then
+the cylinders, wedges and plates), so a rubble mound is set up as its armour layer's
+outline with the filter and the core inside: LAGOON draws each layer as REEF3D fills
+it, side by side (a flume's side shows armour, filter and core as bands). Coloured by
+`d50` (also `porosity`, or `layer`: the materials numbered as they first appear in
+ctrl.txt), half see-through over the flow in them, with *Outlines* where one layer
+meets the next (not where a crest's box meets the slope's wedge of the same stones).
+A slice through the flume behind it shows the velocity in the stones. NHFLOW's porous
+structures (one material for all) are NHFLOW's file of them, a *Structures* item.
+
 **SEASTATE**, REEF3D's spectral wave model, writes maps of the sea state
 (`REEF3D_SEASTATE_VTP`): they open as a *Sea state* item, coloured by the
 significant wave height `Hs` on the rainbow map (as SEASTATE's own maps), with

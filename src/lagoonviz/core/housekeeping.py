@@ -95,7 +95,7 @@ def inventory(case_dir: str | Path, case=None) -> list[Group]:
         case = open_case(case_dir)
     main = list(case.main_datasets().values())
     shown_solvers = {d.solver for d in main}
-    leads = [d for d in main if d.role not in ("solid", "topo", "geodat", "forcing")]
+    leads = [d for d in main if d.role not in ("solid", "topo", "geodat", "forcing", "porous")]
     groups: list[Group] = []
     # the files: as REEF3D wrote them (a store's output stands for its VTK files when
     # the case opens, so these would be missed)
@@ -105,7 +105,7 @@ def inventory(case_dir: str | Path, case=None) -> list[Group]:
         else case
     )
     for dataset in files_case.datasets.values():
-        if dataset.role in ("solid", "topo", "geodat", "forcing"):
+        if dataset.role in ("solid", "topo", "geodat", "forcing", "porous"):
             continue  # the case's own: DIVEMesh, geo.dat, forcing solids
         if dataset in main or any(dataset.same_run_as(lead) for lead in leads):
             continue

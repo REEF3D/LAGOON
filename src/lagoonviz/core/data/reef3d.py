@@ -74,13 +74,14 @@ ROLES = {
     "amr_blocks": "amr_blocks",  # CFD's refined blocks: their outlines
     "solid": "structure",  # DIVEMesh's solids (a monopile, the blocks under a beach)
     "forcing": "structure",  # NHFLOW's direct forcing solids (A 581 - A 589)
+    "porous": "structure",  # CFD's porous structures (B 270 - B 291), layer by layer
     "topo": "bathymetry",  # DIVEMesh's bed (its topo objects, geo.dat), before a run
     "geodat": "geodat",  # the points of geo.dat, as DIVEMesh reads them
     "seastate": "seastate",  # SEASTATE's maps of the sea state (Hs, Tp, dir, ...)
     "cpm_bed": "bathymetry",  # the bed of CFD's CPM sediment model (its bedload layer)
 }
 #: roles of the case, not of a run: DIVEMesh's solids and bed, geo.dat's points
-CASE_ROLES = ("solid", "topo", "geodat", "forcing")
+CASE_ROLES = ("solid", "topo", "geodat", "forcing", "porous")
 
 _FOLDER = re.compile(r"^REEF3D_(?P<solver>[A-Z0-9]+)_(?P<what>VTU|VTP(?:_(?P<tag>[A-Z0-9_]+))?)$")
 _SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp", ".vtk")
@@ -151,6 +152,7 @@ ROLE_LABELS = {
     "amr_blocks": "AMR blocks",
     "solid": "solids",
     "forcing": "direct forcing solids",
+    "porous": "porous structures",
     "topo": "bed",
     "geodat": "geo.dat points",
     "seastate": "sea state",
@@ -992,7 +994,7 @@ class Case:
             volumes = [d for d in pool if d.role == "volume"]
             if not volumes:  # not run yet: DIVEMesh's bed and solids, if any
                 found = {}
-                for role in ("topo", "solid", "forcing"):
+                for role in ("topo", "solid", "forcing", "porous"):
                     matches = [d for d in pool if d.role == role]
                     if matches:
                         found[role] = matches[0]
@@ -1024,6 +1026,9 @@ class Case:
             forcing = self.by_role("forcing")
             if forcing is not None:
                 chosen = {"forcing": forcing, **chosen}
+            porous = self.by_role("porous")
+            if porous is not None:
+                chosen = {"porous": porous, **chosen}
             # objects of the same run (CFD's floating bodies, structures, AMR blocks)
             for role in (*OBJECT_SHOWN, "amr_blocks"):
                 options = [d for d in pool if d.role == role and d.same_run_as(lead)]
@@ -1062,12 +1067,16 @@ class Case:
         forcing = self.by_role("forcing")
         if forcing is not None:
             chosen["forcing"] = forcing
+        porous = self.by_role("porous")
+        if porous is not None:
+            chosen["porous"] = porous
         # beds are drawn first, so a transparent free surface shows them
         order = (
             "bed",
             "cpm_bed",
             "solid",
             "forcing",
+            "porous",
             "structure",
             "body",
             "dem",
@@ -1245,6 +1254,50 @@ class ForcingDataset(Dataset):
         return written, written
 
 
+class PorousDataset(Dataset):
+    """CFD's porous structures (VRANS, ctrl.txt B 270 - B 291;
+    :mod:`lagoonviz.core.data.porous`): one frame, shown at any time, each structure
+    as REEF3D fills its cells (a later one holds where they overlap), with its
+    porosity, d50 and layer (its material's number) and its edges as outlines."""
+
+    def __init__(self, source: Path, case_dir: Path) -> None:
+        self.source = source
+        self._mesh: SurfaceMesh | None = None
+        self._stamp = None
+        frames = [Frame(0, source, [source])]
+        super().__init__("cfd_porous", "CFD", "porous", frames, case_dir)
+
+    def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
+        return "PolyData", {"porosity": 1, "d50": 1, "layer": 1}
+
+    @property
+    def label(self) -> str:
+        return "Porous structures (ctrl.txt)"
+
+    def default_variable(self) -> str:
+        return "d50"  # the layers of a rubble mound: armour, filter, core
+
+    def read(self, index: int = 0, variables: list[str] | None = None) -> SurfaceMesh:
+        try:
+            info = self.source.stat()
+            stamp = (info.st_mtime_ns, info.st_size)
+        except OSError:
+            stamp = None
+        if self._mesh is None or stamp != self._stamp:  # ctrl.txt changed: again
+            from lagoonviz.core.data.porous import porous_from_ctrl
+
+            self._mesh, _ = porous_from_ctrl(self.source)
+            self._stamp = stamp
+        return self._mesh
+
+    def written_span(self) -> tuple[float, float]:
+        try:
+            written = self.source.stat().st_mtime
+        except OSError:
+            written = 0.0
+        return written, written
+
+
 class TopoDataset(Dataset):
     """DIVEMesh's bed of a case (``DIVEMesh_Paraview/REEF3D_Topo.vtp``: its topo objects
     and the bed from geo.dat), one frame shown at any time: the bed of the set-up,
@@ -1374,6 +1427,7 @@ def solid_datasets(case_dir: Path, stores: list[Path] | None = None) -> list[Dat
     from lagoonviz.core.data.divemesh import find_solids, left_over
     from lagoonviz.core.data.divemesh_grid import TOPO
     from lagoonviz.core.data.forcing import find_forcing
+    from lagoonviz.core.data.porous import find_porous
 
     found: list[Dataset] = []
     source = _stored_solids(stores or [], read_ctrl_solver(case_dir), case_dir)
@@ -1383,6 +1437,9 @@ def solid_datasets(case_dir: Path, stores: list[Path] | None = None) -> list[Dat
     forcing = find_forcing(case_dir)
     if forcing is not None:
         found.append(ForcingDataset(forcing, case_dir))
+    porous = find_porous(case_dir)
+    if porous is not None:
+        found.append(PorousDataset(porous, case_dir))
     topo = case_dir / TOPO
     if topo.is_file() and not left_over(topo, case_dir):
         found.append(TopoDataset(topo, case_dir))

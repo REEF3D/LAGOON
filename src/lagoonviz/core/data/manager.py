@@ -56,7 +56,7 @@ log = logging.getLogger(__name__)
 DATA_KINDS = {
     kind: role
     for role, kind in ROLES.items()
-    if role not in ("solid", "topo", "forcing", "cpm_bed")  # theirs: by their dataset key
+    if role not in ("solid", "topo", "forcing", "porous", "cpm_bed")  # theirs: by their key
 } | {
     "slice": "volume",
     "iso_surface": "volume",
@@ -1467,7 +1467,8 @@ class DataManager:
             return None
         item = self.scene.get(item_id)
         edges = edges.astype(np.int64)
-        if item.kind != "slice" and shown.triangles.size:  # not over hidden dry land
+        facing = item.kind == "structure"  # edges of solids: their own points, drawn to the eye
+        if item.kind != "slice" and not facing and shown.triangles.size:  # not over dry land
             used = np.zeros(shown.positions.shape[0], bool)
             used[shown.triangles.ravel()] = True
             edges = edges[used[edges].all(axis=1)]
@@ -1475,7 +1476,7 @@ class DataManager:
                 return None
         segments = np.array(shown.positions[edges], np.float32)
         color = "#ffffff" if colour == "white" else "#1e2833"
-        if item.kind == "slice" and not self.scene.flat:
+        if (item.kind == "slice" or facing) and not self.scene.flat:
             # on the slice, drawn a little towards the camera (lifted off it to both
             # sides by a share of its length they floated well clear of a long flume's
             # slice, two grids side by side)

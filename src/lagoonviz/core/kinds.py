@@ -605,6 +605,13 @@ KINDS: dict[str, KindSpec] = {
             **_data_source("structures"),
             "material": PropertySpec("concrete", "Material", choices=MATERIALS),
             **_SHADOW,
+            "grid_lines": PropertySpec(
+                "off",
+                "Outlines",
+                choices=("off", "dark", "white"),
+                tip="The edges of the structures; of porous structures (CFD) where one "
+                "layer of stones meets the next (armour, filter, core)",
+            ),
             **_colouring("none", "greys"),
         },
     ),

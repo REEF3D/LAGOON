@@ -150,6 +150,7 @@ class Session:
                 "solid",
                 "topo",
                 "forcing",
+                "porous",
                 "cpm_bed",
             ):
                 props["dataset"] = dataset.key  # (solids: a structure; DIVEMesh's bed: a bed)
@@ -165,6 +166,10 @@ class Session:
                     props["vectors_of"] = "wave_direction"
             if kind == "amr_blocks":  # there, switched off: a tick shows them
                 children.append(AddItem(kind, None, props, visible=False))
+                continue
+            if role == "porous":  # CFD's porous layers: by stone size, the flow through
+                props.update(POROUS_LOOK)
+                children.append(AddItem(kind, "Porous structures", props))
                 continue
             if (
                 role == "free_surface"
@@ -3566,6 +3571,12 @@ def _window(times, values, t0: float, t1: float):
     inside = (times > t0) & (times < t1)
     t = np.concatenate([[t0], times[inside], [t1]])
     return t, np.interp(t, times, values)
+
+
+#: how CFD's porous structures first look: coloured by stone size (armour, filter
+#: and core of a rubble mound apart), half see-through over the flow in them, with
+#: their outlines where one layer meets the next
+POROUS_LOOK = {"material": "rock", "colormap": "greys", "opacity": 0.45, "grid_lines": "dark"}
 
 
 def _refined_cfd_volume(case):

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### CFD's porous structures, layer by layer
+
+- A CFD case with porous structures (VRANS, ctrl.txt: B 270 boxes, B 274
+  cylinders, B 281 / B 282 wedges, B 291 plates) opens with a *Porous structures*
+  item, before a run and after: each structure as REEF3D fills its cells, the
+  later one holding where they overlap, so a rubble mound's armour, filter and
+  core lie side by side (as bands on a flume's side) and not one inside the other.
+  Coloured by `d50` on greys (also `porosity`, or `layer`), half see-through over
+  the flow in them, with outlines where one layer meets the next.
+- Structures have an *Outlines* setting (off, dark, white): their edges, drawn
+  towards the camera.
+
 ### Export image with Blender Cycles: a still like the film's frame
 
 - *File → Render still with Cycles* is gone: *File → Export image* has a
