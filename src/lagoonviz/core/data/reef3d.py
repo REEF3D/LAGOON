@@ -1034,7 +1034,7 @@ class Case:
                 options = [d for d in pool if d.role == role and d.same_run_as(lead)]
                 if options:
                     chosen[role] = max(options, key=len)
-            return chosen
+            return _without_vrans_file(chosen)
         free = [d for d in surfaces if d.role == "free_surface"]
         lead = preferred(free or surfaces)
         chosen = {lead.role: lead}
@@ -1070,6 +1070,7 @@ class Case:
         porous = self.by_role("porous")
         if porous is not None:
             chosen["porous"] = porous
+        chosen = _without_vrans_file(chosen)
         # beds are drawn first, so a transparent free surface shows them
         order = (
             "bed",
@@ -1255,17 +1256,21 @@ class ForcingDataset(Dataset):
 
 
 class PorousDataset(Dataset):
-    """CFD's porous structures (VRANS, ctrl.txt B 270 - B 291;
-    :mod:`lagoonviz.core.data.porous`): one frame, shown at any time, each structure
-    as REEF3D fills its cells (a later one holds where they overlap), with its
-    porosity, d50 and layer (its material's number) and its edges as outlines."""
+    """The porous structures of ctrl.txt (VRANS; :mod:`lagoonviz.core.data.porous`):
+    CFD's (B 270 - B 291), each as REEF3D fills its cells (a later one holds where
+    they overlap), or NHFLOW's body (B 210 - B 219) with its layers (B 201, B 202).
+    One frame, shown at any time, with porosity, d50 and layer (its material's
+    number) and its edges as outlines."""
 
     def __init__(self, source: Path, case_dir: Path) -> None:
+        from lagoonviz.core.data.porous import read_porous
+
         self.source = source
         self._mesh: SurfaceMesh | None = None
         self._stamp = None
+        solver = "CFD" if read_porous(source) else "NHFLOW"
         frames = [Frame(0, source, [source])]
-        super().__init__("cfd_porous", "CFD", "porous", frames, case_dir)
+        super().__init__(f"{solver.lower()}_porous", solver, "porous", frames, case_dir)
 
     def _describe(self, first: Frame) -> tuple[str, dict[str, int]]:
         return "PolyData", {"porosity": 1, "d50": 1, "layer": 1}
@@ -1286,7 +1291,7 @@ class PorousDataset(Dataset):
         if self._mesh is None or stamp != self._stamp:  # ctrl.txt changed: again
             from lagoonviz.core.data.porous import porous_from_ctrl
 
-            self._mesh, _ = porous_from_ctrl(self.source)
+            self._mesh = porous_from_ctrl(self.source)
             self._stamp = stamp
         return self._mesh
 
@@ -1416,6 +1421,18 @@ class GeoDatDataset(Dataset):
         except OSError:
             written = 0.0
         return written, written
+
+
+def _without_vrans_file(chosen: dict) -> dict:
+    """Without NHFLOW's file of its porous body (REEF3D_NHFLOW_VRANS_VTP) when the
+    porous structures of ctrl.txt are shown: the same body, with its layers."""
+    structure = chosen.get("structure")
+    if "porous" not in chosen or structure is None or not structure.frames:
+        return chosen
+    pieces = structure.frames[0].pieces
+    if pieces and "VRANS_VTP" in Path(pieces[0]).parent.name:
+        chosen = {role: d for role, d in chosen.items() if role != "structure"}
+    return chosen
 
 
 def solid_datasets(case_dir: Path, stores: list[Path] | None = None) -> list[Dataset]:

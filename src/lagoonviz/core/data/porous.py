@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Architect: Hans Bihs
-"""REEF3D::CFD's porous structures (VRANS, ctrl.txt) as surfaces, layer by layer.
+"""REEF3D's porous structures (VRANS, ctrl.txt) as surfaces, layer by layer: CFD's and NHFLOW's.
 
 REEF3D::CFD gives every porous structure its own material on its line
 (vrans_f::structure_cell)::
@@ -24,8 +24,22 @@ parts inside a later structure: where one layer ends and the next begins. The
 points carry the material: ``porosity`` (n), ``d50`` (m) and ``layer`` (the
 materials numbered in the order they first appear, from 1).
 
-NHFLOW's porous structures (B 210 - B 219, one material for all, B 201) are the
-file NHFLOW writes (REEF3D_NHFLOW_VRANS_VTP), shown as a structure.
+**NHFLOW** (:func:`nhflow_mesh`) makes one porous body of its shapes (B 210 box,
+B 212 cylinder along y, B 213 vertical cylinder, B 214 jacket member, B 215 sphere,
+B 217 - B 219 wedges; nhflow_geometry::objects_vrans) and gives it layers by the
+depth below its exposed surface (nhflow_geometry_layer.cpp, vrans_nhflow.cpp)::
+
+    B 201 n d50 α β            the core
+    B 202 t n d50 α β          a layer t thick, the first the outermost (armour)
+    B 203 1                    faces resting on the bed expose nothing (default)
+
+The exposed surface is the body's outside without its faces on the domain's sides,
+without the faces between its shapes, in 2D without the y-ends, and (B 203 1)
+without the faces facing down onto the bed. A body that is the same at every y (a
+breakwater's trunk: boxes, wedges and cylinders across y over one y-range, its ends
+not exposed) shows its layers on its ends; another, only its outside (the armour:
+depth 0). REEF3D blends the materials over B 209 cells at each layer's boundary;
+LAGOON draws the boundary where the blend is half way.
 """
 
 from __future__ import annotations
@@ -105,9 +119,11 @@ def read_porous(ctrl: str | Path) -> list[Porous]:
 
 
 def find_porous(case_dir: str | Path) -> Path | None:
-    """A case's ctrl.txt if it sets up porous structures for CFD, else None."""
+    """A case's ctrl.txt if it sets up porous structures (CFD or NHFLOW), else None."""
     ctrl = Path(case_dir) / "ctrl.txt"
-    return ctrl if ctrl.is_file() and read_porous(ctrl) else None
+    if not ctrl.is_file():
+        return None
+    return ctrl if read_porous(ctrl) or read_nhflow_porous(ctrl) is not None else None
 
 
 # ======================================================================== shapes
@@ -309,7 +325,7 @@ def porous_mesh(structures: list[Porous]) -> SurfaceMesh:
     solids = [(s, Convex.hull(corners(s))) for s in structures]
     solids = [(s, c) for s, c in solids if c is not None]
     if not solids:
-        return SurfaceMesh(np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32), {})
+        return _assembled([], [], [])
     extent = np.ptp(np.concatenate([np.array([c.low, c.high]) for _, c in solids]), axis=0).max()
     tol = 1e-7 * max(float(extent), 1e-9)
     layers: dict[tuple, int] = {}
@@ -338,7 +354,14 @@ def porous_mesh(structures: list[Porous]) -> SurfaceMesh:
                 p, q = a + t0 * (b - a), a + t1 * (b - a)
                 if where.is_edge(0.5 * (p + q), b - a):
                     lines.append((p, q, value))
-    lines = _merged(lines, tol)
+    return _assembled(triangles, values, _merged(lines, tol))
+
+
+def _assembled(triangles: list, values: list, lines: list) -> SurfaceMesh:
+    """Triangles (three corners each) with their (porosity, d50, layer), and
+    outlines (two ends and their values) as one surface."""
+    if not triangles:
+        return SurfaceMesh(np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32), {})
     faces = np.asarray(triangles, np.float64).reshape(-1, 3)
     ends = np.array([[p, q] for p, q, _ in lines], np.float64).reshape(-1, 3)
     per_point = np.concatenate(
@@ -365,6 +388,8 @@ def _merged(lines: list[tuple], tol: float) -> list[tuple]:
     cut elsewhere: drawn once)."""
     groups: dict[tuple, list] = {}
     for p, q, value in lines:
+        if float(np.linalg.norm(q - p)) <= tol:
+            continue
         d = q - p
         d = d / np.linalg.norm(d)
         k = int(np.argmax(np.abs(d)))
@@ -391,7 +416,322 @@ def _merged(lines: list[tuple], tol: float) -> list[tuple]:
     return merged
 
 
-def porous_from_ctrl(ctrl: str | Path) -> tuple[SurfaceMesh, list[Porous]]:
-    """The porous structures of a ctrl.txt and their surface (:func:`porous_mesh`)."""
+def porous_from_ctrl(ctrl: str | Path) -> SurfaceMesh:
+    """The porous structures of a case's ctrl.txt as a surface: CFD's
+    (:func:`porous_mesh`) or NHFLOW's (:func:`nhflow_mesh`, with the domain, the
+    cell size and 2D or not of the case's control.txt)."""
     structures = read_porous(ctrl)
-    return porous_mesh(structures), structures
+    if structures:
+        return porous_mesh(structures)
+    nhflow = read_nhflow_porous(ctrl)
+    if nhflow is None:
+        return _assembled([], [], [])
+    from lagoonviz.core.data.setup import read_setup
+
+    setup = read_setup(Path(ctrl).parent)
+    spacing = setup.spacing
+    return nhflow_mesh(nhflow, setup.domain, setup.two_d, spacing[0] if spacing else None)
+
+
+# ======================================================================== NHFLOW
+#: NHFLOW's porous shapes in its order (objects_vrans) and their values
+NHFLOW_COMMANDS = {210: 6, 212: 5, 213: 5, 214: 8, 215: 4, 217: 6, 218: 6, 219: 6}
+#: the same shapes as NHFLOW's direct forcing solids (forcing.SHAPES)
+_AS_FORCING = {210: 581, 212: 583, 213: 584, 214: 585, 215: 586, 217: 587, 218: 588, 219: 589}
+#: shapes the same at every y (their section across x and z): box, cylinder along y,
+#: wedges across x; and where their y-range is in their values
+_ALONG_Y = {210: 2, 212: 2, 217: 2, 219: 2}
+
+
+@dataclass(frozen=True)
+class NhflowPorous:
+    """NHFLOW's porous body (module doc): its shapes, its core's material (B 201),
+    its layers from the outside in (B 202: t, n, d50, α, β), B 203 and B 209."""
+
+    shapes: tuple[tuple[int, tuple[float, ...]], ...]
+    core: tuple[float, float, float, float]
+    layers: tuple[tuple[float, float, float, float, float], ...] = ()
+    on_bed: bool = True
+    heaviside: float = 1.1
+
+    def materials(self) -> list[tuple[float, float, float]]:
+        """(porosity, d50, layer) of the layers from the outside in, the core last."""
+        found = [(n, d50, float(k + 1)) for k, (_, n, d50, _, _) in enumerate(self.layers)]
+        return [*found, (self.core[0], self.core[1], float(len(self.layers) + 1))]
+
+    def depths(self) -> list[float]:
+        """The depth of each layer's inner boundary below the exposed surface."""
+        total, found = 0.0, []
+        for layer in self.layers:
+            total += max(layer[0], 0.0)
+            found.append(total)
+        return found
+
+    def layer_at(self, depth: np.ndarray) -> np.ndarray:
+        """The number of the layer (from 1; the core last) at depths below the surface."""
+        bounds = [t for t, (thick, *_) in zip(self.depths(), self.layers, strict=True) if thick > 0]
+        number = [k + 1 for k, (thick, *_) in enumerate(self.layers) if thick > 0]
+        found = np.full(np.shape(depth), len(self.layers) + 1, np.int64)
+        for bound, k in reversed(list(zip(bounds, number, strict=True))):
+            found[np.asarray(depth) < bound] = k
+        return found
+
+
+def read_nhflow_porous(ctrl: str | Path) -> NhflowPorous | None:
+    """NHFLOW's porous body of a ctrl.txt (A 10 5, shapes B 210 - B 219 and B 201);
+    None for another module or without them."""
+    try:
+        text = Path(ctrl).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    module, core, on_bed, heaviside = None, None, True, 1.1
+    shapes: dict[int, list] = {code: [] for code in NHFLOW_COMMANDS}
+    layers = []
+    for line in text.splitlines():
+        words = line.split("//")[0].split()
+        if len(words) < 3:
+            continue
+        try:
+            code = int(words[1])
+            values = [float(w) for w in words[2:]]
+        except ValueError:
+            continue
+        if words[0] == "A" and code == 10:
+            module = int(values[0])
+        if words[0] != "B":
+            continue
+        if code == 201 and len(values) >= 4:
+            core = tuple(values[:4])
+        elif code == 202 and len(values) >= 5:
+            layers.append(tuple(values[:5]))
+        elif code == 203:
+            on_bed = int(values[0]) == 1
+        elif code == 209:
+            heaviside = values[0]
+        elif code in NHFLOW_COMMANDS and len(values) >= NHFLOW_COMMANDS[code]:
+            shapes[code].append(tuple(values[: NHFLOW_COMMANDS[code]]))
+    ordered = tuple((code, v) for code in NHFLOW_COMMANDS for v in shapes[code])
+    if module != 5 or not ordered:
+        return None
+    if core is None:  # REEF3D without B 201: n = 1, no porous media
+        core = (1.0, 0.01, 0.0, 0.0)
+    return NhflowPorous(ordered, core, tuple(layers), on_bed, heaviside)
+
+
+def _nhflow_corners(code: int, values: tuple[float, ...]) -> np.ndarray:
+    from lagoonviz.core.data.forcing import SHAPES
+
+    triangles = SHAPES[_AS_FORCING[code]][1](list(values))
+    return np.asarray(triangles, np.float64).reshape(-1, 3)
+
+
+def _inside(solid: Convex, point: np.ndarray, tol: float) -> bool:
+    return bool((solid.normals @ point <= solid.offsets + tol).all())
+
+
+def distance_to_triangles(points: np.ndarray, triangles: np.ndarray) -> np.ndarray:
+    """The distance of each point (n, 3) to the nearest of the triangles (m, 3, 3)."""
+    points = np.asarray(points, np.float64)
+    best = np.full(len(points), np.inf)
+    for a, b, c in np.asarray(triangles, np.float64):
+        best = np.minimum(best, _to_triangle(points, a, b, c))
+    return best
+
+
+def _to_triangle(p: np.ndarray, a, b, c) -> np.ndarray:
+    """Distances of points to one triangle (the closest point by its regions)."""
+    ab, ac = b - a, c - a
+    normal = np.cross(ab, ac)
+    area = float(normal @ normal)
+    if area < 1e-30:  # degenerate: its longest edge
+        return np.min([_to_segment(p, a, b), _to_segment(p, b, c), _to_segment(p, a, c)], axis=0)
+    # the point projected onto the plane, in barycentric terms
+    w = p - a
+    d00, d01, d11 = ab @ ab, ab @ ac, ac @ ac
+    d20, d21 = w @ ab, w @ ac
+    denom = d00 * d11 - d01 * d01
+    v = (d11 * d20 - d01 * d21) / denom
+    u = (d00 * d21 - d01 * d20) / denom
+    inside = (v >= 0) & (u >= 0) & (v + u <= 1)
+    plane = np.abs(w @ normal) / math.sqrt(area)
+    edges = np.min([_to_segment(p, a, b), _to_segment(p, b, c), _to_segment(p, a, c)], axis=0)
+    return np.where(inside, plane, edges)
+
+
+def _to_segment(p: np.ndarray, a, b) -> np.ndarray:
+    d = b - a
+    t = np.clip((p - a) @ d / max(float(d @ d), 1e-300), 0.0, 1.0)
+    return np.linalg.norm(p - (a + t[:, None] * d), axis=1)
+
+
+def nhflow_mesh(
+    porous: NhflowPorous,
+    domain: tuple | None = None,
+    two_d: bool = False,
+    dx: float | None = None,
+) -> SurfaceMesh:
+    """NHFLOW's porous body as a surface, coloured by its layers (module doc):
+    ``domain`` (xs, xe, ys, ye, zs, ze) and ``dx`` the case's (the faces on the
+    domain's sides and on the bed expose nothing), ``two_d`` a 2D case (no y-ends)."""
+    shapes = [(code, v, Convex.hull(_nhflow_corners(code, v))) for code, v in porous.shapes]
+    shapes = [(code, v, c) for code, v, c in shapes if c is not None]
+    if not shapes:
+        return _assembled([], [], [])
+    solids = [c for *_, c in shapes]
+    low = np.min([c.low for c in solids], axis=0)
+    high = np.max([c.high for c in solids], axis=0)
+    extent = max(float(np.ptp(np.array([low, high]), axis=0).max()), 1e-9)
+    tol = 1e-7 * extent
+    step = 1e-4 * extent  # off a face, to see what is beyond it
+    # the body's outside: each shape's faces without what a later shape covers and
+    # without those between two shapes
+    outside = []  # (ring, outward normal)
+    for i, solid in enumerate(solids):
+        for ring, normal in zip(solid.faces, solid.normals, strict=True):
+            parts = [ring]
+            for other in solids[i + 1 :]:
+                parts = [q for part in parts for q in without(part, other, tol)]
+            for part in parts:
+                beyond = part.mean(axis=0) + step * normal
+                if any(_inside(o, beyond, tol) for j, o in enumerate(solids) if j != i):
+                    continue
+                outside.append((part, normal))
+    bed = domain[4] if domain is not None else float(low[2])
+    bed_tol = max(porous.heaviside * (dx or 0.0), 1e3 * tol)
+
+    def exposed(ring: np.ndarray, normal: np.ndarray) -> bool:
+        beyond = ring.mean(axis=0) + step * normal
+        if domain is not None:
+            if beyond[0] < domain[0] or beyond[0] > domain[1]:
+                return False
+            if not two_d and (beyond[1] < domain[2] or beyond[1] > domain[3]):
+                return False
+        if two_d and abs(normal[1]) > 0.9:
+            return False
+        down = normal[2] < -math.sqrt(0.5)
+        return not (porous.on_bed and down and float(ring[:, 2].min()) <= bed + bed_tol)
+
+    open_ = [(ring, normal) for ring, normal in outside if exposed(ring, normal)]
+    surface = np.array(
+        [(r[0], r[k], r[k + 1]) for r, _ in open_ for k in range(1, len(r) - 1)], np.float64
+    ).reshape(-1, 3, 3)
+
+    def depth(points: np.ndarray) -> np.ndarray:
+        if not len(surface):  # nothing exposed: REEF3D gives the body its core
+            return np.full(len(points), np.inf)
+        return distance_to_triangles(points, surface)
+
+    materials = porous.materials()
+    triangles, values, lines = [], [], []
+
+    def add(ring: np.ndarray, layer: int) -> None:
+        value = materials[layer - 1]
+        for k in range(1, len(ring) - 1):
+            triangles.append((ring[0], ring[k], ring[k + 1]))
+            values.append(value)
+
+    ys = {v[_ALONG_Y[code]] for code, v, _ in shapes if code in _ALONG_Y}
+    ye = {v[_ALONG_Y[code] + 1] for code, v, _ in shapes if code in _ALONG_Y}
+    trunk = (
+        all(code in _ALONG_Y for code, *_ in shapes)
+        and len(ys) == 1
+        and len(ye) == 1
+        and not any(abs(n[1]) > 0.9 for _, n in open_)  # its ends expose nothing
+    )
+    for ring, normal in outside:
+        if trunk and abs(normal[1]) > 0.9:
+            continue  # its ends: layered below
+        centre = ring.mean(axis=0)
+        add(ring, int(porous.layer_at(depth(centre[None, :] - 1e3 * tol * normal))[0]))
+    # the body's edges (where its outside bends, not where two shapes meet)
+    where = Layers([(1, c) for c in solids], 20.0 * tol)
+    for solid in solids:
+        for a, b in solid.edges():
+            cuts = sorted({0.0, 1.0, *(t for c in solids for t in _crossings(a, b, c, tol))})
+            for t0, t1 in zip(cuts[:-1], cuts[1:], strict=False):
+                if (t1 - t0) * float(np.linalg.norm(b - a)) <= 100.0 * tol:
+                    continue
+                p, q = a + t0 * (b - a), a + t1 * (b - a)
+                if where.is_edge(0.5 * (p + q), b - a):
+                    lines.append((p, q, materials[0]))
+    if trunk:
+        y0, y1 = float(next(iter(ys))), float(next(iter(ye)))
+        for ring, layer, contour in _trunk_ends(porous, solids, low, high, depth, y0, y1):
+            if ring is not None:
+                add(ring, layer)
+            if contour is not None:
+                lines.append((*contour, materials[min(layer, len(materials)) - 1]))
+    return _assembled(triangles, values, _merged(lines, tol))
+
+
+#: points across a trunk's end at most (its layers drawn on a grid this fine)
+END_POINTS = 250_000
+
+
+def _trunk_ends(porous, solids, low, high, depth, y0: float, y1: float):
+    """A trunk's two ends (y0, y1) with its layers: (triangle, layer, None) for each
+    triangle, (None, layer, (p, q)) for each piece of a layer's inner boundary."""
+    from lagoonviz.core.data.mesh import grid_triangles, iso_lines
+
+    thick = [t for t, *_ in porous.layers if t > 0]
+    size = np.array([high[0] - low[0], high[2] - low[2]])
+    step = min(min(thick) / 6.0 if thick else size.max() / 100.0, size.max() / 100.0)
+    step = max(step, math.sqrt(size[0] * size[1] / END_POINTS))
+    pad = 2.0 * step
+    x = np.arange(low[0] - pad, high[0] + pad + step, step)
+    z = np.arange(low[2] - pad, high[2] + pad + step, step)
+    gx, gz = np.meshgrid(x, z)
+    middle = 0.5 * (y0 + y1)
+    points = np.stack([gx.ravel(), np.full(gx.size, middle), gz.ravel()], axis=1)
+    inside = np.zeros(len(points), bool)
+    for solid in solids:
+        inside |= ((points @ solid.normals.T) <= solid.offsets).all(axis=1)
+    # the signed distance to the body's outline across x and z (inside positive)
+    edges = []
+    for solid in solids:
+        for ring, normal in zip(solid.faces, solid.normals, strict=True):
+            if abs(normal[1]) > 0.9:
+                xz = ring[:, [0, 2]]
+                edges += [(xz[k], xz[(k + 1) % len(xz)]) for k in range(len(xz))]
+    flat = points[:, [0, 2]]
+    outline = np.min([_to_segment(flat, a, b) for a, b in edges], axis=0)
+    signed = np.where(inside, outline, -outline)
+    deep = depth(points)
+    grid = SurfaceMesh(
+        points.astype(np.float32),
+        grid_triangles(len(z), len(x)),
+        {"signed": signed.astype(np.float32), "depth": np.minimum(deep, 1e6).astype(np.float32)},
+    )
+    body = clip_surface_of(grid, "signed", 0.0, "above")
+    bounds = [0.0, *porous.depths()]
+    for k in range(len(porous.layers) + 1):
+        part = body
+        if k > 0:
+            part = clip_surface_of(part, "depth", bounds[k], "above")
+        if k < len(porous.layers):
+            if porous.layers[k][0] <= 0:
+                continue
+            part = clip_surface_of(part, "depth", bounds[k + 1], "below")
+            line = iso_lines(body, body.point_data["depth"], bounds[k + 1])
+            for y in (y0, y1):
+                ends = np.asarray(line.points, np.float64)
+                ends[:, 1] = y
+                for a, b in np.asarray(line.segments, np.int64):
+                    yield None, k + 1, (ends[a], ends[b])
+        for y, flip in ((y0, False), (y1, True)):
+            corners = np.asarray(part.points, np.float64)[np.asarray(part.triangles, np.int64)]
+            corners[..., 1] = y
+            facing = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])[:, 1]
+            turn = (facing > 0) if not flip else (facing < 0)  # y0 faces -y, y1 +y
+            corners[turn] = corners[turn][:, ::-1]
+            for triangle in corners:
+                yield triangle, k + 1, None
+
+
+def clip_surface_of(mesh: SurfaceMesh, name: str, level: float, keep: str) -> SurfaceMesh:
+    """:func:`~lagoonviz.core.data.mesh.clip_surface` by one of the mesh's arrays."""
+    from lagoonviz.core.data.mesh import clip_surface
+
+    if not mesh.n_triangles:
+        return mesh
+    return clip_surface(mesh, mesh.point_data[name], level, keep)

@@ -3573,7 +3573,7 @@ def _window(times, values, t0: float, t1: float):
     return t, np.interp(t, times, values)
 
 
-#: how CFD's porous structures first look: coloured by stone size (armour, filter
+#: how porous structures first look: coloured by stone size (armour, filter
 #: and core of a rubble mound apart), half see-through over the flow in them, with
 #: their outlines where one layer meets the next
 POROUS_LOOK = {"material": "rock", "colormap": "greys", "opacity": 0.45, "grid_lines": "dark"}

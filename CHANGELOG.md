@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### CFD's porous structures, layer by layer
+### Porous structures, layer by layer (CFD and NHFLOW)
 
 - A CFD case with porous structures (VRANS, ctrl.txt: B 270 boxes, B 274
   cylinders, B 281 / B 282 wedges, B 291 plates) opens with a *Porous structures*
@@ -13,6 +13,13 @@
   the flow in them, with outlines where one layer meets the next.
 - Structures have an *Outlines* setting (off, dark, white): their edges, drawn
   towards the camera.
+- NHFLOW too: its porous body (B 210 - B 219) with its layers below the exposed
+  surface (B 202 armour and filter, B 201 the core; the faces on the domain's
+  sides, between the shapes, the 2D ends and, with B 203 1, on the bed expose
+  nothing), as nhflow_geometry_layer.cpp has them. A breakwater's trunk shows its
+  layers on its ends (Yue's flume: armour 0.075 m, filter 0.045 m, the core);
+  another body its outside. NHFLOW's own file of the body is then not shown
+  besides.
 
 ### Export image with Blender Cycles: a still like the film's frame
 

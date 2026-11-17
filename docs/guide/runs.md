@@ -110,8 +110,20 @@ it, side by side (a flume's side shows armour, filter and core as bands). Colour
 `d50` (also `porosity`, or `layer`: the materials numbered as they first appear in
 ctrl.txt), half see-through over the flow in them, with *Outlines* where one layer
 meets the next (not where a crest's box meets the slope's wedge of the same stones).
-A slice through the flume behind it shows the velocity in the stones. NHFLOW's porous
-structures (one material for all) are NHFLOW's file of them, a *Structures* item.
+A slice through the flume behind it shows the velocity in the stones.
+
+**NHFLOW's porous structures** make one body of their shapes (B 210 - B 219) and
+give it layers by the depth below its exposed surface: `B 202 t n d50 α β` a layer
+`t` thick, the first the outermost (the armour, then the filter), `B 201` the core
+inside. The exposed surface leaves out the faces on the domain's sides, those
+between the shapes, the ends in 2D and, with `B 203 1` (the default), the faces on
+the bed. The *Porous structures* item shows that body, its outside the armour; a
+body that is the same at every y (a breakwater's trunk of boxes, wedges and
+cylinders across the flume) shows its layers on its ends, where REEF3D puts them
+(it blends them over `B 209` cells; LAGOON draws each boundary half way). NHFLOW's
+file of the body (`REEF3D_NHFLOW_VRANS_VTP`) is then not shown besides. With layers
+NHFLOW also writes `porosity` into its volume (`P 10`): a slice coloured by it shows
+them as the run has them.
 
 **SEASTATE**, REEF3D's spectral wave model, writes maps of the sea state
 (`REEF3D_SEASTATE_VTP`): they open as a *Sea state* item, coloured by the
