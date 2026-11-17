@@ -137,6 +137,18 @@ def _exaggeration(tip: str) -> dict[str, PropertySpec]:
     }
 
 
+def _without_solids() -> dict[str, PropertySpec]:
+    return {
+        "without_solids": PropertySpec(
+            False,
+            "Without solids",
+            tip="Cut away where it lies in the case's solids (DIVEMesh's, NHFLOW's direct "
+            "forcing solids, the floating bodies): REEF3D writes its volume there too, "
+            "where no water flows. Porous structures stay",
+        )
+    }
+
+
 def _grid_lines(what: str) -> dict[str, PropertySpec]:
     return {
         "grid_lines": PropertySpec(
@@ -366,6 +378,7 @@ KINDS: dict[str, KindSpec] = {
         {
             **_data_source("volume"),
             **_colouring("velocity", "reef3d"),
+            **_without_solids(),
             **_grid_lines("on the volume's outside"),
             "outline": PropertySpec(
                 "off",
@@ -447,6 +460,7 @@ KINDS: dict[str, KindSpec] = {
                 tip="CFD: the slice only where the level set phi >= 0 (the water), cut at "
                 "its zero (the free surface)",
             ),
+            **_without_solids(),
             **_grid_lines("the slice cuts"),
             **_contours(),
             "iso_line_of": PropertySpec(
@@ -495,6 +509,7 @@ KINDS: dict[str, KindSpec] = {
                 "bubbles away from the surface are not found. Whole volume: every level of "
                 "every frame",
             ),
+            **_without_solids(),
             **_grid_lines("the surface crosses (with AMR: of every level)"),
             **_exaggeration("Scales heights about the still water level"),
         },
@@ -513,6 +528,7 @@ KINDS: dict[str, KindSpec] = {
             "iso_min": PropertySpec(0.0, "From", tip="The part of the volume from this value"),
             "iso_max": PropertySpec(1.0, "To", tip="… up to this value"),
             **_colouring("none", "reef3d"),
+            **_without_solids(),
             **_exaggeration("Scales heights about the still water level"),
         },
     ),

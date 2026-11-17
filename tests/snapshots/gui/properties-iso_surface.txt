@@ -21,6 +21,7 @@ QWidget
   Bar ticks: number 0 in [0, 11] decimals 0
   Colours from: choice 'water side' of ['water side', 'surface']
   Searched: choice 'near the surface' of ['near the surface', 'whole volume']
+  Without solids: checkbox '' off
   Grid lines: choice 'off' of ['off', 'dark', 'white']
   Vertical scale: _LogSlider
       slider in [0, 1000]

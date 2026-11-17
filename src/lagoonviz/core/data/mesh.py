@@ -1257,12 +1257,16 @@ def iso_lines(mesh: SurfaceMesh, field: np.ndarray, level: float) -> SurfaceMesh
     )
 
 
-def clip_surface(mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str) -> SurfaceMesh:
+def clip_surface(
+    mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str, crossing=None
+) -> SurfaceMesh:
     """The part of a triangle surface where ``field`` is at least (``keep`` "above")
     or at most ("below") ``level``: triangles across the level are cut on their
     edges (points and data interpolated, cut points shared by neighbours). Its
     ``outlines`` (a slice's grid lines, edges of its triangles) are kept as far as
-    they reach: an outline across the level ends at the cut point of its edge."""
+    they reach: an outline across the level ends at the cut point of its edge.
+    ``crossing(a, b)``: where the edges from points a to b (index arrays) cross, as
+    t along them (default: where the field, linear along them, does)."""
     d = np.asarray(field, np.float64) - float(level)
     if keep == "below":
         d = -d
@@ -1279,7 +1283,7 @@ def clip_surface(mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str) 
             compact.reshape(-1, 3).astype(np.uint32),
             {name: values[kept] for name, values in mesh.point_data.items()},
         ).with_normals()
-        return _with_outlines(surface, _clipped_outlines(mesh, d))
+        return _with_outlines(surface, _clipped_outlines(mesh, d, crossing))
     # the odd corner first (inside of one, outside of two), the winding kept
     flags = inside[(count == 1) | (count == 2)]
     odd = np.where(one, flags.argmax(axis=1), (~flags).argmax(axis=1))
@@ -1295,6 +1299,8 @@ def clip_surface(mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str) 
     )
     a, b = a[first], b[first]
     t = d[a] / np.where(d[a] == d[b], 1.0, d[a] - d[b])
+    if crossing is not None:
+        t = np.asarray(crossing(a, b), np.float64)
     n = mesh.n_points
     cut01 = n + inverse[: len(v0)]
     cut02 = n + inverse[len(v0) :]
@@ -1319,10 +1325,10 @@ def clip_surface(mesh: SurfaceMesh, field: np.ndarray, level: float, keep: str) 
         compact.reshape(-1, 3).astype(np.uint32),
         {name: values[kept] for name, values in data.items()},
     ).with_normals()
-    return _with_outlines(surface, _clipped_outlines(mesh, d))
+    return _with_outlines(surface, _clipped_outlines(mesh, d, crossing))
 
 
-def _clipped_outlines(mesh: SurfaceMesh, d: np.ndarray):
+def _clipped_outlines(mesh: SurfaceMesh, d: np.ndarray, crossing=None):
     """A surface's outlines (point pairs, e.g. a slice's grid lines) where ``d`` >= 0:
     whole, or up to where they cross 0; as points of their own (two per segment)
     with their data. None without outlines."""
@@ -1334,6 +1340,10 @@ def _clipped_outlines(mesh: SurfaceMesh, d: np.ndarray):
     pairs, da, db = pairs[keep], da[keep], db[keep]
     # an end outside moves to where the segment crosses: t along a -> b
     t = da / np.where(da == db, 1.0, da - db)
+    across = (da >= 0) != (db >= 0)
+    if crossing is not None and across.any():
+        t = t.copy()
+        t[across] = crossing(pairs[across, 0], pairs[across, 1])
     ta = np.where(da >= 0, 0.0, t)
     tb = np.where(db >= 0, 1.0, t)
     a, b = pairs[:, 0], pairs[:, 1]

@@ -187,7 +187,17 @@ in the water, where the level set phi is 0 or more, cut at the free surface (its
 grid lines too). *Iso-line of* draws the line where an iso-surface of a variable
 crosses the slice, at *Iso-line value*: phi at 0 is the free surface on the slice,
 pressure or a velocity component a line of equal value. It is drawn thicker than
-contour lines, in its *Iso-line colour* (white, black, red or yellow). *Add → Iso-surface* draws where a variable
+contour lines, in its *Iso-line colour* (white, black, red or yellow).
+
+*Without solids* (of the volume, slices, iso-surfaces and iso-volumes) cuts them away
+where they lie in the case's solids: DIVEMesh's (control.txt, its STL, a store's),
+NHFLOW's direct forcing solids and the floating bodies at the time shown. REEF3D
+writes its volume there too, where no water flows (a weir's body, a pier, the blocks
+under a beach). The cut follows the solid's faces where the cells' edges enter it; a
+corner of a solid inside a cell is cut off it. Porous structures stay: the flow in
+the stones is real.
+
+*Add → Iso-surface* draws where a variable
 has a *Value*. *Add → Iso-volume* (and its button in the toolbar) draws the part of
 the volume where a variable lies between *From* and *To*, as a closed body: for a
 CFD run it starts with the level set phi from 0 up, the water itself; else the

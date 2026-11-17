@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Volumes without the solids in them
+
+- The volume, slices, iso-surfaces and iso-volumes have *Without solids*: cut
+  away where they lie in the case's solids (DIVEMesh's, NHFLOW's direct forcing
+  solids, the floating bodies at the time shown), where REEF3D writes its volume
+  too but no water flows (a weir's body, piers, baffle blocks). The cut follows the
+  solids' faces (each cell edge entering one cut where it does); a solid's corner
+  inside a cell is cut off it. Porous structures stay.
+- In a solid: a ray straight up crossing its faces, tops counted +1 and bottoms
+  -1, so solids that overlap and STL geometry work alike; points on a solid's
+  face count as in it (a solid up to the domain's top or bottom is cut there too).
+- On the river weir (1868 faces of its body, piers and baffles, a slice of
+  350 000 points) the cut takes 0.3 s.
+
 ### Porous structures, layer by layer (CFD and NHFLOW)
 
 - A CFD case with porous structures (VRANS, ctrl.txt: B 270 boxes, B 274

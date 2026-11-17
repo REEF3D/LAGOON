@@ -87,6 +87,9 @@ PLAN_LAYERS = {
     "amr": 3.0,
     "statistics": 3.2,  # over the water: a map of it
 }
+#: dataset roles of solids a volume is cut by ("Without solids"; floating bodies by
+#: their items)
+SOLID_ROLES = ("solid", "forcing")
 #: the colours of a slice's iso-line ("iso_line_colour")
 ISO_LINE_COLOURS = {"white": "#ffffff", "black": "#000000", "red": "#e0302a", "yellow": "#ffd000"}
 #: while the time moves, the iso-surface of a volume of more points than this is cut
@@ -324,6 +327,8 @@ class FrameKey:
     detail: int = 1
     #: the case shown with its mirror image: () no, ("y", plane) about y = plane
     mirror: tuple = ()
+    #: "Without solids": the solids cut away, as ((dataset key, frame index), ...)
+    clip: tuple = ()
 
 
 def _kind_of(key) -> tuple:
@@ -1056,7 +1061,61 @@ class DataManager:
             detail = self._detail(dataset) if not extra else 1
         plane = self.mirror_plane(item_id)
         mirror = ("y", plane) if plane is not None else ()
-        return FrameKey(self._case_key(item_id), dataset.key, index, arrays, extra, detail, mirror)
+        clip = self._solids_key(item_id, time) if item.properties.get("without_solids") else ()
+        return FrameKey(
+            self._case_key(item_id), dataset.key, index, arrays, extra, detail, mirror, clip
+        )
+
+    def _solids_key(self, item_id: str, time: float | None = None) -> tuple:
+        """The solids an item's volume is cut by (its "Without solids"): DIVEMesh's
+        and NHFLOW's direct forcing solids of its case, and its floating bodies at
+        the time (each body item of the case, shown or not)."""
+        case = self.case(item_id)
+        if case is None:
+            return ()
+        found = [(d.key, 0) for d in case.datasets.values() if d.role in SOLID_ROLES]
+        mine = self.case_item(item_id)
+        for other in self.data_items():
+            body = self.scene.get(other)
+            if body.kind != "body" or self.case_item(other) is not mine:
+                continue
+            dataset = self.dataset(other)
+            index = self.frame_index(other, time)
+            if dataset is not None and index is not None:
+                found.append((dataset.key, int(index)))
+        return tuple(sorted(set(found)))
+
+    def _solids(self, key: FrameKey):
+        """The solids of a frame key's clip (:class:`~lagoonviz.core.data.solidclip.Solids`),
+        kept for the last few."""
+        from lagoonviz.core.data.solidclip import Solids
+
+        cache = self.__dict__.setdefault("_solids_cache", {})
+        found = cache.get((key.case, key.clip))
+        if found is not None:
+            return found
+        case = self._cases.get(key.case) or self.open(key.case)
+        parts = []
+        for name, index in key.clip:
+            dataset = case.datasets.get(name)
+            if dataset is None:
+                continue
+            try:
+                if hasattr(dataset, "triangles") and dataset.role == "solid":
+                    points, triangles = dataset.triangles()  # (its faces in the bed too)
+                else:
+                    mesh = dataset.read(index, [])
+                    points, triangles = mesh.points, mesh.triangles
+            except (OSError, ValueError, KeyError, IndexError) as error:
+                log.warning("solids of %s not read: %s", name, error)
+                continue
+            points = np.asarray(points, np.float64)
+            parts.append(points[np.asarray(triangles, np.int64)])
+        found = Solids(np.concatenate(parts) if parts else np.zeros((0, 3, 3)))
+        if len(cache) > 8:
+            cache.clear()
+        cache[(key.case, key.clip)] = found
+        return found
 
     def mirror_plane(self, item_id: str) -> float | None:
         """The plane y = value its case is mirrored about (the case's *Mirror in y*:
@@ -1148,13 +1207,18 @@ class DataManager:
         mesh = self.cache.get(key)
         if mesh is not None:
             return mesh
+        # read as it is (not kept: what is made of it is), without the solids in it
+        # (in the model's place, before a mirror image), then with its image
+        plain = replace(key, mirror=(), clip=())
+        mesh = (self.cache.get(plain) if plain != key else None) or self._read_key(plain)
+        if key.clip:
+            from lagoonviz.core.data.solidclip import without_solids
+
+            mesh = without_solids(mesh, self._solids(key))
         if key.mirror:
-            # read as it is (not kept: the mirrored mesh is), then with its image
             from lagoonviz.core.data.mesh import mirrored_y
 
-            mesh = mirrored_y(self._read_key(replace(key, mirror=())), float(key.mirror[1]))
-        else:
-            mesh = self._read_key(key)
+            mesh = mirrored_y(mesh, float(key.mirror[1]))
         self.cache.put(key, mesh)
         return mesh
 
