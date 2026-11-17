@@ -401,11 +401,15 @@ def _record_film(session: Session, path: Path, settings: dict, style: str) -> No
         log.warning("film not recorded for the script:\n%s", traceback.format_exc())
 
 
-def _path_trace(session, path, times, settings, style, progress, blender) -> Path | None:
+def _path_trace(
+    session, path, times, settings, style, progress, blender, title: str = "Export animation"
+) -> Path | None:
     """Path trace with Blender: the scene is written here (it reads the session),
     Blender renders in a background thread while the dialog shows the frames done
     and the time left. Stop ends Blender; the frames done are kept, and exporting
-    again goes on from them (frames whose data, camera and settings are unchanged)."""
+    again goes on from them (frames whose data, camera and settings are unchanged).
+    Also File → Export image's still (``title``; ``settings["dpi"]``: its print
+    resolution)."""
     from lagoonviz.render.pathtrace import blender_progress, export_scene, finish, work_folder
 
     work = work_folder(path)
@@ -430,7 +434,7 @@ def _path_trace(session, path, times, settings, style, progress, blender) -> Pat
         )
     except Exception as error:  # noqa: BLE001 (report, keep the window)
         log.error("path tracing export failed:\n%s", traceback.format_exc())
-        QMessageBox.warning(progress.parentWidget(), "Export animation", f"Failed:\n{error}")
+        QMessageBox.warning(progress.parentWidget(), title, f"Failed:\n{error}")
         return None
     if progress.wasCanceled():
         return None
@@ -459,6 +463,7 @@ def _path_trace(session, path, times, settings, style, progress, blender) -> Pat
                 resume=True,
                 cancel=stop.is_set,
                 status=heard,
+                dpi=settings.get("dpi"),
             )
         except Exception as error:  # noqa: BLE001 (reported below)
             log.error("path tracing failed:\n%s", traceback.format_exc())
@@ -484,7 +489,7 @@ def _path_trace(session, path, times, settings, style, progress, blender) -> Pat
         worker.join(0.1)
     if state["error"] is not None and not stop.is_set():
         QMessageBox.warning(
-            progress.parentWidget(), "Export animation", f"Path tracing failed:\n{state['error']}"
+            progress.parentWidget(), title, f"Path tracing failed:\n{state['error']}"
         )
         return None
     return state["result"]
@@ -497,72 +502,3 @@ def _duration(seconds: float) -> str:
     if seconds < 5400:
         return f"{round(seconds / 60)} min"
     return f"{seconds / 3600:.1f} h"
-
-
-def render_still(window, samples: int = 64) -> str | None:
-    """File → Render still with Cycles: the 3D view as it is now, path traced by
-    Blender at the view's shape (Full HD width), in the view's look (open ocean for
-    the engineering looks). Returns the written path."""
-    from PySide6.QtWidgets import QFileDialog
-
-    from lagoonviz.render.pathtrace import find_blender
-
-    session = window.session
-    blender = find_blender()
-    if blender is None:
-        QMessageBox.information(
-            window,
-            "Render still with Cycles",
-            "Path tracing needs Blender 4.2 or newer: install it from blender.org "
-            "(LAGOON finds it in Applications), or set LAGOON_BLENDER to its executable.",
-        )
-        return None
-    path, _ = QFileDialog.getSaveFileName(
-        window,
-        "Render still with Cycles",
-        str(movie_folder(session) / "lagoon_cycles.png"),
-        "PNG image (*.png)",
-    )
-    if not path:
-        return None
-    path = Path(path).with_suffix(".png")
-    viewport = window.viewport
-    if hasattr(viewport, "view"):
-        session.set_camera(viewport.view.camera_state())
-    style = getattr(getattr(viewport, "view", None), "style_name", "studio")
-    canvas = getattr(viewport, "canvas", viewport)
-    size = view_sizes((canvas.width(), canvas.height()))[0][1]
-    settings = {"size": size, "samples": samples, "fps": 25.0, "foam": white_water_setting(window)}
-    progress = QProgressDialog("Handing the scene to Blender…", "Stop", 0, 1, window)
-    progress.setWindowTitle("Render still with Cycles")
-    progress.setWindowModality(Qt.WindowModal)
-    progress.setMinimumDuration(0)
-    keep_time = session.scene.time
-    written = _path_trace(session, path, [keep_time], settings, style, progress, blender)
-    session.set_time(keep_time)
-    progress.close()
-    if written is None:
-        return None
-    import shutil
-
-    from lagoonviz.render.pathtrace import work_folder
-
-    shutil.rmtree(work_folder(path), ignore_errors=True)  # a still keeps no frames
-    try:
-        from lagoonviz.render.script import cycles_still_code
-
-        session.record_output(
-            cycles_still_code(
-                path,
-                size=size,
-                time=keep_time,
-                style=style,
-                samples=samples,
-                camera=session.scene.camera,
-                plan=(session.scene.plan_view, session.scene.plan_side),
-            )
-        )
-    except Exception:  # noqa: BLE001 (the image is written; only the script misses it)
-        log.warning("still not recorded for the script:\n%s", traceback.format_exc())
-    window.statusBar().showMessage(f"Path traced still saved to {written}", 30000)
-    return str(written)

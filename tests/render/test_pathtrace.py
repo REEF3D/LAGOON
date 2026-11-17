@@ -393,7 +393,44 @@ def test_path_trace_still_and_film(reef3d_run, tmp_path, fake_blender):
         assert out == tmp_path / "film.mp4" and out.stat().st_size > 500
     assert len(list((tmp_path / "film.cycles").glob("frame_*.png"))) == 3
     assert work_folder(tmp_path / "a.png") == tmp_path / "a.cycles"
+    assert work_folder(tmp_path / "a.tif") == tmp_path / "a.cycles"
     assert work_folder(tmp_path / "frames") == tmp_path / "frames"
+
+
+def test_a_still_as_jpeg_or_tiff(reef3d_run, tmp_path, fake_blender):
+    """File → Export image with Cycles: a still in the image's format, its print
+    resolution kept; no frames left beside it."""
+    from PIL import Image
+
+    session = Session()
+    session.open_case(reef3d_run)
+    tif = path_trace(session, tmp_path / "still.tif", size=(64, 36), blender=fake_blender, dpi=300)
+    with Image.open(tif) as image:
+        assert image.format == "TIFF" and round(image.info["dpi"][0]) == 300
+    jpg = path_trace(session, tmp_path / "still.jpg", size=(64, 36), blender=fake_blender)
+    with Image.open(jpg) as image:
+        assert image.format == "JPEG"
+    assert not (tmp_path / "still.cycles").exists()
+
+
+def test_path_traced_at_full_detail_while_the_time_moves(reef3d_run, tmp_path):
+    """Playing (or the slider held), the window reads large surfaces coarser: a path
+    traced frame is exported at full detail all the same, and the window's state
+    is left as it was."""
+    session = Session()
+    session.open_case(reef3d_run)
+    seen = []
+    original = session.data.frame_key
+
+    def frame_key(item_id, *args, **kwargs):
+        seen.append(session.data.moving)
+        return original(item_id, *args, **kwargs)
+
+    session.data.frame_key = frame_key
+    session.data.moving = True
+    export_scene(session, tmp_path / "still.cycles", [1.0], (64, 36), "wave_flume", 4, foam="none")
+    assert seen and not any(seen)
+    assert session.data.moving is True
 
 
 def test_command_line_cycles(reef3d_run, tmp_path, fake_blender, capsys):

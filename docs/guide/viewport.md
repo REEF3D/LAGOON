@@ -113,6 +113,11 @@ from lagoonviz.render.offscreen import render_image
 render_image(session, "view.tif", (2008, 1130), scale=2.5, legend=True, dpi=300)
 ```
 
+*Renderer: Blender Cycles* path traces the image instead, as *Export animation*
+does a film (see [Cinematic looks](cinematic.md)): the same scene, look, samples
+and white water as a path traced film's frame at that time, in minutes rather than
+at once, and without the time and colour bars. Any size; PNG, JPEG or TIFF.
+
 *File → Save screenshot…* (++f12++) saves a quick picture of the whole window with
 the 3D view in it. For a paper figure with axes, see *File → Export figure… → 3D
 view*.

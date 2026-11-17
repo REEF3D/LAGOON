@@ -92,8 +92,9 @@ and broken foam just off the beach.
    `PATH`, or where the environment variable `LAGOON_BLENDER` points.
 2. Choose a cinematic look (with Studio or Ocean, Cycles uses Wave flume or Open
    ocean).
-3. *File → Render still with Cycles…* for one picture of the 3D view as it is, or
-   *File → Export animation… → Renderer: Blender Cycles* for a film.
+3. *File → Export image… → Renderer: Blender Cycles* for one picture of the 3D view
+   as it is, or *File → Export animation… → Renderer: Blender Cycles* for a film:
+   the same scene, samples and white water, so a still looks like the film's frame.
 
 ```bash
 lagoon-render flume.lagoon-session still.png --engine cycles --style open_ocean

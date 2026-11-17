@@ -202,3 +202,7 @@ def test_cycles_still_code(tmp_path):
     compile(code, "<code>", "exec")
     assert "session.set_time(1.5)" in code and "session.set_camera(" in code
     assert "path_trace(" in code and "look='wave_flume'" in code and "samples=64" in code
+    assert "foam=" not in code and "dpi=" not in code and "Export image" in code
+    tif = cycles_still_code(tmp_path / "still.tif", size=(800, 600), foam="heavy", dpi=300)
+    compile(tif, "<code>", "exec")
+    assert "foam='heavy'" in tif and "dpi=300.0" in tif

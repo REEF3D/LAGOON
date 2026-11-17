@@ -7,6 +7,10 @@ or a width in centimetres at a print resolution), as PNG, JPEG or TIFF.
 The image frames what the 3D view shows (its shape is the view's), and lines,
 markers and text keep their share of the image: a 4K image of the view is the view
 drawn sharper, not smaller. Save screenshot stays the quick picture of the window.
+
+Two renderers, as for Export animation: LAGOON's own (at once, as the 3D view draws
+it) and Blender's Cycles (path traced, minutes; the same scene, look, samples and
+white water as a film's frame at that time).
 """
 
 from __future__ import annotations
@@ -170,6 +174,8 @@ class ExportImageDialog(QDialog):
         holder.setLayout(shown)
         form.addRow("Show", holder)
 
+        self._cycles_controls(form, parent)
+
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.button(QDialogButtonBox.Ok).setText("Export")
         self.buttons.accepted.connect(self.accept)
@@ -183,9 +189,58 @@ class ExportImageDialog(QDialog):
             self.custom.valueChanged,
             self.cm.valueChanged,
             self.dpi.valueChanged,
+            self.engine.currentIndexChanged,
         ):
             signal.connect(lambda *_: self._update())
         self._update()
+
+    def _cycles_controls(self, form: QFormLayout, parent) -> None:
+        """The renderer, and for Cycles its samples and white water (as Export
+        animation has them)."""
+        from lagoonviz.core.foam import WHITE_WATER_AMOUNTS
+        from lagoonviz.gui.export_movie import white_water_setting
+        from lagoonviz.render.pathtrace import find_blender
+
+        self.blender = find_blender()
+        self.engine = QComboBox()
+        self.engine.addItem("LAGOON (at once, as the 3D view draws it)", "pygfx")
+        self.engine.addItem("Blender Cycles (path traced, slow)", "cycles")
+        self.engine.setToolTip(
+            "Cycles traces the light: reflections, refraction through the water, soft "
+            "shadows. In the look of the 3D view if it is a cinematic one, else open ocean; "
+            "the same picture as a path traced film's frame at this time."
+        )
+        form.addRow("Renderer", self.engine)
+        self.samples = QSpinBox()
+        self.samples.setRange(4, 4096)
+        self.samples.setValue(64)
+        self.samples.setToolTip("Samples per pixel: more is less noisy and slower")
+        self.foam = QComboBox()
+        for name in WHITE_WATER_AMOUNTS:
+            self.foam.addItem(name, name)
+        self.foam.setCurrentIndex(max(self.foam.findData(white_water_setting(parent)), 0))
+        self.foam.setToolTip(
+            "White water where the surface breaks: spray off the crests, foam drifting "
+            "on the surface, bubbles under it (from the free surface's velocity); also "
+            "View → White water in Cycles"
+        )
+        self.blender_label = QLabel(
+            f"Blender: {self.blender}"
+            if self.blender
+            else "Blender not found: install it from blender.org (4.2 or newer), "
+            "or set LAGOON_BLENDER"
+        )
+        self.blender_label.setWordWrap(True)
+        cycles = QHBoxLayout()
+        cycles.setContentsMargins(0, 0, 0, 0)
+        cycles.addWidget(QLabel("samples"))
+        cycles.addWidget(self.samples)
+        cycles.addWidget(QLabel("white water"))
+        cycles.addWidget(self.foam)
+        cycles.addWidget(self.blender_label, 1)
+        self.cycles_row = QWidget()
+        self.cycles_row.setLayout(cycles)
+        form.addRow("", self.cycles_row)
 
     # ------------------------------------------------------------- state
     def _restore(self) -> None:
@@ -199,6 +254,9 @@ class ExportImageDialog(QDialog):
             self.dpi.setValue(int(settings.value(SETTINGS + "dpi", self.dpi.value())))
             legend = settings.value(SETTINGS + "legend", True)
             self.legend.setChecked(str(legend).lower() not in ("false", "0"))
+            self.samples.setValue(int(settings.value(SETTINGS + "samples", self.samples.value())))
+            engine = self.engine.findData(str(settings.value(SETTINGS + "engine", "pygfx")))
+            self.engine.setCurrentIndex(max(engine, 0))
         except (TypeError, ValueError):
             return
         if 0 <= index < self.size.count():
@@ -213,6 +271,8 @@ class ExportImageDialog(QDialog):
         settings.setValue(SETTINGS + "cm", self.cm.value())
         settings.setValue(SETTINGS + "dpi", self.dpi.value())
         settings.setValue(SETTINGS + "legend", self.legend.isChecked())
+        settings.setValue(SETTINGS + "engine", self.engine.currentData())
+        settings.setValue(SETTINGS + "samples", self.samples.value())
 
     def chosen(self):
         """(width, height), scale to the view, dpi (or None)."""
@@ -224,24 +284,34 @@ class ExportImageDialog(QDialog):
             self.dpi.value(),
         )
 
+    @property
+    def cycles(self) -> bool:
+        return self.engine.currentData() == "cycles"
+
     def _update(self) -> None:
         kind = self.size.currentData()[0]
         self.form.setRowVisible(self.custom, kind == "custom")
         self.form.setRowVisible(self.print_row, kind == "print")
+        cycles = self.cycles
+        self.form.setRowVisible(self.cycles_row, cycles)
+        self.legend.setEnabled(not cycles)  # Cycles shows the scene alone, as in its films
         (width, height), _, dpi = self.chosen()
         megabytes = width * height * 4 / 1e6
         text = f"{width} × {height} pixels"
         if dpi:
             text += f" ({width / dpi * CM_PER_INCH:.1f} × {height / dpi * CM_PER_INCH:.1f} cm)"
-        too_large = max(width, height) > self.limit
+        too_large = not cycles and max(width, height) > self.limit  # (the GPU's)
+        if cycles and not self.blender:
+            text += ": Cycles needs Blender"
         if too_large:
             text += f": too large, the GPU draws {self.limit} pixels a side at most"
         elif megabytes > 100:
             text += f", about {megabytes:.0f} MB in memory"
         self.summary.setText(text)
-        self.summary.setEnabled(too_large)
-        self.summary.setStyleSheet("color: #c0392b;" if too_large else "")
-        self.buttons.button(QDialogButtonBox.Ok).setEnabled(not too_large)
+        blocked = too_large or (cycles and not self.blender)
+        self.summary.setEnabled(blocked)
+        self.summary.setStyleSheet("color: #c0392b;" if blocked else "")
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(not blocked)
 
     def _legend(self) -> None:
         from lagoonviz.gui.legend_dialog import LegendDialog
@@ -265,7 +335,10 @@ class ExportImageDialog(QDialog):
             "size": size,
             "scale": scale,
             "dpi": dpi,
-            "legend": self.legend.isChecked(),
+            "legend": self.legend.isChecked() and not self.cycles,
+            "engine": self.engine.currentData(),
+            "samples": self.samples.value(),
+            "foam": self.foam.currentData(),
         }
 
 
@@ -279,8 +352,9 @@ def image_name(session: Session) -> str:
 
 def export_image(window, path: str | Path | None = None, **chosen) -> str | None:
     """Ask for the file and size (or take ``path`` and the dialog's settings as
-    keywords: size, scale, dpi, legend), draw the 3D view off screen and write it.
-    Returns the path written."""
+    keywords: size, scale, dpi, legend; engine "cycles" with samples and foam), draw
+    the 3D view off screen (or path trace it with Blender) and write it. Returns the
+    path written."""
     from lagoonviz.gui.export_movie import movie_folder
     from lagoonviz.render.offscreen import IMAGE_SUFFIXES, render_image
 
@@ -311,6 +385,9 @@ def export_image(window, path: str | Path | None = None, **chosen) -> str | None
             "scale": float(chosen.get("scale", size[0] / view_size[0])),
             "dpi": chosen.get("dpi"),
             "legend": bool(chosen.get("legend", False)),
+            "engine": str(chosen.get("engine", "pygfx")),
+            "samples": int(chosen.get("samples", 64)),
+            "foam": chosen.get("foam", None),
         }
     target = Path(settings["path"]).expanduser()
     if not target.suffix:
@@ -334,6 +411,8 @@ def export_image(window, path: str | Path | None = None, **chosen) -> str | None
         session.set_camera(view.camera_state())
     style = getattr(view, "style_name", "studio")
     window.timeline.play_button.setChecked(False)
+    if settings["engine"] == "cycles":
+        return _path_trace_still(window, target, settings, style)
     QApplication.setOverrideCursor(Qt.WaitCursor)
     try:
         written = render_image(
@@ -354,6 +433,68 @@ def export_image(window, path: str | Path | None = None, **chosen) -> str | None
     _record(session, written, settings, style)
     width, height = settings["size"]
     window.statusBar().showMessage(f"Image saved to {written} ({width} × {height})", 15000)
+    return str(written)
+
+
+def _path_trace_still(window, target: Path, settings: dict, style: str) -> str | None:
+    """The still path traced by Blender: the scene of a path traced film's frame at
+    the session's time (the same look, samples, white water and size), written as
+    the image asked for."""
+    import shutil
+
+    from PySide6.QtWidgets import QProgressDialog
+
+    from lagoonviz.gui.export_movie import _path_trace, set_white_water, white_water_setting
+    from lagoonviz.render.pathtrace import find_blender, work_folder
+
+    session = window.session
+    blender = find_blender()
+    if blender is None:
+        QMessageBox.information(
+            window,
+            "Export image",
+            "Path tracing needs Blender 4.2 or newer: install it from blender.org "
+            "(LAGOON finds it in Applications), or set LAGOON_BLENDER to its executable.",
+        )
+        return None
+    foam = settings.get("foam") or white_water_setting(window)
+    set_white_water(window, foam)  # remembered for the next film or still
+    traced = {**settings, "fps": 25.0, "foam": foam}
+    progress = QProgressDialog("Handing the scene to Blender…", "Stop", 0, 1, window)
+    progress.setWindowTitle("Export image")
+    progress.setWindowModality(Qt.WindowModal)
+    progress.setMinimumDuration(0)
+    keep_time = session.scene.time
+    written = _path_trace(
+        session, target, [keep_time], traced, style, progress, blender, "Export image"
+    )
+    session.set_time(keep_time)
+    progress.close()
+    if written is None:
+        return None
+    shutil.rmtree(work_folder(target), ignore_errors=True)  # a still keeps no frames
+    try:
+        from lagoonviz.render.script import cycles_still_code
+
+        session.record_output(
+            cycles_still_code(
+                target,
+                size=settings["size"],
+                time=keep_time,
+                style=style,
+                samples=settings["samples"],
+                camera=session.scene.camera,
+                plan=(session.scene.plan_view, session.scene.plan_side),
+                foam=foam,
+                dpi=settings["dpi"],
+            )
+        )
+    except Exception:  # noqa: BLE001 (the image is written; only the script misses it)
+        log.warning("still not recorded for the script:\n%s", traceback.format_exc())
+    width, height = settings["size"]
+    window.statusBar().showMessage(
+        f"Path traced image saved to {written} ({width} × {height})", 30000
+    )
     return str(written)
 
 

@@ -318,8 +318,10 @@ def cycles_still_code(
     samples: int = 64,
     camera: dict | None = None,
     plan: tuple[bool, str] | None = None,
+    foam: bool | str | float = True,
+    dpi: float | None = None,
 ) -> str:
-    """File → Render still with Cycles: the 3D view path traced by Blender."""
+    """File → Export image with Blender Cycles: the 3D view path traced by Blender."""
     imports = ["from lagoonviz.render.pathtrace import path_trace"]
     body = _view(time, camera, plan)
     body.append(
@@ -331,10 +333,12 @@ def cycles_still_code(
                 f"size={tuple(int(v) for v in size)!r}",
                 f"look={style!r}",
                 f"samples={int(samples)!r}",
+                *([] if foam is True or foam == "medium" else [f"foam={foam!r}"]),
+                *([f"dpi={float(dpi)!r}"] if dpi else []),
             ],
         )
     )
-    return _block("File > Render still with Cycles (path traced with Blender)", imports, body)
+    return _block("File > Export image with Blender Cycles (path traced)", imports, body)
 
 
 def screenshot_code(

@@ -1658,6 +1658,10 @@ def export_scene(
     frames = []
     materials: dict[str, dict[str, Any]] = {}
     water_bodies = 0
+    # at full detail, also when the time is moving in the window (playing, the slider
+    # held): the surfaces read meanwhile are coarser (DataManager._iso_detail)
+    moving = getattr(session.data, "moving", False)
+    session.data.moving = False
     fars: list[float] = []  # how far each frame's world reaches beyond the domain
     low = high = None
     try:
@@ -1706,6 +1710,7 @@ def export_scene(
             if progress is not None and not progress(number + 1, len(times)):
                 break
     finally:
+        session.data.moving = moving
         session.set_time(original_time)
     if low is None:
         low, high = np.full(3, -1.0), np.full(3, 1.0)
@@ -2045,9 +2050,11 @@ def path_trace(
     cancel: Callable[[], bool] | None = None,
     status: Callable[[str], None] | None = None,
     foam: bool | str | float = True,
+    dpi: float | None = None,
 ) -> Path:
-    """Path trace the session with Blender: a still (``.png``, at ``times[0]`` or the
-    session's time), a film (``.mp4``/``.mov``) or numbered PNGs (a folder). The
+    """Path trace the session with Blender: a still (``.png``, ``.jpg`` or ``.tif``,
+    at ``times[0]`` or the session's time; ``dpi``: its print resolution), a film
+    (``.mp4``/``.mov``) or numbered PNGs (a folder). The
     exported scene is kept in ``work`` (default: :func:`work_folder`; for a still it
     is removed once the image is there, and kept with Blender's log if it fails).
     With ``resume``, frames rendered before from the same data, camera and settings
@@ -2056,14 +2063,14 @@ def path_trace(
     from lagoonviz.render.movie import frame_times
 
     output = Path(output).expanduser()
-    still = output.suffix.lower() == ".png"
+    still = is_still(output)
     if times is None:
         times = [session.scene.time] if still else frame_times(session)
     times = list(times)[:1] if still else list(times)
     keep = work is not None or not still
     work = Path(work) if work is not None else work_folder(output)
     export_scene(session, work, times, size, look, samples, foam=foam)
-    written = finish(work, output, fps, blender, progress, resume, cancel, status)
+    written = finish(work, output, fps, blender, progress, resume, cancel, status, dpi)
     if not keep:  # a still keeps no frames (on failure, the folder and its log stay)
         shutil.rmtree(work, ignore_errors=True)
     return written
@@ -2076,7 +2083,7 @@ def work_folder(output: str | Path) -> Path:
 
     output = Path(output).expanduser()
     suffix = output.suffix.lower()
-    return output.with_suffix(".cycles") if suffix in (*MOVIE_SUFFIXES, ".png") else output
+    return output.with_suffix(".cycles") if suffix in MOVIE_SUFFIXES or is_still(output) else output
 
 
 def finish(
@@ -2088,10 +2095,13 @@ def finish(
     resume: bool = True,
     cancel: Callable[[], bool] | None = None,
     status: Callable[[str], None] | None = None,
+    dpi: float | None = None,
 ) -> Path:
     """Render an exported folder with Blender and deliver it: the still copied to
-    ``output`` (``.png``), the frames encoded into the film (``.mp4``/``.mov``), or
-    the folder of PNGs. Takes long; touches no session (safe in a thread)."""
+    ``output`` (``.png``; ``.jpg`` or ``.tif`` converted; ``dpi``: the print
+    resolution kept in the file), the frames encoded into the film
+    (``.mp4``/``.mov``), or the folder of PNGs. Takes long; touches no session (safe
+    in a thread)."""
     from lagoonviz.render.movie import MOVIE_SUFFIXES, movie_available
 
     work, output = Path(work), Path(output).expanduser()
@@ -2099,9 +2109,18 @@ def finish(
     images = render_folder(work, blender, progress, resume=resume, cancel=cancel, status=status)
     if not images:
         raise RuntimeError("Blender wrote no images")
-    if suffix == ".png":
+    if is_still(output):
         output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(images[0], output)
+        if suffix == ".png" and not dpi:
+            shutil.copyfile(images[0], output)
+        else:
+            from PIL import Image
+
+            from lagoonviz.render.offscreen import write_image
+
+            with Image.open(images[0]) as picture:
+                image = np.asarray(picture.convert("RGBA" if "A" in picture.mode else "RGB"))
+            write_image(output, image, dpi)
         return output
     if suffix in MOVIE_SUFFIXES:
         if not movie_available():
@@ -2109,6 +2128,13 @@ def finish(
             return work
         return encode_images(images, output, fps)
     return work
+
+
+def is_still(output: str | Path) -> bool:
+    """Whether ``output`` is a still: an image file (PNG, JPEG, TIFF)."""
+    from lagoonviz.render.offscreen import IMAGE_SUFFIXES
+
+    return Path(output).suffix.lower() in IMAGE_SUFFIXES
 
 
 def blender_version(blender: str | None = None) -> str | None:

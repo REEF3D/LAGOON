@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Export image with Blender Cycles: a still like the film's frame
+
+- *File → Render still with Cycles* is gone: *File → Export image* has a
+  *Renderer*, LAGOON or Blender Cycles, as *Export animation* has. With Cycles the
+  samples and the white water are chosen as for a film, and every size of Export
+  image is offered (also beyond the GPU's 8192 pixels, a width in cm at a print
+  resolution), as PNG, JPEG or TIFF; the time and colour bars stay off, as in a
+  path traced film.
+- The still was path traced at 64 samples and Full HD alone, whatever the films
+  were made with; it is now the scene, look, samples, white water and size of a
+  path traced film's frame at that time.
+- Fixed: path tracing while the time was moving (playing, or the slider held)
+  read the surfaces as the window shows them meanwhile, coarser (large CFD
+  volumes' iso-surfaces, large surfaces in streaming). It reads them at full
+  detail now; Export image also stops playing first, as Export animation does.
+- `path_trace` writes stills as `.jpg` and `.tif` too, with `dpi=`.
+
 ### CFD with VOF-PLIC: the free surface where the PLIC interface is
 
 - A CFD run with VOF-PLIC (`F 80 4`) opens with its free surface at `phi` = 0 as

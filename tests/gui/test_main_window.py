@@ -434,6 +434,68 @@ def test_export_image_sizes(window):
     assert again.size.currentData() == ("custom", None) and again.custom.value() == 1000
 
 
+def test_export_image_with_cycles(window, reef3d_run, tmp_path, monkeypatch):
+    """Export image's renderer: LAGOON or Blender Cycles (samples, white water, as in
+    Export animation; no time and colour bars); without Blender not exported. With
+    it the still is the film's frame, path traced (here a stand-in for Blender), in
+    the script; there is no "Render still with Cycles" any more."""
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    from lagoonviz.gui import export_image, export_movie
+    from lagoonviz.gui.export_image import ExportImageDialog
+    from lagoonviz.render import pathtrace
+
+    window.open_case(reef3d_run)
+    assert not hasattr(window, "act_cycles_still")
+    monkeypatch.setattr(pathtrace, "find_blender", lambda: None)
+    dialog = ExportImageDialog(window, window.session, "x.png", (800, 400), 1.0)
+    ok = dialog.buttons.button(QDialogButtonBox.Ok)
+    assert dialog.settings()["engine"] == "pygfx" and not dialog.cycles_row.isVisibleTo(dialog)
+    dialog.engine.setCurrentIndex(dialog.engine.findData("cycles"))
+    assert dialog.cycles_row.isVisibleTo(dialog) and not dialog.legend.isEnabled()
+    assert not ok.isEnabled() and "needs Blender" in dialog.summary.text()
+    settings = dialog.settings()
+    assert settings["engine"] == "cycles" and settings["samples"] == 64
+    assert settings["legend"] is False and settings["foam"] == "medium"
+    custom = next(i for i in range(dialog.size.count()) if dialog.size.itemData(i)[0] == "custom")
+    dialog.size.setCurrentIndex(custom)
+    dialog.custom.setValue(dialog.limit + 1)  # Blender is not held to the GPU's limit
+    assert "too large" not in dialog.summary.text()
+    blender = tmp_path / "blender"
+    blender.write_text("")
+    monkeypatch.setattr(pathtrace, "find_blender", lambda: str(blender))
+    found = ExportImageDialog(window, window.session, "x.png", (800, 400), 1.0)
+    found.engine.setCurrentIndex(found.engine.findData("cycles"))
+    found.samples.setValue(200)
+    assert found.buttons.button(QDialogButtonBox.Ok).isEnabled()
+    found.remember()
+    again = ExportImageDialog(window, window.session, "x.png", (800, 400), 1.0)
+    assert again.engine.currentData() == "cycles" and again.samples.value() == 200
+    # exported: the film's path, one frame at the session's time, into the image
+    calls = []
+
+    def path_trace(session, path, times, settings, style, progress, blender, title):
+        calls.append((path, times, settings, title))
+        path.write_bytes(b"image")
+        return path
+
+    monkeypatch.setattr(export_movie, "_path_trace", path_trace)
+    window.session.set_time(1.0)
+    target = tmp_path / "traced.tif"
+    written = window.export_image(
+        target, size=(320, 160), engine="cycles", samples=32, foam="light", dpi=300
+    )
+    assert written == str(target) and len(calls) == 1
+    path, times, settings, title = calls[0]
+    assert path == target and times == [1.0] and title == "Export image"
+    assert settings["samples"] == 32 and settings["foam"] == "light" and settings["dpi"] == 300
+    assert export_movie.white_water_setting(window) == "light"
+    script = window.session.to_script()
+    assert "Export image with Blender Cycles" in script and "dpi=300.0" in script
+    compile(script, "<script>", "exec")
+    assert export_image is not None
+
+
 def test_export_image(window, reef3d_run, tmp_path, monkeypatch):
     """The 3D view alone, drawn off screen at the size asked, as PNG or TIFF (its
     print resolution kept), with the time and colour bars, into the script."""

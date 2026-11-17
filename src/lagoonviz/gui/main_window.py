@@ -372,7 +372,8 @@ class MainWindow(QMainWindow):
             lambda _checked=False: self.export_image(),  # triggered(checked): no path
             "Ctrl+Shift+I",
             tip="The 3D view alone as an image at a size of your choice (as on the screen, "
-            "4K, 8K, a width in cm for print): PNG, JPEG or TIFF",
+            "4K, 8K, a width in cm for print): PNG, JPEG or TIFF; drawn by LAGOON or path "
+            "traced by Blender Cycles",
         )
         self.act_clean_up = self._action(
             "&Clean up case folder...",
@@ -391,11 +392,6 @@ class MainWindow(QMainWindow):
             self.export_animation,
             "Ctrl+Shift+E",
             tip="Film the 3D view over the timeline into an MP4 video",
-        )
-        self.act_cycles_still = self._action(
-            "Render still with &Cycles...",
-            self.render_still,
-            tip="The 3D view path traced by Blender (reflections, refraction, soft shadows)",
         )
         self.act_export_figure = self._action(
             "Export &figure...",
@@ -531,7 +527,6 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_figure_editor)
         file_menu.addAction(self.act_export_image)
         file_menu.addAction(self.act_export_movie)
-        file_menu.addAction(self.act_cycles_still)
         file_menu.addAction(self.act_screenshot)
         file_menu.addSeparator()
         file_menu.addAction(self.act_quit)
@@ -1558,12 +1553,6 @@ class MainWindow(QMainWindow):
         from lagoonviz.gui.export_movie import export_animation
 
         return export_animation(self)
-
-    def render_still(self) -> str | None:
-        """File → Render still with Cycles: the 3D view path traced by Blender."""
-        from lagoonviz.gui.export_movie import render_still
-
-        return render_still(self)
 
     # ------------------------------------------------------------- full screen
     @property
