@@ -87,6 +87,30 @@ PLAN_LAYERS = {
     "amr": 3.0,
     "statistics": 3.2,  # over the water: a map of it
 }
+#: the fields whose iso-surface is CFD's free surface (the level set phi, a VOF-PLIC
+#: run's volume fraction), water where they are at least its value
+WATER_FIELDS = {"phi": 0.0, "VOF": 0.5}
+
+
+def is_water(item: SceneItem) -> bool:
+    """An item that is water: a free surface, CFD's (an iso-surface of phi at 0 or of
+    VOF at 0.5) or the water itself (an iso-volume of phi from 0, of VOF from 0.5)."""
+    props = item.properties
+    if item.kind in WATER_KINDS:
+        return True
+    level = WATER_FIELDS.get(str(props.get("iso_by", "none")))
+    if level is None:
+        return False
+    try:
+        if item.kind == "iso_surface":
+            return abs(float(props.get("iso_value", 0.0)) - level) < 1e-9
+        if item.kind == "iso_volume":
+            return abs(float(props.get("iso_min", 0.0)) - level) < 1e-9
+    except (TypeError, ValueError):
+        return False
+    return False
+
+
 #: dataset roles of solids a volume is cut by ("Without solids"; floating bodies by
 #: their items)
 SOLID_ROLES = ("solid", "forcing")
@@ -136,6 +160,9 @@ class DisplaySurface:
     #: colour bands (filled contours): the edges between them as fractions of the
     #: colour range (lagoonviz.core.colormaps.band_edges); empty: smooth colours
     bands: tuple[float, ...] = ()
+    #: water: a free surface, or CFD's (an iso-surface of the level set phi at 0, of
+    #: VOF at 0.5; an iso-volume of the water), drawn as water by the looks
+    water: bool = False
 
 
 @dataclass
@@ -1946,6 +1973,7 @@ class DataManager:
             material=str(props.get("material", "") or ""),
             shadow=bool(props.get("shadow", True)),
             bands=bands,
+            water=is_water(item),
         )
 
     def _plan_layer(self, item_id: str) -> float:

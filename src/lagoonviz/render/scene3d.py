@@ -77,6 +77,12 @@ DIORAMA_SIDE_OPACITY = 0.7
 #: item kinds that are water
 WATER_KINDS = ("free_surface", "amr")
 
+
+def _is_water(kind: str, shown) -> bool:
+    """Water: a free surface, or CFD's (its iso-surface of phi; DisplaySurface.water)."""
+    return kind in WATER_KINDS or bool(getattr(shown, "water", False))
+
+
 #: where the sun stands, seen from the scene: about 31 degrees above the horizon and
 #: mostly from -x, across the crests of waves that travel along x (REEF3D's usual
 #: set-up), so the slopes facing it and facing away differ clearly
@@ -431,6 +437,8 @@ class SceneRenderer:
         given = look_colour(self.preset, kind, shown.color, shown.material, view=True)
         if given is not None and shown.values is None:
             return given
+        if not shown.material and _is_water(kind, shown):  # CFD's free surface too
+            return shown.color, "water"
         return shown.color, surface_of(kind, shown.material)
 
     def _material(self, kind: str, shown: DisplaySurface) -> gfx.Material:
@@ -441,7 +449,7 @@ class SceneRenderer:
             material = pbr_material(self._surface(kind, shown)[1], preset)
         else:
             material = gfx.MeshPhongMaterial(side="both")
-            self._gloss(material, kind)
+            self._gloss(material, kind, _is_water(kind, shown))
         try:
             material.pick_write = True  # clicks report which triangle was hit
         except AttributeError:
@@ -449,10 +457,10 @@ class SceneRenderer:
         self._style(material, kind, shown)
         return material
 
-    def _gloss(self, material: gfx.Material, kind: str) -> None:
+    def _gloss(self, material: gfx.Material, kind: str, water: bool | None = None) -> None:
         """Shininess and specular colour of the look; water is glossier."""
         look = STYLES[self.style_name]
-        water = kind in ("free_surface", "amr")
+        water = kind in WATER_KINDS if water is None else water
         material.shininess = look["water_shininess" if water else "shininess"]
         try:
             material.specular = look["water_specular" if water else "specular"]
@@ -469,9 +477,10 @@ class SceneRenderer:
             material.map = None
             preset = self.preset
             water = preset is not None and surface_of(kind, shown.material) == "water"
+            water = water or (preset is not None and _is_water(kind, shown))
             material.color = preset.water_color if water else self._surface(kind, shown)[0]
         opacity = shown.opacity
-        if self.diorama and kind in WATER_KINDS and shown.values is None:
+        if self.diorama and _is_water(kind, shown) and shown.values is None:
             opacity = min(opacity, DIORAMA_WATER_OPACITY)  # the bed shows through
         material.opacity = opacity
         # transparent surfaces must not hide what lies behind them
@@ -567,7 +576,11 @@ class SceneRenderer:
         """The sides of an item on a stand: the bed a solid block down to a base, the
         water's sides down to the bed (see-through, in its colour)."""
         shown = self._shown.get(item_id)
-        if not self.diorama or shown is None or shown.kind not in ("bathymetry", *WATER_KINDS):
+        if (
+            not self.diorama
+            or shown is None
+            or not (shown.kind == "bathymetry" or _is_water(shown.kind, shown.display))
+        ):
             self._remove_stand(item_id)
             if item_id in self._shown and shown.kind == "bathymetry":
                 self._bed_heights = None
@@ -630,7 +643,7 @@ class SceneRenderer:
         self._stand[item_id] = mesh
         if shown.kind == "bathymetry":  # the water's sides end on this bed
             for other, item in list(self._shown.items()):
-                if item.kind in WATER_KINDS:
+                if _is_water(item.kind, item.display):
                     self._update_stand(other)
 
     def _stand_material(self, shown: _Shown) -> gfx.Material:
@@ -934,7 +947,7 @@ class SceneRenderer:
                     shown.display.material,
                 )
             elif hasattr(material, "shininess"):
-                self._gloss(material, shown.kind)
+                self._gloss(material, shown.kind, _is_water(shown.kind, shown.display))
         self._refresh_stand()
 
     def item_at(self, world_object) -> str | None:

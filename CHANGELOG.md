@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### CFD's free surface is water in the 3D view's looks
+
+- Fixed: in Open ocean (and every cinematic look) CFD's free surface, an
+  iso-surface of the level set phi at 0, was drawn as a plain matte surface in a
+  light grey-teal, not as water: no sky reflected, no glint, opaque, without the
+  water's sides on the stand; it looked like plastic, not like the sea. It is
+  water now as a free surface is (the look's water colour, glossy, the sky
+  picture reflected, a little see-through with its sides down to the bed; in the
+  engineering looks the water's sheen). So are the iso-surface of VOF at 0.5
+  (VOF-PLIC) and the iso-volume of the water (phi from 0).
+
 ### Volumes without the solids in them
 
 - The volume, slices, iso-surfaces and iso-volumes have *Without solids*: cut
