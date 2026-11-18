@@ -142,6 +142,28 @@ and the y components of vectors (`velocity.y`) change sign, vorticity's x and z
 components too (a pseudo-vector); probes read the image as well, and white water
 in path traced films covers it. The case set-up and the grid stay as computed.
 
+## Calculated fields
+
+The case's *Calculated fields* make new variables of the ones REEF3D wrote, as
+ParaView's calculator does, one per line or separated by `;`:
+
+```text
+nu_rel = eddyv / nu
+speed = mag(velocity)
+ke = 0.5 * rho * (velocity.x**2 + velocity.y**2 + velocity.z**2)
+```
+
+Each is a variable of every output that has what it is made of: *Colour by* lists it,
+contour lines and a slice's *Iso-line of* take it, and an *Iso-surface* or
+*Iso-volume* of it shows the fluid by it (the water where `nu_rel` is above 100: an
+iso-volume of `nu_rel` from 100). A field may use the ones before it. Expressions
+use the variables by name (a space as `_`: `vorticity_x`), a vector's components
+(`velocity.x`), numbers, `+ - * / **`, comparisons (1 where true, else 0), `and`,
+`or`, `not`, the functions `sqrt abs exp log log10 sin cos tan arctan2 mag min max
+where clip` and the case's constants from ctrl.txt: `nu`, `rho` (the water, W 2 and
+W 1), `nu_air`, `rho_air` (W 4, W 3), `g` (W 22) and `pi`. Nothing else is run. In a
+script: `session.set_property(case, "calculated", "nu_rel = eddyv / nu")`.
+
 ## Reading values
 
 *Probe* in the view's bar (++p++) lists every value at a point, like ParaView's

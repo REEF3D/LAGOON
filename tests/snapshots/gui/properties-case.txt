@@ -9,4 +9,5 @@ QWidget
       number 1 in [0.1, 100] decimals 3
       button 'Sync' [x] tip='On: one vertical scale for the whole case (every item follows this slider). Off: each item has its own.'
   Mirror in y: choice 'off' of ['off', 'lower side', 'upper side']
+  Calculated fields: text ''
   label 'NHFLOW bed: 3 frames / NHFLOW free surface: 3 frames / NHFLOW volume: 3 frames' (disabled)

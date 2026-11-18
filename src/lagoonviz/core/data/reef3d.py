@@ -26,6 +26,7 @@ import numpy as np
 from lagoon_format.run import FOLDER as RUN_FOLDER
 from lagoon_format.run import Output, Run, RunLog, read_case
 
+from lagoonviz.core.calculator import add_fields
 from lagoonviz.core.data.mesh import (
     CutPlan,
     PieceMerger,
@@ -553,6 +554,7 @@ class Dataset:
         water_side: bool = False,
         near_surface: bool = False,
         stride: int = 1,
+        calculated: tuple | None = None,
     ) -> SurfaceMesh:
         """The iso-surface of a volume frame where ``variable`` equals ``value``.
 
@@ -572,11 +574,22 @@ class Dataset:
         drops and bubbles away from the surface are not found). ``stride``: while the
         time moves, a LAGOON store's volume (no AMR) is cut from every so many grid
         lines across (all its levels), a coarser surface in a fraction of the time.
+
+        ``calculated``: (fields, constants) when ``variable`` is a calculated field
+        (:mod:`lagoonviz.core.calculator`): each piece read whole with what the field
+        is made of (``variables``), the field calculated at its points, then cut.
         """
+        fields = None
+        if calculated is not None and variable.partition(".")[0] not in self.components:
+            fields, constants = calculated
         if self.kind != "UnstructuredGrid":  # a surface: its line at the value
             from lagoonviz.core.data.mesh import iso_lines
 
             surface = self.read(index, [*(variables or []), variable])
+            if fields:
+                surface = replace(
+                    surface, point_data=add_fields(surface.point_data, fields, constants)
+                )
             field = scalar_values(surface.point_data, variable)
             if field is None:
                 raise ValueError(f"{self.label} has no {variable!r} for an iso-line")
@@ -592,9 +605,13 @@ class Dataset:
         extra = self._water_margin() if side else 0.0
         cuts = []
         for number, path in enumerate(frame.pieces):
-            cut = self._iso_piece(
-                number, path, variable, float(value), arrays, extra, near_surface, stride
-            )
+            if fields:  # a calculated field: the piece whole, the field at its points
+                cut = Dataset._iso_piece(self, number, path, variable, float(value), arrays)
+                cut[0].point_data = add_fields(cut[0].point_data, fields, constants)
+            else:
+                cut = self._iso_piece(
+                    number, path, variable, float(value), arrays, extra, near_surface, stride
+                )
             if cut is not None:  # None: no level of the cut in this piece
                 cuts.append(cut)
         together = self._cuts_together(cuts)
@@ -673,17 +690,25 @@ class Dataset:
         low: float,
         high: float,
         variables: list[str] | None = None,
+        calculated: tuple | None = None,
     ) -> SurfaceMesh:
         """The part of a volume frame where ``variable`` lies between ``low`` and
         ``high`` (ParaView's iso-volume, e.g. the water where the level set phi >= 0),
         as its surface: the iso-surfaces at the two bounds (facing out of the part)
-        and the volume's outer surface clipped to the range."""
+        and the volume's outer surface clipped to the range. ``calculated``: as for
+        :meth:`read_iso`."""
         from lagoonviz.core.data.mesh import clip_surface
 
         low, high = sorted((float(low), float(high)))
         names = [*(variables or []), variable]
+
+        def with_fields(mesh: SurfaceMesh) -> SurfaceMesh:
+            if calculated is None or variable.partition(".")[0] in self.components:
+                return mesh
+            return replace(mesh, point_data=add_fields(mesh.point_data, *calculated))
+
         if self.kind != "UnstructuredGrid":  # a surface: its part in the range
-            surface = self.read(index, names)
+            surface = with_fields(self.read(index, names))
             field = scalar_values(surface.point_data, variable)
             if field is None:
                 raise ValueError(f"{self.label} has no {variable!r} for an iso-volume")
@@ -694,7 +719,7 @@ class Dataset:
                 part = clip_surface(part, scalar_values(part.point_data, variable), high, "below")
             return part
         parts = []
-        bottom = self.read_iso(index, variable, low, names)
+        bottom = self.read_iso(index, variable, low, names, calculated=calculated)
         if bottom.n_triangles:  # it faces the rising field: into the part, so turned
             parts.append(
                 SurfaceMesh(
@@ -703,10 +728,10 @@ class Dataset:
                     bottom.point_data,
                 )
             )
-        top = self.read_iso(index, variable, high, names)
+        top = self.read_iso(index, variable, high, names, calculated=calculated)
         if top.n_triangles:
             parts.append(top)
-        outside = self.read(index, names)
+        outside = with_fields(self.read(index, names))
         field = scalar_values(outside.point_data, variable)
         if field is None:
             raise ValueError("an iso-volume needs a variable")

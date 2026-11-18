@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Calculated fields
+
+- A case's *Calculated fields* make new variables of REEF3D's, as ParaView's
+  calculator: `nu_rel = eddyv / nu` (the eddy viscosity over the water's, Kelley's
+  relative viscosity), `speed = mag(velocity)`, one per line or separated by `;`.
+  They are variables of every output that has what they are made of: to colour
+  by, for contour lines and a slice's iso-line, and as iso-surfaces and
+  iso-volumes (the fluid where `nu_rel` is above 100). Expressions take the
+  variables by name, `velocity.x`, arithmetic, comparisons, `and or not`,
+  `sqrt abs exp log log10 sin cos tan arctan2 mag min max where clip` and the
+  case's constants `nu rho nu_air rho_air g pi` (ctrl.txt's W 1 - W 4, W 22);
+  nothing else runs.
+
 ### The app icon rounded while LAGOON runs (macOS)
 
 - Fixed: on macOS the Dock showed LAGOON's icon as a square while it ran (Qt puts

@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
+from lagoonviz.core.calculator import add_fields, needed, parse_quietly, usable
 from lagoonviz.core.colormaps import SERIES_PALETTES, plain_color
 from lagoonviz.core.contours import contour_levels, contour_segments
 from lagoonviz.core.data.background import Backgrounds
@@ -35,7 +36,7 @@ from lagoonviz.core.data.divemesh_grid import (
     sigma_grid,
     uniform_grid,
 )
-from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals
+from lagoonviz.core.data.mesh import SurfaceMesh, exaggerate_normals, variable_names
 from lagoonviz.core.data.profiles import Profile, ProfileLine, ProfileSet
 from lagoonviz.core.data.reef3d import CASE_ROLES, ROLES, Case, Dataset, open_case
 from lagoonviz.core.data.series import SeriesFile, TimeSeries, parse_columns
@@ -356,6 +357,8 @@ class FrameKey:
     mirror: tuple = ()
     #: "Without solids": the solids cut away, as ((dataset key, frame index), ...)
     clip: tuple = ()
+    #: the case's calculated fields the item needs (calculator.Field), in order
+    fields: tuple = ()
 
 
 def _kind_of(key) -> tuple:
@@ -806,7 +809,10 @@ class DataManager:
 
     def variable_choices(self, item_id: str) -> list[str]:
         dataset = self.dataset(item_id)
-        return ["none", *dataset.variables()] if dataset else ["none"]
+        if dataset is None:
+            return ["none"]
+        fields = usable(self.calculated(item_id), dataset.components)
+        return ["none", *dataset.variables(), *variable_names(fields)]
 
     def choices(self, item_id: str, provider: str) -> list[str]:
         if provider == "variables":
@@ -1025,10 +1031,10 @@ class DataManager:
         case = self.case(item_id)
         if dataset is None or index is None or case is None:
             return None
-        arrays = tuple(
-            a for a in self.arrays_for(self.scene.get(item_id)) if a in dataset.components
-        )
         item = self.scene.get(item_id)
+        # the output's own arrays, and those the case's calculated fields are made of
+        own, fields = needed(self.arrays_for(item), self.calculated(item_id), dataset.components)
+        arrays = tuple(a for a in own if a in dataset.components)
         extra: tuple = ()
         if item.kind == "slice":
             axis = AXES.get(str(item.properties.get("normal", "y")), 1)
@@ -1090,8 +1096,39 @@ class DataManager:
         mirror = ("y", plane) if plane is not None else ()
         clip = self._solids_key(item_id, time) if item.properties.get("without_solids") else ()
         return FrameKey(
-            self._case_key(item_id), dataset.key, index, arrays, extra, detail, mirror, clip
+            self._case_key(item_id),
+            dataset.key,
+            index,
+            tuple(sorted(arrays)),
+            extra,
+            detail,
+            mirror,
+            clip,
+            tuple(fields),
         )
+
+    def calculated(self, item_id: str) -> list:
+        """The calculated fields of an item's case (its *Calculated fields*,
+        :mod:`lagoonviz.core.calculator`)."""
+        case_item = self.case_item(item_id)
+        text = str(case_item.properties.get("calculated", "") or "") if case_item else ""
+        if not text.strip():
+            return []
+        cache = self.__dict__.setdefault("_calculated", {})
+        found = cache.get(text)
+        if found is None:
+            found = cache[text] = parse_quietly(text)
+        return found
+
+    def _constants(self, key: FrameKey) -> dict:
+        """The constants of a frame key's case for its calculated fields (ctrl.txt's)."""
+        from lagoonviz.core.calculator import constants_of
+
+        cache = self.__dict__.setdefault("_case_constants", {})
+        if key.case not in cache:
+            case = self._cases.get(key.case) or self.open(key.case)
+            cache[key.case] = constants_of(case.path)
+        return cache[key.case]
 
     def _solids_key(self, item_id: str, time: float | None = None) -> tuple:
         """The solids an item's volume is cut by (its "Without solids"): DIVEMesh's
@@ -1238,6 +1275,10 @@ class DataManager:
         # (in the model's place, before a mirror image), then with its image
         plain = replace(key, mirror=(), clip=())
         mesh = (self.cache.get(plain) if plain != key else None) or self._read_key(plain)
+        if key.fields:  # the case's calculated fields the item shows
+            mesh = replace(
+                mesh, point_data=add_fields(mesh.point_data, list(key.fields), self._constants(key))
+            )
         if key.clip:
             from lagoonviz.core.data.solidclip import without_solids
 
@@ -1266,6 +1307,8 @@ class DataManager:
             near = bool(key.extra[5]) if len(key.extra) > 5 else False
             args = (key.index, key.extra[1], key.extra[2], list(key.arrays))
             options = {"grid_lines": lines, "water_side": water, "near_surface": near}
+            if any(f.name == key.extra[1] for f in key.fields):  # of a calculated field
+                options["calculated"] = (list(key.fields), self._constants(key))
             if key.detail > 1:  # while the time moves (_iso_detail)
                 options["stride"] = key.detail
             mesh = self._cut_apart(key, dataset, "read_iso", *args, **options)
@@ -1274,9 +1317,12 @@ class DataManager:
         elif key.extra and key.extra[0] == "isovol":
             _, variable, low, high = key.extra
             args = (key.index, variable, low, high, list(key.arrays))
-            mesh = self._cut_apart(key, dataset, "read_iso_volume", *args)
+            more = {}
+            if any(f.name == variable for f in key.fields):  # of a calculated field
+                more["calculated"] = (list(key.fields), self._constants(key))
+            mesh = self._cut_apart(key, dataset, "read_iso_volume", *args, **more)
             if mesh is None:
-                mesh = dataset.read_iso_volume(*args)
+                mesh = dataset.read_iso_volume(*args, **more)
         elif key.extra and key.extra[0] == "stream":
             _, vector, axis, position, count, lines_in = key.extra
             mesh = dataset.read_streamlines(

@@ -309,6 +309,16 @@ KINDS: dict[str, KindSpec] = {
                 "case with its mirror image about the domain's lower or upper side in y "
                 "(v and the y components of vectors turned)",
             ),
+            "calculated": PropertySpec(
+                "",
+                "Calculated fields",
+                tip="New variables made of the case's, one per line or separated by ; "
+                "e.g. nu_rel = eddyv / nu; speed = mag(velocity). They can be coloured "
+                "by and drawn as iso-surfaces and iso-volumes like the others. Use the "
+                "variables by name (a space as _), velocity.x, + - * / **, comparisons, "
+                "sqrt abs exp log log10 sin cos tan arctan2 mag min max where clip, and "
+                "the constants nu, rho (water), nu_air, rho_air, g, pi of ctrl.txt",
+            ),
         },
     ),
     "free_surface": KindSpec(
