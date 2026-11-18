@@ -421,6 +421,10 @@ def _path_trace(
         QApplication.processEvents()
         return not progress.wasCanceled()
 
+    def preparing(text: str) -> None:  # what is being made before a frame is written
+        progress.setLabelText(f"Handing the scene to Blender: {text}…")
+        QApplication.processEvents()
+
     try:
         export_scene(
             session,
@@ -431,6 +435,7 @@ def _path_trace(
             settings["samples"],
             prepared,
             foam=settings.get("foam", True),
+            status=preparing,
         )
     except Exception as error:  # noqa: BLE001 (report, keep the window)
         log.error("path tracing export failed:\n%s", traceback.format_exc())

@@ -1592,8 +1592,10 @@ class WhiteWater:
                 return depth if depth > 0 else None
         return None
 
-    def at(self, time: float) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-        """The white water at a time (per kind: positions and radii)."""
+    def at(self, time: float, status=None) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        """The white water at a time (per kind: positions and radii). ``status(text)``
+        hears how far its warm-up is (before a film's first frame or a still, up to
+        :data:`WARM_OUTPUTS` free surfaces read: a minute for a large CFD volume)."""
         from lagoonviz.core.foam import FoamSimulation
 
         if not self.ok:
@@ -1616,9 +1618,11 @@ class WhiteWater:
             # (a surface cut from the volume, CFD's, takes a second or two each)
             every = math.ceil(len(steps) / self.WARM_OUTPUTS)
             steps = steps[::-1][::every][::-1]
-        for t in [*steps.tolist(), time]:
+        for k, t in enumerate([*steps.tolist(), time]):
             if t <= self.sim.time + 1e-9:
                 continue
+            if status is not None and len(steps) > 1:
+                status(f"white water: free surface {k + 1} of {len(steps) + 1} before it")
             grid, _ = self._surface(t)
             if grid is None or self.grid is None or grid.z.shape != self.grid.z.shape:
                 self.grid, self.sim.time = grid, t  # a jump: start afresh from here
@@ -1637,12 +1641,15 @@ def export_scene(
     samples: int = 64,
     progress: Progress | None = None,
     foam: bool | str | float = True,
+    status: Callable[[str], None] | None = None,
 ) -> Path:
     """Write the session at ``times`` for Blender: ``scene.json``, a ``frame_NNNNN.npz``
     per time and ``environment.hdr``. With ``foam``, white water (foam, spray and
     bubbles) where the free surface breaks: True the default amount ("medium"), or
     "none", "light", "medium", "heavy" or a number (1: "heavy"; see
-    :func:`lagoonviz.core.foam.white_water_amount`). Returns the path of ``scene.json``."""
+    :func:`lagoonviz.core.foam.white_water_amount`). ``status(text)`` hears what is
+    being made (the white water's warm-up before the first frame). Returns the path of
+    ``scene.json``."""
     folder = Path(folder).expanduser()
     folder.mkdir(parents=True, exist_ok=True)
     preset = look_preset(look)
@@ -1666,7 +1673,9 @@ def export_scene(
     low = high = None
     try:
         for number, time in enumerate(times):
-            particles = white.at(time) if white is not None else {}
+            if status is not None:
+                status(f"frame {number + 1} of {len(times)}: the data")
+            particles = white.at(time, status) if white is not None else {}
             session.set_time(time)
             bounds = _bounds(session)
             if bounds is not None:

@@ -419,10 +419,14 @@ def test_export_image_sizes(window):
     size, scale, dpi = pixels_for(("print", None), view, 0, 17.0, 300)
     assert size == (2008, 1004) and dpi == 300.0 and scale == pytest.approx(2.51)
     dialog = ExportImageDialog(window, window.session, "x.png", view, 2.0)
-    dialog.size.setCurrentIndex(dialog.size.findData(("print", None)))
+
+    def kind(combo, name):  # (findData does not find a tuple with PySide 6.12)
+        return next(i for i in range(combo.count()) if combo.itemData(i)[0] == name)
+
+    dialog.size.setCurrentIndex(kind(dialog.size, "print"))
     assert dialog.print_row.isVisibleTo(dialog) and not dialog.custom.isVisibleTo(dialog)
     assert "2008 × 1004 pixels (17.0 × 8.5 cm)" in dialog.summary.text()
-    dialog.size.setCurrentIndex(dialog.size.findData(("custom", None)))
+    dialog.size.setCurrentIndex(kind(dialog.size, "custom"))
     dialog.custom.setValue(dialog.limit + 1)
     assert "too large" in dialog.summary.text()
     from PySide6.QtWidgets import QDialogButtonBox

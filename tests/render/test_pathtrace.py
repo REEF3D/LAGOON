@@ -480,7 +480,7 @@ def test_real_blender(reef3d_run, tmp_path, monkeypatch):
     # white water: point clouds by geometry nodes (here a band of foam and spray)
     from lagoonviz.render import pathtrace
 
-    def particles(self, time):
+    def particles(self, time, status=None):
         rng = np.random.default_rng(0)
         foam = np.c_[rng.uniform(2, 6, 4000), rng.uniform(0, 4, 4000), np.full(4000, 2.08)]
         spray = foam[:600] + [0.0, 0.0, 0.3]
@@ -845,7 +845,7 @@ def test_white_water_goes_to_blender(reef3d_run, tmp_path, fake_blender, monkeyp
 
     calls = []
 
-    def particles(self, time):
+    def particles(self, time, status=None):
         calls.append(time)
         rng = np.random.default_rng(int(time * 10))
         return {
