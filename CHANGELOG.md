@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### The app icon rounded while LAGOON runs (macOS)
+
+- Fixed: on macOS the Dock showed LAGOON's icon as a square while it ran (Qt puts
+  the window icon there as it is), though the app bundle's icon is the rounded
+  macOS shape. LAGOON now shows the same rounded icon while it runs
+  (`resources/icon_macos.png`, made by `packaging/macos/make_icon.py --running`
+  from the same source); other systems keep the square one.
+
 ### CFD's free surface is water in the 3D view's looks
 
 - Fixed: in Open ocean (and every cinematic look) CFD's free surface, an

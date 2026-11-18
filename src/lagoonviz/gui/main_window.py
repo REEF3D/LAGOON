@@ -58,7 +58,7 @@ from lagoonviz.gui.panels import (
     TimelinePanel,
     create_viewport,
 )
-from lagoonviz.gui.resources import resource_path
+from lagoonviz.gui.resources import app_icon_path
 from lagoonviz.gui.theme import DEFAULT_THEME, THEME_LOOKS, apply_theme
 
 log = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
         self.ask_before_discard = True
 
         self.setObjectName("LagoonMainWindow")
-        self.setWindowIcon(QIcon(str(resource_path("icon.png"))))
+        self.setWindowIcon(QIcon(str(app_icon_path())))
         self.setDockNestingEnabled(True)
         self.resize(1400, 860)
 

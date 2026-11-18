@@ -19,7 +19,7 @@ from lagoonviz.core import Session
 from lagoonviz.gui import gc_guard
 from lagoonviz.gui.macos import bring_forward, set_app_name
 from lagoonviz.gui.main_window import MainWindow
-from lagoonviz.gui.resources import resource_path
+from lagoonviz.gui.resources import app_icon_path
 from lagoonviz.gui.theme import DEFAULT_THEME, apply_theme
 
 
@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName("LAGOON")
     app.setOrganizationName("REEF3D")
     app.setApplicationVersion(lagoonviz.__version__)
-    app.setWindowIcon(QIcon(str(resource_path("icon.png"))))
+    app.setWindowIcon(QIcon(str(app_icon_path())))
     apply_theme(app, str(QSettings().value("view/theme", DEFAULT_THEME)))
     # loader threads must not run the garbage collector while the GUI thread deletes
     # widgets (a segmentation fault in SbkObject_tp_traverse)

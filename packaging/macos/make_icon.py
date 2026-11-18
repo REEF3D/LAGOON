@@ -5,6 +5,11 @@ on the 1024 px grid, 824 px wide with a little margin) at every size an .iconset
 needs. ``iconutil -c icns`` makes the .icns from the folder.
 
     python make_icon.py logo/icon_dark.png build/LAGOON.iconset
+    python make_icon.py --running logo/icon_dark.png src/lagoonviz/gui/resources/icon_macos.png
+
+The same shape is the icon LAGOON shows while it runs on macOS (Qt puts the window
+icon into the Dock): ``src/lagoonviz/gui/resources/icon_macos.png``, 512 px, made
+with :func:`rounded` from the same source (``--running`` writes it again).
 """
 
 from __future__ import annotations
@@ -43,5 +48,13 @@ def main(source: str, folder: str) -> None:
         icon.resize((2 * size, 2 * size), Image.LANCZOS).save(out / f"icon_{size}x{size}@2x.png")
 
 
+def running(source: Path, target: Path, size: int = 512) -> None:
+    """The icon shown while LAGOON runs on macOS (module doc)."""
+    rounded(source).resize((size, size), Image.LANCZOS).save(target, optimize=True)
+
+
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    if sys.argv[1:2] == ["--running"]:
+        running(Path(sys.argv[2]), Path(sys.argv[3]))
+    else:
+        main(*sys.argv[1:3])

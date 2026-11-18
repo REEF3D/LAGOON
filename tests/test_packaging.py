@@ -118,3 +118,18 @@ def test_the_mac_app_recipe(tmp_path, monkeypatch):
     icon["main"](str(ROOT / "logo" / "icon_dark.png"), str(tmp_path / "LAGOON.iconset"))
     made = sorted(p.name for p in (tmp_path / "LAGOON.iconset").iterdir())
     assert len(made) == 10 and "icon_512x512@2x.png" in made
+    # running on macOS: the same rounded shape in the Dock (Qt's window icon), not
+    # the square one; made from the same source, as the package has it
+    import numpy as np
+    from PIL import Image
+
+    from lagoonviz.gui.resources import app_icon_path
+
+    assert app_icon_path("linux").name == "icon.png"
+    shipped = app_icon_path("darwin")
+    icon["running"](ROOT / "logo" / "icon_dark.png", tmp_path / "running.png")
+    with Image.open(shipped) as a, Image.open(tmp_path / "running.png") as b:
+        ours, again = np.asarray(a.convert("RGBA")), np.asarray(b.convert("RGBA"))
+    assert ours.shape == (512, 512, 4) and np.abs(ours.astype(int) - again).max() <= 1
+    assert ours[0, 0, 3] == 0 and ours[60, 60, 3] == 0  # the corners clear
+    assert ours[256, 256, 3] == 255
