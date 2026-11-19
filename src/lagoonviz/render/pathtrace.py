@@ -438,6 +438,11 @@ def water_body(
     return all_points.astype(np.float32), triangles_out.astype(np.uint32), smooth
 
 
+#: how many cells at most the plan of a surface is cut into to tell its outside
+#: edges (:func:`outer_rim`)
+RIM_CELLS = 4_000_000
+
+
 def _facing_up_and_rim(p: np.ndarray, t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """The triangles turned to face up, and their open edges (used by one triangle
     only, directed as in their triangle: the surface on their left seen from above)."""
@@ -463,6 +468,70 @@ def _facing_up_and_rim(p: np.ndarray, t: np.ndarray) -> tuple[np.ndarray, np.nda
     once = np.zeros(len(keys), bool)
     once[order[alone]] = True
     return t, edges[once]
+
+
+def outer_rim(p: np.ndarray, t: np.ndarray, rim: np.ndarray) -> np.ndarray:
+    """The open edges of a surface (``rim``, as :func:`_facing_up_and_rim` gives them)
+    on its outside: without those with the surface beyond them, seen from above.
+
+    - the seams of a surface made of pieces that do not share their points (CFD's
+      free surface: each piece of the volume cut on its own, a refined block's cut
+      beside the coarser one round it, a coarse edge against two fine ones);
+    - the holes in it: round a pile, along a deck the water was cut from (*Without
+      solids*), an island of dry land.
+
+    The stand of the Diorama and Open ocean hung the water's sides from all open
+    edges: walls of water across the flume at every seam, a glass box under a pier.
+    An edge on the sides of the surface's box (the domain's) is outside; another is
+    inside when, going out from it (to its right), the surface comes again before
+    the box ends."""
+    if not len(rim) or not len(t):
+        return rim
+    p = np.asarray(p, np.float64)
+    used = np.zeros(len(p), bool)
+    used[t.ravel()] = True
+    low, high = p[used, :2].min(axis=0), p[used, :2].max(axis=0)
+    tol = 1e-6 * max(float(np.max(high - low)), 1e-12)
+    ends = p[rim][:, :, :2]
+    on_box = np.zeros(len(rim), bool)
+    for d in range(2):
+        for side in (low[d], high[d]):
+            on_box |= (np.abs(ends[:, :, d] - side) <= tol).all(axis=1)
+    test = np.flatnonzero(~on_box & (np.abs(ends[:, 1] - ends[:, 0]).max(axis=1) > tol))
+    if not len(test):
+        return rim
+    a, b = ends[test, 0], ends[test, 1]
+    d = b - a
+    length = np.linalg.norm(d, axis=1)
+    out = np.stack([d[:, 1], -d[:, 0]], 1) / length[:, None]
+    # where the surface lies, as cells about as large as the edges tested (their
+    # median): those with a corner or the middle of a triangle in them
+    size = float(np.median(length))
+    span = np.maximum(high - low, size)
+    size = max(size, float(np.sqrt(span[0] * span[1] / RIM_CELLS)), tol)
+    shape = np.ceil(span / size).astype(np.int64) + 1
+    lies = np.zeros(tuple(shape), bool)
+    for xy in (p[used, :2], p[t, :2].mean(axis=1)):
+        ij = np.clip(((xy - low) / size).astype(np.int64), 0, shape - 1)
+        lies[ij[:, 0], ij[:, 1]] = True
+    # out from the middle of each edge, a cell at a time (from two cells off: the
+    # edge's own triangles lie in the first), until the box ends or the surface comes
+    start = 0.5 * (a + b)
+    inside = np.zeros(len(test), bool)
+    going = np.arange(len(test))
+    steps = int(np.ceil(float(np.hypot(*span)) / size)) + 2
+    for k in range(2, steps):
+        at = start[going] + (k * size) * out[going]
+        within = ((at >= low) & (at <= high)).all(axis=1)
+        ij = np.clip(((at - low) / size).astype(np.int64), 0, shape - 1)
+        hit = within & lies[ij[:, 0], ij[:, 1]]
+        inside[going[hit]] = True
+        going = going[within & ~hit]
+        if not len(going):
+            break
+    keep = np.ones(len(rim), bool)
+    keep[test[inside]] = False
+    return rim[keep]
 
 
 def skirt(positions: np.ndarray, triangles: np.ndarray, bottom: float):

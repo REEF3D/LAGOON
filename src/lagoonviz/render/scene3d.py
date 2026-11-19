@@ -666,8 +666,9 @@ class SceneRenderer:
         return material
 
     def _rim(self, item_id: str, positions: np.ndarray, triangles: np.ndarray):
-        """The open edges of an item's surface (kept while its triangles stay the same)."""
-        from lagoonviz.render.pathtrace import _facing_up_and_rim
+        """The open edges of an item's surface (kept while its triangles stay the same),
+        without the seams between its pieces (:func:`~lagoonviz.render.pathtrace.outer_rim`)."""
+        from lagoonviz.render.pathtrace import _facing_up_and_rim, outer_rim
 
         known = self._rims.get(item_id)
         if known is not None and known[0] is triangles:
@@ -676,7 +677,10 @@ class SceneRenderer:
         finite = np.isfinite(positions).all(axis=1)
         t = t[finite[t].all(axis=1)]
         t = t[(t[:, 0] != t[:, 1]) & (t[:, 1] != t[:, 2]) & (t[:, 0] != t[:, 2])]
-        rim = _facing_up_and_rim(positions, t)[1] if len(t) else None
+        rim = None
+        if len(t):
+            t, rim = _facing_up_and_rim(positions, t)
+            rim = outer_rim(positions, t, rim)
         self._rims[item_id] = (triangles, rim)
         return rim
 

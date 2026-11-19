@@ -217,7 +217,10 @@ NHFLOW's direct forcing solids and the floating bodies at the time shown. REEF3D
 writes its volume there too, where no water flows (a weir's body, a pier, the blocks
 under a beach). The cut follows the solid's faces where the cells' edges enter it; a
 corner of a solid inside a cell is cut off it. Porous structures stay: the flow in
-the stones is real.
+the stones is real. On CFD's free surface it also leaves out a sheet lying on a
+solid's top and joined to no other water (within the interface band over it):
+REEF3D keeps the level set in a solid's cells, and a deck that waves went over has
+the water of an earlier wave in it, its zero in the deck or a cell above it.
 
 *Add → Iso-surface* draws where a variable
 has a *Value*. *Add → Iso-volume* (and its button in the toolbar) draws the part of

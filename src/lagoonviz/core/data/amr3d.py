@@ -23,7 +23,7 @@ floating body. :class:`AmrBlocks` draws the blocks' outlines, coloured by level.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path
 
@@ -555,6 +555,11 @@ class FolderBlocks:
     def level(self, key: Path) -> int:
         return self.block(key).level
 
+    def cell_height(self, key: Path) -> float:
+        """The height of a block's cells."""
+        z = np.asarray(self.block(key).z, np.float64)
+        return float(np.min(np.diff(z))) if len(z) > 1 else 0.0
+
     def stamp(self, step: int) -> Path:
         """A file whose modification time says when the output was written."""
         return self.outputs[step]
@@ -578,6 +583,7 @@ class StoreBlocks:
         #: what opening a run and the volume's cells need, without the blocks' fields
         self._levels: dict[int, np.ndarray] = {}
         self._boxes: dict[int, list[tuple]] = {}
+        self._sizes: dict[int, np.ndarray] = {}  # output -> its grids' cells (nx, ny, nz)
         self._lock = threading.Lock()
 
     @property
@@ -650,6 +656,21 @@ class StoreBlocks:
 
     def level(self, key: Path) -> int:
         return int(self._levels_of(int(key.parent.name[1:]))[int(key.stem[1:])])
+
+    def cell_height(self, key: Path) -> float:
+        """The height of a block's cells (its box over its cells, from the grid table)."""
+        t, g = int(key.parent.name[1:]), int(key.stem[1:])
+        with self._lock:
+            size = self._sizes.get(t)
+        if size is None:
+            size = np.asarray(self.amr.table(t)["size"])
+            with self._lock:
+                if len(self._sizes) > 64:
+                    self._sizes.clear()
+                self._sizes[t] = size
+        z0, z1 = self.box(key)[4:6]
+        cells = int(size[g][2]) if size.ndim == 2 and size.shape[1] > 2 else 0
+        return (z1 - z0) / cells if cells > 0 else 0.0
 
     def stamp(self, step: int) -> Path:
         return self.amr.group.path / "time" / "zarr.json"
@@ -941,6 +962,16 @@ class RefinedVolume(Dataset):
     def _water_margin(self) -> float | None:
         return self.base._water_margin()  # the volume's cells are the coarsest
 
+    def smallest_cell_height(self, index: int) -> float | None:
+        """The cells of the finest blocks of the frame (the volume's without any)."""
+        keys = self.amr_blocks(index)
+        if not keys:
+            return self.base.smallest_cell_height(index)
+        top = max(self.blocks.level(k) for k in keys)
+        heights = [self.blocks.cell_height(k) for k in keys if self.blocks.level(k) == top]
+        heights = [h for h in heights if h > 0]
+        return min(heights) if heights else self.base.smallest_cell_height(index)
+
     # ------------------------------------------------------------- reading
     def read(self, index: int, variables: list[str] | None = None) -> SurfaceMesh:
         """The outer surface of a frame (the volume's and its blocks')."""
@@ -954,7 +985,8 @@ class RefinedVolume(Dataset):
             plan = self._plans.get(key)
             if plan is None or not plan.accepts(light):
                 full = [self._piece(p, point_arrays=[]) for p in frame.pieces]
-                plan = VolumePlan.build(full)
+                boxes = [self.blocks.box(k) for k in self.amr_blocks(index)]
+                plan = _outside_only(VolumePlan.build(full), full, boxes)
                 if len(self._plans) > 8:
                     self._plans.clear()
                 self._plans[key] = plan
@@ -989,6 +1021,51 @@ class RefinedVolume(Dataset):
 
     def points_per_frame(self) -> int | None:
         return self.base.points_per_frame()
+
+
+def _outside_only(plan: VolumePlan, pieces: list[Piece], boxes: list[tuple]) -> VolumePlan:
+    """The outer surface of a volume with refined blocks, without the faces inside
+    it. A block's faces and those of the volume's cells round it (their covered
+    cells taken out) do not match, a coarse cell's face against four of the
+    block's: inside the volume they stayed, the walls of every block (and of the
+    hole round it) in the outer surface. Drawn, they lay just under the domain's
+    sides as a sunk panel where the mesh was refined (their edges shaded round
+    with them), and a see-through volume, a cut one ("Without solids") and CFD's
+    water (its iso-volume, path traced) showed them inside.
+
+    Kept: the faces on the sides of the volume's box, and those away from the
+    blocks (a face in a block's box, its sides too, that is not on the volume's
+    sides lies inside)."""
+    if not boxes or not len(plan.triangles):
+        return plan
+    points, _ = plan.apply(pieces)
+    p = np.asarray(points, np.float64)
+    low, high = p.min(axis=0), p.max(axis=0)
+    tol = 1e-6 * max(float(np.max(high - low)), 1e-12)
+    t = plan.triangles.astype(np.int64)
+    corners = p[t]
+    on_side = np.zeros(len(t), bool)
+    for d in range(3):
+        for side in (low[d], high[d]):
+            on_side |= (np.abs(corners[:, :, d] - side) <= tol).all(axis=1)
+    centre = corners.mean(axis=1)
+    in_block = np.zeros(len(t), bool)
+    for x0, x1, y0, y1, z0, z1 in boxes:
+        in_block |= (
+            (centre[:, 0] >= x0 - tol) & (centre[:, 0] <= x1 + tol)
+            & (centre[:, 1] >= y0 - tol) & (centre[:, 1] <= y1 + tol)
+            & (centre[:, 2] >= z0 - tol) & (centre[:, 2] <= z1 + tol)
+        )  # fmt: skip
+    keep = on_side | ~in_block
+    if keep.all():
+        return plan
+    t = t[keep]
+    used, compact = np.unique(t, return_inverse=True)  # its points only
+    return replace(
+        plan,
+        first=plan.first[used],
+        triangles=np.ascontiguousarray(compact.reshape(t.shape), dtype=np.uint32),
+    )
 
 
 def _without_covered(piece: Piece, boxes: list[tuple]) -> Piece:

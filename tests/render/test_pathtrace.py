@@ -617,6 +617,41 @@ def test_skirt_hangs_from_the_rim_and_faces_out():
     assert np.allclose(normal[:, 2], 0, atol=1e-6)
 
 
+def test_outer_rim_leaves_out_seams_and_holes():
+    """The stand of the Diorama and Open ocean hung the water's sides from every
+    open edge of CFD's free surface: from its seams (pieces that do not share their
+    points: a refined block's cut beside the coarser one round it, a coarse edge
+    against two fine ones), round the piles and along the gap a deck was cut from:
+    walls of water across the flume, a glass box under the pier. The edges on the
+    domain's sides stay, and so does one with no water beyond it (dry land)."""
+    from lagoonviz.render.pathtrace import _facing_up_and_rim, outer_rim
+
+    coarse, fine = _grid(6, 4), _grid(11, 7)  # x 0-5, y 0-3: 1 m and 0.5 m cells
+    left = coarse[0][:, 0] <= 2.0 + 1e-9
+    keep = left[coarse[1]].all(axis=1)  # the coarse surface over x 0-2
+    right = fine[0].copy()
+    right[:, 0] = 2.0 + 0.6 * right[:, 0]  # the fine one over x 2-5 (0.3 m cells)
+    quads = np.arange(len(fine[1])) // 2
+    i, j = quads % 10, quads // 10
+    hole = (i == 5) & (j == 3)  # a cell left out: round a pile
+    dry = (i == 9) & (j == 0)  # the corner cell at x 4.7-5, y 0-0.5: dry land
+    points = np.concatenate([coarse[0], right])
+    triangles = np.concatenate([coarse[1][keep], fine[1][~hole & ~dry] + len(coarse[0])])
+    t, rim = _facing_up_and_rim(points, triangles)
+    outer = outer_rim(points, t, rim)
+    middle = points[outer].mean(axis=1)
+    assert np.isclose(points[rim].mean(axis=1)[:, 0], 2.0).sum() == 3 + 6  # the seam's
+    assert not np.isclose(middle[:, 0], 2.0).any()
+    on_sides = (
+        np.isclose(middle[:, 0], 0) | np.isclose(middle[:, 0], 5)
+        | np.isclose(middle[:, 1], 0) | np.isclose(middle[:, 1], 3)
+    )  # fmt: skip
+    assert on_sides.sum() == 3 + 5 + 2 * (2 + 10) - 1  # the domain's (but the dry corner's)
+    # the dry corner's two edges (nothing beyond them); none round the hole
+    np.testing.assert_allclose(np.sort(middle[~on_sides, 0]), [4.7, 4.85], atol=1e-6)
+    assert len(outer_rim(points, t, rim[:0])) == 0
+
+
 def test_ocean_ring_surrounds_the_domain():
     positions, triangles = ocean_ring((0, 0, -5), (10, 4, 1), 0.5, 1000.0)
     assert np.allclose(positions[:, 2], 0.5)

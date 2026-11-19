@@ -1181,6 +1181,27 @@ class DataManager:
         cache[(key.case, key.clip)] = found
         return found
 
+    def _film_band(self, key: FrameKey) -> float | None:
+        """For CFD's free surface without the solids (an iso-surface of the level set
+        phi at 0, of VOF at 0.5): how thin a sheet on a solid's top is the level set
+        in the solid (:func:`~lagoonviz.core.data.solidclip.without_films`), the
+        interface band (F 45) at the frame's smallest cells. None: another surface."""
+        extra = key.extra
+        if not extra or extra[0] != "iso" or len(extra) < 3:
+            return None
+        if (extra[1], float(extra[2])) not in (("phi", 0.0), ("VOF", 0.5)):
+            return None
+        case = self._cases.get(key.case) or self.open(key.case)
+        dataset = case.datasets.get(key.dataset)
+        if dataset is None:
+            return None
+        height = dataset.smallest_cell_height(key.index)
+        if not height:
+            return None
+        from lagoonviz.core.data.reef3d import _interface_cells
+
+        return _interface_cells(dataset.folder) * height
+
     def mirror_plane(self, item_id: str) -> float | None:
         """The plane y = value its case is mirrored about (the case's *Mirror in y*:
         its domain's lower or upper side; control.txt's B 10 when the results lie in
@@ -1280,9 +1301,12 @@ class DataManager:
                 mesh, point_data=add_fields(mesh.point_data, list(key.fields), self._constants(key))
             )
         if key.clip:
-            from lagoonviz.core.data.solidclip import without_solids
+            from lagoonviz.core.data.solidclip import without_films, without_solids
 
             mesh = without_solids(mesh, self._solids(key))
+            band = self._film_band(key)
+            if band:  # CFD's free surface: not the level set kept in a solid's cells
+                mesh = without_films(mesh, self._solids(key), band)
         if key.mirror:
             from lagoonviz.core.data.mesh import mirrored_y
 

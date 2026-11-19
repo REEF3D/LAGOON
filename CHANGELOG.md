@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### CFD with mesh refinement and solids: the coastal pier as it is
+
+- Fixed: with *Without solids* everything under one of DIVEMesh's solids was taken
+  as in it: the free surface under the pier's deck was cut away. DIVEMesh's
+  REEF3D_Solid.vtp has every flat face turned up (a box's bottom as its top), and
+  the test counted the faces above a point by their facing. A solid whose faces are
+  not oriented (each edge not run once each way) now counts by the number of its
+  faces a ray crosses, odd inside; oriented ones (STL, bodies) by the winding as
+  before, so overlapping solids stay inside.
+- Fixed: with *Without solids* a solid reaching a side of the domain was cut from
+  the volume's outside at one side and stood there at the other (the coastal
+  pier's beach, from wall to wall: cut at y = 0, still there at y = 2.4). The ray
+  up that tells a point in a solid started a little aside, to one side only; on a
+  solid's side face it lay outside at the high x or y. It is tried to the other
+  side as well now, where a solid's side stands in plan.
+- Fixed: where the mesh was refined, the volume's outside looked sunk in. The
+  faces of a refined block and of the coarser cells round it do not match (a
+  coarse face against four fine ones), so they stayed in the outer surface: the
+  walls of every block and of the hole round it, inside the volume, their shading
+  carried round the edge where a block reaches the domain's side. A see-through
+  or cut volume and CFD's water when path traced (its iso-volume) had the boxes
+  inside. The outer surface is the domain's sides alone now (on the pier, 984 000
+  triangles became 384 000).
+- Fixed: in the Diorama and Open ocean the water's sides on the stand hung from
+  every open edge of CFD's free surface: its seams (each piece of the volume and
+  each refined block cut on its own, with points of their own), the holes round
+  the piles and the gap the deck was cut from. Walls of water stood across the
+  flume at every seam and a glass box under the pier. Only the outside edges have
+  sides now: on the domain's sides, or with no water beyond them.
+- *Without solids* on CFD's free surface also leaves out the sheets that lie on a
+  solid's top and are not joined to the rest of the water: REEF3D keeps the level
+  set in a solid's cells (the deck holds the water of an earlier wave), so the
+  free surface lay as a film in the deck or a cell over it, water on the deck
+  where none was. A piece of the surface all of whose points have a solid within
+  the interface band (F 45 cells of the smallest cells) below goes; a wave going
+  over the deck is joined to the sea and stays, as does a body of water thicker
+  than the band.
+
 ### Calculated fields
 
 - A case's *Calculated fields* make new variables of REEF3D's, as ParaView's

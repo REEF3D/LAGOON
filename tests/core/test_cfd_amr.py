@@ -306,6 +306,49 @@ def test_the_blocks_meet_without_a_crack(tmp_path):
                 assert len(lines) and _loose_ends(lines, _in_cut) < 1e-5, (index, y, name)
 
 
+#: a level 1 block across the whole width (y 0-4, both side walls), level 2 in it
+ACROSS = [
+    (1, (2.0, 4.0), (0.0, 4.0), (1.5, 3.0), (4, 8, 2)),
+    (2, (2.5, 3.5), (1.5, 2.5), (1.5, 2.25), (4, 4, 2)),
+]
+
+
+def _area(points, triangles, axis) -> float:
+    t = points[triangles.astype(np.int64)].astype(np.float64)
+    return 0.5 * float(np.abs(np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0])[:, axis]).sum())
+
+
+def test_the_outer_surface_is_the_domain_s_sides_alone(tmp_path):
+    """Bug: the faces of a block and of the volume's cells round it do not match (a
+    coarse face against four fine ones), so they stayed in the outer surface: the
+    walls of every block and of the hole round it, inside the volume. Where a block
+    reached a side of the domain they met the side's faces at the block's edge,
+    whose shading went round with them: the side looked sunk in where the mesh was
+    refined, and a see-through or cut volume showed the boxes inside. Now the outer
+    surface is the domain's sides, each whole."""
+    root = cfd_amr_case(tmp_path, blocks=ACROSS)
+    s = Session()
+    volume = s.data.case(s.open_case(root)).datasets["cfd_volume"]
+    for index in (0, 2):
+        outside = volume.read(index, ["phi", "level"])
+        p = outside.points.astype(np.float64)
+        low, high = p.min(axis=0), p.max(axis=0)
+        corners = p[outside.triangles.astype(np.int64)]
+        on_side = np.zeros(len(corners), bool)
+        for d in range(3):
+            for side in (low[d], high[d]):
+                on_side |= (np.abs(corners[:, :, d] - side) < 1e-6).all(axis=1)
+        assert on_side.all()
+        size = high - low
+        for d in range(3):  # each side once, without a hole or a face twice
+            other = [size[e] for e in range(3) if e != d]
+            assert np.isclose(_area(p, outside.triangles, d), 2 * other[0] * other[1])
+        # the block's own cells on the side walls it reaches (y = 0 and 4)
+        wall = p[np.abs(p[:, 1] - low[1]) < 1e-6]
+        assert np.isclose(wall[:, 0], 2.5).any()  # a fine node: the coarse are 1 m apart
+        assert (outside.point_data["level"] == 1).any()
+
+
 def test_a_refinement_that_stays_is_planned_once(tmp_path, monkeypatch):
     """Blocks in the same places from output to output (their files are each
     output's own): the outer surface's faces and a slice's cuts are found once,

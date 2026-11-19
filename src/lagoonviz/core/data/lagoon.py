@@ -468,6 +468,14 @@ class StoreDataset(Dataset):
             self._bands[(number, name, value, top)] = (k0, k1, nz)
         return window, r0, k0, k1
 
+    def smallest_cell_height(self, index: int) -> float | None:
+        output = self.output
+        if output.grid != "cartesian" or output.z is None or len(output.z) < 2:
+            return None
+        heights = np.diff(np.asarray(output.z, np.float64))
+        heights = heights[heights > 0]
+        return float(heights.min()) if len(heights) else None
+
     def _water_margin(self) -> float | None:
         """A cartesian volume: twice the interface band (F 45 and 0.3 cells) at its
         tallest cells, and a quarter more (see :meth:`Dataset._water_side`)."""

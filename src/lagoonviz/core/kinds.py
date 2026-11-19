@@ -144,7 +144,9 @@ def _without_solids() -> dict[str, PropertySpec]:
             "Without solids",
             tip="Cut away where it lies in the case's solids (DIVEMesh's, NHFLOW's direct "
             "forcing solids, the floating bodies): REEF3D writes its volume there too, "
-            "where no water flows. Porous structures stay",
+            "where no water flows. Porous structures stay. CFD's free surface: also the "
+            "sheets on a solid's top joined to no other water (the level set REEF3D keeps "
+            "in a solid's cells)",
         )
     }
 

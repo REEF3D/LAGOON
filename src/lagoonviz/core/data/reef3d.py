@@ -480,6 +480,10 @@ class Dataset:
         _, connectivity, offsets, types = self._piece_cells(number, path, piece)
         return piece, connectivity, offsets, types
 
+    def smallest_cell_height(self, index: int) -> float | None:
+        """The height of a frame's smallest cells (a volume's), None: not known."""
+        return None
+
     def _water_margin(self) -> float | None:
         """How far into the water (in phi) the free surface's water-side colours
         look (twice the interface band and a bit, at the largest cell height): what a
