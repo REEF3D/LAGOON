@@ -206,7 +206,10 @@ waves). In 2D they lie just over their surface.
 cuts, so the slice shows the grid the solver computed on (on a σ-grid the lines
 follow the bed and the free surface). *Water only* shows a slice of a CFD run only
 in the water, where the level set phi is 0 or more, cut at the free surface (its
-grid lines too). *Iso-line of* draws the line where an iso-surface of a variable
+grid lines too); a new slice of a CFD run starts so. *Within* shows a slice only
+inside an iso-volume of its case, where that one's variable lies in its range (a
+calculated field's too), and follows it as its range changes: a new slice is within
+the case's iso-volume when one is shown. *Iso-line of* draws the line where an iso-surface of a variable
 crosses the slice, at *Iso-line value*: phi at 0 is the free surface on the slice,
 pressure or a velocity component a line of equal value. It is drawn thicker than
 contour lines, in its *Iso-line colour* (white, black, red or yellow).

@@ -959,8 +959,8 @@ class Viewport3D(QWidget):
             item = self.session.scene.get(item_id)
             if item.kind == "case":
                 self.refresh()  # path or output interval changed
-            else:
-                self.refresh([item_id])
+            else:  # and the slices shown within it (an iso-volume's range)
+                self.refresh([item_id, *self.session.data.slices_within(item_id)])
         else:
             self.refresh()
 

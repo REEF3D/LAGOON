@@ -50,7 +50,7 @@ def test_a_clipped_surface_keeps_its_grid_lines_up_to_the_cut():
 
 
 def test_a_cfd_slice_in_the_water_alone(tmp_path):
-    s, item = _slice(tmp_path)
+    s, item = _slice(tmp_path, water_only=False)
     whole = s.data.load(item)
     assert whole.points[:, 2].max() > 2.9  # up to the top of the volume, the air too
     s.set_property(item, "water_only", True)
@@ -116,3 +116,35 @@ def test_the_line_of_an_iso_surface_on_a_slice(tmp_path):
     drawn = view._contours[f"{item}#isoline"]
     view.set_style("ocean")
     assert tuple(round(c, 3) for c in tuple(drawn.material.color)[:3]) == (0.878, 0.188, 0.165)
+
+
+def test_a_slice_within_the_iso_volume(tmp_path):
+    """Kelley: a CFD section only in the water. A new slice of a CFD run is in the
+    water (phi >= 0); with an iso-volume shown, within it (its variable's range, a
+    calculated field's too), following its range as it changes."""
+    root = _cfd_store(tmp_path / "cfd", frames=2)
+    s = Session()
+    case = s.open_case(root)
+    first = s.add_slice("y", position=1.5)
+    assert s.scene.get(first).properties["water_only"] is True
+    # an iso-volume of a calculated field: the water deeper than 0.5 m
+    s.set_property(case, "calculated", "depth = phi")
+    deep = s.add_iso_volume("depth", 0.5, 10.0)
+    item = s.add_slice("y", position=1.5, variable="velocity")
+    assert s.scene.get(item).properties["within"] == deep
+    assert s.data.choices(item, "iso_volumes") == ["", deep]
+    mesh = s.data.load(item)
+    cells = mesh.points[mesh.triangles.astype(np.int64)]
+    level = _surface(np.unique(cells[..., 0].astype(np.float64)), np.array([1.5]), 0)[0]
+    assert cells[..., 2].max() <= level.max() - 0.5 + 1e-3  # half a metre under the surface
+    assert np.nanmin(mesh.point_data["depth"][mesh.triangles.ravel()]) >= 0.5 - 1e-4
+    # the iso-volume's range changed: the slice follows (and is redrawn with it)
+    s.set_property(deep, "iso_min", 1.0)
+    assert s.data.slices_within(deep) == [item]
+    deeper = s.data.load(item)
+    assert (
+        deeper.points[deeper.triangles.astype(np.int64)][..., 2].max() <= level.max() - 1.0 + 1e-3
+    )
+    # the iso-volume gone: everywhere
+    s.remove_item(deep)
+    assert s.data.within(item) is None and s.data.load(item).n_triangles

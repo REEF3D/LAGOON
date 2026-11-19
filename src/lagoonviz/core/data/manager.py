@@ -112,6 +112,19 @@ def is_water(item: SceneItem) -> bool:
     return False
 
 
+def _within(mesh: SurfaceMesh, variable: str, low: float, high: float) -> SurfaceMesh:
+    """A surface (a slice) where ``variable`` lies from ``low`` to ``high``, cut there."""
+    from lagoonviz.core.data.mesh import clip_surface, scalar_values
+
+    field = scalar_values(mesh.point_data, variable)
+    if field is None or not mesh.n_triangles:
+        return mesh
+    part = clip_surface(mesh, np.nan_to_num(field, nan=low - 1.0), low, "above")
+    if part.n_triangles:
+        part = clip_surface(part, scalar_values(part.point_data, variable), high, "below")
+    return part
+
+
 #: dataset roles of solids a volume is cut by ("Without solids"; floating bodies by
 #: their items)
 SOLID_ROLES = ("solid", "forcing")
@@ -817,6 +830,12 @@ class DataManager:
     def choices(self, item_id: str, provider: str) -> list[str]:
         if provider == "variables":
             return self.variable_choices(item_id)
+        if provider == "iso_volumes":  # of the item's case
+            mine = self.case_item(item_id)
+            found = [
+                i.id for i in self.scene if i.kind == "iso_volume" and self.case_item(i.id) is mine
+            ]
+            return ["", *found]
         if provider == "datasets":
             return ["", *self.dataset_choices(item_id)]
         if provider == "cases":
@@ -854,6 +873,10 @@ class DataManager:
         if provider == "cases":
             return [
                 ("first case" if v == "" else f"{self.scene.get(v).name} [{v}]", v) for v in values
+            ]
+        if provider == "iso_volumes":
+            return [
+                ("everywhere" if v == "" else f"{self.scene.get(v).name} [{v}]", v) for v in values
             ]
         if provider == "series":
             case = self.case(item_id)
@@ -1032,8 +1055,10 @@ class DataManager:
         if dataset is None or index is None or case is None:
             return None
         item = self.scene.get(item_id)
+        within = self.within(item_id) if item.kind == "slice" else None
+        names = [*self.arrays_for(item), *([within[0]] if within else [])]
         # the output's own arrays, and those the case's calculated fields are made of
-        own, fields = needed(self.arrays_for(item), self.calculated(item_id), dataset.components)
+        own, fields = needed(names, self.calculated(item_id), dataset.components)
         arrays = tuple(a for a in own if a in dataset.components)
         extra: tuple = ()
         if item.kind == "slice":
@@ -1041,6 +1066,8 @@ class DataManager:
             extra = ("slice", axis, float(item.properties.get("position", 0.0)))
             if self._water_only(item, dataset):
                 extra = (*extra, True)
+            if within is not None:  # inside an iso-volume: (variable, from, to)
+                extra = (*extra[:3], self._water_only(item, dataset), within)
         elif item.kind == "iso_surface":
             variable = str(item.properties.get("iso_by", "none"))
             if variable == "none":
@@ -1256,6 +1283,31 @@ class DataManager:
         points = memory.current().detail_points
         return dataset.detail_stride(points) if points else 1
 
+    def within(self, item_id: str) -> tuple[str, float, float] | None:
+        """The range a slice is shown in (its "Within": an iso-volume of its case):
+        (variable, from, to), or None (everywhere; the iso-volume gone or empty)."""
+        item = self.scene.get(item_id)
+        other = str(item.properties.get("within", "") or "")
+        if not other or other not in self.scene:
+            return None
+        volume = self.scene.get(other)
+        variable = str(volume.properties.get("iso_by", "none"))
+        if volume.kind != "iso_volume" or variable == "none":
+            return None
+        if self.case_item(other) is not self.case_item(item_id):
+            return None
+        low = float(volume.properties.get("iso_min", 0.0))
+        high = float(volume.properties.get("iso_max", 1.0))
+        return (variable, min(low, high), max(low, high))
+
+    def slices_within(self, item_id: str) -> list[str]:
+        """The slices shown within an iso-volume (they follow its changes)."""
+        return [
+            i.id
+            for i in self.scene
+            if i.kind == "slice" and str(i.properties.get("within", "") or "") == item_id
+        ]
+
     @staticmethod
     def _water_only(item, dataset) -> bool:
         """A slice shown only in the water: its "water_only" setting, and a level set
@@ -1300,6 +1352,8 @@ class DataManager:
             mesh = replace(
                 mesh, point_data=add_fields(mesh.point_data, list(key.fields), self._constants(key))
             )
+        if key.extra and key.extra[0] == "slice" and len(key.extra) > 4:
+            mesh = _within(mesh, *key.extra[4])  # inside an iso-volume's range
         if key.clip:
             from lagoonviz.core.data.solidclip import without_films, without_solids
 

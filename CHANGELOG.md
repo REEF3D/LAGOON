@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Slices in the water, or within an iso-volume
+
+- Kelley: a slice of a CFD case showed the air too, though an iso-volume showed
+  the water. A slice has *Within*: an iso-volume of its case, the slice shown only
+  where that one's variable lies in its range (a calculated field's too),
+  following its range as it changes. A new slice is within the case's iso-volume
+  when one is shown, else a CFD run's slice starts with *Water only* (phi >= 0).
+
 ### CFD with mesh refinement and solids: the coastal pier as it is
 
 - Fixed: with *Without solids* everything under one of DIVEMesh's solids was taken

@@ -2806,7 +2806,31 @@ class Session:
         if position is None:
             center = self.data.domain_center("slice", properties)
             position = round(center["xyz".index(normal)], 6) if center else 0.0
+        properties = {**self._slice_within(properties), **properties}
         return self.add_item("slice", normal=normal, position=position, **properties)
+
+    def _slice_within(self, properties: dict[str, Any]) -> dict[str, Any]:
+        """Where a new slice is shown, unless asked (Kelley: a CFD section only in the
+        water): within the case's iso-volume, if one is shown (the water, a field's
+        range); else a CFD run's slice in the water alone (phi >= 0)."""
+        if "within" in properties or "water_only" in properties:
+            return {}
+        try:
+            case_item = self.scene.get(self._case_id(properties.get("case") or None))
+        except (ValueError, KeyError):
+            return {}
+        for item in self.scene:
+            if (
+                item.kind == "iso_volume"
+                and item.visible
+                and str(item.properties.get("iso_by", "none")) != "none"
+                and self.data.case_item(item.id) is case_item
+            ):
+                return {"within": item.id}
+        dataset = self.data.dataset_for("slice", properties)
+        if dataset is not None and "phi" in dataset.components:
+            return {"water_only": True}
+        return {}
 
     def add_iso_surface(
         self, iso_by: str | None = None, iso_value: float | None = None, **properties: Any

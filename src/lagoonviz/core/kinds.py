@@ -472,6 +472,14 @@ KINDS: dict[str, KindSpec] = {
                 tip="CFD: the slice only where the level set phi >= 0 (the water), cut at "
                 "its zero (the free surface)",
             ),
+            "within": PropertySpec(
+                "",
+                "Within",
+                provider="iso_volumes",
+                tip="The slice only inside an iso-volume of the case, where its variable "
+                "lies in its range (the water: phi from 0; a calculated field's range), "
+                "following it as it changes; empty: everywhere",
+            ),
             **_without_solids(),
             **_grid_lines("the slice cuts"),
             **_contours(),
