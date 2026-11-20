@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Reload: an item whose dataset is gone shows the case's current one
+
+- A Structures item kept DIVEMesh's solids of an earlier run (S 10) after the
+  case was changed to NHFLOW's direct forcing solids (A 581) and run again:
+  that dataset no longer exists and the item drew nothing. On Reload, an item
+  whose dataset the case no longer has now shows one of the case's main datasets
+  of its kind that no other item shows, else its kind's default; the console
+  says which.
+
 ### Slices in the water, or within an iso-volume
 
 - Kelley: a slice of a CFD case showed the air too, though an iso-volume showed

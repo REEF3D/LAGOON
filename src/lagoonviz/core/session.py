@@ -3028,10 +3028,43 @@ class Session:
 
     def reload(self, case_id: str | None = None) -> list[str]:
         """Read the case folders again, keeping the scene, the time and the camera
-        (new results of a running simulation). Not an undo step."""
+        (new results of a running simulation). An item whose dataset the case no
+        longer has shows its current one (:meth:`_follow_datasets`). Not an undo step."""
         paths = self.data.reload(case_id)
+        self._follow_datasets(case_id)
         self.scene.data_changed()
         return paths
+
+    def _follow_datasets(self, case_id: str | None = None) -> None:
+        """After a reload: an item whose ``dataset`` the case no longer has (DIVEMesh's
+        solids of a run before, now NHFLOW's direct forcing solids; an output folder
+        removed) shows the case's current dataset of its kind, one of the case's main
+        datasets that no other item of the case shows; without one its kind's default
+        (empty: the output of its role). Said in the console; not an undo step."""
+        for item in list(self.scene):
+            key = str(item.properties.get("dataset", "") or "")
+            if not key or item.kind == "case":
+                continue
+            owner = self.data.case_item(item.id)
+            if owner is None or (case_id and owner.id != case_id):
+                continue
+            case = self.data.case(item.id)
+            if case is None or key in case.datasets:
+                continue
+            shown = {
+                str(other.properties.get("dataset", "") or "")
+                for other in self.scene
+                if other.id != item.id
+                and other.kind == item.kind
+                and self.data.case_item(other.id) is owner
+            }
+            new = ""
+            for role, dataset in case.main_datasets().items():
+                if ROLES.get(role) == item.kind and dataset.key not in shown:
+                    new = dataset.key
+                    break
+            self.scene.update(item.id, properties={"dataset": new})
+            self._log(f"# {item.name}: {key} is gone, it shows {new or 'its default'} now")
 
     def grow(self, before: dict[str, tuple], after: dict[str, tuple]) -> bool:
         """New outputs of runs still writing into their LAGOON stores, without reading

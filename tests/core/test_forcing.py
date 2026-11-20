@@ -82,3 +82,43 @@ def test_a_case_shows_its_forcing_solids(tmp_path):
     # not an NHFLOW case: none
     (root / "ctrl.txt").write_text(CTRL.replace("A 10 5", "A 10 6"))
     assert find_forcing(root) is None
+
+
+def test_reload_moves_a_structure_to_the_forcing_solids(tmp_path):
+    # the item showed DIVEMesh's solids of an earlier run (S 10); the case now has
+    # NHFLOW's direct forcing solids (A 581) instead: after a reload it shows those
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "ctrl.txt").write_text(CTRL)
+    (case / "control.txt").write_text("B 1 0.25\nB 10 0.0 8.0 0.0 4.0 0.0 3.0\nM 10 1\n")
+    s = Session()
+    s.open_case(case)
+    item = [i for i in s.scene if i.kind == "structure"][0]
+    s.scene.update(item.id, properties={"dataset": "divemesh_solids"})
+    lines = []
+    s.subscribe_log(lines.append)
+    s.reload()
+    assert s.scene.get(item.id).properties["dataset"] == "nhflow_forcing"
+    assert s.data.load(item.id) is not None
+    assert any("divemesh_solids is gone" in line for line in lines)
+    # a dataset the case still has is kept
+    s.reload()
+    assert s.scene.get(item.id).properties["dataset"] == "nhflow_forcing"
+
+
+def test_reload_leaves_a_second_item_on_its_default(tmp_path):
+    # two items of one kind lost their dataset: the first takes the forcing solids,
+    # the other (none left) its kind's default
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "ctrl.txt").write_text(CTRL)
+    (case / "control.txt").write_text("B 1 0.25\nB 10 0.0 8.0 0.0 4.0 0.0 3.0\nM 10 1\n")
+    s = Session()
+    s.open_case(case)
+    first = [i for i in s.scene if i.kind == "structure"][0]
+    second = s.add_item("structure", dataset="nhflow_forcing")
+    s.scene.update(first.id, properties={"dataset": "gone_a"})
+    s.scene.update(second, properties={"dataset": "gone_b"})
+    s.reload()
+    keys = sorted(s.scene.get(i).properties["dataset"] for i in (first.id, second))
+    assert keys == ["", "nhflow_forcing"]
