@@ -1245,7 +1245,8 @@ class SolidDataset(Dataset):
 
 class ForcingDataset(Dataset):
     """NHFLOW's direct forcing solids (:mod:`lagoonviz.core.data.forcing`): one frame,
-    shown at any time, read from REEF3D_NHFLOW_FORCING_VTP or built from ctrl.txt."""
+    shown at any time, read from REEF3D_NHFLOW_FORCING_VTP, built from ctrl.txt, or
+    read from a LAGOON store (SPEC 12, group "forcing"; ``source`` the store's folder)."""
 
     def __init__(self, source: Path, case_dir: Path) -> None:
         self.source = source
@@ -1264,7 +1265,14 @@ class ForcingDataset(Dataset):
         if self._mesh is None:
             from lagoonviz.core.data.forcing import forcing_from_ctrl
 
-            if self.source.suffix == ".vtp":
+            if Path(self.source).is_dir():
+                from lagoon_format.store import Store
+
+                found = Store(self.source).forcing_solids()
+                if found is None:
+                    raise ValueError(f"{Path(self.source).name} holds no forcing solids")
+                points, triangles = found[0], found[1]
+            elif self.source.suffix == ".vtp":
                 mesh = self._read_plain(self.frames[0], [], False)
                 points, triangles = mesh.points, mesh.triangles
             else:
@@ -1481,6 +1489,8 @@ def solid_datasets(case_dir: Path, stores: list[Path] | None = None) -> list[Dat
     if source is not None:
         found.append(SolidDataset(source, case_dir))
     forcing = find_forcing(case_dir)
+    if forcing is None and not (Path(case_dir) / "ctrl.txt").is_file():
+        forcing = _stored_forcing(stores or [])  # a store copied elsewhere (SPEC 12)
     if forcing is not None:
         found.append(ForcingDataset(forcing, case_dir))
     porous = find_porous(case_dir)
@@ -1492,6 +1502,20 @@ def solid_datasets(case_dir: Path, stores: list[Path] | None = None) -> list[Dat
     if (case_dir / "geo.dat").is_file():
         found.append(GeoDatDataset(case_dir / "geo.dat", case_dir))
     return found
+
+
+def _stored_forcing(stores: list[Path]) -> Path | None:
+    """The NHFLOW store that holds direct forcing solids (SPEC 12, group "forcing");
+    None if none does."""
+    from lagoon_format.store import Store, StoreError
+
+    for store in sorted(stores, key=lambda s: _store_solver(s) != "NHFLOW"):
+        try:
+            if Store(store).forcing_solids() is not None:
+                return Path(store)
+        except (OSError, ValueError, KeyError, StoreError):
+            continue
+    return None
 
 
 def _stored_solids(

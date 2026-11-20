@@ -385,6 +385,9 @@ def convert(
         solids = _convert_solids(case, writer)
         if solids:
             added["solids"] = solids
+        forcing = _convert_forcing(case, writer)
+        if forcing:
+            added["forcing"] = forcing
     writer.close()
     return Report(path, added, vtk_bytes, _time.perf_counter() - began, skipped)
 
@@ -409,6 +412,30 @@ def _convert_solids(case: Case, writer: StoreWriter) -> int:
         pass
     writer.set_solids(points, triangles, source.as_posix())
     return int(len(triangles))
+
+
+def _convert_forcing(case: Case, writer: StoreWriter) -> int:
+    """NHFLOW's direct forcing solids (REEF3D_NHFLOW_FORCING_VTP, else built from
+    ctrl.txt) into the store once (SPEC 12, group "forcing"); the triangles written, 0
+    when the store has them or the case none."""
+    forcing = case.by_role("forcing")
+    if forcing is None or Store(writer.path).forcing_solids() is not None:
+        return 0
+    source = Path(forcing.source)
+    if source.is_dir():  # read from a store
+        return 0
+    try:
+        mesh = forcing.read(0, [])
+    except (OSError, ValueError, KeyError, IndexError):
+        return 0
+    if not len(mesh.triangles):
+        return 0
+    try:
+        source = source.relative_to(case.path)
+    except ValueError:
+        pass
+    writer.set_forcing_solids(mesh.points, mesh.triangles, source.as_posix())
+    return int(len(mesh.triangles))
 
 
 def _series_solver(case: Case) -> str:

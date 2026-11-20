@@ -68,3 +68,21 @@ def test_solids_as_reef3d_writes_them(tmp_path):
     found, faces, _ = Store(path).solids()
     np.testing.assert_array_equal(found, points)
     np.testing.assert_array_equal(faces, triangles)
+
+
+def test_forcing_solids_round_trip(tmp_path):
+    """NHFLOW's direct forcing solids: their own group "forcing" beside DIVEMesh's solids."""
+    path = tmp_path / "run.lagoon"
+    writer = StoreWriter.create(path, "NHFLOW")
+    assert Store(path).forcing_solids() is None
+    points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], np.float64)
+    triangles = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
+    source = "REEF3D_NHFLOW_FORCING_VTP/REEF3D-NHFLOW-FORCING.vtp"
+    writer.set_forcing_solids(points, triangles, source)
+    found, faces, info = Store(path).forcing_solids()
+    np.testing.assert_array_equal(found, points)
+    np.testing.assert_array_equal(faces, triangles)
+    assert info == {"role": "forcing", "source": source}
+    assert Store(path).solids() is None  # DIVEMesh's: not written
+    with pytest.raises(StoreError):
+        writer.set_forcing_solids(points[:3], triangles)

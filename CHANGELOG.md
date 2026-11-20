@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### NHFLOW's direct forcing solids in the store (SPEC 12)
+
+- A store copied elsewhere showed DIVEMesh's solids but not NHFLOW's direct
+  forcing solids (A 581 - A 590): those came only from ctrl.txt or
+  REEF3D_NHFLOW_FORCING_VTP next to it. They are now the store's group
+  `forcing` (role "forcing", the arrays of `solids`); REEF3D writes it with
+  P 18, `lagoon-convert` from the case. LAGOON shows it where the case folder
+  has no ctrl.txt (`Store.forcing_solids`, `StoreWriter.set_forcing_solids`).
+
 ### Reload: an item whose dataset is gone shows the case's current one
 
 - A Structures item kept DIVEMesh's solids of an earlier run (S 10) after the

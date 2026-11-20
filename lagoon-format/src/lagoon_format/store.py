@@ -514,15 +514,23 @@ class Store:
     def solids(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]] | None:
         """The case's solids (SPEC 12): points (np, 3) float64, triangles (nt, 3)
         int32 and the group's attributes; None without them."""
-        if "solids" not in self.root:
+        return self._triangles("solids")
+
+    def forcing_solids(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]] | None:
+        """NHFLOW's direct forcing solids (SPEC 12, group "forcing"; A 581 - A 590):
+        points, triangles and attributes as :meth:`solids`; None without them."""
+        return self._triangles("forcing")
+
+    def _triangles(self, name: str) -> tuple[np.ndarray, np.ndarray, dict[str, Any]] | None:
+        if name not in self.root:
             return None
-        group = self.root.group("solids")
+        group = self.root.group(name)
         if "points" not in group or "triangles" not in group:
             return None
         points = np.asarray(group.array("points")[:], np.float64).reshape(-1, 3)
         triangles = np.asarray(group.array("triangles")[:], np.int32).reshape(-1, 3)
         if len(triangles) and (triangles.min() < 0 or triangles.max() >= len(points)):
-            raise StoreError(f"{self.path}: solids: a triangle names a point that is not there")
+            raise StoreError(f"{self.path}: {name}: a triangle names a point that is not there")
         return points, triangles, dict(group.attrs.get("lagoon", {}))
 
     @property
@@ -712,14 +720,22 @@ class StoreWriter:
     def set_solids(self, points, triangles, source: str = "") -> None:
         """Write the case's solids (SPEC 12): corners (np, 3) and triangles (nt, 3) as
         point numbers; replaces any written before."""
+        self._set_triangles("solids", "solid", points, triangles, source)
+
+    def set_forcing_solids(self, points, triangles, source: str = "") -> None:
+        """Write NHFLOW's direct forcing solids (SPEC 12, group "forcing"), as
+        :meth:`set_solids`."""
+        self._set_triangles("forcing", "forcing", points, triangles, source)
+
+    def _set_triangles(self, name: str, role: str, points, triangles, source: str) -> None:
         points = np.ascontiguousarray(np.asarray(points, np.float64).reshape(-1, 3))
         triangles = np.ascontiguousarray(np.asarray(triangles, np.int32).reshape(-1, 3))
         if len(triangles) and (triangles.min() < 0 or triangles.max() >= len(points)):
-            raise StoreError("solids: a triangle names a point that is not there")
-        info: dict[str, Any] = {"role": "solid"}
+            raise StoreError(f"{name}: a triangle names a point that is not there")
+        info: dict[str, Any] = {"role": role}
         if source:
             info["source"] = source
-        group = Group.create(self.path / "solids", {"lagoon": info})
+        group = Group.create(self.path / name, {"lagoon": info})
         for name, values, dims in (
             ("points", points, ["point", "xyz"]),
             ("triangles", triangles, ["triangle", "corner"]),

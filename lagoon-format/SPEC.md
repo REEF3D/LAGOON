@@ -671,6 +671,19 @@ it begins a store, from DIVEMesh's `REEF3D_Solid.vtp` when that is the case's
 `DIVEMesh_Partition.vtp` by more than an hour is left over from another case and
 not taken); `lagoon-convert` writes the solids LAGOON shows for the case.
 
+NHFLOW's direct forcing solids (the shapes of `A 581` - `A 589` and the STL of
+`A 590` in ctrl.txt) are the group `forcing`, with the same two arrays:
+
+```json
+{"lagoon": {"role": "forcing", "source": "REEF3D_NHFLOW_FORCING_VTP/REEF3D-NHFLOW-FORCING.vtp"}}
+```
+
+REEF3D writes it with `P 18` into an NHFLOW store when it begins the store, from the
+solids it makes for its direct forcing (the grid file's solids of `A 580 1` are
+DIVEMesh's, in `solids`); `lagoon-convert` writes the forcing solids LAGOON shows for
+the case. A reader shows them where the case folder has neither ctrl.txt nor
+`REEF3D_NHFLOW_FORCING_VTP` (a store copied elsewhere).
+
 ## 13. To be specified
 
 - Particle tracks by particle id (from `id` fields) for path lines.

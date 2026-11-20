@@ -666,3 +666,32 @@ def test_left_over_solids_in_a_store_are_not_shown(tmp_path):
     session = Session()
     session.open_case(alone)
     assert [i for i in session.scene if i.kind == "structure"]
+
+
+def test_the_forcing_solids_go_into_the_store(tmp_path):
+    """lagoon-convert writes NHFLOW's direct forcing solids into the store once (SPEC 12,
+    group "forcing"): the store copied on its own, without ctrl.txt, shows them."""
+    from lagoonviz.core.data.reef3d import ForcingDataset
+
+    run = make_run(tmp_path / "case", frames=2)
+    (run / "ctrl.txt").write_text("A 10 5\nA 581 1.0 2.0 1.0 2.0 0.0 1.5\n")
+    report = convert(run)
+    assert report.outputs["forcing"] == 12
+    points, triangles, info = Store(report.store).forcing_solids()
+    assert info == {"role": "forcing", "source": "ctrl.txt"} and len(triangles) == 12
+    np.testing.assert_allclose(points.max(axis=0), [2.0, 2.0, 1.5])
+    assert "forcing" not in convert(run).outputs  # written once
+    alone = tmp_path / "elsewhere" / report.store.name
+    shutil.copytree(report.store, alone)
+    session = Session()
+    session.open_case(alone)
+    item = next(i for i in session.scene if i.kind == "structure")
+    dataset = session.data.dataset(item.id)
+    assert isinstance(dataset, ForcingDataset) and dataset.source == alone
+    mesh = session.data.load(item.id)
+    np.testing.assert_allclose(mesh.points.max(axis=0), [2.0, 2.0, 1.5])
+    # next to the case: from ctrl.txt (the store's are the same)
+    session = Session()
+    session.open_case(run)
+    item = next(i for i in session.scene if i.kind == "structure")
+    assert session.data.dataset(item.id).source == run / "ctrl.txt"
