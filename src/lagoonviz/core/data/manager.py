@@ -83,6 +83,7 @@ PLAN_LAYERS = {
     "seastate": 3.0,  # where the free surface would be
     "mooring": 2.0,
     "net": 2.0,
+    "membrane": 1.8,
     "amr_blocks": 2.0,
     "free_surface": 3.0,
     "amr": 3.0,

@@ -214,6 +214,7 @@ KIND_SURFACES = {
     "bathymetry": "sand",
     "ice": "ice",
     "rods": "wood",
+    "membrane": "plain",
     "dem": "rock",
     "body": "steel",
     "structure": "concrete",

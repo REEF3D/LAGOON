@@ -185,6 +185,7 @@ PLAIN_COLORS = {
     "slice": "#9aa7b4",
     "mooring": "#e0a030",
     "net": "#3f5f4a",  # dark net green
+    "membrane": "#56636d",  # grey tarpaulin of a closed cage, its collar pipe
     "amr_blocks": "#ffd84a",
     "body": "#8f9aa6",
     "structure": "#a7a39b",

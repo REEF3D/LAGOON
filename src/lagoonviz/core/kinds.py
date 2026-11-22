@@ -635,6 +635,14 @@ KINDS: dict[str, KindSpec] = {
             "line_width": PropertySpec(1.5, "Line width [px]", minimum=0.5, maximum=20.0),
         },
     ),
+    "membrane": KindSpec(
+        "Membranes",
+        {
+            **_data_source("membranes"),
+            **_SHADOW,
+            **_colouring("none", "reef3d"),
+        },
+    ),
     "structure": KindSpec(
         "Structures",
         {

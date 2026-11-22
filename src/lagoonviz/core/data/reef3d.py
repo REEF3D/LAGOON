@@ -27,6 +27,7 @@ from lagoon_format.run import FOLDER as RUN_FOLDER
 from lagoon_format.run import Output, Run, RunLog, read_case
 
 from lagoonviz.core.calculator import add_fields
+from lagoonviz.core.data.membranes import Collar, collars_of, find_membrane_dat, with_collars
 from lagoonviz.core.data.mesh import (
     CutPlan,
     PieceMerger,
@@ -66,6 +67,7 @@ ROLES = {
     "body": "body",
     "mooring": "mooring",
     "net": "net",
+    "membrane": "membrane",  # NHFLOW's membranes (X 330): the fabric, a bag's collar
     "structure": "structure",
     "dem": "dem",
     "ice": "ice",
@@ -90,13 +92,15 @@ _SUFFIXES = (".pvtu", ".pvtp", ".vtu", ".vtp", ".vtk")
 #: structures, DEM elements (REEF3D_DEM_VTP, written by the DEM for any solver)
 _OBJECT_FOLDER = re.compile(
     r"^REEF3D_(?:(?P<solver>[A-Z0-9]+)_)?"
-    r"(?P<what>6DOF_VTP|6DOF_Mooring|6DOF_Net|VRANS_VTP|FORCING_VTP|DEM_VTP|ICE|RodTree"
+    r"(?P<what>6DOF_VTP|6DOF_Mooring|6DOF_Net|Membrane_VTP|VRANS_VTP|FORCING_VTP|DEM_VTP|ICE|RodTree"
     r"|CPM_Particle|Particles)$"
 )
 _OBJECT_ROLES = {
     "6DOF_VTP": "body",
     "6DOF_Mooring": "mooring",
     "6DOF_Net": "net",  # nets of bars (X 320): REEF3D-Net-<net>-<output>.vtk
+    # membranes (X 330): REEF3D-NHFLOW-Membrane-<membrane>-<output>.vtp, at their own interval
+    "Membrane_VTP": "membrane",
     "VRANS_VTP": "structure",
     "FORCING_VTP": "structure",
     "DEM_VTP": "dem",
@@ -109,13 +113,24 @@ _OBJECT_ROLES = {
 #: MPI rank, or one serial file per output (not one file per object)
 _PARALLEL_OBJECTS = ("CPM_Particle", "Particles")
 #: objects shown with the run that wrote them
-OBJECT_SHOWN = ("body", "mooring", "net", "structure", "dem", "ice", "rods", "particles", "cpm_bed")
+OBJECT_SHOWN = (
+    "body",
+    "mooring",
+    "net",
+    "membrane",
+    "structure",
+    "dem",
+    "ice",
+    "rods",
+    "particles",
+    "cpm_bed",
+)
 #: roles whose files are drawn as they are (no merging of MPI pieces)
-PLAIN_ROLES = ("body", "mooring", "net", "structure", "dem", "ice", "rods", "particles")
+PLAIN_ROLES = ("body", "mooring", "net", "membrane", "structure", "dem", "ice", "rods", "particles")
 #: roles whose outputs have their own interval: their times come from the files
-OWN_TIME_ROLES = ("dem", "ice", "rods", "particles")
+OWN_TIME_ROLES = ("dem", "ice", "rods", "particles", "membrane")
 #: roles whose cell data (one value per floe or rod) is shown on their points
-CELL_DATA_ROLES = ("ice", "rods")
+CELL_DATA_ROLES = ("ice", "rods", "membrane")
 #: folders whose files are numbered one per output (not one per object)
 _NUMBERED_FOLDERS = ("DEM_VTP", "_ICE", "RodTree")
 _PIECE_STEP = re.compile(r"^(?P<stem>.+?)-(?P<piece>\d+)-(?P<step>\d+)$")
@@ -143,6 +158,7 @@ ROLE_LABELS = {
     "body": "bodies",
     "mooring": "mooring lines",
     "net": "nets",
+    "membrane": "membranes",
     "structure": "structures",
     "dem": "DEM elements",
     "ice": "ice floes",
@@ -248,7 +264,7 @@ class Dataset:
             "cpm_bed": ("bed_change",),
             "seastate": ("Hs",),
         }.get(self.role, ())
-        if self.role in ("bed", "body", "structure", "dem", "ice", "rods"):
+        if self.role in ("bed", "body", "structure", "dem", "ice", "rods", "membrane"):
             return "none"  # drawn in their material colour, like sand or steel
         for name in preferred:
             if name in self.components:
@@ -303,6 +319,15 @@ class Dataset:
         index = int(np.searchsorted(self._step_array, round(frame), side="right")) - 1
         return min(max(index, 0), len(self.frames) - 1)
 
+    @property
+    def collars(self) -> list[Collar]:
+        """Membranes: the collar rings of the case's flexible bags (membrane.dat),
+        drawn with the fabric (REEF3D writes none)."""
+        found = getattr(self, "_collars", None)
+        if found is None:
+            found = self._collars = collars_of(find_membrane_dat(Path(self.folder), 5))
+        return found
+
     # ------------------------------------------------------------- reading
     def read(self, index: int, variables: list[str] | None = None) -> SurfaceMesh:
         """Read one frame as a surface with the arrays needed for ``variables``.
@@ -327,9 +352,14 @@ class Dataset:
         if self.role in PLAIN_ROLES:
             if self.role == "rods" and arrays is not None and "radius" in self.components:
                 arrays = sorted({*arrays, "radius"})
+            collars = self.collars if self.role == "membrane" else []
+            if collars and arrays is not None and "displacement" in self.components:
+                arrays = sorted({*arrays, "displacement"})  # where the ring's nodes started
             mesh = self._read_plain(frame, arrays, self.role in CELL_DATA_ROLES)
             if self.role == "rods" and mesh.segments is not None and "radius" in mesh.point_data:
                 return tubes(mesh.points, mesh.segments, mesh.point_data["radius"], mesh.point_data)
+            if collars:
+                return with_collars(mesh, collars)
             return mesh
         # reading runs in parallel; only making a new plan is serialised
         light = [self._piece(path, point_arrays=arrays, with_cells=False) for path in frame.pieces]
@@ -1115,6 +1145,7 @@ class Case:
             "particles",
             "mooring",
             "net",
+            "membrane",
             "free_surface",
             "amr",
         )
@@ -2051,6 +2082,8 @@ def _datasets_by_run(key, solver, role, frames, folder, owners) -> list[Dataset]
             dataset.times = np.asarray(times, dtype=np.float64)[order]
         elif role in OWN_TIME_ROLES:
             _times_from_files(dataset)
+            if dataset.times is None and role == "membrane":
+                _times_from_pvd(dataset, folder)
         datasets.append(dataset)
     return datasets
 
@@ -2106,6 +2139,36 @@ def _times_from_files(dataset: Dataset) -> None:
     order = np.argsort(times, kind="stable")
     dataset.frames = [dataset.frames[i] for i in order]
     dataset.times = np.asarray(times, dtype=np.float64)[order]
+
+
+_PVD_ENTRY = re.compile(r'timestep="(?P<time>[^"]+)"[^>]*file="(?P<file>[^"]+)"')
+
+
+def _times_from_pvd(dataset: Dataset, folder: Path) -> None:
+    """Simulation times from the .pvd collections beside the files (membranes, which
+    write their files at their own interval and say when in REEF3D-NHFLOW-Membrane-
+    <membrane>.pvd), for files without a TimeValue. Left unset unless every frame
+    has one."""
+    times: dict[str, float] = {}
+    for pvd in sorted(Path(folder).glob("*.pvd")):
+        try:
+            text = pvd.read_text(errors="replace")
+        except OSError:
+            continue
+        for match in _PVD_ENTRY.finditer(text):
+            try:
+                times[Path(match.group("file")).name] = float(match.group("time"))
+            except ValueError:
+                continue
+    found = [
+        times.get(frame.pieces[0].name if frame.pieces else frame.path.name)
+        for frame in dataset.frames
+    ]
+    if not found or any(t is None for t in found):
+        return
+    order = np.argsort(found, kind="stable")
+    dataset.frames = [dataset.frames[i] for i in order]
+    dataset.times = np.asarray(found, dtype=np.float64)[order]
 
 
 def preferred(datasets: list[Dataset], short: float = 0.1) -> Dataset:

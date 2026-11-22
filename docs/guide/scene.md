@@ -33,6 +33,7 @@ script the session writes ([Scripting](../scripting.md)).
 | Time series | wave gauges, 6DOF motions or forces, plotted under the 3D view |
 | Free surface line | the surface along the lines of `WSFLINE`, with the wave theory (FNPF) |
 | Bodies, Mooring lines, Nets, Structures | floating bodies, their moorings and nets (coloured by tension), fixed structures |
+| Membranes | NHFLOW's membranes (X 330, `REEF3D_NHFLOW_Membrane_VTP` or the store): the fabric, coloured by `dp`, `tension`, `load`, ...; a flexible bag's collar (`collar D ...` in membrane.dat) as a pipe of diameter D along its top edge, which REEF3D does not write |
 | DEM elements, Ice floes, Rod trees, Particles | the objects of those modules, with trails for DEM and particles (CPM parcels need REEF3D's parcel numbers, `id`); particles of a fixed size on screen or, *Size* radius, as large as they are in the model (times *Radius scale*); *Draw as* spheres: round, lit balls in the model, of *Sphere radius* (box and slider) or, with *Size* radius, each its own |
 | CPM bed | the bed of CFD's CPM sediment model (Q 58, `REEF3D-CFD-CPM-Bed-*.dat` of the ranks as one surface): its level, the bed shear stress `tau` and its change since the first output, `bed_change` (the default colour) |
 

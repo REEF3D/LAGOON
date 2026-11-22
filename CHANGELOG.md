@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### NHFLOW's membranes, with the collar of a flexible bag
+
+- LAGOON did not show NHFLOW's membranes (X 330). It now reads them, from
+  `REEF3D_NHFLOW_Membrane_VTP` (one file per membrane and output, at the
+  membranes' own print interval: the time from the files or their `.pvd`) or
+  the store (`particles/nhflow_membrane`, P 18), as the item *Membranes*: the
+  fabric, coloured by its node and triangle values (`dp`, `tension`, `load`,
+  `displacement`, ...). `lagoon-convert` stores them.
+- The collar of a flexible bag (membrane.dat `collar D m EA EI`), a floating
+  pipe ring, has its centre line on the bag's top edge, but REEF3D writes no
+  pipe. LAGOON draws it as a tube of diameter D through the nodes that started
+  on the top edge (at or above `attach z`, else z_top), from membrane.dat in the
+  case folder; the tube carries the values of its nodes.
+
 ### NHFLOW's direct forcing solids in the store (SPEC 12)
 
 - A store copied elsewhere showed DIVEMesh's solids but not NHFLOW's direct
