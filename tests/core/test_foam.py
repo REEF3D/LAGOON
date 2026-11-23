@@ -147,3 +147,34 @@ def test_coarse_and_fine_triangles_leave_no_holes():
     grid = SurfaceGrid.from_scattered(points, np.zeros_like(points), triangles=triangles, fill=0)
     assert grid.h == pytest.approx(0.1, rel=0.3)
     assert np.isfinite(grid.z).all() and np.allclose(grid.z, 1.0)
+
+
+def test_a_fine_surface_on_a_coarser_grid():
+    """CFD's free surface, cut from a volume of fine cells (a river 80 m long in cells
+    of 5 cm), on a grid of at most FoamSettings.grid points along its longer side: on
+    its own cells the particles (a fraction of a grid cell) were millimetres, too
+    small to see, and so many that the limit left little foam."""
+    xs, ys = np.arange(0.0, 80.0, 0.05), np.arange(0.0, 20.0, 0.05)
+    x, y = np.meshgrid(xs, ys, indexing="ij")
+    z = 2.0 + 0.2 * np.sin(x) * np.cos(y)
+    points = np.c_[x.ravel(), y.ravel(), z.ravel()]
+    velocity = np.c_[np.full(len(points), 3.0), np.zeros((len(points), 2))]
+    most = FoamSettings().grid
+    grid = SurfaceGrid.from_scattered(points, velocity, cell=0.05, most=most)
+    assert max(grid.z.shape) <= most and grid.h == pytest.approx(80.0 / (most - 1), rel=0.01)
+    assert np.isfinite(grid.z).all()
+    # each grid point the highest point near it
+    assert np.nanmax(grid.z) == pytest.approx(z.max(), abs=0.01)
+    fine = SurfaceGrid.from_scattered(points[:4000], velocity[:4000], cell=0.05, most=most)
+    assert fine.h == pytest.approx(0.05)  # a small surface keeps its cells
+
+
+def test_the_limit_keeps_the_foam():
+    """At the limit only as many are born as have gone, not the oldest dropped: foam
+    lives longest, and dropping the oldest left only spray and bubbles just born."""
+    free = run(3.0).particles()
+    limited = run(3.0, limit=300).particles()
+    share = len(free["foam"][0]) / sum(len(p) for p, _ in free.values())
+    kept = len(limited["foam"][0]) / sum(len(p) for p, _ in limited.values())
+    assert sum(len(p) for p, _ in limited.values()) <= 300
+    assert kept > 0.5 * share

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### White water on CFD's free surface
+
+- A CFD run rendered with Cycles showed hardly any foam. Its free surface, cut
+  from a volume of fine cells, was put on a grid of those cells (5 cm in a river
+  80 m long): the particles, a fraction of a grid cell, were millimetres across,
+  too small to see, and so many that the limit of 400 000 dropped the oldest,
+  the foam. A free surface is now put on a grid of at most 400 points along its
+  longer side (`FoamSettings.grid`), and at the limit only as many particles are
+  born as have gone, so the foam stays. Coarser, the warm-up before a still is
+  also quicker (a river: 70 s of white water work became 1.5 s).
+
 ### NHFLOW's membranes, with the collar of a flexible bag
 
 - LAGOON did not show NHFLOW's membranes (X 330). It now reads them, from

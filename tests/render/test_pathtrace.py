@@ -1092,3 +1092,29 @@ def test_cfd_free_surface_goes_to_blender_as_its_water(tmp_path, look):
     scene = json.loads(path.read_text())
     entry = next(o for o in scene["frames"][0]["objects"] if o["name"] == free)
     assert not scene["materials"][entry["material"]].get("water")
+
+
+def test_white_water_of_a_fine_surface_on_a_coarser_grid(tmp_path):
+    """A free surface finer than FoamSettings.grid points along its longer side (CFD's
+    fine cells, a large NHFLOW grid) is put on a coarser grid of its own, the same for
+    every output."""
+    import shutil
+
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.core.foam import FoamSettings
+    from lagoonviz.render.pathtrace import WhiteWater
+
+    for solver in ("CFD", "NHFLOW"):
+        run = make_run(tmp_path / solver, solver=solver, frames=4, print_interval=0.5)
+        if solver == "CFD":  # CFD writes a volume only: its free surface is cut from it
+            for name in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):
+                shutil.rmtree(run / name)
+        session = Session()
+        session.open_case(run)
+        white = WhiteWater(session, FoamSettings(grid=6))
+        grid, _ = white._surface(0.5)
+        assert max(grid.z.shape) <= 6 and white.scattered is grid
+        again, _ = white._surface(1.0)
+        assert again.z.shape == grid.z.shape
+        assert isinstance(white.at(1.5), dict) and white.ok

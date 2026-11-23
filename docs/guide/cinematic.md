@@ -117,7 +117,10 @@ and the output times in seconds. CFD's free surface (the level set `phi` at 0, c
 from the volume) and the *Free Surface AMR* are on no grid: they are put on one of
 their cell size first (the highest point near each grid point, the top of an
 overturning crest), the same for every output, and CFD's water depth comes from
-its bed. No white water is born in the last two cells along the domain's edges.
+its bed. A surface finer than 400 grid points along its longer side (CFD's fine
+cells, a large grid) is put on a grid of 400 points: the particles are a fraction
+of a grid cell, so they stay large enough to see. Once there are 400 000
+particles, only as many are born as have gone. No white water is born in the last two cells along the domain's edges.
 The warm-up before a still reads at most 24 outputs (every so many over a long
 one): a surface cut from the volume takes a second or two each. How much there is: *View → White water in Cycles*
 (*None*, *Light*, *Medium*, *Heavy*; Medium by default, Heavy as much as before

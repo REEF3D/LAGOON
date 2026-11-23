@@ -43,8 +43,14 @@ class FoamSettings:
     lifetime: float = 12.0
     #: particle radius in cell sizes (foam; spray and bubbles a little smaller)
     radius: float = 0.12
-    #: at most this many particles (the oldest go first)
+    #: at most this many particles: once there are, only as many are born as have
+    #: gone (a lower rate; dropping the oldest instead left no foam, the oldest)
     limit: int = 400_000
+    #: at most this many grid points along the surface's longer side: a finer surface
+    #: (CFD's, cut from a volume of fine cells) is put on a coarser grid. The particles
+    #: are a fraction of a grid cell: on a grid of CFD's cells they were too small to
+    #: see (millimetres in a river) and so many that the limit took the foam
+    grid: int = 400
     seed: int = 1
 
     def scaled(self, amount: float) -> FoamSettings:
@@ -132,6 +138,7 @@ class SurfaceGrid:
         triangles=None,
         fill: int = 2,
         like: SurfaceGrid | None = None,
+        most: int | None = None,
     ) -> SurfaceGrid | None:
         """A surface whose points are on no grid (CFD's free surface, an iso-surface
         of the volume; AMR) put on one: grid points ``cell`` apart (default: the
@@ -140,8 +147,9 @@ class SurfaceGrid:
         velocity. Holes of up to ``fill`` grid points (no point of the surface came
         near) take their neighbours' mean, so they make no false crests; the rest
         stays dry (NaN). ``like``: on that surface's grid (the frames of a film on
-        one grid, so the white water carries on from frame to frame). None with too
-        few points."""
+        one grid, so the white water carries on from frame to frame). ``most``: at
+        most that many grid points along the longer side (a coarser cell). None with
+        too few points."""
         full = np.asarray(points, float).reshape(-1, 3)
         speed = np.asarray(velocity, float).reshape(-1, 3)
         ok = np.isfinite(full).all(axis=1) & np.isfinite(speed).all(axis=1)
@@ -168,6 +176,8 @@ class SurfaceGrid:
             low, high = p[:, :2].min(axis=0), p[:, :2].max(axis=0)
             if not cell or cell <= 0:
                 cell = float(max(high - low)) / max(math.sqrt(len(p)), 2.0)
+            if most:
+                cell = max(cell, float(max(high - low)) / max(int(most) - 1, 1))
             n = np.maximum(np.round((high - low) / cell).astype(np.int64) + 1, 2)
             if n[0] * n[1] > 4_000_000:  # a coarser grid for a very large surface
                 cell *= math.sqrt(n[0] * n[1] / 4_000_000)
@@ -415,15 +425,17 @@ class FoamSimulation:
             return
         positions = np.concatenate([p for p, _, _ in new])
         ok = np.isfinite(positions).all(axis=1)
+        room = max(settings.limit - len(self.position), 0)
+        if ok.sum() > room:  # full: as many born as there is room for, at random
+            chosen = rng.choice(np.flatnonzero(ok), room, replace=False)
+            ok[:] = False
+            ok[chosen] = True
         life = self.unit_time * settings.lifetime * (0.5 + self.rng.random(int(ok.sum())))
         self.position = np.concatenate([self.position, positions[ok]])
         self.velocity = np.concatenate([self.velocity, np.concatenate([v for _, v, _ in new])[ok]])
         self.kind = np.concatenate([self.kind, np.concatenate([k for _, _, k in new])[ok]])
         self.life = np.concatenate([self.life, life])
         self.size = np.concatenate([self.size, 0.6 + 0.8 * self.rng.random(int(ok.sum()))])
-        extra = len(self.position) - settings.limit
-        if extra > 0:  # the oldest go
-            self._keep(np.arange(len(self.position)) >= extra)
 
     def _move(self, surface: SurfaceGrid, dt: float) -> None:
         if not len(self.position):

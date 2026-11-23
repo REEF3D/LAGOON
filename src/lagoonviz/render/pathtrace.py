@@ -1560,7 +1560,9 @@ class WhiteWater:
     warm-up before the first one, so a still shows foam that has had time to form.
     The free surface shown: REEF3D's (on its grid), else the Free Surface AMR, else
     CFD's (the level set phi at 0, an iso-surface of the volume): those two are put
-    on a grid of their cell size first (:meth:`SurfaceGrid.from_scattered`). Off
+    on a grid of their cell size first (:meth:`SurfaceGrid.from_scattered`), at
+    most :attr:`FoamSettings.grid` points along the longer side (CFD's fine cells:
+    a coarser grid, so the particles are large enough to see). Off
     (``ok`` False) without a free surface with velocity, or without times in
     seconds."""
 
@@ -1619,11 +1621,14 @@ class WhiteWater:
         points = data.placed(self.item, raw.points)  # exaggerated as drawn
         velocity = raw.point_data["velocity"]
         grid = None
+        most = self.settings.grid
         if self.scattered is None:
             grid = SurfaceGrid.from_points(points, velocity, raw.point_data.get("breaking"))
+            if grid is not None and max(len(grid.xs), len(grid.ys)) > most:
+                grid = None  # too fine: on a coarser grid of its own, as below
         if grid is None:  # an iso-surface, AMR: on a grid of its own, the same each frame
             grid = SurfaceGrid.from_scattered(
-                points, velocity, triangles=raw.triangles, like=self.scattered
+                points, velocity, triangles=raw.triangles, like=self.scattered, most=most
             )
             if grid is not None and self.scattered is None:
                 self.scattered = grid
