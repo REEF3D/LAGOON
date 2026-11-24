@@ -1175,3 +1175,39 @@ def test_cfd_water_coloured_is_drawn_as_water(tmp_path):
     [obj] = [o for o in scene["frames"][0]["objects"] if o["name"] == free.id]
     spec = scene["materials"][obj["material"]]
     assert spec["roughness"] <= 0.3 and obj["colors"] and obj.get("subdivide")
+
+
+def test_cfd_water_without_its_body(tmp_path):
+    """Bug (the coastal pier in Diorama): CFD's body of water could not be made and
+    its free surface went to Cycles as a plain, matte sheet, no water and no white
+    water. It is now a free surface's water (glass down to the bed), and the export
+    says why there is no body."""
+    import shutil
+
+    from reef3d_fixtures import make_run
+
+    run = make_run(tmp_path / "cfd", solver="CFD", frames=4, print_interval=0.5)
+    for name in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):
+        shutil.rmtree(run / name)
+    session = Session()
+    session.open_case(run)
+    free = next(i for i in session.scene if i.kind == "iso_surface")
+    session.scene.update(free.id, properties={"variable": "none"})
+    dataset = session.data.dataset(free.id)
+
+    def fails(*args, **kwargs):
+        raise RuntimeError("too large")
+
+    dataset.read_iso_volume = fails
+    said = []
+    path = export_scene(
+        session, tmp_path / "w", [1.0], (64, 36), "diorama", 4, foam=False, status=said.append
+    )
+    assert any("body of water not made (RuntimeError: too large)" in s for s in said)
+    scene = json.loads(path.read_text())
+    water = [
+        o
+        for o in scene["frames"][0]["objects"]
+        if o["name"].startswith(free.id) and scene["materials"][o["material"]].get("water")
+    ]
+    assert water and scene["materials"][water[0]["material"]]["transmission"] == 1.0

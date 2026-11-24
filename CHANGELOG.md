@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### CFD in Cycles: water when its body cannot be made, and why
+
+- The coastal pier in Diorama (and Diorama classic) was a flat, matte, opaque
+  sheet with no reflections: CFD's body of water (the volume where phi >= 0)
+  could not be made, and its free surface then went to Cycles as a plain
+  surface. It is now drawn as a free surface's water (glass down to the bed,
+  as FNPF's), after any error there, and the export says why the body was not
+  made ("...: its body of water not made (...)").
+
 ### CFD in Cycles: white water on water coloured by nothing, coloured water glossy
 
 - A CFD film showed no white water although the waves broke. Its free surface

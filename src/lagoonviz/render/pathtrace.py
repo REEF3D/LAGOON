@@ -822,6 +822,8 @@ class _Collector:
         #: (low, high) of the frame's data: the floor and the depth of water bodies
         self.bounds = bounds
         self.water_bodies = 0
+        #: what was not drawn as asked, and why (said by export_scene)
+        self.notes: list[str] = []
         #: the bed's heights (BedHeights), where water bodies end
         self.bed: BedHeights | None = None
         #: the still water level (as drawn), where the land begins and the sea around
@@ -1385,13 +1387,14 @@ LEVEL_SET = "phi"
 WATER_FIELDS = (LEVEL_SET, "VOF")
 
 
-def _level_set_water(session, item_id: str, item, mesh, shown):
+def _level_set_water(session, item_id: str, item, mesh, shown, notes: list | None = None):
     """CFD's free surface (an iso-surface or iso-volume of the level set phi) drawn
     plain (coloured by nothing, not see-through) as water: the closed body of the
     water, the part of the volume where phi is at least the surface's value (its
     free surface and the faces of the domain under water), as shown (the vertical
     scale), with the free surface smooth and the faces of the domain flat:
-    (positions, triangles, smooth), or None for other items."""
+    (positions, triangles, smooth), or None for other items. Why it could not be
+    made goes to ``notes`` (it is then drawn as a free surface's water)."""
     if item.kind not in ("iso_surface", "iso_volume") or not shown.visible:
         return None
     field = str(item.properties.get("iso_by", "none"))
@@ -1409,10 +1412,15 @@ def _level_set_water(session, item_id: str, item, mesh, shown):
             return None
         try:
             body = dataset.read_iso_volume(index, field, value, 1e30, [field])
-        except (OSError, ValueError, KeyError) as error:
-            log.warning("%s: its water not made (%s): drawn as a surface", item.name, error)
+        except Exception as error:  # noqa: BLE001 - drawn as a surface's water instead
+            note = f"{item.name}: its body of water not made ({type(error).__name__}: {error})"
+            log.warning("%s: drawn as a surface's water", note)
+            if notes is not None:
+                notes.append(note)
             return None
     if not body.n_triangles:
+        if notes is not None:
+            notes.append(f"{item.name}: its body of water is empty")
         return None
     drawn = session.data.display(item_id, body)
     triangles = np.asarray(drawn.triangles, np.int64).reshape(-1, 3)
@@ -1453,7 +1461,7 @@ def _frame_objects(
         except ValueError:
             out.bed = None
     for item_id, item, mesh, shown in shown_items:
-        body = _level_set_water(session, item_id, item, mesh, shown)
+        body = _level_set_water(session, item_id, item, mesh, shown, out.notes)
         if body is not None:  # CFD's free surface: its water, the part where phi >= 0
             out.water_volume(shown, *body)
         else:
@@ -1788,6 +1796,9 @@ def export_scene(
                 session, preset, pixel_size(camera, centre, size[1]), bounds, size[0] * size[1]
             )
             collector.white_water(particles)
+            if number == 0 and status is not None:
+                for note in collector.notes:
+                    status(note)
             water_bodies += collector.water_bodies
             fars.append(collector.far)
             # one material table for the film: the frame's keys renamed into it
