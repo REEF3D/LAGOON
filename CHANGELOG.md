@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### CFD in Cycles: white water on water coloured by nothing, coloured water glossy
+
+- A CFD film showed no white water although the waves broke. Its free surface
+  coloured by nothing (drawn as water, as a film wants it) was read without its
+  velocity, and the white water turned itself off without a word. Its velocity
+  is now read for the white water whatever it is coloured by; the water shown as
+  an iso-volume of phi (from 0) gives it too (its top); and when there is none,
+  the export says why ("no white water: ...").
+- CFD's free surface coloured by a variable (its velocity, as a case opens) or
+  see-through was a plain matte surface in Cycles; it is water now, glossy and
+  smooth, as a free surface coloured by a variable is.
+
 ### White water on CFD's free surface
 
 - A CFD run rendered with Cycles showed hardly any foam. Its free surface, cut

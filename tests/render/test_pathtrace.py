@@ -1118,3 +1118,60 @@ def test_white_water_of_a_fine_surface_on_a_coarser_grid(tmp_path):
         again, _ = white._surface(1.0)
         assert again.z.shape == grid.z.shape
         assert isinstance(white.at(1.5), dict) and white.ok
+
+
+def test_cfd_white_water_on_water_coloured_by_nothing(tmp_path):
+    """Bug: CFD's free surface coloured by nothing (drawn as water, as a film wants
+    it) had no velocity read, and there was no white water at all; nor with the
+    water shown as an iso-volume of phi. Its velocity is read for the white water
+    whatever it is coloured by; when there is none, export_scene says why."""
+    import shutil
+
+    from reef3d_fixtures import make_run
+
+    from lagoonviz.render.pathtrace import WhiteWater
+
+    run = make_run(tmp_path / "cfd", solver="CFD", frames=6, print_interval=0.5)
+    for name in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):
+        shutil.rmtree(run / name)
+    session = Session()
+    session.open_case(run)
+    free = next(i for i in session.scene if i.kind == "iso_surface")
+    session.scene.update(free.id, properties={"variable": "none"})
+    white = WhiteWater(session)
+    particles = white.at(2.0)
+    assert white.ok and sum(len(p) for p, _ in particles.values()) > 0
+    # the water as an iso-volume (phi from 0), the free surface hidden: its top
+    session.scene.update(free.id, visible=False)
+    water = session.add_item("iso_volume", iso_by="phi", iso_min=0.0, iso_max=1e30)
+    session.scene.update(water, properties={"variable": "none"})
+    white = WhiteWater(session)
+    assert session.scene.get(white.item).kind == "iso_volume"
+    particles = white.at(2.0)
+    assert white.ok and sum(len(p) for p, _ in particles.values()) > 0
+    # none shown: off, and why
+    session.scene.update(white.item, visible=False)
+    white = WhiteWater(session)
+    assert not white.ok and white.reason == "no free surface shown"
+
+
+def test_cfd_water_coloured_is_drawn_as_water(tmp_path):
+    """CFD's free surface coloured by a variable (its velocity, as a case opens) is
+    water in Cycles too, as a free surface is (glossy, smooth), not a plain matte
+    surface."""
+    import shutil
+
+    from reef3d_fixtures import make_run
+
+    run = make_run(tmp_path / "cfd", solver="CFD", frames=2, print_interval=0.5)
+    for name in ("REEF3D_CFD_VTP_FSF", "REEF3D_CFD_VTP_BED"):
+        shutil.rmtree(run / name)
+    session = Session()
+    session.open_case(run)
+    free = next(i for i in session.scene if i.kind == "iso_surface")
+    assert free.properties["variable"] == "velocity"
+    path = export_scene(session, tmp_path / "w", [0.5], (64, 36), "open_ocean", 4, foam=False)
+    scene = json.loads(path.read_text())
+    [obj] = [o for o in scene["frames"][0]["objects"] if o["name"] == free.id]
+    spec = scene["materials"][obj["material"]]
+    assert spec["roughness"] <= 0.3 and obj["colors"] and obj.get("subdivide")

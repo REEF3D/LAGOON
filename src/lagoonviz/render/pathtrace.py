@@ -24,6 +24,7 @@ Everything here is NumPy only; :func:`render_folder` starts Blender.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import hashlib
 import json
@@ -959,6 +960,8 @@ class _Collector:
             self.lines(shown.item_id, ends, shown.line_width, shown.color, seg_rgb)
             return
         surface = surface_of(kind, shown.material)
+        if getattr(shown, "water", False) and not shown.material:
+            surface = "water"  # CFD's free surface (coloured, or see-through): water too
         s = SURFACES.get(surface, SURFACES["plain"])
         water = surface == "water"
         if water and rgb is None and shown.opacity >= 1.0:
@@ -1568,8 +1571,9 @@ class WhiteWater:
 
     #: outputs read at most on the way to a time (the warm-up before a still)
     WARM_OUTPUTS = 24
-    #: the kinds of items that are a free surface, in the order they are taken
-    SURFACES = ("free_surface", "amr", "iso_surface")
+    #: the kinds of items that are a free surface, in the order they are taken (CFD's
+    #: water as an iso-volume of phi: its top)
+    SURFACES = ("free_surface", "amr", "iso_surface", "iso_volume")
 
     def __init__(self, session, settings=None) -> None:
         from lagoonviz.core.foam import FoamSettings
@@ -1585,7 +1589,10 @@ class WhiteWater:
             item
             for item in shown
             if item.kind in self.SURFACES
-            and (item.kind != "iso_surface" or item.properties.get("iso_by") in WATER_FIELDS)
+            and (
+                item.kind not in ("iso_surface", "iso_volume")
+                or item.properties.get("iso_by") in WATER_FIELDS
+            )
         ]
         shown.sort(key=lambda item: self.SURFACES.index(item.kind))
         self.item = shown[0].id if shown else None
@@ -1595,6 +1602,12 @@ class WhiteWater:
         self.sim = None
         self.grid = None
         self.ok = self.item is not None and len(self.outputs) > 0
+        #: why there is none (said by export_scene), empty while there may be some
+        self.reason = ""
+        if self.item is None:
+            self.reason = "no free surface shown"
+        elif not len(self.outputs):
+            self.reason = "the output times are not in seconds"
 
     def _surface(self, time: float):
         """The free surface's grid at a time (heights as drawn, velocity, breaking)."""
@@ -1604,11 +1617,20 @@ class WhiteWater:
         dataset = data.dataset(self.item)
         index = data.frame_index(self.item, time)
         if dataset is None or index is None or "velocity" not in dataset.components:
+            self.reason = "the free surface has no velocity"
             return None, None
-        if self.session.scene.get(self.item).kind == "iso_surface":
-            # CFD: the level set phi at 0, cut from the volume (as drawn, cached)
-            raw = data.load(self.item, time)
+        if self.session.scene.get(self.item).kind in ("iso_surface", "iso_volume"):
+            # CFD: the level set phi at 0 (or the water, its top), cut from the volume
+            # as drawn (cached), with its velocity also when it is coloured by none:
+            # drawn as water, it had none and there was no white water
+            key = data.frame_key(self.item, time)
+            if key is None:
+                return None, None
+            if "velocity" not in key.arrays:
+                key = dataclasses.replace(key, arrays=tuple(sorted({*key.arrays, "velocity"})))
+            raw = data.load_key(key)
             if raw is None or "velocity" not in raw.point_data or not raw.n_points:
+                self.reason = "the free surface has no velocity"
                 return None, None
         else:
             wanted = [n for n in ("velocity", "breaking", "WL", "depth") if n in dataset.components]
@@ -1633,6 +1655,7 @@ class WhiteWater:
             if grid is not None and self.scattered is None:
                 self.scattered = grid
         if grid is None:
+            self.reason = "the free surface has too few points"
             return None, None
         depth = None
         for name in ("WL", "depth"):  # the water depth (NHFLOW: WL, FNPF: depth)
@@ -1750,6 +1773,10 @@ def export_scene(
             if status is not None:
                 status(f"frame {number + 1} of {len(times)}: the data")
             particles = white.at(time, status) if white is not None else {}
+            if white is not None and not white.ok and white.reason and number == 0:
+                log.warning("no white water: %s", white.reason)
+                if status is not None:
+                    status(f"no white water: {white.reason}")
             session.set_time(time)
             bounds = _bounds(session)
             if bounds is not None:
