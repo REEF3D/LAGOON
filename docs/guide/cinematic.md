@@ -107,7 +107,9 @@ Path traced films and stills show white water where the free surface breaks:
 spray thrown off the crests, foam drifting on the surface and fading, bubbles
 under it rising to the top. It is born where REEF3D flags breaking (NHFLOW's
 `breaking`), on sharp crests whose water runs forward fast, and where the
-surface flow converges and traps air, and it moves with the free surface's
+surface flow converges and traps air near a breaking crest (CFD's surface, rough
+from cell to cell as it is cut from the volume, is smoothed over a cell or two
+first, so waves that do not break have none), and it moves with the free surface's
 velocity from output to output. Its size and lifetime scale with the case (the
 cells and the water depth), so a flume and a coast look alike. A still runs the
 foam from a few wave periods before its time, so it has formed.

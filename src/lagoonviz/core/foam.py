@@ -84,12 +84,15 @@ def white_water_amount(foam) -> float:
 # ======================================================================== surface
 class SurfaceGrid:
     """The free surface on its rectilinear grid (REEF3D writes it on one): heights,
-    velocity and REEF3D's breaking flag per grid point (NaN where dry)."""
+    velocity and REEF3D's breaking flag per grid point (NaN where dry). ``cut``: put
+    on the grid from points on none (:meth:`from_scattered`: CFD's free surface cut
+    from the volume, AMR), its heights and velocity rough from cell to cell."""
 
-    def __init__(self, xs, ys, z, u, v, w, breaking=None) -> None:
+    def __init__(self, xs, ys, z, u, v, w, breaking=None, cut: bool = False) -> None:
         self.xs, self.ys = np.asarray(xs, float), np.asarray(ys, float)
         self.z, self.u, self.v, self.w = (np.asarray(a, float) for a in (z, u, v, w))
         self.breaking = None if breaking is None else np.asarray(breaking, float)
+        self.cut = bool(cut)
         self.h = float(
             np.sqrt(np.mean(np.diff(self.xs)) * np.mean(np.diff(self.ys)))
             if len(self.xs) > 1 and len(self.ys) > 1
@@ -235,7 +238,7 @@ class SurfaceGrid:
             filled = holes & (count >= 2)
             for total, field in zip(sums, fields, strict=True):
                 field[filled] = total[filled] / count[filled]
-        return cls(xs, ys, z, u, v, w)
+        return cls(xs, ys, z, u, v, w, cut=True)
 
     def blend(self, other: SurfaceGrid, s: float) -> SurfaceGrid:
         """The surface a fraction ``s`` of the way to ``other`` (same grid)."""
@@ -256,6 +259,7 @@ class SurfaceGrid:
             mix(self.v, other.v),
             mix(self.w, other.w),
             breaking,
+            self.cut,
         )
 
     def sample(self, xy: np.ndarray, *fields: np.ndarray) -> list[np.ndarray]:
@@ -307,18 +311,47 @@ def _ramp(value, low: float, high: float) -> np.ndarray:
     return np.clip((np.nan_to_num(value, nan=0.0) - low) / (high - low), 0.0, 1.0)
 
 
+def _smoothed(field: np.ndarray, passes: int = 2) -> np.ndarray:
+    """A field smoothed over its neighbours (binomial 1-2-1 passes in x and y, about a
+    Gaussian of a cell), its dry points (NaN) left out and kept dry."""
+    from scipy.ndimage import convolve1d
+
+    known = np.isfinite(field)
+    values = np.where(known, field, 0.0)
+    weight = known.astype(float)
+    kernel = np.array([0.25, 0.5, 0.25])
+    for _ in range(passes):
+        for axis in (0, 1):
+            values = convolve1d(values, kernel, axis=axis, mode="nearest")
+            weight = convolve1d(weight, kernel, axis=axis, mode="nearest")
+    return np.where(known, values / np.maximum(weight, 1e-12), np.nan)
+
+
 def potentials(grid: SurfaceGrid, depth: float) -> tuple[np.ndarray, np.ndarray]:
     """Where white water is born, per grid point (0..1): at breaking crests (REEF3D's
     flag, or a sharp crest moving forward, fast enough) and where the surface flow
-    converges and traps air."""
+    converges and traps air near them.
+
+    A surface cut from a volume (CFD's, ``grid.cut``) is rough from cell to cell: the
+    highest point of each grid cell, the velocity under it. Its slopes, curvature and
+    the flow's convergence (derivatives, which make the roughness larger) are taken
+    of it smoothed over a cell or two, or every wave on its way to the beach had
+    foam. Air is trapped only near a breaking crest (within half the water depth):
+    the flow converges in front of every crest, and only a breaking one draws air
+    under."""
+    from scipy.ndimage import maximum_filter
+
     xs, ys = grid.xs, grid.ys
-    z = np.where(np.isfinite(grid.z), grid.z, np.nanmean(grid.z))
+    fields = (grid.z, grid.u, grid.v, grid.w)
+    if grid.cut:
+        fields = tuple(_smoothed(f) for f in fields)
+    z = np.where(np.isfinite(fields[0]), fields[0], np.nanmean(fields[0]))
     zx, zy = np.gradient(z, xs, ys)
     zxx = np.gradient(zx, xs, axis=0)
     zyy = np.gradient(zy, ys, axis=1)
     norm = np.sqrt(zx**2 + zy**2 + 1.0)
     nx, ny, nz = -zx / norm, -zy / norm, 1.0 / norm
-    u, v, w = (np.nan_to_num(a) for a in (grid.u, grid.v, grid.w))
+    u, v, w = (np.nan_to_num(a) for a in fields[1:])
     speed = np.sqrt(u**2 + v**2 + w**2)
     facing = (u * nx + v * ny + w * nz) / np.maximum(speed, 1e-9)
     # how sharply the slope turns over one cell at a crest (dimensionless)
@@ -334,7 +367,9 @@ def potentials(grid: SurfaceGrid, depth: float) -> tuple[np.ndarray, np.ndarray]
     if grid.breaking is not None:
         breaking_crest = np.maximum(breaking_crest, (np.nan_to_num(grid.breaking) > 0) * 1.0)
     divergence = np.gradient(u, xs, axis=0) + np.gradient(v, ys, axis=1)
-    trapped = _ramp(-divergence * math.sqrt(depth / G), 0.05, 0.5) * energy
+    reach = max(int(math.ceil(0.5 * depth / max(grid.h, 1e-12))), 2)
+    near = maximum_filter(breaking_crest, size=2 * reach + 1, mode="nearest")
+    trapped = _ramp(-divergence * math.sqrt(depth / G), 0.05, 0.5) * energy * near
     dry = ~np.isfinite(grid.z)
     breaking_crest[dry] = 0.0
     trapped[dry] = 0.0

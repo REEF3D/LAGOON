@@ -178,3 +178,37 @@ def test_the_limit_keeps_the_foam():
     kept = len(limited["foam"][0]) / sum(len(p) for p, _ in limited.values())
     assert sum(len(p) for p, _ in limited.values()) <= 300
     assert kept > 0.5 * share
+
+
+def _cut(surface: SurfaceGrid, rough: float, seed: int = 3) -> SurfaceGrid:
+    """A surface as CFD's is put on a grid: from points on no grid, the heights rough
+    by ``rough`` [m] and the velocity by 5 ``rough`` [m/s] from cell to cell."""
+    rng = np.random.default_rng(seed)
+    x, y = np.meshgrid(surface.xs, surface.ys, indexing="ij")
+    points = np.c_[x.ravel(), y.ravel(), surface.z.ravel() + rng.normal(0, rough, x.size)]
+    velocity = np.c_[surface.u.ravel(), surface.v.ravel(), surface.w.ravel()]
+    velocity = velocity + rng.normal(0, 5 * rough, velocity.shape)
+    cell = float(surface.xs[1] - surface.xs[0])
+    return SurfaceGrid.from_scattered(points, velocity, cell=cell)
+
+
+def test_no_white_water_on_waves_that_do_not_break():
+    """Hans: a CFD flume had much foam where its waves were made and on their way to
+    the beach, before they broke. CFD's surface cut from the volume is rough from
+    cell to cell; its curvature and the flow's convergence (derivatives) made crests
+    and trapped air everywhere. Taken of it smoothed, and air trapped only near a
+    breaking crest, a train of steep waves that do not break has next to none, and
+    a breaking crest as much as before."""
+    xs, ys = np.arange(0.0, 20.0, 0.05), np.arange(0.0, 2.0, 0.05)
+    x, _ = np.meshgrid(xs, ys, indexing="ij")
+    k, height = 2 * np.pi / 4.0, 0.3  # steep (H / d = 0.3), not breaking
+    eta = 0.5 * height * np.cos(k * x) + 0.03 * np.cos(2 * k * x)
+    u = 0.5 * height * np.sqrt(9.81 / DEPTH) * np.cos(k * x)  # u / sqrt(g d) < 0.15
+    train = SurfaceGrid(xs, ys, DEPTH + eta, u, 0 * u, 0 * u)
+    crest, trapped = potentials(_cut(train, 0.01), DEPTH)
+    assert crest.sum() < 0.002 * crest.size and trapped.sum() < 0.001 * trapped.size
+    # the breaking crest of the steep wave, cut as CFD's
+    crest, trapped = potentials(_cut(wave(0.0), 0.01), DEPTH)
+    xb, _ = np.meshgrid(XS, YS, indexing="ij")
+    assert crest.max() > 0.5 and crest[np.abs(xb - 2.0) >= 1.0].sum() < 1.0
+    assert trapped.sum() > 10.0  # air under it

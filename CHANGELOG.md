@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### White water: none on CFD's waves before they break
+
+- A CFD flume rendered with Cycles (white water Heavy) had much foam where the
+  waves were made and on their way to the beach, before they broke. CFD's free
+  surface, cut from the volume and put on a grid, is rough from cell to cell
+  (the highest point of each cell, the velocity under it); its curvature and the
+  flow's convergence, derivatives that make the roughness larger, found sharp
+  crests and trapped air on every wave. They are now taken of it smoothed over
+  a cell or two, and air is trapped only near a breaking crest (within half the
+  water depth), for every solver: the flow converges in front of every crest,
+  only a breaking one draws air under. A train of steep waves that do not break
+  has next to no white water; a breaking crest as much as before.
+
 ### CFD in Cycles: water when its body cannot be made, and why
 
 - The coastal pier in Diorama (and Diorama classic) was a flat, matte, opaque
